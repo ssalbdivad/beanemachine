@@ -66,7 +66,7 @@ export const App = () => {
 						beane<b>machine</b>
 					</h1>
 				</div>
-				<p className="tag">League scoring, read from the source — never guessed.</p>
+				<p className="tag">Optimized picks, ranked in your league&rsquo;s own scoring. Billy&mdash;named for Beane&mdash;does the counting.</p>
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
 						Static build — edits stay in this browser and Save downloads the file. Run{" "}

@@ -54,6 +54,8 @@ export interface RateOptions {
 	injuries: Map<number, string>
 	teamGamesPlayed: Map<number, number>
 	gamesByTeam: Map<number, number>
+	/** keyed "id:group" */
+	recentVolumePerGame?: Record<string, number>
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -72,7 +74,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			player,
 			underlying,
 			player.teamId ? o.teamGamesPlayed.get(player.teamId) : undefined,
-			horizonGames
+			horizonGames,
+			{ recentVolumePerGame: o.recentVolumePerGame?.[`${player.id}:${player.group}`] ?? null }
 		)
 		const table = tableFor(o.league, player.group)
 		return {

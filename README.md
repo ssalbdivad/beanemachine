@@ -93,6 +93,43 @@ Confidence comes from real sample size, whether Statcast data exists at all, and
 health. It is never a flat default. A league category that can't be sourced is
 reported as unscoreable rather than silently treated as zero.
 
+### Is bscore actually predictive? — the backtest
+
+`nub run backtest` stands at four past dates, projects the next 14 days using **only**
+what was knowable then, and scores against what actually happened. It is leak-free by
+construction: both the StatsAPI line and the Savant expected stats are pulled with
+explicit date ranges ending at the as-of date.
+
+The baseline to beat is *"he'll keep doing what he's been doing"* — season-to-date
+points per team game, scaled to games ahead. Mean Spearman ρ across four folds:
+
+| variant | hitting | pitching |
+|---|---|---|
+| naive baseline | 0.569 | 0.473 |
+| + Statcast quality blend | 0.564 | 0.471 |
+| + rate shrinkage | 0.561 | 0.440 |
+| **+ recent playing time (shipped)** | **0.668** | **0.544** |
+
+Three findings, including two negative ones worth stating plainly:
+
+1. **Recent playing time is the whole game.** Blending 14-day playing time at 75%
+   against season-long beats the baseline on all eight folds — about +20% relative for
+   hitters, +16% for pitchers. A player who just took over an everyday job has a
+   season-long rate that understates his coming volume, and that is a *volume* error,
+   not a rate error.
+2. **The Statcast blend did not earn its place.** Every parameter sweep ranked
+   `qualityWeight: 0` first. It is therefore **off by default** — xwOBA and barrel rate
+   are still shown, because they are genuinely informative to a human, but they do not
+   silently move a recommendation on evidence that failed. The knob remains, and the
+   hypothesis that it helps over a longer horizon is untested.
+3. **Rate shrinkage made things worse**, not better. The naive line already carries the
+   selection effect that good players accumulate more plate appearances, so shrinking
+   the rate on top of a volume model double-penalises exactly the players it shouldn't.
+
+`nub run tune` sweeps the recent-window length, the blend weight and the Statcast
+weight, fetching each fold once and evaluating every parameter set in memory. The
+shipped values — 14 days, 0.75, 0.0 — are what it chose.
+
 ### Architecture
 
 The engine (`src/engine/`) is pure, so ranking runs **in the browser** against a

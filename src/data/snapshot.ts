@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import {
 	fetchGamesByTeam,
+	fetchWindowStats,
 	fetchInjuries,
 	fetchSeason,
 	fetchTeamGamesPlayed,
@@ -27,6 +28,10 @@ export interface Snapshot {
 	injuries: Record<string, string>
 	teamGamesPlayed: Record<string, number>
 	gamesByTeam: Record<string, number>
+	/** Volume per team game over the recent window, keyed "id:group". The backtest
+	 *  showed recent playing time is the strongest predictor available. */
+	recentVolumePerGame: Record<string, number>
+	recentWindow: { start: string; end: string; days: number }
 	sources: { name: string; url: string; rows: number }[]
 }
 
@@ -40,16 +45,37 @@ export const buildSnapshot = async (
 	const start = iso(now)
 	const end = iso(new Date(now.getTime() + horizonDays * 86400_000))
 
-	const [hitting, pitching, xBat, xPit, gamesByTeam, teamGamesPlayed, injuries] =
-		await Promise.all([
+	const RECENT_DAYS = 14
+	const recentStart = iso(new Date(now.getTime() - RECENT_DAYS * 86400_000))
+	const [
+		hitting, pitching, xBat, xPit, gamesByTeam, teamGamesPlayed, injuries,
+		recentHit, recentPit, recentGames
+	] = await Promise.all([
 			fetchSeason(season, "hitting"),
 			fetchSeason(season, "pitching"),
 			fetchUnderlying(season, "batter"),
 			fetchUnderlying(season, "pitcher"),
 			fetchGamesByTeam(start, end),
 			fetchTeamGamesPlayed(season),
-			fetchInjuries()
+			fetchInjuries(),
+			fetchWindowStats(season, "hitting", recentStart, start),
+			fetchWindowStats(season, "pitching", recentStart, start),
+			fetchGamesByTeam(recentStart, start)
 		])
+
+	// per-team-game volume over the recent window, the input the backtest favoured
+	const recentVolumePerGame: Record<string, number> = {}
+	for (const [rows, group] of [
+		[recentHit, "hitting"],
+		[recentPit, "pitching"]
+	] as const)
+		for (const r of rows) {
+			const g = r.teamId ? (recentGames.get(r.teamId) ?? 0) : 0
+			if (!g) continue
+			const v = group === "hitting" ? r.stats.plateAppearances : r.stats.battersFaced
+			if (v === undefined) continue
+			recentVolumePerGame[`${r.id}:${group}`] = Number((v / g).toFixed(4))
+		}
 
 	// Keyed by side, NOT merged. 133 players appear in both pools, so a flat
 	// `new Map([...xBat, ...xPit])` let each pitcher row overwrite the batter row —
@@ -87,6 +113,8 @@ export const buildSnapshot = async (
 			[...teamGamesPlayed].map(([k, v]) => [String(k), v])
 		),
 		gamesByTeam: Object.fromEntries([...gamesByTeam].map(([k, v]) => [String(k), v])),
+		recentVolumePerGame,
+		recentWindow: { start: recentStart, end: start, days: RECENT_DAYS },
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
@@ -109,5 +137,6 @@ export const hydrate = (s: Snapshot) => ({
 	teamGamesPlayed: new Map(
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])
 	),
-	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v]))
+	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v])),
+	recentVolumePerGame: s.recentVolumePerGame ?? {}
 })

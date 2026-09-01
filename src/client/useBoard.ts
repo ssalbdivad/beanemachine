@@ -30,7 +30,8 @@ export interface Filters {
 	group: "all" | "hitting" | "pitching"
 	hideInjured: boolean
 	minConfidence: number
-	sort: "bscore" | "points" | "undervaluation"
+	sort: "bscore" | "points" | "undervaluation" | "replacement" | "confidence" | "name"
+	desc: boolean
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -39,7 +40,8 @@ export const DEFAULT_FILTERS: Filters = {
 	group: "all",
 	hideInjured: false,
 	minConfidence: 0,
-	sort: "bscore"
+	sort: "bscore",
+	desc: true
 }
 
 export const useBoard = (snapshot: Snapshot | null, league: League | null, filters: Filters) => {
@@ -57,6 +59,7 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 				injuries: h.injuries,
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: h.gamesByTeam,
+				recentVolumePerGame: h.recentVolumePerGame,
 				teams: league.meta.max_teams
 			})
 		)
@@ -74,9 +77,21 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 			if (r.confidence.value < filters.minConfidence) return false
 			return true
 		})
-		if (filters.sort === "points") out.sort((a, b) => b.points - a.points)
-		else if (filters.sort === "undervaluation")
-			out.sort((a, b) => (b.undervaluation ?? -1) - (a.undervaluation ?? -1))
+		const key = (r: (typeof out)[number]) => {
+			switch (filters.sort) {
+				case "points": return r.points
+				case "replacement": return r.replacement
+				case "confidence": return r.confidence.value
+				case "undervaluation": return r.undervaluation ?? -1
+				case "name": return r.player.name
+				default: return r.bscore
+			}
+		}
+		out.sort((a, b) => {
+			const x = key(a), y = key(b)
+			const cmp = typeof x === "string" ? x.localeCompare(y as string) : (x as number) - (y as number)
+			return filters.desc ? -cmp : cmp
+		})
 		return out
 	}, [rated, filters])
 

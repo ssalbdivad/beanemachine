@@ -149,12 +149,12 @@ export const Board = ({
 				<div className="board">
 					<div className="board-head">
 						<span>#</span>
-						<span>Player</span>
-						<span className="r">bscore</span>
-						<span className="r">proj</span>
-						<span className="r">repl</span>
-						<span>conf</span>
-						<span className="r">x−a</span>
+						<SortHead field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
+						<SortHead field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
+						<SortHead field="points" filters={filters} setFilters={setFilters} right>proj</SortHead>
+						<SortHead field="replacement" filters={filters} setFilters={setFilters} right>repl</SortHead>
+						<SortHead field="confidence" filters={filters} setFilters={setFilters}>conf</SortHead>
+						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>x−a</SortHead>
 					</div>
 					{rows.slice(0, 120).map((r, i) => (
 						<Row key={r.player.id} rank={i + 1} r={r} open={open === r.player.id}
@@ -169,6 +169,36 @@ export const Board = ({
 				)}
 			</section>
 		</>
+	)
+}
+
+/** Column header that sorts. Clicking the active column flips direction. */
+const SortHead = ({
+	field, filters, setFilters, right, children
+}: {
+	field: Filters["sort"]
+	filters: Filters
+	setFilters: (f: (p: Filters) => Filters) => void
+	right?: boolean
+	children: React.ReactNode
+}) => {
+	const active = filters.sort === field
+	return (
+		<button
+			type="button"
+			className={`sort-head${right ? " r" : ""}${active ? " active" : ""}`}
+			onClick={() =>
+				setFilters(f =>
+					f.sort === field ?
+						{ ...f, desc: !f.desc }
+					:	{ ...f, sort: field, desc: field !== "name" }
+				)
+			}
+			title={`Sort by ${field}`}
+		>
+			{children}
+			<span className="arrow">{active ? (filters.desc ? "▾" : "▴") : ""}</span>
+		</button>
 	)
 }
 

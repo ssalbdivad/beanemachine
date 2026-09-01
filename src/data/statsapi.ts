@@ -70,6 +70,34 @@ export const fetchSeason = async (
 	}).filter((p: PlayerSeason) => typeof p.id === "number")
 }
 
+/** Stats accumulated strictly inside a date window — used for recent playing time,
+ *  which the backtest showed is the single strongest predictor available. */
+export const fetchWindowStats = async (
+	season: number,
+	group: "hitting" | "pitching",
+	startDate: string,
+	endDate: string
+): Promise<PlayerSeason[]> => {
+	const data = await json(
+		`${BASE}/stats?stats=byDateRange&group=${group}&season=${season}&sportId=1` +
+			`&playerPool=All&limit=3000&startDate=${startDate}&endDate=${endDate}`
+	)
+	return (data.stats?.[0]?.splits ?? [])
+		.map((s: any): PlayerSeason => {
+			const stats: StatLine = {}
+			for (const [k, v] of Object.entries(s.stat ?? {})) {
+				const n = asNumber(v)
+				if (n !== null) stats[k] = n
+			}
+			return {
+				id: s.player?.id, name: s.player?.fullName ?? "",
+				team: s.team?.name ?? null, teamId: s.team?.id ?? null,
+				position: s.position?.abbreviation ?? "", group, stats
+			}
+		})
+		.filter((p: PlayerSeason) => typeof p.id === "number")
+}
+
 /** Games each team actually has scheduled in a window — the real denominator for
  *  any "next N days" projection, instead of assuming a uniform slate. */
 export const fetchGamesByTeam = async (

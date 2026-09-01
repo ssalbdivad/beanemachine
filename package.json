@@ -15,7 +15,9 @@
     "check": "tsc --noEmit",
     "refresh": "node src/refresh.ts",
     "test:board": "node test/board.mjs",
-    "test:engine": "node test/engine.mjs"
+    "test:engine": "node test/engine.mjs",
+    "backtest": "node src/backtest/run.ts",
+    "tune": "node src/backtest/tune.ts"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

@@ -440,3 +440,12 @@ pre{
 .tiny-note{margin:0 0 9px;font-size:11px;line-height:1.45;color:var(--faint);font-style:italic}
 .chip.age{margin-left:10px;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;
   text-transform:none;padding:3px 9px}
+.sort-head{
+  background:transparent;border:0;box-shadow:none;padding:0;cursor:pointer;
+  font:inherit;color:var(--faint);letter-spacing:.14em;text-transform:uppercase;
+  display:flex;align-items:center;gap:4px;
+}
+.sort-head.r{justify-content:flex-end}
+.sort-head:hover{color:var(--ink)}
+.sort-head.active{color:var(--accent)}
+.sort-head .arrow{font-size:8px;line-height:1}

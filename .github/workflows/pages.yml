@@ -28,7 +28,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      # vite copies scoring.json into the bundle so the static build has data
+      # capture live MLB + Savant data; the browser can't call them directly
+      # (neither sends CORS headers), so the snapshot is how real data ships
+      - run: pnpm refresh
       - run: pnpm build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

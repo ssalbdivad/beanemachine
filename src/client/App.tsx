@@ -14,7 +14,13 @@ export const App = () => {
 	const [config, setConfig] = useState<Config | null>(null)
 	const [key, setKey] = useState<string | null>(null)
 	const [busy, setBusy] = useState(false)
+	// Billy's lenses light for a moment when a save lands
+	const [acknowledged, setAcknowledged] = useState(false)
 	const { toast, show } = useToast()
+	const acknowledge = useCallback(() => {
+		setAcknowledged(true)
+		setTimeout(() => setAcknowledged(false), 900)
+	}, [])
 
 	const run = useCallback(
 		async (fn: () => Promise<void>) => {
@@ -48,7 +54,7 @@ export const App = () => {
 	const league = key && config ? config.leagues[key] : undefined
 
 	return (
-		<div className={busy ? "wrap busy" : "wrap"}>
+		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
 			<header>
 				<div className="mark">
 					<Billy />
@@ -106,10 +112,12 @@ export const App = () => {
 					league={league}
 					onSaved={next => {
 						adopt(next, key)
+						acknowledge()
 						show("Saved to scoring.json")
 					}}
 					onDownload={next => {
 						adopt(next, key)
+						acknowledge()
 						downloadConfig(next)
 						show("Downloaded scoring.json")
 					}}

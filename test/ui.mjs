@@ -1,7 +1,24 @@
 import { chromium, firefox } from "playwright-core"
-import { readFileSync } from "node:fs"
+import { copyFileSync, existsSync, readFileSync, unlinkSync } from "node:fs"
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
+// This suite drives the real app against the real Hono server, so saving writes
+// scoring.json for real. Snapshot it first and restore on ANY exit — a crash
+// partway through used to leave a test value (HR 12.25) in the league config.
+const CONFIG = "scoring.json"
+const BACKUP = "scoring.json.testbak"
+copyFileSync(CONFIG, BACKUP)
+let restored = false
+const restoreConfig = () => {
+  if (restored || !existsSync(BACKUP)) return
+  restored = true
+  copyFileSync(BACKUP, CONFIG)
+  unlinkSync(BACKUP)
+}
+process.on("exit", restoreConfig)
+for (const sig of ["SIGINT", "SIGTERM"])
+  process.on(sig, () => { restoreConfig(); process.exit(130) })
+
 const ENGINE = process.env.BROWSER ?? "chromium"
 const browser =
   ENGINE === "firefox" ?
@@ -113,11 +130,23 @@ t("raw league rules shown", (await page.$$eval("dl dt", n => n.length)) > 20)
 // a stray scrollbar; they must be suppressed in every engine.
 const spinner = await page.evaluate(() => {
   const i = document.querySelector("input.val")
-  const r = i.getBoundingClientRect()
-  return { box: Math.round(r.width), client: i.clientWidth }
+  const cs = getComputedStyle(i)
+  const px = v => parseFloat(v) || 0
+  // Firefox excludes padding from clientWidth on form controls, Chromium includes
+  // it — so measure the leftover after accounting for border AND padding.
+  const border = px(cs.borderLeftWidth) + px(cs.borderRightWidth)
+  const pad = px(cs.paddingLeft) + px(cs.paddingRight)
+  return {
+    appearance: cs.appearance,
+    leftover: Math.round(i.getBoundingClientRect().width - i.clientWidth - border),
+    pad: Math.round(pad)
+  }
 })
-t("number fields have no spinner widget",
-  spinner.box - spinner.client <= 20, `box ${spinner.box} vs content ${spinner.client}`)
+t("number inputs declare spinners suppressed",
+  spinner.appearance === "textfield", spinner.appearance)
+t("no spinner widget is eating the field",
+  spinner.leftover <= spinner.pad + 2,
+  `leftover ${spinner.leftover}px vs padding ${spinner.pad}px`)
 
 // every control in the toolbar says what it is
 const labels = await page.$$eval(".ctl > span", n => n.map(e => e.textContent.trim().toLowerCase()))

@@ -9,3 +9,4 @@ logo/sheet*.html
 logo/candidates*.json
 logo/pick.png
 public/snapshot.json
+data/backtest-cache/

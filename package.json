@@ -17,7 +17,8 @@
     "test:board": "node test/board.mjs",
     "test:engine": "node test/engine.mjs",
     "backtest": "node src/backtest/run.ts",
-    "tune": "node src/backtest/tune.ts"
+    "tune": "node src/backtest/tune.ts",
+    "evaluate": "node src/backtest/evaluate.ts"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

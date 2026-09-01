@@ -80,12 +80,23 @@ export interface ProjectOptions {
 	/** Volume per team game over the recent window, if known. */
 	recentVolumePerGame?: number | null
 	/**
-	 * How much to trust recent playing time over season-long. 0.75 measured best
-	 * on both sides: a player who just took over an everyday job has a season-long
-	 * rate that understates his coming volume, and that is a volume error.
+	 * How much to trust recent playing time over season-long. 0.75 measured best on
+	 * both sides across 100 folds and ten seasons: a player who just took over an
+	 * everyday job has a season-long rate that understates his coming volume, and
+	 * that is a volume error, not a rate error.
 	 */
 	recentWeight?: number
 }
+
+/**
+ * The recent window that measured best per side, over 2016–2026.
+ *
+ * They differ, and the reason is structural rather than statistical: a hitter's
+ * role can change in a week, so a 7-day window tracks it; a starter works every
+ * fifth day, so a 7-day window is one or two starts of pure noise and 21 days is
+ * needed before his workload is even visible.
+ */
+export const RECENT_WINDOW_DAYS = { hitting: 7, pitching: 21 } as const
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 

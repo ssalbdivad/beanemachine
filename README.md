@@ -93,42 +93,53 @@ Confidence comes from real sample size, whether Statcast data exists at all, and
 health. It is never a flat default. A league category that can't be sourced is
 reported as unscoreable rather than silently treated as zero.
 
-### Is bscore actually predictive? — the backtest
+### Is bscore actually predictive? — 100 folds, ten seasons
 
-`nub run backtest` stands at four past dates, projects the next 14 days using **only**
-what was knowable then, and scores against what actually happened. It is leak-free by
-construction: both the StatsAPI line and the Savant expected stats are pulled with
-explicit date ranges ending at the as-of date.
+`nub run evaluate` builds a corpus from **2016–2026** — every season of the Statcast
+era — and scores projection variants against what actually happened. It is leak-free
+by construction: both the StatsAPI line and the Savant expected stats are pulled with
+date ranges ending at the as-of date, so nothing from the evaluation window reaches
+the projection. 2020 is skipped automatically; its 60-game season is too short to hold
+a 14-day horizon after a warm-up period.
 
-The baseline to beat is *"he'll keep doing what he's been doing"* — season-to-date
-points per team game, scaled to games ahead. Mean Spearman ρ across four folds:
+Every fetch goes through a disk cache, so the first build takes ~15 minutes and every
+sweep after that runs offline in seconds. That's what makes it practical to test ideas
+rather than guess.
 
-| variant | hitting | pitching |
-|---|---|---|
-| naive baseline | 0.569 | 0.473 |
-| + Statcast quality blend | 0.564 | 0.471 |
-| + rate shrinkage | 0.561 | 0.440 |
-| **+ recent playing time (shipped)** | **0.668** | **0.544** |
+```sh
+nub run evaluate                        # 2016–2026, 5 folds/season, 14-day horizon
+nub run evaluate --from=2021 --to=2025  # narrower
+nub run evaluate --horizon=7 --folds=8  # different question
+```
 
-Three findings, including two negative ones worth stating plainly:
+**Scored result — 50 folds per side, baseline is "he'll keep doing what he's been
+doing" (season-to-date rate scaled to games ahead):**
 
-1. **Recent playing time is the whole game.** Blending 14-day playing time at 75%
-   against season-long beats the baseline on all eight folds — about +20% relative for
-   hitters, +16% for pitchers. A player who just took over an everyday job has a
-   season-long rate that understates his coming volume, and that is a *volume* error,
-   not a rate error.
-2. **The Statcast blend did not earn its place.** Every parameter sweep ranked
-   `qualityWeight: 0` first. It is therefore **off by default** — xwOBA and barrel rate
-   are still shown, because they are genuinely informative to a human, but they do not
-   silently move a recommendation on evidence that failed. The knob remains, and the
-   hypothesis that it helps over a longer horizon is untested.
-3. **Rate shrinkage made things worse**, not better. The naive line already carries the
-   selection effect that good players accumulate more plate appearances, so shrinking
-   the rate on top of a volume model double-penalises exactly the players it shouldn't.
+| side | model | ρ | vs naive | folds won |
+|---|---|---|---|---|
+| hitting | naive baseline | 0.5743 | — | — |
+| hitting | **`d7_w0.75_q0` (shipped)** | **0.6759** | **+17.7%** | **48/50** |
+| pitching | naive baseline | 0.4697 | — | — |
+| pitching | **`d21_w0.75_q0` (shipped)** | **0.5275** | **+12.3%** | **49/50** |
 
-`nub run tune` sweeps the recent-window length, the blend weight and the Statcast
-weight, fetching each fold once and evaluating every parameter set in memory. The
-shipped values — 14 days, 0.75, 0.0 — are what it chose.
+Three findings, two of them negative:
+
+1. **Recent playing time is the whole game**, and the right window **differs by side** —
+   7 days for hitters, 21 for pitchers. The reason is structural, not statistical: a
+   hitter's role can change in a week, so a 7-day window tracks it; a starter works
+   every fifth day, so a week of his data is one or two starts of pure noise.
+2. **The Statcast blend does not earn its place.** Across ten seasons every sweep
+   ranked `qualityWeight: 0` first. It is **off by default**. xwOBA and barrel rate are
+   still displayed, because they genuinely inform a human, but they do not silently
+   move a recommendation on evidence that failed — and the drill-down says so.
+3. **Rate shrinkage made things worse.** The naive line already carries the selection
+   effect that good players accumulate more plate appearances, so shrinking the rate on
+   top of a volume model double-penalises exactly the players it shouldn't.
+
+Honest limits: ρ ≈ 0.68 is a real ranking signal, not clairvoyance — fourteen days of
+baseball is mostly variance, and the top-20 actual-points column barely separates the
+variants, meaning the gain is in ranking the broad pool (waiver decisions) rather than
+the very top (which is obvious anyway).
 
 ### Architecture
 

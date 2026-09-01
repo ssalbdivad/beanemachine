@@ -8,6 +8,7 @@ import {
 	type PlayerSeason
 } from "./statsapi.ts"
 import { fetchUnderlying, type Underlying } from "./savant.ts"
+import { RECENT_WINDOW_DAYS } from "../engine/project.ts"
 
 /**
  * A point-in-time capture of every source, so the app has one consistent view of
@@ -31,7 +32,7 @@ export interface Snapshot {
 	/** Volume per team game over the recent window, keyed "id:group". The backtest
 	 *  showed recent playing time is the strongest predictor available. */
 	recentVolumePerGame: Record<string, number>
-	recentWindow: { start: string; end: string; days: number }
+	recentWindow: { hitting: number; pitching: number }
 	sources: { name: string; url: string; rows: number }[]
 }
 
@@ -45,11 +46,14 @@ export const buildSnapshot = async (
 	const start = iso(now)
 	const end = iso(new Date(now.getTime() + horizonDays * 86400_000))
 
-	const RECENT_DAYS = 14
-	const recentStart = iso(new Date(now.getTime() - RECENT_DAYS * 86400_000))
+	// Side-specific windows: measured best at 7 days for hitters and 21 for
+	// pitchers across ten seasons. A starter works every fifth day, so a week of
+	// his data is one or two starts of noise.
+	const recentHitStart = iso(new Date(now.getTime() - RECENT_WINDOW_DAYS.hitting * 86400_000))
+	const recentPitStart = iso(new Date(now.getTime() - RECENT_WINDOW_DAYS.pitching * 86400_000))
 	const [
 		hitting, pitching, xBat, xPit, gamesByTeam, teamGamesPlayed, injuries,
-		recentHit, recentPit, recentGames
+		recentHit, recentPit, recentHitGames, recentPitGames
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
 			fetchSeason(season, "pitching"),
@@ -58,19 +62,20 @@ export const buildSnapshot = async (
 			fetchGamesByTeam(start, end),
 			fetchTeamGamesPlayed(season),
 			fetchInjuries(),
-			fetchWindowStats(season, "hitting", recentStart, start),
-			fetchWindowStats(season, "pitching", recentStart, start),
-			fetchGamesByTeam(recentStart, start)
+			fetchWindowStats(season, "hitting", recentHitStart, start),
+			fetchWindowStats(season, "pitching", recentPitStart, start),
+			fetchGamesByTeam(recentHitStart, start),
+			fetchGamesByTeam(recentPitStart, start)
 		])
 
 	// per-team-game volume over the recent window, the input the backtest favoured
 	const recentVolumePerGame: Record<string, number> = {}
-	for (const [rows, group] of [
-		[recentHit, "hitting"],
-		[recentPit, "pitching"]
+	for (const [rows, group, games] of [
+		[recentHit, "hitting", recentHitGames],
+		[recentPit, "pitching", recentPitGames]
 	] as const)
 		for (const r of rows) {
-			const g = r.teamId ? (recentGames.get(r.teamId) ?? 0) : 0
+			const g = r.teamId ? (games.get(r.teamId) ?? 0) : 0
 			if (!g) continue
 			const v = group === "hitting" ? r.stats.plateAppearances : r.stats.battersFaced
 			if (v === undefined) continue
@@ -114,7 +119,7 @@ export const buildSnapshot = async (
 		),
 		gamesByTeam: Object.fromEntries([...gamesByTeam].map(([k, v]) => [String(k), v])),
 		recentVolumePerGame,
-		recentWindow: { start: recentStart, end: start, days: RECENT_DAYS },
+		recentWindow: { ...RECENT_WINDOW_DAYS },
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },

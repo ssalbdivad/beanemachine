@@ -34,8 +34,10 @@ t("bscore equals projected minus replacement",
 await page.click(".board-row")
 await page.waitForSelector(".detail")
 const sections = await page.$$eval(".detail h3", n => n.map(e => e.textContent.toLowerCase()))
-t("drill-down separates observed from modelled",
-  sections.some(s => s.includes("observed")) && sections.some(s => s.includes("modelled")),
+t("drill-down separates measured, Statcast model and our model",
+  sections.some(s => s.includes("measured")) &&
+  sections.some(s => s.includes("statcast model")) &&
+  sections.some(s => s.includes("our model")),
   sections.join("|"))
 const modelled = await page.$$eval(".detail .notes li", n => n.map(e => e.textContent))
 t("modelled assumptions are stated explicitly",

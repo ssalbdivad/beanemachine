@@ -40,6 +40,9 @@ export interface Rated {
 	slot: string
 	replacement: number
 	confidence: { value: number; reasons: string[] }
+	/** False when no projection was possible — such a player is reported, never
+	 *  silently ranked at zero alongside real ones. */
+	rateable: boolean
 	/** est_woba − woba: positive means results trail contact quality. */
 	regressionGap: number | null
 }
@@ -47,11 +50,14 @@ export interface Rated {
 export interface RateOptions {
 	league: League
 	players: PlayerSeason[]
-	underlying: Map<number, Underlying>
+	underlying: { hitting: Map<number, Underlying>; pitching: Map<number, Underlying> }
 	injuries: Map<number, string>
 	teamGamesPlayed: Map<number, number>
 	gamesByTeam: Map<number, number>
-	/** Teams in the league — sets how deep the replacement level sits. */
+	/** Teams in the league — sets how deep the replacement level sits. Required:
+	 *  defaulting it would silently move every replacement level and therefore
+	 *  every bscore, which is exactly the kind of quiet assumption this app exists
+	 *  to refuse. */
 	teams: number
 }
 
@@ -59,7 +65,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	const slotCounts = o.league.roster.slots
 
 	const rated: Rated[] = o.players.map(player => {
-		const underlying = o.underlying.get(player.id)
+		const underlying = o.underlying[player.group].get(player.id)
 		const injury = o.injuries.get(player.id)
 		const horizonGames = player.teamId ? (o.gamesByTeam.get(player.teamId) ?? 0) : 0
 		const projection = project(
@@ -82,6 +88,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			slot: "",
 			replacement: 0,
 			confidence: confidenceOf(player, underlying, injury),
+			rateable: projection.projectedVolume !== null && projection.projectedVolume > 0,
 			regressionGap: underlying?.xwobaGap ?? null
 		}
 	})
@@ -98,7 +105,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	for (const [slot, count] of Object.entries(slotCounts)) {
 		if (slot === "BN" || slot === "IL" || slot === "NA") continue
 		const eligible = rated
-			.filter(r => r.slots.includes(slot))
+			.filter(r => r.rateable && r.slots.includes(slot))
 			.sort((a, b) => b.points - a.points)
 		const depth = Math.min(o.teams * count, Math.max(eligible.length - 1, 0))
 		replacementBySlot.set(slot, eligible[depth]?.points ?? 0)
@@ -123,20 +130,28 @@ export const rateAll = (o: RateOptions): Rated[] => {
 /** Percentile of the regression gap within the rated pool — the undervaluation
  *  signal, expressed relative to the players actually being compared. */
 export const withUndervaluation = (rated: Rated[]) => {
-	const gaps = rated
-		.map(r => r.regressionGap)
-		.filter((g): g is number => g !== null)
-		.sort((a, b) => a - b)
-	return rated.map(r => ({
-		...r,
-		undervaluation:
-			r.regressionGap === null ? null : (
-				Number(
-					(
-						(gaps.filter(g => g < r.regressionGap!).length / Math.max(gaps.length, 1)) *
-						100
-					).toFixed(1)
-				)
-			)
-	}))
+	// Percentile WITHIN a side. For a batter a positive est_woba − woba means his
+	// results trail his contact; for a pitcher it means the opposite. Ranking both
+	// in one pool, as an earlier version did, produced a number with no meaning.
+	const gapsBySide = {
+		hitting: [] as number[],
+		pitching: [] as number[]
+	}
+	for (const r of rated)
+		if (r.regressionGap !== null && r.rateable) gapsBySide[r.player.group].push(r.regressionGap)
+	for (const key of ["hitting", "pitching"] as const) gapsBySide[key].sort((a, b) => a - b)
+
+	return rated.map(r => {
+		if (r.regressionGap === null || !r.rateable) return { ...r, undervaluation: null }
+		// a pitcher benefits when his expected is BELOW his actual, so the sign flips
+		const gap = r.player.group === "hitting" ? r.regressionGap : -r.regressionGap
+		const pool = gapsBySide[r.player.group].map(g =>
+			r.player.group === "hitting" ? g : -g
+		)
+		const below = pool.filter(g => g < gap).length
+		return {
+			...r,
+			undervaluation: Number(((below / Math.max(pool.length, 1)) * 100).toFixed(1))
+		}
+	})
 }

@@ -89,8 +89,12 @@ export const fetchGamesByTeam = async (
 	return counts
 }
 
-/** Current injury/roster status per player, so an IL stint is shown rather than
- *  quietly folded into a lower projection. */
+/** Injury list status only.
+ *
+ *  The roster feed reports every non-active status, and most of them are not
+ *  injuries: of 709 non-active entries, 513 were Reassigned to Minors, Minor
+ *  League Contract, Traded, Released, Claimed or DFA. Showing "Traded" under an
+ *  injury flag is simply wrong, so this filters to the D-prefixed IL codes. */
 export const fetchInjuries = async (): Promise<Map<number, string>> => {
 	const teams = await json(`${BASE}/teams?sportId=1`)
 	const ids: number[] = (teams.teams ?? []).map((t: any) => t.id)
@@ -102,9 +106,11 @@ export const fetchInjuries = async (): Promise<Map<number, string>> => {
 	)
 	for (const r of rosters)
 		for (const entry of r?.roster ?? []) {
-			const code = entry.status?.code
-			const desc = entry.status?.description
-			if (entry.person?.id && code && code !== "A") out.set(entry.person.id, desc ?? code)
+			const code: string | undefined = entry.status?.code
+			const desc: string | undefined = entry.status?.description
+			// D7 / D10 / D15 / D60 are the injured-list codes
+			const isInjury = code ? /^D\d+$/.test(code) : false
+			if (entry.person?.id && isInjury) out.set(entry.person.id, desc ?? code!)
 		}
 	return out
 }

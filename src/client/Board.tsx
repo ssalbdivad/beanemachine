@@ -195,7 +195,7 @@ const Detail = ({ r }: { r: Rated }) => {
 				</dl>
 			</div>
 			<div className="detail-col">
-				<h3>Observed</h3>
+				<h3>Measured</h3>
 				<dl>
 					<div className="pair"><dt>season points</dt><dd>{r.season.points}</dd></div>
 					<div className="pair"><dt>volume / team game</dt><dd>{r.projection.volumePerTeamGame ?? "—"}</dd></div>
@@ -203,16 +203,36 @@ const Detail = ({ r }: { r: Rated }) => {
 					{r.underlying?.woba != null && (
 						<div className="pair"><dt>wOBA</dt><dd>{r.underlying.woba}</dd></div>
 					)}
-					{r.underlying?.xwoba != null && (
-						<div className="pair"><dt>xwOBA</dt><dd>{r.underlying.xwoba}</dd></div>
-					)}
 					{r.underlying?.barrelRate != null && (
 						<div className="pair"><dt>barrel %</dt><dd>{r.underlying.barrelRate}</dd></div>
+					)}
+					{r.underlying?.avgExitVelocity != null && (
+						<div className="pair"><dt>exit velo</dt><dd>{r.underlying.avgExitVelocity}</dd></div>
 					)}
 				</dl>
 			</div>
 			<div className="detail-col">
-				<h3>Modelled</h3>
+				<h3>Statcast model</h3>
+				<p className="tiny-note">
+					Expected stats are MLB's model of what this contact usually produces — not
+					something that happened.
+				</p>
+				<dl>
+					{r.underlying?.xwoba != null ?
+						<>
+							<div className="pair"><dt>xwOBA</dt><dd>{r.underlying.xwoba}</dd></div>
+							{r.underlying.xba != null && (
+								<div className="pair"><dt>xBA</dt><dd>{r.underlying.xba}</dd></div>
+							)}
+							{r.underlying.xslg != null && (
+								<div className="pair"><dt>xSLG</dt><dd>{r.underlying.xslg}</dd></div>
+							)}
+						</>
+					:	<p className="empty">No Statcast row for this player.</p>}
+				</dl>
+			</div>
+			<div className="detail-col">
+				<h3>Our model</h3>
 				{r.projection.modelled.length ?
 					<ul className="notes">{r.projection.modelled.map(m => <li key={m}>{m}</li>)}</ul>
 				:	<p className="empty">Nothing modelled — no projection was possible.</p>}

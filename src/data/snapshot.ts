@@ -23,7 +23,7 @@ export interface Snapshot {
 	capturedAt: string
 	horizon: { start: string; end: string }
 	players: PlayerSeason[]
-	underlying: Record<string, Underlying>
+	underlying: { hitting: Record<string, Underlying>; pitching: Record<string, Underlying> }
 	injuries: Record<string, string>
 	teamGamesPlayed: Record<string, number>
 	gamesByTeam: Record<string, number>
@@ -51,15 +51,37 @@ export const buildSnapshot = async (
 			fetchInjuries()
 		])
 
-	const underlying = new Map([...xBat, ...xPit])
-	const players = [...hitting, ...pitching]
+	// Keyed by side, NOT merged. 133 players appear in both pools, so a flat
+	// `new Map([...xBat, ...xPit])` let each pitcher row overwrite the batter row —
+	// 37 real hitters were being projected off their xwOBA-AGAINST as pitchers.
+	// A batter's xwOBA and a pitcher's xwOBA-against are opposite quantities.
+
+	// Pool hygiene: a pitcher who took three plate appearances is not a fantasy
+	// hitter, and listing him as a 0-PA Util bat both pollutes the board and drags
+	// the replacement level. Two-way players legitimately appear on both sides.
+	const isTwoWay = (id: number) =>
+		hitting.some(h => h.id === id && h.position === "TWP") ||
+		pitching.some(q => q.id === id && q.position === "TWP")
+	const players = [
+		...hitting.filter(
+			h => (h.position !== "P" || isTwoWay(h.id)) && (h.stats.plateAppearances ?? 0) > 0
+		),
+		// Symmetric to the hitting filter: a first baseman who mopped up an inning is
+		// not a fantasy pitcher. Position is the signal, not workload.
+		...pitching.filter(
+			q => (q.position === "P" || isTwoWay(q.id)) && (q.stats.battersFaced ?? 0) > 0
+		)
+	]
 
 	return {
 		season,
 		capturedAt: now.toISOString(),
 		horizon: { start, end },
 		players,
-		underlying: Object.fromEntries([...underlying].map(([k, v]) => [String(k), v])),
+		underlying: {
+			hitting: Object.fromEntries([...xBat].map(([k, v]) => [String(k), v])),
+			pitching: Object.fromEntries([...xPit].map(([k, v]) => [String(k), v]))
+		},
 		injuries: Object.fromEntries([...injuries].map(([k, v]) => [String(k), v])),
 		teamGamesPlayed: Object.fromEntries(
 			[...teamGamesPlayed].map(([k, v]) => [String(k), v])
@@ -79,7 +101,10 @@ export const buildSnapshot = async (
 /** Rehydrate the string-keyed maps a JSON snapshot has to use. */
 export const hydrate = (s: Snapshot) => ({
 	players: s.players,
-	underlying: new Map(Object.entries(s.underlying).map(([k, v]) => [Number(k), v])),
+	underlying: {
+		hitting: new Map(Object.entries(s.underlying.hitting).map(([k, v]) => [Number(k), v])),
+		pitching: new Map(Object.entries(s.underlying.pitching).map(([k, v]) => [Number(k), v]))
+	},
 	injuries: new Map(Object.entries(s.injuries).map(([k, v]) => [Number(k), v])),
 	teamGamesPlayed: new Map(
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])

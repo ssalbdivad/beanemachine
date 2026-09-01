@@ -45,6 +45,9 @@ export const DEFAULT_FILTERS: Filters = {
 export const useBoard = (snapshot: Snapshot | null, league: League | null, filters: Filters) => {
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
+		// Replacement depth is teams × slots. Without a real team count there is no
+		// honest bscore, so this refuses rather than assuming a league size.
+		if (league.meta.max_teams == null) return []
 		const h = hydrate(snapshot)
 		return withUndervaluation(
 			rateAll({
@@ -54,7 +57,7 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 				injuries: h.injuries,
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: h.gamesByTeam,
-				teams: league.meta.max_teams ?? 12
+				teams: league.meta.max_teams
 			})
 		)
 	}, [snapshot, league])
@@ -62,6 +65,8 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()
 		const out = rated.filter(r => {
+			// a player with no projectable volume has no bscore to rank
+			if (!r.rateable) return false
 			if (q && !r.player.name.toLowerCase().includes(q)) return false
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false

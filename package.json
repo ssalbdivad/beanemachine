@@ -11,10 +11,11 @@
     "preview": "vite preview",
     "start": "nub src/server.ts",
     "import": "nub src/cli.ts",
-    "test": "node test/ui.mjs && node test/board.mjs",
+    "test": "node test/engine.mjs && node test/ui.mjs && node test/board.mjs",
     "check": "tsc --noEmit",
     "refresh": "node src/refresh.ts",
-    "test:board": "node test/board.mjs"
+    "test:board": "node test/board.mjs",
+    "test:engine": "node test/engine.mjs"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

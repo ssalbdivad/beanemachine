@@ -437,3 +437,4 @@ pre{
   .board-head span:nth-child(5),.board-row .dim:nth-of-type(2),
   .board-head span:nth-child(7),.board-row .gap{display:none}
 }
+.tiny-note{margin:0 0 9px;font-size:11px;line-height:1.45;color:var(--faint);font-style:italic}

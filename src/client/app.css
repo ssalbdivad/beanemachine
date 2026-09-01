@@ -438,3 +438,5 @@ pre{
   .board-head span:nth-child(7),.board-row .gap{display:none}
 }
 .tiny-note{margin:0 0 9px;font-size:11px;line-height:1.45;color:var(--faint);font-style:italic}
+.chip.age{margin-left:10px;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;
+  text-transform:none;padding:3px 9px}

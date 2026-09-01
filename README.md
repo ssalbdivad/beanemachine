@@ -99,9 +99,18 @@ The engine (`src/engine/`) is pure, so ranking runs **in the browser** against a
 snapshot of observed data. That collapses the server/static split — GitHub Pages gets
 the same live board — and means re-scoring your league re-ranks it instantly.
 
-`src/data/` fetches and normalises sources; `src/refresh.ts` writes the snapshot,
-which CI recaptures on every deploy. Browsers can't call MLB or Savant directly
-(neither sends CORS headers), so the snapshot is how real data reaches the page.
+`src/data/` fetches and normalises sources; `src/refresh.ts` writes the snapshot.
+Browsers can't call MLB or Savant directly (neither sends CORS headers), so the
+snapshot is how real data reaches the page.
+
+**Why a snapshot rather than live calls, and why CSV.** Savant serves these
+leaderboards as HTML; `csv=true` is its actual data interface, and there is no JSON
+equivalent — scraping their internals would be more fragile, not less. But the format
+is beside the point: a browser can't call either source directly, so the data has to
+be captured server-side either way. What matters is *cadence*. CI recaptures on every
+push **and on a schedule — 11:00 and 23:00 UTC** — so the board never quietly serves
+numbers from whenever someone last pushed code. The UI states the capture age next to
+the heading and flags it once it passes 36 hours.
 
 `src/schema.ts` is the shared contract: the same ArkType `League` type validates the
 form on every keystroke, guards each Hono route via `@hono/arktype-validator`, and

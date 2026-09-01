@@ -18,6 +18,17 @@ const Confidence = ({ value, reasons }: { value: number; reasons: string[] }) =>
 
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
+/** How old the capture is. A projection built on last week's numbers is wrong in a
+ *  way nothing else in the UI would reveal, so the age is always stated. */
+const freshness = (capturedAt: string, now: number) => {
+	const hours = (now - Date.parse(capturedAt)) / 3_600_000
+	if (!Number.isFinite(hours)) return { label: "unknown age", stale: true }
+	if (hours < 1) return { label: "just now", stale: false }
+	if (hours < 36) return { label: `${Math.round(hours)}h ago`, stale: false }
+	const days = Math.round(hours / 24)
+	return { label: `${days}d ago`, stale: true }
+}
+
 export const Board = ({
 	snapshot,
 	league,
@@ -30,6 +41,7 @@ export const Board = ({
 	const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
 	const [open, setOpen] = useState<number | null>(null)
 	const { rows } = useBoard(snapshot, league, filters)
+	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
 
@@ -122,11 +134,17 @@ export const Board = ({
 			</section>
 
 			<section className="card full">
-				<h2>Recommendations</h2>
+				<h2>
+					Recommendations
+					{age && (
+						<span className={`chip ${age.stale ? "warn" : "ok"} age`}>
+							data {age.label}
+						</span>
+					)}
+				</h2>
 				<p className="sub">
 					{rows.length} players ranked in {league.meta.league_name ?? "this league"}'s scoring ·
-					projected over {snapshot.horizon.start} → {snapshot.horizon.end} · data captured{" "}
-					{snapshot.capturedAt.slice(0, 10)}
+					projected over {snapshot.horizon.start} → {snapshot.horizon.end}
 				</p>
 				<div className="board">
 					<div className="board-head">

@@ -3,6 +3,14 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Refresh the data snapshot twice a day. The board is only as current as its
+  # last capture, and during the season the numbers move daily — without this the
+  # site would silently serve whatever was true at the last code push.
+  # 11:00 UTC ≈ 07:00 ET, after every previous-day game is final.
+  # 23:00 UTC ≈ 19:00 ET, picking up day games and afternoon roster moves.
+  schedule:
+    - cron: "0 11 * * *"
+    - cron: "0 23 * * *"
   workflow_dispatch:
 
 permissions:

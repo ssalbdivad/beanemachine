@@ -1,0 +1,430 @@
+{
+  "schema_version": "1.0",
+  "description": "League scoring/roster configuration for the lineup optimizer. Values are only ever read from a league's own pages or API — anything a source doesn't state stays null and is named in needs_review, so a missing setting can never pass for a real one.",
+  "active_league": "yahoo:228947",
+  "stat_keys": {
+    "description": "Canonical internal stat keys. Platform importers map their own names/ids onto these; anything that doesn't map is preserved verbatim under scoring.unmapped rather than dropped or guessed.",
+    "batting": [
+      "R",
+      "1B",
+      "2B",
+      "3B",
+      "HR",
+      "RBI",
+      "SB",
+      "CS",
+      "BB",
+      "IBB",
+      "HBP",
+      "SO",
+      "SF",
+      "SH",
+      "GIDP",
+      "TB",
+      "H",
+      "AB",
+      "PA"
+    ],
+    "pitching": [
+      "W",
+      "L",
+      "SV",
+      "BS",
+      "HLD",
+      "OUT",
+      "IP",
+      "H",
+      "ER",
+      "R",
+      "BB",
+      "IBB",
+      "HBP",
+      "K",
+      "HR",
+      "CG",
+      "SHO",
+      "QS",
+      "PICK",
+      "WP",
+      "BK"
+    ]
+  },
+  "leagues": {
+    "yahoo:228947": {
+      "meta": {
+        "platform": "yahoo",
+        "sport": "mlb",
+        "league_id": "228947",
+        "league_name": "Yahoo H2H-Pts 228947",
+        "league_url": "https://baseball.fantasysports.yahoo.com/b1/228947",
+        "team_id": "8",
+        "team_name": "Mrs. Met's Harem",
+        "season": null,
+        "scoring_type": "Head-to-Head - Points",
+        "max_teams": 10,
+        "publicly_viewable": true
+      },
+      "scoring": {
+        "unit": "points",
+        "batting": {
+          "R": 1.9,
+          "1B": 2.6,
+          "2B": 5.2,
+          "3B": 7.8,
+          "HR": 10.4,
+          "RBI": 1.9,
+          "SB": 4.2,
+          "BB": 2.6,
+          "HBP": 2.6
+        },
+        "pitching": {
+          "W": 8,
+          "SV": 8,
+          "OUT": 1,
+          "H": -1.3,
+          "ER": -3,
+          "BB": -1.3,
+          "HBP": -1.3,
+          "K": 3
+        }
+      },
+      "roster": {
+        "raw": "C, 1B, 2B, 3B, SS, OF, OF, OF, Util, Util, SP, SP, RP, RP, P, P, P, P, BN, BN, BN, BN, BN, IL, IL, IL, IL",
+        "slots": {
+          "C": 1,
+          "1B": 1,
+          "2B": 1,
+          "3B": 1,
+          "SS": 1,
+          "OF": 3,
+          "Util": 2,
+          "SP": 2,
+          "RP": 2,
+          "P": 4,
+          "BN": 5,
+          "IL": 4
+        },
+        "slot_order": [
+          "C",
+          "1B",
+          "2B",
+          "3B",
+          "SS",
+          "OF",
+          "OF",
+          "OF",
+          "Util",
+          "Util",
+          "SP",
+          "SP",
+          "RP",
+          "RP",
+          "P",
+          "P",
+          "P",
+          "P",
+          "BN",
+          "BN",
+          "BN",
+          "BN",
+          "BN",
+          "IL",
+          "IL",
+          "IL",
+          "IL"
+        ],
+        "counts": {
+          "active": 18,
+          "bench": 5,
+          "injured_list": 4,
+          "total": 27
+        },
+        "slot_accepts": {
+          "C": [
+            "C"
+          ],
+          "1B": [
+            "1B"
+          ],
+          "2B": [
+            "2B"
+          ],
+          "3B": [
+            "3B"
+          ],
+          "SS": [
+            "SS"
+          ],
+          "OF": [
+            "OF"
+          ],
+          "SP": [
+            "SP"
+          ],
+          "RP": [
+            "RP"
+          ],
+          "Util": [
+            "C",
+            "1B",
+            "2B",
+            "3B",
+            "SS",
+            "OF"
+          ],
+          "P": [
+            "SP",
+            "RP"
+          ],
+          "BN": "any",
+          "IL": "injured_only"
+        }
+      },
+      "eligibility": {
+        "source": "https://baseball.fantasysports.yahoo.com/b1/228947/positioneligibility",
+        "tracked_positions": [
+          "C",
+          "1B",
+          "2B",
+          "3B",
+          "SS",
+          "OF",
+          "Util",
+          "SP",
+          "RP",
+          "P"
+        ],
+        "batters": {
+          "rule": "or",
+          "games_started_at_position": 5,
+          "games_played_at_position": 10
+        },
+        "pitchers": {
+          "SP": {
+            "starts": 3
+          },
+          "RP": {
+            "relief_appearances": 5
+          }
+        },
+        "grid_legend": {
+          "P": "games to play until eligible",
+          "S": "games to start until eligible",
+          "E": "currently eligible",
+          "-": "no appearances yet"
+        }
+      },
+      "league_rules": {
+        "raw_settings": {
+          "League ID#": "228947",
+          "League Name": "Yahoo H2H-Pts 228947",
+          "Auto-renew Enabled": "No",
+          "Draft Type": "Live Standard Draft",
+          "Draft Time": "Sat May 2 4:28pm EDT",
+          "Live Draft Pick Time": "1 Minute",
+          "Max Teams": "10",
+          "Scoring Type": "Head-to-Head - Points",
+          "Player Universe": "All baseball",
+          "New Players Become Available": "As soon as Yahoo adds them View List of Forced Players",
+          "Max Acquisitions for Entire Season": "No maximum",
+          "Max Trades for Entire Season": "No maximum",
+          "Trade End Date": "August 6, 2026",
+          "Allow Draft Pick Trades": "No",
+          "Waiver Time": "1 day",
+          "Waiver Type": "Continual rolling list",
+          "Waiver Mode": "Standard",
+          "Allow injured players from waivers or free agents to be added directly to injury slot": "No",
+          "Can't Cut List Provider": "Yahoo Sports",
+          "Trade Review": "League Votes",
+          "Votes Required to Veto": "Default",
+          "Trade Reject Time": "2 days",
+          "Post Draft Players": "Follow Waiver Rules",
+          "Max Acquisitions per Week": "6",
+          "Min innings pitched per team per week": "20",
+          "Weekly Deadline": "Daily - Today",
+          "Start Scoring on": "Week 7",
+          "Playoffs": "6 teams - Week 24, 25 and 26 (ends Sunday, Sep 27)",
+          "Playoff Tie-Breaker": "Higher seed wins",
+          "Playoff Reseeding": "Yes",
+          "Lock Eliminated Teams": "Yes",
+          "Divisions": "No",
+          "Lock Benched Players": "No",
+          "Make League Publicly Viewable": "Yes",
+          "Send unjoined players email reminders": "Yes",
+          "Roster Positions": "C, 1B, 2B, 3B, SS, OF, OF, OF, Util, Util, SP, SP, RP, RP, P, P, P, P, BN, BN, BN, BN, BN, IL, IL, IL, IL"
+        }
+      },
+      "provenance": {
+        "fetched_at": "2026-09-01",
+        "sources": [
+          "https://baseball.fantasysports.yahoo.com/b1/228947/settings",
+          "https://baseball.fantasysports.yahoo.com/b1/228947/positioneligibility",
+          "https://baseball.fantasysports.yahoo.com/b1/228947/8"
+        ],
+        "method": "raw HTML fetch + table parse",
+        "verified": true
+      },
+      "needs_review": [
+        "slot_accepts is derived from the roster slot names plus the columns of Yahoo's position-eligibility grid; Yahoo does not state it as prose."
+      ]
+    }
+  },
+  "platform_templates": {
+    "yahoo": {
+      "meta": {
+        "platform": "yahoo",
+        "sport": "mlb",
+        "league_id": null,
+        "league_name": null,
+        "league_url": null,
+        "team_id": null,
+        "team_name": null,
+        "season": null,
+        "scoring_type": null,
+        "max_teams": null
+      },
+      "scoring": {
+        "unit": "points",
+        "batting": {},
+        "pitching": {}
+      },
+      "roster": {
+        "raw": null,
+        "slots": {},
+        "slot_order": null,
+        "counts": null,
+        "slot_accepts": null
+      },
+      "eligibility": null,
+      "league_rules": {
+        "raw_settings": {}
+      },
+      "provenance": {
+        "fetched_at": null,
+        "sources": [],
+        "method": "manual entry",
+        "verified": false
+      },
+      "needs_review": [
+        "Nothing imported yet — every field is blank on purpose. Import a league URL, or fill these in by hand."
+      ]
+    },
+    "espn": {
+      "meta": {
+        "platform": "espn",
+        "sport": "flb",
+        "league_id": null,
+        "league_name": null,
+        "league_url": null,
+        "team_id": null,
+        "team_name": null,
+        "season": null,
+        "scoring_type": null,
+        "max_teams": null
+      },
+      "scoring": {
+        "unit": "points",
+        "batting": {},
+        "pitching": {}
+      },
+      "roster": {
+        "raw": null,
+        "slots": {},
+        "slot_order": null,
+        "counts": null,
+        "slot_accepts": null
+      },
+      "eligibility": null,
+      "league_rules": {
+        "raw_settings": {}
+      },
+      "provenance": {
+        "fetched_at": null,
+        "sources": [],
+        "method": "manual entry",
+        "verified": false
+      },
+      "needs_review": [
+        "Nothing imported yet — every field is blank on purpose. Import a league URL, or fill these in by hand."
+      ]
+    },
+    "sleeper": {
+      "meta": {
+        "platform": "sleeper",
+        "sport": null,
+        "league_id": null,
+        "league_name": null,
+        "league_url": null,
+        "team_id": null,
+        "team_name": null,
+        "season": null,
+        "scoring_type": null,
+        "max_teams": null
+      },
+      "scoring": {
+        "unit": "points",
+        "batting": {},
+        "pitching": {}
+      },
+      "roster": {
+        "raw": null,
+        "slots": {},
+        "slot_order": null,
+        "counts": null,
+        "slot_accepts": null
+      },
+      "eligibility": null,
+      "league_rules": {
+        "raw_settings": {}
+      },
+      "provenance": {
+        "fetched_at": null,
+        "sources": [],
+        "method": "manual entry",
+        "verified": false
+      },
+      "needs_review": [
+        "Nothing imported yet — every field is blank on purpose. Import a league URL, or fill these in by hand."
+      ]
+    },
+    "custom": {
+      "meta": {
+        "platform": "custom",
+        "sport": "mlb",
+        "league_id": null,
+        "league_name": null,
+        "league_url": null,
+        "team_id": null,
+        "team_name": null,
+        "season": null,
+        "scoring_type": null,
+        "max_teams": null
+      },
+      "scoring": {
+        "unit": "points",
+        "batting": {},
+        "pitching": {}
+      },
+      "roster": {
+        "raw": null,
+        "slots": {},
+        "slot_order": null,
+        "counts": null,
+        "slot_accepts": null
+      },
+      "eligibility": null,
+      "league_rules": {
+        "raw_settings": {}
+      },
+      "provenance": {
+        "fetched_at": null,
+        "sources": [],
+        "method": "manual entry",
+        "verified": false
+      },
+      "needs_review": [
+        "Nothing imported yet — every field is blank on purpose. Import a league URL, or fill these in by hand."
+      ]
+    }
+  }
+}

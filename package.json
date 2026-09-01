@@ -1,0 +1,35 @@
+{
+  "name": "beanecounter",
+  "version": "0.1.0",
+  "description": "Fantasy league scoring configuration for the Mrs. Met's Harem lineup optimizer",
+  "type": "module",
+  "scripts": {
+    "dev": "nub run dev:api & vite",
+    "dev:api": "nub watch src/server.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "nub src/server.ts",
+    "import": "nub src/cli.ts",
+    "test": "node test/ui.mjs",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/arktype-validator": "^2.0.1",
+    "@hono/node-server": "^2.1.1",
+    "@tanstack/react-form": "^1.33.5",
+    "arktype": "^2.2.3",
+    "hono": "^4.13.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "playwright-core": "^1.62.1",
+    "typescript": "^5.7.2",
+    "vite": "^8.2.2"
+  }
+}

@@ -1,0 +1,449 @@
+import type { League } from "./schema.ts"
+import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
+
+/**
+ * Reads a league's real settings from a pasted URL.
+ *
+ * Invariant: nothing is invented. Every value written comes from the league's
+ * own pages or API. Whatever the source doesn't state stays `null` and is named
+ * in `needs_review`, so a missing setting can never pass for a real one.
+ */
+
+const USER_AGENT =
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+
+/** Thrown for conditions the user can act on; surfaced verbatim in the UI. */
+export class ImportError extends Error {}
+
+const YAHOO_SPORTS = {
+	baseball: "mlb",
+	football: "nfl",
+	basketball: "nba",
+	hockey: "nhl"
+} as const
+
+const ESPN_GAMES = {
+	baseball: "flb",
+	football: "ffl",
+	basketball: "fba",
+	hockey: "fhl"
+} as const
+
+export type Target =
+	| {
+			platform: "yahoo"
+			sport: string
+			yahooGame: keyof typeof YAHOO_SPORTS
+			leagueId: string
+			teamId: string | null
+	  }
+	| {
+			platform: "espn"
+			sport: string
+			leagueId: string
+			teamId: string | null
+			season: number | null
+	  }
+	| { platform: "sleeper"; leagueId: string }
+
+export const detect = (url: string): Target => {
+	const u = url.trim()
+
+	const yahoo = u.match(
+		/(baseball|football|basketball|hockey)\.fantasysports\.yahoo\.com\/\w+\/(\d+)(?:\/(\d+))?/
+	)
+	if (yahoo) {
+		const game = yahoo[1] as keyof typeof YAHOO_SPORTS
+		return {
+			platform: "yahoo",
+			sport: YAHOO_SPORTS[game],
+			yahooGame: game,
+			leagueId: yahoo[2]!,
+			teamId: yahoo[3] ?? null
+		}
+	}
+
+	const espn = u.match(/fantasy\.espn\.com\/(baseball|football|basketball|hockey)\b/)
+	if (espn) {
+		const leagueId = u.match(/leagueId=(\d+)/)?.[1]
+		if (!leagueId) throw new ImportError("That ESPN URL has no `leagueId=` in it.")
+		const season = u.match(/seasonId=(\d+)/)?.[1]
+		return {
+			platform: "espn",
+			sport: ESPN_GAMES[espn[1] as keyof typeof ESPN_GAMES],
+			leagueId,
+			teamId: u.match(/teamId=(\d+)/)?.[1] ?? null,
+			season: season ? Number(season) : null
+		}
+	}
+
+	const sleeper = u.match(/sleeper\.(?:app|com)\/leagues?\/(\d+)/)
+	if (sleeper) return { platform: "sleeper", leagueId: sleeper[1]! }
+
+	throw new ImportError(
+		"Unrecognized league URL. Supported: Yahoo (*.fantasysports.yahoo.com), " +
+			"ESPN (fantasy.espn.com, needs ?leagueId=), Sleeper (sleeper.com/leagues/…)."
+	)
+}
+
+const fetchText = async (url: string): Promise<string> => {
+	const res = await fetch(url, { headers: { "user-agent": USER_AGENT } })
+	if (!res.ok) throw new ImportError(`${url} returned HTTP ${res.status}.`)
+	return res.text()
+}
+
+const today = (): string => new Date().toISOString().slice(0, 10)
+
+/** Yahoo labels every scored stat with its short code: "Home Runs (HR)". */
+const STAT_CODE = /\(([A-Za-z0-9/]+)\)\s*$/
+
+const IL_SLOTS = ["IL", "NA", "IL+"]
+
+const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<League> => {
+	const base = `https://${t.yahooGame}.fantasysports.yahoo.com/b1/${t.leagueId}`
+	const settingsUrl = `${base}/settings`
+	const eligibilityUrl = `${base}/positioneligibility`
+	const needsReview: string[] = []
+
+	const settingsHtml = await fetchText(settingsUrl)
+	if (!/Scoring\s*(&amp;|&)\s*Settings/i.test(settingsHtml)) {
+		throw new ImportError(
+			"Couldn't read that league's settings page. Only publicly-viewable Yahoo " +
+				"leagues can be read without signing in."
+		)
+	}
+
+	const batting: Record<string, number> = {}
+	const pitching: Record<string, number> = {}
+	const unmapped: { side: string; label: string; value: string }[] = []
+	const settings: Record<string, string> = {}
+
+	for (const rows of parseTables(settingsHtml)) {
+		const header = (rows[0] ?? []).join(" ").toLowerCase()
+		const side =
+			header.includes("batters stat category") ? batting
+			: header.includes("pitchers stat category") ? pitching
+			: null
+
+		if (side) {
+			for (const row of rows.slice(1)) {
+				const [label, raw] = row
+				if (!label || raw === undefined) continue
+				const code = STAT_CODE.exec(label)?.[1]
+				const value = parseNumber(raw)
+				if (code && value !== null) side[code] = value
+				else if (label.trim())
+					unmapped.push({
+						side: side === batting ? "batting" : "pitching",
+						label,
+						value: raw
+					})
+			}
+		} else if (rows[0]?.[0]?.trim().toLowerCase() === "setting") {
+			for (const row of rows.slice(1)) {
+				const [label, value] = row
+				if (label && value !== undefined)
+					settings[label.trim().replace(/:$/, "")] = value.trim()
+			}
+		}
+	}
+
+	if (!Object.keys(batting).length && !Object.keys(pitching).length) {
+		throw new ImportError(
+			"No points-scoring table on that league's settings page — it may be a " +
+				"roto or categories league rather than head-to-head points."
+		)
+	}
+
+	const rawRoster = settings["Roster Positions"] ?? ""
+	const slotOrder = rawRoster
+		.split(",")
+		.map(s => s.trim())
+		.filter(Boolean)
+	const slots: Record<string, number> = {}
+	for (const slot of slotOrder) slots[slot] = (slots[slot] ?? 0) + 1
+
+	// Yahoo expresses slot compatibility as the columns of its eligibility grid
+	// rather than as prose, so we mirror the slot names it actually published.
+	let slotAccepts: Record<string, string[] | "any" | "injured_only"> | null = null
+	if (t.sport === "mlb" && slotOrder.length) {
+		const batterPositions = ["C", "1B", "2B", "3B", "SS", "OF"].filter(p => p in slots)
+		slotAccepts = Object.fromEntries(batterPositions.map(p => [p, [p]]))
+		for (const p of ["SP", "RP"]) if (p in slots) slotAccepts[p] = [p]
+		if ("Util" in slots) slotAccepts["Util"] = batterPositions
+		if ("P" in slots) {
+			const arms = ["SP", "RP"].filter(p => p in slots)
+			slotAccepts["P"] = arms.length ? arms : ["SP", "RP"]
+		}
+		if ("BN" in slots) slotAccepts["BN"] = "any"
+		for (const il of IL_SLOTS) if (il in slots) slotAccepts[il] = "injured_only"
+		needsReview.push(
+			"slot_accepts is derived from the roster slot names plus the columns of " +
+				"Yahoo's position-eligibility grid; Yahoo does not state it as prose."
+		)
+	}
+
+	let eligibility: League["eligibility"] = null
+	try {
+		const text = documentText(await fetchText(eligibilityUrl))
+		const batters = text.match(
+			/Batters need either (\d+) Games Started or (\d+) Games Played/
+		)
+		const pitchers = text.match(
+			/Pitchers need (\d+) Starts to gain SP eligibility,\s*(\d+) Relief Appearances/
+		)
+		const header = text.match(/No Appearances Yet\s+((?:[A-Za-z0-9+]+\s+){2,14}?)Player\b/)
+		if (batters || pitchers) {
+			if (!header)
+				needsReview.push(
+					"Couldn't parse the eligibility grid header; tracked_positions is null."
+				)
+			eligibility = {
+				source: eligibilityUrl,
+				tracked_positions: header ? header[1]!.trim().split(/\s+/) : null,
+				batters:
+					batters ?
+						{
+							rule: "or",
+							games_started_at_position: Number(batters[1]),
+							games_played_at_position: Number(batters[2])
+						}
+					:	null,
+				pitchers:
+					pitchers ?
+						{
+							SP: { starts: Number(pitchers[1]) },
+							RP: { relief_appearances: Number(pitchers[2]) }
+						}
+					:	null,
+				grid_legend: {
+					P: "games to play until eligible",
+					S: "games to start until eligible",
+					E: "currently eligible",
+					"-": "no appearances yet"
+				}
+			}
+		} else {
+			needsReview.push(
+				"Eligibility thresholds weren't found on the position-eligibility page."
+			)
+		}
+	} catch (e) {
+		needsReview.push(
+			`Position-eligibility page unreadable (${(e as Error).message}); eligibility is null.`
+		)
+	}
+
+	let teamName: string | null = null
+	if (t.teamId) {
+		try {
+			const title = cellText(
+				(await fetchText(`${base}/${t.teamId}`)).match(
+					/<title>([\s\S]*?)<\/title>/i
+				)?.[1] ?? ""
+			)
+			// "<league name> - <team name> | Fantasy Baseball | Yahoo! Sports"
+			const afterLeague = title.split(" - ").slice(1).join(" - ")
+			teamName = afterLeague.split(" | ")[0]?.trim() || null
+			if (!teamName) needsReview.push("Couldn't parse the team name from the team page.")
+		} catch (e) {
+			needsReview.push(
+				`Team page unreadable (${(e as Error).message}); team_name is null.`
+			)
+		}
+	}
+
+	const numericSetting = (label: string): number | null => {
+		const raw = settings[label]
+		if (raw === undefined) return null
+		const n = parseNumber(raw)
+		if (n === null)
+			needsReview.push(`"${label}" is "${raw}", not a number; stored as null.`)
+		return n
+	}
+
+	const active = Object.entries(slots)
+		.filter(([slot]) => slot !== "BN" && !IL_SLOTS.includes(slot))
+		.reduce((sum, [, n]) => sum + n, 0)
+
+	const scoring: League["scoring"] = { unit: "points", batting, pitching }
+	if (unmapped.length) {
+		scoring.unmapped = unmapped
+		needsReview.push(
+			`${unmapped.length} scoring row(s) had no (CODE) in the label; kept verbatim under scoring.unmapped.`
+		)
+	}
+
+	return {
+		meta: {
+			platform: "yahoo",
+			sport: t.sport,
+			league_id: t.leagueId,
+			league_name: settings["League Name"] ?? null,
+			league_url: base,
+			team_id: t.teamId,
+			team_name: teamName,
+			season: null,
+			scoring_type: settings["Scoring Type"] ?? null,
+			max_teams: numericSetting("Max Teams"),
+			publicly_viewable: settings["Make League Publicly Viewable"] === "Yes"
+		},
+		scoring,
+		roster: {
+			raw: rawRoster || null,
+			slots,
+			slot_order: slotOrder.length ? slotOrder : null,
+			counts: slotOrder.length ?
+				{
+					active,
+					bench: slots["BN"] ?? 0,
+					injured_list: IL_SLOTS.reduce((sum, il) => sum + (slots[il] ?? 0), 0),
+					total: slotOrder.length
+				}
+			:	null,
+			slot_accepts: slotAccepts
+		},
+		eligibility,
+		// Verbatim label/value pairs exactly as the settings page prints them.
+		league_rules: { raw_settings: settings },
+		provenance: {
+			fetched_at: today(),
+			sources: [settingsUrl, eligibilityUrl, ...(t.teamId ? [`${base}/${t.teamId}`] : [])],
+			method: "raw HTML fetch + table parse",
+			verified: true
+		},
+		needs_review: needsReview
+	}
+}
+
+const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<League> => {
+	const season = t.season ?? new Date().getFullYear()
+	const url =
+		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${t.sport}` +
+		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings`
+
+	const res = await fetch(url, { headers: { "user-agent": USER_AGENT } })
+	if (!res.ok) {
+		throw new ImportError(
+			`ESPN returned HTTP ${res.status} for league ${t.leagueId}. Private leagues ` +
+				"need cookies; only publicly-viewable leagues can be imported."
+		)
+	}
+	const data = (await res.json()) as Record<string, any>
+	const settings = data.settings ?? {}
+	const scoringSettings = settings.scoringSettings ?? {}
+	const lineupSlotCounts: Record<string, number> = settings.rosterSettings?.lineupSlotCounts ?? {}
+
+	// ESPN identifies stats and lineup slots by numeric id. We keep them raw
+	// rather than guessing what each id means — a mislabeled stat would silently
+	// corrupt every lineup decision downstream.
+	const items = (scoringSettings.scoringItems ?? []).map((item: Record<string, unknown>) => ({
+		espn_stat_id: item.statId,
+		points: item.points,
+		points_overrides: item.pointsOverrides
+	}))
+
+	const slots = Object.fromEntries(
+		Object.entries(lineupSlotCounts).filter(([, n]) => Number(n) > 0)
+	) as Record<string, number>
+
+	return {
+		meta: {
+			platform: "espn",
+			sport: t.sport,
+			league_id: t.leagueId,
+			league_name: settings.name ?? null,
+			league_url: `https://fantasy.espn.com/baseball/league?leagueId=${t.leagueId}`,
+			team_id: t.teamId,
+			team_name: null,
+			season,
+			scoring_type: scoringSettings.scoringType ?? null,
+			max_teams: settings.size ?? null
+		},
+		scoring: { unit: "points", batting: {}, pitching: {}, unmapped: items },
+		roster: {
+			raw: null,
+			slots,
+			slot_order: null,
+			counts: null,
+			slot_accepts: null
+		},
+		eligibility: null,
+		league_rules: { raw_settings: settings },
+		provenance: {
+			fetched_at: today(),
+			sources: [url],
+			method: "ESPN v3 mSettings API",
+			verified: false
+		},
+		needs_review: [
+			"ESPN stat ids and lineup-slot ids are numeric and kept raw under " +
+				"scoring.unmapped and roster.slots. Map them to canonical stat keys before " +
+				"optimizing — they are deliberately not guessed.",
+			"This endpoint doesn't expose position-eligibility rules; eligibility is null."
+		]
+	}
+}
+
+const importSleeper = async (t: Extract<Target, { platform: "sleeper" }>): Promise<League> => {
+	const url = `https://api.sleeper.app/v1/league/${t.leagueId}`
+	const res = await fetch(url, { headers: { "user-agent": USER_AGENT } })
+	if (!res.ok) throw new ImportError(`Sleeper returned HTTP ${res.status}.`)
+	const data = (await res.json()) as Record<string, any> | null
+	if (!data) throw new ImportError(`Sleeper has no league ${t.leagueId}.`)
+
+	const positions: string[] = data.roster_positions ?? []
+	const slots: Record<string, number> = {}
+	for (const p of positions) slots[p] = (slots[p] ?? 0) + 1
+
+	return {
+		meta: {
+			platform: "sleeper",
+			sport: data.sport ?? null,
+			league_id: t.leagueId,
+			league_name: data.name ?? null,
+			league_url: `https://sleeper.com/leagues/${t.leagueId}`,
+			team_id: null,
+			team_name: null,
+			season: data.season ?? null,
+			scoring_type: data.settings?.type != null ? String(data.settings.type) : null,
+			max_teams: data.total_rosters ?? null
+		},
+		scoring: {
+			unit: "points",
+			batting: {},
+			pitching: {},
+			unmapped: data.scoring_settings ?? {}
+		},
+		roster: {
+			raw: positions.join(", ") || null,
+			slots,
+			slot_order: positions.length ? positions : null,
+			counts: null,
+			slot_accepts: null
+		},
+		eligibility: null,
+		league_rules: { raw_settings: data.settings ?? {} },
+		provenance: {
+			fetched_at: today(),
+			sources: [url],
+			method: "Sleeper v1 league API",
+			verified: false
+		},
+		needs_review: [
+			"Sleeper scoring keys are kept raw under scoring.unmapped; split them into " +
+				"batting/pitching against stat_keys before optimizing.",
+			"This endpoint doesn't expose position-eligibility rules; eligibility is null."
+		]
+	}
+}
+
+export const importLeague = async (url: string): Promise<{ key: string; league: League }> => {
+	const target = detect(url)
+	const league =
+		target.platform === "yahoo" ? await importYahoo(target)
+		: target.platform === "espn" ? await importEspn(target)
+		: await importSleeper(target)
+	return { key: `${target.platform}:${target.leagueId}`, league }
+}

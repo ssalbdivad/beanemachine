@@ -39,42 +39,70 @@ Exploration rounds that got here live in `logo/round*.mjs` with contact sheets i
 
 ## The app
 
-React 19 + TanStack Form on the client, Hono on the server, Vite for the build —
-and one set of ArkType schemas shared by both sides.
+Ranks every MLB player by a **bscore** — projected points over the horizon, minus
+what a freely available replacement at the same roster slot would produce, in *your
+league's* scoring. Points above replacement is the honest unit: a bscore of 40 means
+forty more points than the next man up, in your league's own currency.
 
 ```sh
-nub run dev      # Hono API on :8000 + Vite on :5173 (proxied)
-nub run import <league-url>
-nub run test     # browser suite against the dev server
+nub run dev      # Hono API on :8000 + Vite client on :5173 (proxied) — open 5173
+nub run refresh  # capture a fresh snapshot of MLB + Savant data
+nub run test     # browser suites, both config editor and board
 nub run check    # tsc --noEmit
 nub run build    # static bundle into dist/
 ```
 
-`src/schema.ts` is the single contract. The same `League` type validates TanStack
-Form on every keystroke, guards each Hono route through `@hono/arktype-validator`,
-and gates writes to `scoring.json` — so an invalid edit is refused in three places
-and can never reach disk.
+### The two dev servers
 
-`scoring.json` holds one entry per league. **Nothing in it is ever inferred**: every
-value is read from the league's own pages or API, and anything a source doesn't
-state stays `null` and is named in that league's `needs_review`. A missing setting
-must never be able to pass for a real one — a wrong point value silently corrupts
-every lineup decision downstream.
+They are not interchangeable:
 
-Importers: Yahoo (scrapes the public settings + position-eligibility pages), ESPN
-and Sleeper (public APIs). ESPN reports stats as numeric ids; those are kept raw
-under `scoring.unmapped` rather than guessed at.
+- **`:8000` — the Hono API only.** Serves `/api/*` (league import, save, templates)
+  and hot-reloads on server-side changes. Opening it in a browser shows no UI.
+- **`:5173` — the Vite client**, with HMR, proxying `/api` through to `:8000`.
+  **This is the one to open.**
 
-### The two run modes
+### Where the numbers come from
 
-The client detects whether an API answers and adapts:
+All verified live and unauthenticated:
 
-- **server** — `nub run dev`. Imports scrape live leagues; Save writes `scoring.json`.
-- **static** — the GitHub Pages build. The committed `scoring.json` loads as an
-  asset, edits stay in the browser, and Save downloads the file. Importing is
-  impossible in a browser regardless of hosting: Yahoo and ESPN send no CORS
-  headers, so the page cannot read them. The UI says so rather than failing quietly.
+| Source | What it gives |
+|---|---|
+| MLB StatsAPI `/stats?playerPool=All` | full 719-hitter / 834-pitcher pool and season lines |
+| MLB StatsAPI `/schedule` | real games per team in the horizon window |
+| MLB StatsAPI `/teams/{id}/roster` | IL and roster status |
+| Baseball Savant `expected_statistics?min=1` | xwOBA, xBA, xSLG and the expected-minus-actual gap |
+| Baseball Savant `statcast?min=1` | barrel %, exit velocity, hard-hit %, sweet-spot % |
 
-`.github/workflows/pages.yml` typechecks, builds and deploys `dist/` on every push
-to `main`. Vite sets `base` to `/beanemachine/` for that build, since Pages serves a
-project repo from a subpath.
+Two coverage decisions matter. `playerPool=All` instead of the default, because the
+qualified leaderboard is ~240 of ~720 hitters and hides exactly the waiver-wire
+players this exists to surface. And Savant `min=1` instead of `q`, which lifts batter
+coverage from 243 to 641.
+
+### How the invariant survives a projection
+
+The rule everywhere else is that nothing is inferred. A projection *is* an inference,
+so the rule adapts rather than breaks: **every number carries its inputs.** Opening a
+player splits them into
+
+- **observed** — wOBA, xwOBA, barrel %, volume per team game, games in the window
+- **modelled** — the λ blend toward expected wOBA, the volume projection, each stated
+  with its actual parameters
+- **missing** — no Statcast row, no team games, or a league category no source provides
+
+Confidence comes from real sample size, whether Statcast data exists at all, and
+health. It is never a flat default. A league category that can't be sourced is
+reported as unscoreable rather than silently treated as zero.
+
+### Architecture
+
+The engine (`src/engine/`) is pure, so ranking runs **in the browser** against a
+snapshot of observed data. That collapses the server/static split — GitHub Pages gets
+the same live board — and means re-scoring your league re-ranks it instantly.
+
+`src/data/` fetches and normalises sources; `src/refresh.ts` writes the snapshot,
+which CI recaptures on every deploy. Browsers can't call MLB or Savant directly
+(neither sends CORS headers), so the snapshot is how real data reaches the page.
+
+`src/schema.ts` is the shared contract: the same ArkType `League` type validates the
+form on every keystroke, guards each Hono route via `@hono/arktype-validator`, and
+drives the scoring conversion.

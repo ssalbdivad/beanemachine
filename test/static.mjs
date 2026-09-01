@@ -1,9 +1,8 @@
 // Verifies the GitHub Pages build: no backend, config loaded as an asset,
 // editing still works, saving downloads, importing explains itself.
 import { chromium } from "playwright-core"
-import { readFileSync } from "node:fs"
 const BASE = process.env.STATIC_BASE ?? "http://127.0.0.1:4173/beanemachine/"
-const b = await chromium.launch({ executablePath: readFileSync("/tmp/bc-chrome.txt","utf8").trim(), args:["--no-sandbox"] })
+const b = await chromium.launch({ args: ["--no-sandbox"] })
 const p = await b.newPage({ viewport:{width:1280,height:1000} })
 const errs = []
 p.on("pageerror", e => errs.push(String(e)))

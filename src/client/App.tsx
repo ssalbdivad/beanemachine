@@ -155,31 +155,37 @@ const Toolbar = ({
 	return (
 		<>
 			<div className="bar">
-				<select
-					value={activeKey ?? ""}
-					disabled={!keys.length}
-					aria-label="Active league"
-					onChange={e => onSelect(e.currentTarget.value)}
-				>
-					{keys.map(k => (
-						<option key={k} value={k}>
-							{config!.leagues[k]!.meta.league_name ?? k}
-							{config!.leagues[k]!.meta.team_name ? ` · ${config!.leagues[k]!.meta.team_name}` : ""}
-						</option>
-					))}
-				</select>
-				<select
-					id="tpl"
-					value={template}
-					aria-label="Template for a new league"
-					onChange={e => setTemplate(e.currentTarget.value)}
-				>
-					{TEMPLATES.map(t => (
-						<option key={t} value={t}>
-							{t === "custom" ? "blank" : t}
-						</option>
-					))}
-				</select>
+				<label className="ctl">
+					<span>League being edited</span>
+					<select
+						value={activeKey ?? ""}
+						disabled={!keys.length}
+						aria-label="League being edited"
+						onChange={e => onSelect(e.currentTarget.value)}
+					>
+						{keys.map(k => (
+							<option key={k} value={k}>
+								{config!.leagues[k]!.meta.league_name ?? k}
+								{config!.leagues[k]!.meta.team_name ? ` · ${config!.leagues[k]!.meta.team_name}` : ""}
+							</option>
+						))}
+					</select>
+				</label>
+				<label className="ctl">
+					<span>Start a league from</span>
+					<select
+						id="tpl"
+						value={template}
+						aria-label="Start a league from"
+						onChange={e => setTemplate(e.currentTarget.value)}
+					>
+						{TEMPLATES.map(t => (
+							<option key={t} value={t}>
+								{t === "custom" ? "a blank template" : `a ${t} template`}
+							</option>
+						))}
+					</select>
+				</label>
 				<button
 					onClick={() => {
 						const k = prompt(`Key for the new ${template} league (e.g. "${template}:12345"):`, `${template}:`)
@@ -206,13 +212,16 @@ const Toolbar = ({
 					setUrl("")
 				}}
 			>
-				<input
-					type="text"
-					value={url}
-					onChange={e => setUrl(e.currentTarget.value)}
-					placeholder="Paste a Yahoo, ESPN, or Sleeper league URL…"
-					aria-label="League URL"
-				/>
+				<label className="ctl grow">
+					<span>Import a league from its URL</span>
+					<input
+						type="text"
+						value={url}
+						onChange={e => setUrl(e.currentTarget.value)}
+						placeholder="Paste a Yahoo, ESPN, or Sleeper league URL…"
+						aria-label="Import a league from its URL"
+					/>
+				</label>
 				<button className="primary" type="submit">
 					Import
 				</button>

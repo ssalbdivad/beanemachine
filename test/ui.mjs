@@ -1,9 +1,13 @@
-import { chromium } from "playwright-core"
+import { chromium, firefox } from "playwright-core"
 import { readFileSync } from "node:fs"
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
-const exe = readFileSync("/tmp/bc-chrome.txt", "utf8").trim()
-const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] })
+const ENGINE = process.env.BROWSER ?? "chromium"
+const browser =
+  ENGINE === "firefox" ?
+    await firefox.launch()
+  : await chromium.launch({ args: ["--no-sandbox"] })
+console.log(`--- ${ENGINE} ---`)
 let pass = 0, fail = 0
 const t = (n, ok, extra = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + extra}`) }
 
@@ -104,6 +108,24 @@ t("nothing dirty after all rejections",
 t("needs review listed", (await page.$$eval(".flags li", n => n.length)) >= 1)
 // raw settings present
 t("raw league rules shown", (await page.$$eval("dl dt", n => n.length)) > 20)
+
+// Firefox paints persistent number-input spinners that eat the field and read as
+// a stray scrollbar; they must be suppressed in every engine.
+const spinner = await page.evaluate(() => {
+  const i = document.querySelector("input.val")
+  const r = i.getBoundingClientRect()
+  return { box: Math.round(r.width), client: i.clientWidth }
+})
+t("number fields have no spinner widget",
+  spinner.box - spinner.client <= 20, `box ${spinner.box} vs content ${spinner.client}`)
+
+// every control in the toolbar says what it is
+const labels = await page.$$eval(".ctl > span", n => n.map(e => e.textContent.trim().toLowerCase()))
+t("dropdowns and URL field are labelled",
+  labels.some(l => l.includes("league being edited")) &&
+  labels.some(l => l.includes("start a league")) &&
+  labels.some(l => l.includes("import a league")),
+  labels.join(" | "))
 
 // dark mode renders
 const dark = await browser.newContext({ colorScheme: "dark", viewport: { width: 1280, height: 1000 } })

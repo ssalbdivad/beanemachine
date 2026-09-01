@@ -104,7 +104,7 @@ export default app
 
 const port = Number(process.argv.find(a => a.startsWith("--port="))?.slice(7) ?? 8000)
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, info => {
-	console.log(`beanecounter api → http://localhost:${info.port}`)
+	console.log(`beanemachine api → http://localhost:${info.port}`)
 	console.log(`config            ${CONFIG_PATH}`)
 	if (!existsSync(DIST)) console.log(`client            run \`nub run dev\` (Vite serves it)`)
 })

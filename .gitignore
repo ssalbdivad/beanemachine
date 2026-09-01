@@ -3,9 +3,9 @@ dist/
 *.tmp
 logo/.preview.html
 # generated at build time from scoring.json
-public/scoring.json
 # regenerable logo exploration output (run logo/round*.mjs to rebuild)
 logo/sheet*.png
 logo/sheet*.html
 logo/candidates*.json
 logo/pick.png
+public/snapshot.json

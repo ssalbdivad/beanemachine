@@ -167,7 +167,7 @@ h2{
     <div class="grid">${ORDER.map(card).join("")}</div>
   </section>
 
-  <p class="foot">Tell me the code under the one you want — say <code>brim-long</code> — and I'll cut it as the real asset: SVG plus favicon, wired into beanecounter's header (the default is already in there). Or tell me what to change about it (longer brim, bigger insignia, flatter curve) and I'll run another pass.</p>
+  <p class="foot">Tell me the code under the one you want — say <code>brim-long</code> — and I'll cut it as the real asset: SVG plus favicon, wired into beanemachine's header (the default is already in there). Or tell me what to change about it (longer brim, bigger insignia, flatter curve) and I'll run another pass.</p>
 </div>
 
 <script>

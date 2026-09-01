@@ -4,16 +4,21 @@ import { defineConfig, type Plugin } from "vite"
 
 const API = "http://127.0.0.1:8000"
 
-/** The static build reads the committed scoring.json as an asset. */
-const publishConfig = (): Plugin => ({
-	name: "publish-scoring-json",
-	buildStart: () => copyFileSync("scoring.json", "public/scoring.json")
+/** The engine is pure, so ranking runs in the browser. The build just needs the
+ *  observed-data snapshot as an asset — browsers can't call MLB or Savant directly
+ *  (neither sends CORS headers), so the snapshot is how real data reaches the page. */
+const publishSnapshot = (): Plugin => ({
+	name: "publish-snapshot",
+	buildStart: () => {
+		copyFileSync("data/snapshot.json", "public/snapshot.json")
+		copyFileSync("scoring.json", "public/scoring.json")
+	}
 })
 
 export default defineConfig(({ command }) => ({
 	// GitHub Pages serves a project repo from /<repo>/; dev stays at the root
 	base: command === "build" ? "/beanemachine/" : "/",
-	plugins: [react(), publishConfig()],
+	plugins: [react(), publishSnapshot()],
 	server: {
 		port: 5173,
 		// the Hono app owns /api; Vite serves the client and proxies through

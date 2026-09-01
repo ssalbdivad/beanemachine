@@ -34,11 +34,17 @@ page.on("pageerror", e => errors.push(String(e)))
 page.on("console", m => { if (m.type() === "error") errors.push(m.text()) })
 
 await page.goto(BASE, { waitUntil: "networkidle" })
-await page.waitForSelector(".grid section.card .rows")
+// the recommendation board is the default view; the config editor is a tab
+const toLeagueSetup = async pg => {
+  await pg.waitForSelector(".views button")
+  await pg.click('.views button:nth-child(2)')
+  await pg.waitForSelector(".grid section.card .rows")
+}
+await toLeagueSetup(page)
 
 await page.screenshot({ path: "/tmp/bc-light.png", fullPage: true })
 t("no console/page errors on load", errors.length === 0, errors.join(" | "))
-t("wordmark renders", (await page.textContent("h1")) === "beanecounter")
+t("wordmark renders", (await page.textContent("h1")) === "beanemachine")
 t("league selected", (await page.inputValue(".bar select")) === "yahoo:228947")
 
 // chips reflect real imported data
@@ -160,7 +166,7 @@ t("dropdowns and URL field are labelled",
 const dark = await browser.newContext({ colorScheme: "dark", viewport: { width: 1280, height: 1000 } })
 const dp = await dark.newPage()
 await dp.goto(BASE, { waitUntil: "networkidle" })
-await dp.waitForSelector(".grid section.card .rows")
+await toLeagueSetup(dp)
 const bg = await dp.evaluate(() => getComputedStyle(document.body).backgroundColor)
 t("dark mode background applied", bg === "rgb(20, 22, 26)", bg)
 
@@ -168,7 +174,7 @@ t("dark mode background applied", bg === "rgb(20, 22, 26)", bg)
 const mob = await browser.newContext({ viewport: { width: 390, height: 844 } })
 const mp = await mob.newPage()
 await mp.goto(BASE, { waitUntil: "networkidle" })
-await mp.waitForSelector(".grid section.card .rows")
+await toLeagueSetup(mp)
 const overflow = await mp.evaluate(() =>
   document.documentElement.scrollWidth - document.documentElement.clientWidth)
 t("no horizontal overflow at 390px", overflow <= 0, `overflow ${overflow}px`)

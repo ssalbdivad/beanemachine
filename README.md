@@ -5,7 +5,7 @@ Lineup optimizer for **Mrs. Met's Harem** (Yahoo H2H-points league 228947, team 
 ## Billy
 
 The mascot robot is called **Billy** — after Billy Beane. He's the face of
-`beanecounter` and the project's favicon. Use the name in copy, commit messages,
+`beanemachine` and the project's favicon. Use the name in copy, commit messages,
 and any future artwork.
 
 - Head-only mark, so he survives being shrunk to 16px.
@@ -37,7 +37,7 @@ theme tokens. The mark is authored against `--acc`, aliased onto the app's
 Exploration rounds that got here live in `logo/round*.mjs` with contact sheets in
 `logo/sheet*.png`.
 
-## beanecounter
+## The app
 
 React 19 + TanStack Form on the client, Hono on the server, Vite for the build —
 and one set of ArkType schemas shared by both sides.

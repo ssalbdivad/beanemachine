@@ -5,7 +5,9 @@ import type { Config, League } from "../schema.ts"
 import { League as LeagueSchema } from "../schema.ts"
 import { api, ApiError, downloadConfig, getMode } from "./api.ts"
 import { Billy } from "./Billy.tsx"
+import { Board } from "./Board.tsx"
 import { EligibilityPanel, Fragment2, RosterPanel, StatTable } from "./panels.tsx"
+import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
 
 const TEMPLATES = ["custom", "yahoo", "espn", "sleeper"]
@@ -16,6 +18,8 @@ export const App = () => {
 	const [busy, setBusy] = useState(false)
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
+	const [view, setView] = useState<"board" | "league">("board")
+	const { snapshot, error: snapshotError } = useSnapshot()
 	const { toast, show } = useToast()
 	const acknowledge = useCallback(() => {
 		setAcknowledged(true)
@@ -59,7 +63,7 @@ export const App = () => {
 				<div className="mark">
 					<Billy />
 					<h1>
-						beane<b>counter</b>
+						beane<b>machine</b>
 					</h1>
 				</div>
 				<p className="tag">League scoring, read from the source — never guessed.</p>
@@ -70,6 +74,25 @@ export const App = () => {
 					</p>
 				)}
 			</header>
+
+			<nav className="views" role="tablist">
+				<button
+					role="tab"
+					aria-selected={view === "board"}
+					className={view === "board" ? "on" : ""}
+					onClick={() => setView("board")}
+				>
+					Recommendations
+				</button>
+				<button
+					role="tab"
+					aria-selected={view === "league"}
+					className={view === "league" ? "on" : ""}
+					onClick={() => setView("league")}
+				>
+					League setup
+				</button>
+			</nav>
 
 			<Toolbar
 				config={config}
@@ -105,7 +128,11 @@ export const App = () => {
 
 			{league && <Chips league={league} />}
 
-			{league && key ?
+			{view === "board" ?
+				<div className="grid">
+					<Board snapshot={snapshot} league={league ?? null} error={snapshotError} />
+				</div>
+			: league && key ?
 				<LeagueEditor
 					key={key}
 					leagueKey={key}

@@ -1,5 +1,5 @@
 {
-  "name": "beanecounter",
+  "name": "beanemachine",
   "version": "0.1.0",
   "description": "Fantasy league scoring configuration for the Mrs. Met's Harem lineup optimizer",
   "type": "module",
@@ -11,8 +11,10 @@
     "preview": "vite preview",
     "start": "nub src/server.ts",
     "import": "nub src/cli.ts",
-    "test": "node test/ui.mjs",
-    "check": "tsc --noEmit"
+    "test": "node test/ui.mjs && node test/board.mjs",
+    "check": "tsc --noEmit",
+    "refresh": "nub src/refresh.ts",
+    "test:board": "node test/board.mjs"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

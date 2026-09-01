@@ -13,7 +13,7 @@
     "import": "nub src/cli.ts",
     "test": "node test/ui.mjs && node test/board.mjs",
     "check": "tsc --noEmit",
-    "refresh": "nub src/refresh.ts",
+    "refresh": "node src/refresh.ts",
     "test:board": "node test/board.mjs"
   },
   "dependencies": {

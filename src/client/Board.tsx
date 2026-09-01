@@ -1,6 +1,7 @@
 import { useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
+import { Billy } from "./Billy.tsx"
 import { DEFAULT_FILTERS, useBoard, type Filters, type Rated } from "./useBoard.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -133,6 +134,10 @@ export const Board = ({
 				</div>
 			</section>
 
+			{rows[0] && <BillysPick r={rows[0]} horizonDays={
+				Math.round((Date.parse(snapshot.horizon.end) - Date.parse(snapshot.horizon.start)) / 86400000)
+			} />}
+
 			<section className="card full">
 				<h2>
 					Recommendations
@@ -169,6 +174,43 @@ export const Board = ({
 				)}
 			</section>
 		</>
+	)
+}
+
+/**
+ * Billy's read on the top of the board. Every clause is assembled from a number
+ * that is actually on the row — no adjectives the data doesn't support.
+ */
+const BillysPick = ({ r, horizonDays }: { r: Rated; horizonDays: number }) => {
+	const clauses: string[] = []
+	clauses.push(`${r.bscore} points clear of a replacement ${r.slot} over the next ${horizonDays} days`)
+	if (r.projection.volumePerTeamGame !== null)
+		clauses.push(`${r.projection.volumePerTeamGame.toFixed(1)} plate trips per team game`)
+	if (r.projection.horizonGames)
+		clauses.push(`${r.projection.horizonGames} games scheduled`)
+	const worry =
+		r.injury ? `He's listed ${r.injury.toLowerCase()}, so treat that number carefully.`
+		: r.confidence.value < 0.7 ?
+			`Confidence is only ${Math.round(r.confidence.value * 100)}% — ${r.confidence.reasons.join(", ")}.`
+		:	null
+	return (
+		<section className="card full pick">
+			<span className="pick-bot" aria-hidden>
+				<Billy />
+			</span>
+			<div className="pick-body">
+				<h2>Billy&rsquo;s pick</h2>
+				<p className="pick-name">{r.player.name}</p>
+				<p className="pick-why">
+					{clauses.join(" · ")}.
+					{worry && <em> {worry}</em>}
+				</p>
+			</div>
+			<span className="pick-score">
+				<b>{r.bscore}</b>
+				<span>bscore</span>
+			</span>
+		</section>
 	)
 }
 

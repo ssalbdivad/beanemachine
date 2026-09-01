@@ -46,6 +46,17 @@ t("the drill-down states whether the Statcast adjustment was applied",
   modelled.some(m => /Statcast adjustment (evaluated and NOT applied|)/i.test(m)) ||
   modelled.some(m => /quality: wOBA/.test(m)), modelled.join(" | "))
 
+// Billy's pick must be the top row, and every clause backed by a real number
+await page.waitForSelector(".card.pick")
+const pickName = (await page.textContent(".pick-name")).trim()
+const topName = await page.$eval(".board-row .who b", e => e.textContent.trim())
+t("Billy's pick matches the top of the board", pickName === topName, `${pickName} vs ${topName}`)
+const why = await page.textContent(".pick-why")
+const pickScore = Number(await page.textContent(".pick-score b"))
+t("Billy's reasoning cites the actual bscore",
+  why.includes(String(pickScore)) && /points clear of a replacement/.test(why), why)
+t("Billy's reasoning cites real scheduled games", /\d+ games scheduled/.test(why), why)
+
 // filters actually filter
 const before = await page.$$eval(".board-row", n => n.length)
 await page.selectOption(".filters select >> nth=1", "hitting")

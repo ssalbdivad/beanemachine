@@ -40,8 +40,11 @@ t("drill-down separates measured, Statcast model and our model",
   sections.some(s => s.includes("our model")),
   sections.join("|"))
 const modelled = await page.$$eval(".detail .notes li", n => n.map(e => e.textContent))
-t("modelled assumptions are stated explicitly",
-  modelled.some(m => /λ|quality|volume/.test(m)), modelled.join(" | "))
+t("modelled assumptions name the playing-time blend and its weight",
+  modelled.some(m => /playing time/i.test(m) && /% recent/.test(m)), modelled.join(" | "))
+t("the drill-down states whether the Statcast adjustment was applied",
+  modelled.some(m => /Statcast adjustment (evaluated and NOT applied|)/i.test(m)) ||
+  modelled.some(m => /quality: wOBA/.test(m)), modelled.join(" | "))
 
 // filters actually filter
 const before = await page.$$eval(".board-row", n => n.length)

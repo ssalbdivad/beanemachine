@@ -124,3 +124,5 @@
 }
 /* drafted but starting nowhere — the bench is real, and it is not worth as much */
 .draft-mine .bench-chip{opacity:.62}
+/* a pick the wire would have covered is worth seeing at full strength */
+.draft-mine .bench-chip.chip-under{opacity:1;border-color:var(--flag)}

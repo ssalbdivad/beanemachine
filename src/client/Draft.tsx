@@ -547,11 +547,28 @@ export const Draft = ({ snapshot, league, leagueKey, error }: DraftProps) => {
 									<b>{s.slot}</b> {s.player.player.name}
 								</span>
 							))}
-						{advice.lineup.bench.map(r => (
-							<span className="chip bench-chip" key={rosterKey(r.player)} title="Drafted, but starts nowhere">
-								<b>BN</b> {r.player.name}
-							</span>
-						))}
+						{advice.lineup.bench.map(r => {
+							// during a draft this is the sharper of the two: a man who starts
+							// nowhere is bench depth, a man below the bar everywhere is a pick
+							// spent on someone the waiver wire would have given you
+							const under = advice.lineup.belowBar.some(
+								b => rosterKey(b.player) === rosterKey(r.player)
+							)
+							return (
+								<span
+									className={`chip bench-chip${under ? " chip-under" : ""}`}
+									key={rosterKey(r.player)}
+									title={
+										under ?
+											"Starts nowhere, and projects below the freely available man at every " +
+											"slot he can fill"
+										:	"Drafted, but starts nowhere — somebody better holds every spot he can fill"
+									}
+								>
+									<b>BN</b> {r.player.name}
+								</span>
+							)
+						})}
 					</div>
 				:	<p className="empty">
 						You haven&rsquo;t taken anyone yet. The spots you have not filled are priced at

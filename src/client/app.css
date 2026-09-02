@@ -488,3 +488,7 @@ pre{
 @media (prefers-reduced-motion:reduce){.bot circle[r="3.8"]{animation:none}}
 .pool-count{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--accent)}
 .toggle input:disabled + span{opacity:.5}
+.legend{margin-top:16px}
+.legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:8px 16px}
+.legend dt{color:var(--accent);font-weight:500}
+.legend dd{font-family:inherit;font-size:12.5px;font-weight:400;color:var(--muted);line-height:1.5}

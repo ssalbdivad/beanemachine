@@ -2,6 +2,7 @@ import { useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
+import { Fragment2 } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Rated } from "./useBoard.ts"
 import { api, ApiError, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
@@ -222,6 +223,24 @@ export const Board = ({
 					))}
 					{!rows.length && <p className="empty">No players match these filters. Try clearing the slot filter or lowering the confidence minimum.</p>}
 				</div>
+				<details className="legend">
+					<summary>What these columns mean</summary>
+					<dl>
+						{(
+							[
+								["bscore", COLUMN_HELP.bscore],
+								["proj pts", COLUMN_HELP.points],
+								["waiver pts", COLUMN_HELP.replacement],
+								["confidence", COLUMN_HELP.confidence],
+								["luck", COLUMN_HELP.undervaluation]
+							] as const
+						).map(([term, text]) => (
+							<Fragment2 key={term} term={term}>
+								{text}
+							</Fragment2>
+						))}
+					</dl>
+				</details>
 				{rows.length > 120 && (
 					<p className="sub" style={{ marginTop: 12 }}>
 						Showing the top 120 of {rows.length} — narrow the filters to see further down.

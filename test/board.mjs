@@ -74,6 +74,15 @@ if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {
   await page.waitForTimeout(400)
 }
 
+// "most undervalued" must surface buy-low candidates, not replacement-level noise
+await page.selectOption(".filters select >> nth=2", "undervaluation")
+await page.waitForTimeout(500)
+const uvScores = await page.$$eval(".board-row .bscore", n => n.slice(0,10).map(e => Number(e.textContent)))
+t("most-undervalued only ranks players above replacement",
+  uvScores.length > 0 && uvScores.every(v => v > 0), String(uvScores.slice(0,4)))
+await page.selectOption(".filters select >> nth=2", "bscore")
+await page.waitForTimeout(400)
+
 // filters actually filter
 const before = await page.$$eval(".board-row", n => n.length)
 await page.selectOption(".filters select >> nth=1", "hitting")

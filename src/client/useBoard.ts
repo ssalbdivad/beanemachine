@@ -84,6 +84,10 @@ export const useBoard = (
 		const out = rated.filter(r => {
 			// a player with no projectable volume has no bscore to rank
 			if (!r.rateable) return false
+			// "most undervalued" asks who is due for positive regression among players
+			// worth rostering. Unrestricted it just finds the unluckiest replacement-level
+			// player in baseball, which answers nobody's question.
+			if (filters.sort === "undervaluation" && r.bscore <= 0) return false
 			if (q && !r.player.name.toLowerCase().includes(q)) return false
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false

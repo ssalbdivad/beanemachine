@@ -148,7 +148,7 @@ export const Board = ({
 						>
 							<option value="bscore">bscore (value over replacement)</option>
 							<option value="points">projected points</option>
-							<option value="undervaluation">most undervalued</option>
+							<option value="undervaluation">most undervalued (above replacement)</option>
 						</select>
 					</label>
 					<label className="ctl">

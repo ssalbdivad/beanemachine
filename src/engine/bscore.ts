@@ -1,8 +1,8 @@
 import type { League } from "../schema.ts"
-import type { PlayerSeason } from "../data/statsapi.ts"
+import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
-import { confidenceOf, project, type Projection } from "./project.ts"
+import { confidenceOf, project, RECENT_RATE_WEIGHT, type Projection } from "./project.ts"
 
 /**
  * The bscore: a player's projected points over the horizon, minus what a freely
@@ -56,6 +56,8 @@ export interface RateOptions {
 	gamesByTeam: Map<number, number>
 	/** keyed "id:group" */
 	recentVolumePerGame?: Record<string, number>
+	/** keyed "id:group" */
+	recentStats?: Record<string, StatLine>
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -75,7 +77,11 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			underlying,
 			player.teamId ? o.teamGamesPlayed.get(player.teamId) : undefined,
 			horizonGames,
-			{ recentVolumePerGame: o.recentVolumePerGame?.[`${player.id}:${player.group}`] ?? null }
+			{
+				recentVolumePerGame: o.recentVolumePerGame?.[`${player.id}:${player.group}`] ?? null,
+				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
+				recentRateWeight: RECENT_RATE_WEIGHT[player.group]
+			}
 		)
 		const table = tableFor(o.league, player.group)
 		return {

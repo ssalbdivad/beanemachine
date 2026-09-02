@@ -86,6 +86,15 @@ export interface ProjectOptions {
 	 * that is a volume error, not a rate error.
 	 */
 	recentWeight?: number
+	/** The player's own line over the recent window, if known. */
+	recentStats?: StatLine | null
+	/**
+	 * How much to blend the RECENT rate into the season rate. Distinct from
+	 * recentWeight, which governs volume only. Defaults to 0 until evidence says
+	 * otherwise — a hot fortnight is mostly noise, and the naive baseline already
+	 * over-trusts it.
+	 */
+	recentRateWeight?: number
 }
 
 /**
@@ -97,6 +106,16 @@ export interface ProjectOptions {
  * needed before his workload is even visible.
  */
 export const RECENT_WINDOW_DAYS = { hitting: 7, pitching: 21 } as const
+
+/**
+ * How much of the recent RATE to blend in, per side.
+ *
+ * Pitchers only, and lightly. Over 100 folds a 0.15 blend on the 21-day window
+ * beat the shipped configuration in 41 of 50 pitching folds. The same idea for
+ * hitters won 29 of 50 — a coin flip — so it is not applied there. Ranking a mean
+ * difference of 0.0009 as an improvement would have been fitting noise.
+ */
+export const RECENT_RATE_WEIGHT = { hitting: 0, pitching: 0.15 } as const
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
@@ -121,7 +140,10 @@ export const project = (
 	horizonGames: number,
 	options: ProjectOptions = {}
 ): Projection => {
-	const { rates, qualityWeight = 0, recentVolumePerGame = null, recentWeight = 0.75 } = options
+	const {
+		rates, qualityWeight = 0, recentVolumePerGame = null, recentWeight = 0.75,
+		recentStats = null, recentRateWeight = 0
+	} = options
 	const modelled: string[] = []
 	const missing: string[] = []
 	const s = player.stats
@@ -188,10 +210,18 @@ export const project = (
 			// at face value, which is the single biggest source of bad recommendations.
 			const leagueRate = rates?.perUnit[key]
 			const k = SHRINK_K[key] ?? DEFAULT_K
-			const perUnit =
+			let perUnit =
 				leagueRate === undefined ?
 					value / volume
 				:	(value + k * leagueRate) / (volume + k)
+			// optionally pull the rate toward what the player has done lately
+			if (recentRateWeight > 0 && recentStats) {
+				const rv = isHitter ? recentStats.plateAppearances : recentStats.outs
+				if (rv && rv > 0) {
+					const recentRate = (recentStats[key] ?? 0) / rv
+					perUnit = (1 - recentRateWeight) * perUnit + recentRateWeight * recentRate
+				}
+			}
 			const scaled = QUALITY_SCALED[player.group].has(key) ? qualityMultiplier : 1
 			stats[key] = Number((perUnit * projectedVolume * scaled).toFixed(3))
 		}

@@ -18,6 +18,9 @@ export interface Variant {
 	recentWeight: number
 	qualityWeight: number
 	shrink: boolean
+	recentRateWeight?: number
+	/** window used for the rate blend, if different from the volume window */
+	rateDays?: number
 }
 
 export interface Score {
@@ -26,6 +29,9 @@ export interface Score {
 	top20: number
 	foldsWon: number
 	folds: number
+	/** Paired head-to-head against the shipped configuration for this side. */
+	beatsShipped: number
+	meanDelta: number
 }
 
 const MIN_VOLUME = { hitting: 80, pitching: 60 }
@@ -81,10 +87,16 @@ export const scoreVariants = (
 						const rg = fold.recentGames[v.recentDays]?.get(p.teamId) ?? 0
 						if (rg > 0) recentPerGame = (rec ? vol(rec) : 0) / rg
 					}
+					const rateRec =
+						v.recentRateWeight ?
+							recentIndex[v.rateDays ?? v.recentDays ?? 14]?.get(p.id)
+						:	null
 					const proj = project(p, u, gBehind, gAhead, {
 						qualityWeight: v.qualityWeight,
 						recentVolumePerGame: recentPerGame,
 						recentWeight: v.recentWeight,
+						recentStats: rateRec?.stats ?? null,
+						recentRateWeight: v.recentRateWeight ?? 0,
 						...(v.shrink ? { rates } : {})
 					})
 					;(pairs[v.name] ??= []).push([
@@ -106,16 +118,25 @@ export const scoreVariants = (
 		const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(a.length, 1)
 		naiveOut[group] = {
 			name: "naive", rho: mean(naiveRho), top20: mean(naiveTop),
-			foldsWon: 0, folds: naiveRho.length
+			foldsWon: 0, folds: naiveRho.length, beatsShipped: 0, meanDelta: 0
 		}
+		// paired comparison: a mean difference of 0.001 across 50 noisy folds is not
+		// evidence of anything, so report how often each variant actually wins
+		const shippedName = group === "hitting" ? "SHIPPED_hit_d7_w0.75" : "SHIPPED_pit_d21_w0.75"
+		const shipped = perVariantRho[shippedName] ?? []
 		byGroup[group] = variants
-			.map(v => ({
-				name: v.name,
-				rho: mean(perVariantRho[v.name] ?? []),
-				top20: mean(perVariantTop[v.name] ?? []),
-				foldsWon: (perVariantRho[v.name] ?? []).filter((r, i) => r > naiveRho[i]!).length,
-				folds: (perVariantRho[v.name] ?? []).length
-			}))
+			.map(v => {
+				const rhos = perVariantRho[v.name] ?? []
+				return {
+					name: v.name,
+					rho: mean(rhos),
+					top20: mean(perVariantTop[v.name] ?? []),
+					foldsWon: rhos.filter((r, i) => r > naiveRho[i]!).length,
+					folds: rhos.length,
+					beatsShipped: rhos.filter((r, i) => r > (shipped[i] ?? Infinity)).length,
+					meanDelta: mean(rhos.map((r, i) => r - (shipped[i] ?? r)))
+				}
+			})
 			.sort((a, b) => b.rho - a.rho)
 	}
 	return { byGroup, naive: naiveOut }
@@ -133,26 +154,40 @@ if (import.meta.filename === process.argv[1]) {
 	const folds = await buildCorpus(seasons, horizon, perSeason, m => console.log(m))
 	console.log(`\n${folds.length} folds built\n`)
 
-	const variants: Variant[] = []
-	for (const d of [null, 7, 14, 21, 30])
-		for (const w of d === null ? [0] : [0.5, 0.75, 1])
-			for (const q of [0, 1])
+	// shipped configuration per side, plus the rate-blend hypothesis
+	const variants: Variant[] = [
+		{ name: "SHIPPED_hit_d7_w0.75", recentDays: 7, recentWeight: 0.75, qualityWeight: 0, shrink: false },
+		{ name: "SHIPPED_pit_d21_w0.75", recentDays: 21, recentWeight: 0.75, qualityWeight: 0, shrink: false }
+	]
+	for (const d of [7, 14, 21, 30])
+		for (const rw of [0.15, 0.3, 0.5])
+			for (const rd of [14, 30])
 				variants.push({
-					name: `${d === null ? "season" : `d${d}`}_w${w}_q${q}`,
-					recentDays: d, recentWeight: w, qualityWeight: q, shrink: false
+					name: `d${d}_rate${rw}@${rd}`,
+					recentDays: d, recentWeight: 0.75, qualityWeight: 0, shrink: false,
+					recentRateWeight: rw, rateDays: rd
 				})
-	variants.push({ name: "d14_w0.75_shrink", recentDays: 14, recentWeight: 0.75, qualityWeight: 0, shrink: true })
+	for (const rw of [0.1, 0.15, 0.2, 0.25])
+		variants.push({
+			name: `d21_rate${rw}@21`, recentDays: 21, recentWeight: 0.75,
+			qualityWeight: 0, shrink: false, recentRateWeight: rw, rateDays: 21
+		})
+	for (const rw of [0.1, 0.15, 0.2])
+		variants.push({
+			name: `d7_rate${rw}@7`, recentDays: 7, recentWeight: 0.75,
+			qualityWeight: 0, shrink: false, recentRateWeight: rw, rateDays: 7
+		})
 
 	const { byGroup, naive } = scoreVariants(folds, league, variants)
 	for (const group of ["hitting", "pitching"] as const) {
 		const n = naive[group]!
 		console.log(`${group.toUpperCase()} — ${n.folds} folds`)
 		console.log(`  ${"naive baseline".padEnd(22)} ρ ${n.rho.toFixed(4)}   top20 ${n.top20.toFixed(1)}`)
-		for (const s of byGroup[group]!.slice(0, 8))
+		for (const s of byGroup[group]!.slice(0, 6))
 			console.log(
-				`  ${s.name.padEnd(22)} ρ ${s.rho.toFixed(4)}   top20 ${s.top20.toFixed(1)}` +
-					`   beats naive in ${s.foldsWon}/${s.folds}` +
-					`   ${s.rho > n.rho ? `+${((s.rho / n.rho - 1) * 100).toFixed(1)}%` : ""}`
+				`  ${s.name.padEnd(22)} ρ ${s.rho.toFixed(4)}  vs naive ${s.foldsWon}/${s.folds}` +
+					`  vs SHIPPED ${String(s.beatsShipped).padStart(2)}/${s.folds}` +
+					`  Δρ ${(s.meanDelta >= 0 ? "+" : "") + s.meanDelta.toFixed(4)}`
 			)
 		console.log()
 	}

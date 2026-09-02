@@ -120,7 +120,7 @@ doing" (season-to-date rate scaled to games ahead):**
 | hitting | naive baseline | 0.5743 | — | — |
 | hitting | **`d7_w0.75_q0` (shipped)** | **0.6759** | **+17.7%** | **48/50** |
 | pitching | naive baseline | 0.4697 | — | — |
-| pitching | **`d21_w0.75_q0` (shipped)** | **0.5275** | **+12.3%** | **49/50** |
+| pitching | **`d21_w0.75_q0_rate0.15` (shipped)** | **0.5318** | **+13.2%** | **49/50** |
 
 Three findings, two of them negative:
 
@@ -132,7 +132,12 @@ Three findings, two of them negative:
    ranked `qualityWeight: 0` first. It is **off by default**. xwOBA and barrel rate are
    still displayed, because they genuinely inform a human, but they do not silently
    move a recommendation on evidence that failed — and the drill-down says so.
-3. **Rate shrinkage made things worse.** The naive line already carries the selection
+3. **A light recent-RATE blend helps pitchers and not hitters.** Blending 15% of the
+   21-day rate beat the previous configuration in **41 of 50** pitching folds. The same
+   idea for hitters won **29 of 50** — a coin flip — so it isn't applied there. The mean
+   difference for hitters was +0.0009, which is exactly the kind of number that looks
+   like an improvement and is actually noise; the paired fold count is what exposed it.
+4. **Rate shrinkage made things worse.** The naive line already carries the selection
    effect that good players accumulate more plate appearances, so shrinking the rate on
    top of a volume model double-penalises exactly the players it shouldn't.
 

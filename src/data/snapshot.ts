@@ -5,7 +5,8 @@ import {
 	fetchInjuries,
 	fetchSeason,
 	fetchTeamGamesPlayed,
-	type PlayerSeason
+	type PlayerSeason,
+	type StatLine
 } from "./statsapi.ts"
 import { fetchUnderlying, type Underlying } from "./savant.ts"
 import { RECENT_WINDOW_DAYS } from "../engine/project.ts"
@@ -33,6 +34,9 @@ export interface Snapshot {
 	 *  showed recent playing time is the strongest predictor available. */
 	recentVolumePerGame: Record<string, number>
 	recentWindow: { hitting: number; pitching: number }
+	/** Recent lines, keyed "id:group". Populated for pitchers only, who are the
+	 *  only side where blending the recent rate measured as a real improvement. */
+	recentStats: Record<string, StatLine>
 	sources: { name: string; url: string; rows: number }[]
 }
 
@@ -70,6 +74,8 @@ export const buildSnapshot = async (
 
 	// per-team-game volume over the recent window, the input the backtest favoured
 	const recentVolumePerGame: Record<string, number> = {}
+	const recentStats: Record<string, StatLine> = {}
+	for (const r of recentPit) recentStats[`${r.id}:pitching`] = r.stats
 	for (const [rows, group, games] of [
 		[recentHit, "hitting", recentHitGames],
 		[recentPit, "pitching", recentPitGames]
@@ -119,6 +125,7 @@ export const buildSnapshot = async (
 		),
 		gamesByTeam: Object.fromEntries([...gamesByTeam].map(([k, v]) => [String(k), v])),
 		recentVolumePerGame,
+		recentStats,
 		recentWindow: { ...RECENT_WINDOW_DAYS },
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
@@ -143,5 +150,6 @@ export const hydrate = (s: Snapshot) => ({
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])
 	),
 	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v])),
-	recentVolumePerGame: s.recentVolumePerGame ?? {}
+	recentVolumePerGame: s.recentVolumePerGame ?? {},
+	recentStats: s.recentStats ?? {}
 })

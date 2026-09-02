@@ -60,6 +60,7 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: h.gamesByTeam,
 				recentVolumePerGame: h.recentVolumePerGame,
+				recentStats: h.recentStats,
 				teams: league.meta.max_teams
 			})
 		)

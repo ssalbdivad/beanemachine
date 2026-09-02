@@ -5,6 +5,7 @@ import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_
 import type { League } from "../schema.ts"
 import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
+import { aggregateStatcast } from "../data/statcast-window.ts"
 import { cachedFetch } from "./cache.ts"
 import { addDays, seasonRange } from "./seasons.ts"
 import { num, parseCsv } from "../data/csv.ts"
@@ -70,12 +71,43 @@ const gamesPlayed = async (start: string, end: string): Promise<Map<number, numb
 	return counts
 }
 
+/**
+ * Point-in-time underlying stats for the simulator.
+ *
+ * The `custom` leaderboard silently ignores its own date parameters (see
+ * src/data/statcast-window.ts), so asking it for "the season so far" returns the
+ * whole season — the future included. Every Statcast result this simulator has
+ * ever produced was measured that way, and those results are therefore void
+ * rather than merely noisy.
+ *
+ * The honest default is now to return nothing: a simulator with no Statcast data
+ * is worse informed, but it is not lying. `--statcast-real` switches on the
+ * day-by-day aggregation that actually respects the window, which is correct and
+ * costs about 16 MB of pitch data per day of history.
+ */
+const REAL_STATCAST = process.argv.includes("--statcast-real")
+
 const underlyingWindow = async (
 	season: number,
 	type: "batter" | "pitcher",
 	start: string,
 	end: string
 ): Promise<Map<number, Underlying>> => {
+	if (!REAL_STATCAST) return new Map()
+	if (REAL_STATCAST) {
+		const lines = await aggregateStatcast(season, type, start, end, url =>
+			cachedFetch(url, "text/csv")
+		)
+		const out = new Map<number, Underlying>()
+		for (const [id, l] of lines)
+			out.set(id, {
+				id, xwoba: l.xwoba, woba: l.woba,
+				xwobaGap: Number((l.xwoba - l.woba).toFixed(4)),
+				xba: null, xslg: null, pa: l.pa,
+				barrelRate: null, hardHitRate: null, avgExitVelocity: null, sweetSpotRate: null
+			})
+		return out
+	}
 	const url =
 		`${SAVANT}?year=${season}&type=${type}&filter=&min=1` +
 		`&selections=pa%2Cwoba%2Cxwoba&chart=false&x=pa&y=pa&r=no&chartType=beeswarm` +

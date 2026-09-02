@@ -10,6 +10,7 @@ import {
 	type StatLine
 } from "./statsapi.ts"
 import { fetchUnderlying, type Underlying } from "./savant.ts"
+import { fetchOwnership, normalizeName } from "./yahoo-pool.ts"
 import { RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
 
 /**
@@ -34,6 +35,12 @@ export interface Snapshot {
 	/** Who each team plays over the horizon. Optional so a snapshot captured before
 	 *  matchups existed still loads — absent means the index is null, not neutral. */
 	opponentsByTeam?: Record<string, number[]>
+	/** Games each team has left in the regular season — the horizon for a stash,
+	 *  as opposed to the next week's slate a streamer plays against. */
+	gamesRemaining?: Record<string, number>
+	/** Yahoo "% Ros", keyed by MLBAM id. Absent for anyone Yahoo did not list;
+	 *  absent means unknown, never unowned. */
+	ownership?: Record<string, number>
 	/** Volume per team game over the recent window, keyed "id:group". The backtest
 	 *  showed recent playing time is the strongest predictor available. */
 	recentVolumeByWindow: Record<string, Record<number, number>>
@@ -49,7 +56,10 @@ const iso = (d: Date) => d.toISOString().slice(0, 10)
 export const buildSnapshot = async (
 	season: number,
 	now: Date,
-	horizonDays = 14
+	horizonDays = 14,
+	/** Whose market prices to read. Ownership is league-platform-specific, so it is
+	 *  a parameter rather than a constant. */
+	leagueId = "228947"
 ): Promise<Snapshot> => {
 	const start = iso(now)
 	const end = iso(new Date(now.getTime() + horizonDays * 86400_000))
@@ -62,7 +72,7 @@ export const buildSnapshot = async (
 	}
 	const back = (d: number) => iso(new Date(now.getTime() - d * 86400_000))
 	const [
-		hitting, pitching, xBat, xPit, horizon, teamGamesPlayed, injuries,
+		hitting, pitching, xBat, xPit, horizon, restOfSeason, owned, teamGamesPlayed, injuries,
 		hitWindows, pitWindows
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
@@ -70,6 +80,8 @@ export const buildSnapshot = async (
 			fetchUnderlying(season, "batter"),
 			fetchUnderlying(season, "pitcher"),
 			fetchSchedule(start, end),
+			fetchGamesByTeam(start, `${season}-11-05`),
+			fetchOwnership(leagueId).catch(() => ({ byName: new Map<string, number>(), read: 0, note: "" })),
 			fetchTeamGamesPlayed(season),
 			fetchInjuries(),
 			Promise.all(
@@ -148,6 +160,15 @@ export const buildSnapshot = async (
 		opponentsByTeam: Object.fromEntries(
 			[...horizon.opponents].map(([k, v]) => [String(k), v])
 		),
+		gamesRemaining: Object.fromEntries([...restOfSeason].map(([k, v]) => [String(k), v])),
+		// joined on normalised name, because Yahoo exposes its own player ids and
+		// never the MLBAM one. A player Yahoo did not list is simply absent.
+		ownership: Object.fromEntries(
+			players.flatMap(pl => {
+				const pct = owned.byName.get(normalizeName(pl.name))
+				return pct === undefined ? [] : [[String(pl.id), pct] as const]
+			})
+		),
 		recentVolumeByWindow,
 		recentStats,
 		recentWindow: { hitting: WINDOWS.hitting, pitching: WINDOWS.pitching },
@@ -155,6 +176,7 @@ export const buildSnapshot = async (
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
 			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule", rows: horizon.counts.size },
+			{ name: "Yahoo · % rostered", url: "baseball.fantasysports.yahoo.com/b1/players", rows: owned.byName.size },
 			{ name: "MLB StatsAPI · roster status", url: "statsapi.mlb.com/api/v1/teams/{id}/roster", rows: injuries.size },
 			{ name: "Baseball Savant · expected stats (batters)", url: "baseballsavant.mlb.com/leaderboard/expected_statistics", rows: xBat.size },
 			{ name: "Baseball Savant · expected stats (pitchers)", url: "baseballsavant.mlb.com/leaderboard/expected_statistics", rows: xPit.size }
@@ -174,6 +196,10 @@ export const hydrate = (s: Snapshot) => ({
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])
 	),
 	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v])),
+	gamesRemaining: new Map(
+		Object.entries(s.gamesRemaining ?? {}).map(([k, v]) => [Number(k), v])
+	),
+	ownership: new Map(Object.entries(s.ownership ?? {}).map(([k, v]) => [Number(k), v])),
 	opponentsByTeam: new Map(
 		Object.entries(s.opponentsByTeam ?? {}).map(([k, v]) => [Number(k), v])
 	),

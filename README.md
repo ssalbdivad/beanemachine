@@ -281,6 +281,24 @@ freely available player at the same slot would produce. That subtraction is the 
 metric: it is why a scarce catcher outranks a better outfielder, and removing it
 collapses the model to a coin flip against a naive manager.
 
+### What the board opens on
+
+The default ranking is **market edge**, not bscore. A bare bscore ranking answers
+"who is best", which on a waiver wire is half a question — the best players are
+already rostered. Market edge answers "who is the field wrong about": it compares
+each player's bscore against the *median bscore of the players the field prices the
+same way he is priced*, using Yahoo's "% Ros" as the price.
+
+It is a residual, so it stays denominated in league points — an edge of +18 means
+eighteen points more than the typical player rostered in about as many leagues. A
+percentile difference would have crowned every unrostered replacement-level body.
+
+Ownership is read from Yahoo's own player pages. They cap an anonymous reader at 24
+rows and ignore the paging offset, but `count=` shifts the window — `count=50`
+returns the next two dozen — so sweeping it per position exposes the whole priced
+universe without an account. Around 970 players come back priced. Anyone Yahoo does
+not list has **no** market edge and shows a dash: unknown is not the same as unowned.
+
 ### Tuning it — `model.json`
 
 Every weight lives in [`model.json`](model.json), not in code:
@@ -310,45 +328,44 @@ nub run backtest               # 100-fold ranking correlation (advisory)
 **Paired weekly win counts decide. Ranking correlation is advisory.** They have
 already disagreed once — the recent-form blend — and the season was right.
 
-### What we tried with Savant, and what it actually earns
+### Savant: a retracted result
 
-Savant is the deepest source here and the most tempting to lean on, so it gets the
-harshest test. As a **multiplier on the projection** it has now failed five distinct
-formulations over three played seasons:
+An earlier version of this file said the Statcast adjustment had been tested and
+failed. That claim was wrong, and the reason is worth keeping.
 
-| formulation | vs season-to-date | vs hot-hand |
-|---|---|---|
-| **no Statcast adjustment** | **48/68** | **40/68** |
-| xwOBA ratio, weight 0.25 | 48/68 | 39/68 |
-| xwOBA ratio, weight 1.0 | 46/68 | 39/68 |
-| λ falling with sample (trust xwOBA most when the sample is small) | 45/68 | 39/68 |
-| batted-ball scope only (runs and RBI left alone) | 48/68 | 39/68 |
-| batted-ball scope + falling λ | 48/68 | 39/68 |
+**Baseball Savant's `custom` leaderboard accepts `start_dt` and `end_dt` and then
+ignores them.** Three different 2023 ranges return byte-identical responses — 656
+rows, 184,104 plate appearances, every time. `month=` is ignored the same way. So
+every backtest that believed it was reading "the season up to this week" was in fact
+reading the finished season, including the very games it was about to predict.
 
-Not one beats leaving it out, and the margin per week falls monotonically as the
-weight rises. The reason is structural rather than statistical: a weekly roster
-decision is dominated by playing time and by slot scarcity, and a ±5% rate multiplier
-almost never changes which 27 players you hold.
+Two things follow, and they point in opposite directions:
 
-That is a finding about *this* use, not about the data. Savant still does three jobs
-in the app, and they are the jobs it is good at:
+- The Statcast **multiplier** lost anyway — at every weight, in all five
+  formulations, *while holding future information*. A signal that cannot help even
+  when it is allowed to cheat is not going to help when it isn't. That conclusion
+  survives.
+- The claim that **the xwOBA gap adds nothing** does **not** survive. With
+  full-season leakage the "prior" wOBA already encodes the outcomes being predicted,
+  which is exactly the condition under which a residual signal must measure as zero.
+  The tight null it produced is an artifact of the bug, not a finding.
 
-- **finding undervalued players** — the expected-minus-actual gap is the luck column,
-  and it is the whole discovery surface;
-- **confidence** — a player with no Statcast row is explicitly less trusted;
-- **provenance** — xwOBA, barrel %, exit velocity and hard-hit % are shown on every
-  player, so a human can overrule the model with the underlying record in front of them.
+So the honest status of Savant here is **untested, not disproven**, and the app's
+`"statcast": { "weight": 0 }` is now a placeholder awaiting a real measurement rather
+than a measured result.
 
-So the number is displayed prominently and does not silently move a recommendation on
-evidence it failed. `"statcast": { "weight": 0 }` in `model.json` is a measured
-result, and one flag flips it back on for anyone who wants to re-test it.
+`src/data/statcast-window.ts` is the fix: `statcast_search` does honour dates, but
+serves only pitch-level rows capped at 25,000 per response — about a day and a half
+of baseball — so a window has to be fetched a day at a time and aggregated into wOBA
+and xwOBA per player. That costs roughly 16 MB of pitch data per day of history,
+which is why the leaderboard was convenient, and is not a good enough reason to keep
+trusting it. `nub run compete --statcast-real` uses it; without that flag the
+simulator now returns **no** Statcast data rather than leaked data.
 
-One correction worth recording: until this pass the simulator merged the batter and
-pitcher Savant leaderboards with `new Map([...batters, ...pitchers])`. Savant keys both
-by bare MLBAM id, so every pitcher who had batted carried the xwOBA he *allowed* in
-place of the one he produced. The live snapshot had already been fixed; the simulator
-had not, which means every earlier Statcast verdict was measured on partly-polluted
-input. The table above is the re-run on clean data. The verdict did not change.
+Savant's three other jobs never depended on the backtest and are unaffected: the
+expected-minus-actual gap drives the luck column, a missing Statcast row lowers
+confidence, and xwOBA, barrel %, exit velocity and hard-hit % are shown on every
+player card so a human can overrule the model with the underlying record in view.
 
 ### Matchups
 

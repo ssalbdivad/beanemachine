@@ -18,8 +18,25 @@ t("board renders ranked rows", (await page.$$eval(".board-row", n => n.length)) 
 
 const scores = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("bscores are finite numbers", scores.every(Number.isFinite), String(scores.slice(0, 3)))
-t("board is sorted by bscore descending",
-  scores.every((v, i) => i === 0 || scores[i - 1] >= v), String(scores.slice(0, 5)))
+// The board opens on market edge, not bscore: the best players are already
+// rostered, so a bare bscore ranking opens on names the reader cannot add.
+const edges = await page.$$eval(".board-row .edge", n =>
+  n.map(e => Number(String(e.textContent).replace("+", "")))
+)
+t("board opens sorted by market edge descending",
+  edges.length > 50 && edges.every((v, i) => i === 0 || edges[i - 1] >= v),
+  String(edges.slice(0, 5)))
+t("every opening recommendation beats its ownership par",
+  edges.slice(0, 20).every(v => v > 0), String(edges.slice(0, 5)))
+
+// and bscore still sorts when asked for
+await page.click(".board-head .sort-head:has-text('bscore')")
+await page.waitForTimeout(150)
+const byB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
+t("sorting by bscore still orders by bscore",
+  byB.every((v, i) => i === 0 || byB[i - 1] >= v), String(byB.slice(0, 5)))
+await page.click(".board-head .sort-head:has-text('edge')")
+await page.waitForTimeout(150)
 
 // bscore must be value OVER REPLACEMENT, so proj − repl should equal it
 const row = await page.$eval(".board-row", r => ({

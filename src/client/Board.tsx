@@ -3,7 +3,7 @@ import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
 import { Fragment2 } from "./panels.tsx"
-import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Rated } from "./useBoard.ts"
+import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 import { api, ApiError, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
 
@@ -217,6 +217,7 @@ export const Board = ({
 					<div className="board-head">
 						<span>#</span>
 						<SortHead field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
+						<SortHead field="marketEdge" filters={filters} setFilters={setFilters} right>edge</SortHead>
 						<SortHead field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
 						<SortHead field="points" filters={filters} setFilters={setFilters} right>proj pts</SortHead>
 						<SortHead field="replacement" filters={filters} setFilters={setFilters} right>waiver pts</SortHead>
@@ -261,7 +262,7 @@ export const Board = ({
  * Billy's read on the top of the board. Every clause is assembled from a number
  * that is actually on the row — no adjectives the data doesn't support.
  */
-const BillysPick = ({ r, horizonDays }: { r: Rated; horizonDays: number }) => {
+const BillysPick = ({ r, horizonDays }: { r: Ranked; horizonDays: number }) => {
 	const clauses: string[] = []
 	clauses.push(
 		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over the next ${horizonDays} days`
@@ -302,6 +303,8 @@ const BillysPick = ({ r, horizonDays }: { r: Rated; horizonDays: number }) => {
 
 const COLUMN_HELP: Record<Filters["sort"], string> = {
 	name: "Sort by player name.",
+	marketEdge:
+		"Edge — how many points this player beats the typical player rostered in about as many leagues as he is. The default view, because the best players are already taken: this ranks who the field is wrong about, not who is best. Blank means Yahoo doesn't list him, which is not the same as nobody owning him.",
 	bscore:
 		"bscore — projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
 	points: "Projected points — what this player scores over the horizon in your league's own scoring.",
@@ -343,7 +346,7 @@ const SortHead = ({
 	)
 }
 
-const Row = ({ rank, r, open, onToggle }: { rank: number; r: Rated; open: boolean; onToggle: () => void }) => (
+const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boolean; onToggle: () => void }) => (
 	<>
 		<button className={`board-row${open ? " open" : ""}`} onClick={onToggle} type="button">
 			<span className="rank">{rank}</span>
@@ -354,6 +357,16 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Rated; open: boolea
 					{r.player.team ?? "—"}
 					{r.injury && <em className="hurt">{r.injury}</em>}
 				</span>
+			</span>
+			<span
+				className={`r edge${(r.marketEdge ?? 0) > 0 ? " up" : ""}`}
+				title={
+					r.marketEdge === null ?
+						"Yahoo doesn't list this player, so there is no market price to compare against. Unknown, not unowned."
+					:	`Rostered in ${r.rosteredPct}% of leagues. Projected for ${r.marketEdge > 0 ? "" : ""}${r.marketEdge} points versus the typical player owned about that widely.`
+				}
+			>
+				{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}
 			</span>
 			<span className="r bscore">{r.bscore}</span>
 			<span className="r dim">{r.points}</span>
@@ -375,7 +388,7 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Rated; open: boolea
 )
 
 /** Every number's provenance: what was observed, what was modelled, what's missing. */
-const Detail = ({ r }: { r: Rated }) => {
+const Detail = ({ r }: { r: Ranked }) => {
 	const top = Object.entries(r.projected.breakdown).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
 	return (
 		<div className="detail">

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
-import { rateAll, withUndervaluation } from "../engine/bscore.ts"
+import { rateAll, withMarketEdge, withUndervaluation, type Ranked } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
+
+export type { Ranked }
 
 /**
  * The ranking engine is pure, so it runs here in the browser against a snapshot of
@@ -10,7 +12,7 @@ import type { League } from "../schema.ts"
  * scoring changes — the same player really is worth a different amount in a
  * different league, and you can watch that happen.
  */
-export type Rated = ReturnType<typeof withUndervaluation>[number]
+
 
 export const useSnapshot = () => {
 	const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
@@ -31,7 +33,7 @@ export interface Filters {
 	hideInjured: boolean
 	availableOnly: boolean
 	minConfidence: number
-	sort: "bscore" | "points" | "undervaluation" | "replacement" | "confidence" | "name"
+	sort: "marketEdge" | "bscore" | "points" | "undervaluation" | "replacement" | "confidence" | "name"
 	desc: boolean
 }
 
@@ -42,7 +44,10 @@ export const DEFAULT_FILTERS: Filters = {
 	hideInjured: false,
 	availableOnly: false,
 	minConfidence: 0,
-	sort: "bscore",
+	// The default answers "who is the field wrong about", not "who is best" — the
+	// best players are already rostered, so a bare bscore ranking opens on names
+	// nobody reading this can actually add.
+	sort: "marketEdge",
 	desc: true
 }
 
@@ -64,8 +69,9 @@ export const useBoard = (
 		// honest bscore, so this refuses rather than assuming a league size.
 		if (league.meta.max_teams == null) return []
 		const h = hydrate(snapshot)
-		return withUndervaluation(
-			rateAll({
+		return withMarketEdge(
+			withUndervaluation(
+				rateAll({
 				league,
 				players: h.players,
 				underlying: h.underlying,
@@ -75,8 +81,11 @@ export const useBoard = (
 			opponentsByTeam: h.opponentsByTeam,
 				recentVolumeByWindow: h.recentVolumeByWindow,
 				recentStats: h.recentStats,
+				ownership: h.ownership,
 				teams: league.meta.max_teams
-			})
+				})
+			),
+			h.ownership
 		)
 	}, [snapshot, league])
 
@@ -89,6 +98,9 @@ export const useBoard = (
 			// worth rostering. Unrestricted it just finds the unluckiest replacement-level
 			// player in baseball, which answers nobody's question.
 			if (filters.sort === "undervaluation" && r.bscore <= 0) return false
+			// Same guard for market edge: a replacement-level body nobody rosters beats
+			// the par for his ownership by definition, and recommending him is noise.
+			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0)) return false
 			if (q && !r.player.name.toLowerCase().includes(q)) return false
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
@@ -104,6 +116,7 @@ export const useBoard = (
 				case "replacement": return r.replacement
 				case "confidence": return r.confidence.value
 				case "undervaluation": return r.undervaluation ?? -1
+				case "marketEdge": return r.marketEdge ?? -Infinity
 				case "name": return r.player.name
 				default: return r.bscore
 			}

@@ -763,9 +763,8 @@ Each was implemented in full, measured, and then either shipped or left off.
 | recent-rate blend, pitchers | **shipped** at 0.15 | 41/50 folds |
 | recent-rate blend, hitters | **rejected** | 29/50 folds — a coin flip at a +0.0009 mean |
 | recency weight 0.75 | **rejected** for 0.5 | correlation preferred 0.75; five played seasons preferred 0.5 |
-| Statcast xwOBA ratio | **rejected** | loses at every weight, five formulations, on clean data |
-| Statcast with λ falling in small samples | **rejected** | 45/68 — worse than leaving it out |
-| Statcast on batted-ball events only | **rejected** | 48/68 — matches the no-adjustment baseline, never beats it |
+| Statcast xwOBA ratio | **rejected** | loses at every weight and in five formulations — and did so *while holding leaked future data*, which is the strongest form of the negative |
+| Statcast xwOBA *gap* as a residual signal | **UNTESTED** | the earlier null was an artifact: the `custom` leaderboard ignores its date parameters, so "prior" wOBA already contained the future. Needs re-running via `statcast-window.ts` |
 | empirical-Bayes rate shrinkage | **rejected** | worse than the stat-specific constants |
 | opponent schedule strength | **shipped** at 0.5, flagged | positive and monotone at every dose; no dose significant |
 | park factors | **left off** | subsumed by the opponent index — same schedule, same information |
@@ -774,6 +773,18 @@ Two of these are worth reading as a pair. The Statcast adjustment is the one eve
 expects to work, and it does not; the matchup adjustment is the one that sounds like
 noise-chasing, and it is mildly positive. Neither result survived because it was
 plausible — they survived because a hundred-odd paired weeks said so.
+
+## 11. A data bug worth remembering
+
+Savant's `custom` leaderboard takes `start_dt` and `end_dt`, returns HTTP 200, and
+ignores them. Three disjoint 2023 ranges give byte-identical output. Nothing errors,
+nothing warns, and the numbers look entirely reasonable — they are simply the wrong
+numbers, and they contain the future.
+
+The lesson is not "check the docs". It is that **a parameter that is accepted is not
+a parameter that is honoured**, and the only way to know is to vary it and assert the
+output changes. Any point-in-time fetch in this repo should be able to answer: what
+did this return when I moved the window, and did it move?
 
 ## Reproducing any of this
 

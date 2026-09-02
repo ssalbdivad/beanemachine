@@ -49,6 +49,9 @@ export interface Rated {
 	rateable: boolean
 	/** est_woba − woba: positive means results trail contact quality. */
 	regressionGap: number | null
+	/** Yahoo "% Ros" — the share of leagues this player is rostered in. Null when
+	 *  the platform did not list him, which is not the same as nobody owning him. */
+	rosteredPct?: number | null
 }
 
 export interface RateOptions {
@@ -66,6 +69,8 @@ export interface RateOptions {
 	recentVolumeByWindow?: Record<string, Record<number, number>>
 	/** keyed "id:group" */
 	recentStats?: Record<string, StatLine>
+	/** Market price by MLBAM id — how many leagues have already taken him. */
+	ownership?: Map<number, number>
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -156,7 +161,17 @@ export const rateAll = (o: RateOptions): Rated[] => {
 
 /** Percentile of the regression gap within the rated pool — the undervaluation
  *  signal, expressed relative to the players actually being compared. */
-export const withUndervaluation = (rated: Rated[]) => {
+/** A rated player plus the two comparative numbers, which need the whole pool to
+ *  compute and so cannot live on Rated itself. */
+export type Ranked = Rated & {
+	undervaluation: number | null
+	rosteredPct: number | null
+	marketEdge: number | null
+}
+
+export const withUndervaluation = (
+	rated: Rated[]
+): (Rated & { undervaluation: number | null })[] => {
 	// Percentile WITHIN a side. For a batter a positive est_woba − woba means his
 	// results trail his contact; for a pitcher it means the opposite. Ranking both
 	// in one pool, as an earlier version did, produced a number with no meaning.
@@ -179,6 +194,72 @@ export const withUndervaluation = (rated: Rated[]) => {
 		return {
 			...r,
 			undervaluation: Number(((below / Math.max(pool.length, 1)) * 100).toFixed(1))
+		}
+	})
+}
+
+
+/**
+ * Market edge: how far a player's bscore sits above what the field's ownership
+ * implies he is worth.
+ *
+ * A bare bscore ranking answers "who is best", which on a waiver wire is only
+ * half the question — the best players are already taken. This answers "who is
+ * the field wrong about", by comparing each player against the players the field
+ * prices the same way he is priced.
+ *
+ * Implemented as a residual rather than as a percentile difference, so the answer
+ * stays denominated in league points: an edge of +18 means eighteen points more
+ * than the typical player rostered in about as many leagues. A percentile gap
+ * would have made every unrostered replacement-level body look like a find.
+ */
+const BUCKETS = 10
+
+export const withMarketEdge = (
+	rated: (Rated & { undervaluation: number | null })[],
+	ownership: Map<number, number> | undefined
+): Ranked[] => {
+	const priced = rated.flatMap(r => {
+		const pct = ownership?.get(r.player.id)
+		return pct === undefined || !r.rateable ? [] : [{ pct, bscore: r.bscore }]
+	})
+
+	// median rather than mean: the top bucket contains superstars whose bscores are
+	// long-tailed, and a mean there would set an unreachable bar for everyone in it
+	const curve: { pct: number; par: number }[] = []
+	if (priced.length >= BUCKETS * 4) {
+		const byPct = [...priced].sort((a, b) => a.pct - b.pct)
+		const size = Math.floor(byPct.length / BUCKETS)
+		for (let i = 0; i < BUCKETS; i++) {
+			const slice = byPct.slice(i * size, i === BUCKETS - 1 ? byPct.length : (i + 1) * size)
+			if (!slice.length) continue
+			const scores = slice.map(x => x.bscore).sort((a, b) => a - b)
+			curve.push({
+				pct: slice.reduce((a, c) => a + c.pct, 0) / slice.length,
+				par: scores[Math.floor(scores.length / 2)]!
+			})
+		}
+	}
+
+	/** What a player rostered this widely typically produces. */
+	const parAt = (pct: number): number | null => {
+		if (curve.length < 2) return null
+		if (pct <= curve[0]!.pct) return curve[0]!.par
+		if (pct >= curve[curve.length - 1]!.pct) return curve[curve.length - 1]!.par
+		for (let i = 1; i < curve.length; i++) {
+			const a = curve[i - 1]!, b = curve[i]!
+			if (pct <= b.pct) return a.par + ((pct - a.pct) / (b.pct - a.pct)) * (b.par - a.par)
+		}
+		return null
+	}
+
+	return rated.map(r => {
+		const pct = ownership?.get(r.player.id) ?? null
+		const par = pct === null || !r.rateable ? null : parAt(pct)
+		return {
+			...r,
+			rosteredPct: pct,
+			marketEdge: par === null ? null : Number((r.bscore - par).toFixed(1))
 		}
 	})
 }

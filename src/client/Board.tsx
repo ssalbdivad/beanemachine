@@ -389,7 +389,10 @@ const Detail = ({ r }: { r: Rated }) => {
 				<h3>Measured</h3>
 				<dl>
 					<div className="pair"><dt>season points</dt><dd>{r.season.points}</dd></div>
-					<div className="pair"><dt>volume / team game</dt><dd>{r.projection.volumePerTeamGame ?? "—"}</dd></div>
+					<div className="pair">
+						<dt>{r.player.group === "hitting" ? "PA / team game" : "outs / team game"}</dt>
+						<dd>{r.projection.volumePerTeamGame ?? "—"}</dd>
+					</div>
 					<div className="pair"><dt>team games in window</dt><dd>{r.projection.horizonGames}</dd></div>
 					{r.underlying?.woba != null && (
 						<div className="pair"><dt>wOBA</dt><dd>{r.underlying.woba}</dd></div>

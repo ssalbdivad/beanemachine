@@ -1091,6 +1091,12 @@ the assignment, whose edge weight depends on the spot, which is a weighted
 bipartite matching and not a matroid. The reverted version measured worse than the
 current one on a real roster (1401.12 against 1448.17) for exactly that reason.
 
+Hill-climbing on the real objective was tried next and also reverted: reaching the
+optimum in the case above needs a three-way rotation through an equal-value
+plateau (A moves 2B→3B, B moves Util→2B, D comes off the bench), and no sequence
+of strictly-improving single swaps or insertions gets there. A plateau-walking
+search would, at the cost of a cycling risk, for an unmeasured gain.
+
 The correct fix is a max-weight bipartite matching on `max(0, points − bar)`. It is
 not written. Until it is, Trade and Draft totals are a lower bound on the best
 legal lineup, and the board itself is unaffected — a bscore takes the maximum over

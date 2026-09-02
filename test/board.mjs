@@ -61,7 +61,15 @@ t("Billy uses the right volume unit for the side",
 
 // the league's real free-agent pool — the board must recommend addable players
 if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {
-  await page.waitForSelector(".pool-count", { timeout: 25000 })
+  // "…" is a legitimate state of this element (still fetching), so wait for it to
+  // settle rather than for it to merely exist
+  await page.waitForFunction(
+    () => {
+      const t = document.querySelector(".pool-count")?.textContent?.trim()
+      return t && t !== "…"
+    },
+    { timeout: 30000 }
+  ).catch(() => {})
   const poolText = (await page.textContent(".pool-count")).trim()
   const poolCount = Number(poolText)
   // Yahoo rate-limits, so an unavailable pool is a legitimate outcome to assert on

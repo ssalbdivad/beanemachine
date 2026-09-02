@@ -8,6 +8,16 @@ import {
 	RECENT_WINDOW_WEIGHTS, type Projection
 } from "./project.ts"
 
+
+/**
+ * Slots that start nobody, so they create no demand for a position and set no
+ * replacement bar. One list, exported, because `src/engine/trade.ts` needs exactly
+ * the same answer and the two drifted: this one omitted Yahoo's second injured slot
+ * "IL+", which `src/import.ts` already marks `injured_only`, so a league carrying
+ * one would have priced a spot nobody can start.
+ */
+export const RESERVE_SLOTS = new Set(["BN", "IL", "NA", "IL+"])
+
 /**
  * The bscore: a player's projected points over the horizon, minus what a freely
  * available replacement at the same roster slot would produce, in THIS league's
@@ -237,7 +247,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	 */
 	const replacementBySlot = new Map<string, number>()
 	for (const [slot, count] of Object.entries(slotCounts)) {
-		if (slot === "BN" || slot === "IL" || slot === "NA") continue
+		if (RESERVE_SLOTS.has(slot)) continue
 		const eligible = rated
 			.filter(r => r.rateable && r.slots.includes(slot))
 			.sort((a, b) => b.points - a.points)

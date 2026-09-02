@@ -1,5 +1,5 @@
 import type { League } from "../schema.ts"
-import { slotsFor, type Rated } from "./bscore.ts"
+import { RESERVE_SLOTS, slotsFor, type Rated } from "./bscore.ts"
 
 /**
  * What a trade is actually worth.
@@ -21,9 +21,9 @@ import { slotsFor, type Rated } from "./bscore.ts"
  *  the caller knows whether the league lets him hold both spots. */
 const keyOf = (r: Rated) => `${r.player.id}:${r.player.group}`
 
-/** A bench spot creates no demand for a position, so it starts nobody. Same
- *  exclusion bscore.ts makes when it sets replacement depth. */
-const UNSTARTABLE = new Set(["BN", "IL", "NA"])
+/** The same list bscore.ts sets replacement depth by, imported rather than
+ *  restated: two copies of it had already drifted apart over Yahoo's "IL+". */
+const UNSTARTABLE = RESERVE_SLOTS
 
 /**
  * One entry per startable spot: three OF slots produce three entries, because the

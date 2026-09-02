@@ -110,25 +110,34 @@ export const useBoard = (
 		const h = hydrate(snapshot)
 		// Rest-of-season counts can be empty in the off-season, and a horizon of zero
 		// games would rank everyone at zero. Fall back rather than invent a number.
+		// Which window actually got used, not which one was asked for. The two can
+		// differ — an off-season snapshot carries no rest-of-season counts and a
+		// horizon of zero games would rank everyone at zero — and everything below is
+		// keyed on the resolved window rather than on the mode. Keying on the mode is
+		// how a week's worth of published starters ends up divided by a fortnight of
+		// games: the numerator and the denominator have to come from the same window
+		// or the coverage scaling in `starterBlendedIndex` is measuring nothing.
+		const window =
+			filters.mode === "stream" && h.gamesWeek.size ? "week"
+			: filters.mode === "stash" && h.gamesRemaining.size ? "season"
+			: "fortnight"
 		const horizon =
-			filters.mode === "stream" && h.gamesWeek.size ?
-				{ games: h.gamesWeek, opponents: h.opponentsWeek }
-			: filters.mode === "stash" && h.gamesRemaining.size ?
-				{ games: h.gamesRemaining, opponents: h.opponentsByTeam }
-			:	{ games: h.gamesByTeam, opponents: h.opponentsByTeam }
-		// Probables only exist about a week out, so the stash horizon has none — and an
+			window === "week" ? { games: h.gamesWeek, opponents: h.opponentsWeek }
+			: window === "season" ? { games: h.gamesRemaining, opponents: h.opponentsByTeam }
+			: { games: h.gamesByTeam, opponents: h.opponentsByTeam }
+		// Probables reach about a week out, so the rest of a season has none — and an
 		// absent count must fall back to the team-games estimate, not project zero.
 		const probableStarts =
-			filters.mode === "stream" ? h.probableStartsWeek
-			: filters.mode === "stash" ? undefined
+			window === "week" ? h.probableStartsWeek
+			: window === "season" ? undefined
 			: h.probableStarts
 		const probableCoverage =
-			filters.mode === "stream" ? h.probableCoverageWeek
-			: filters.mode === "stash" ? undefined
+			window === "week" ? h.probableCoverageWeek
+			: window === "season" ? undefined
 			: h.probableCoverage
 		const opposingStarters =
-			filters.mode === "stream" ? h.opposingStartersWeek
-			: filters.mode === "stash" ? undefined
+			window === "week" ? h.opposingStartersWeek
+			: window === "season" ? undefined
 			: h.opposingStarters
 		return withMarketEdge(
 			withUndervaluation(

@@ -7,6 +7,7 @@ import { type } from "arktype"
 import { hydrate } from "../src/data/snapshot.ts"
 import { League } from "../src/schema.ts"
 import { rateAll, slotsFor } from "../src/engine/bscore.ts"
+import { activeSlots, replacementBySlot, startingLineup } from "../src/engine/trade.ts"
 import { HITTING_MAP, PITCHING_MAP } from "../src/engine/points.ts"
 
 const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
@@ -209,6 +210,47 @@ if (emptyPreset !== undefined) {
       `every bscore 0, ${rz.filter(x => x.rateable).length} flagged rateable, ` +
       `${rz.filter(x => x.projected.unscoreable.length).length} reporting anything unscoreable`)
 }
+
+// Yahoo's second injured slot. No shipped preset carries one, so nothing above
+// exercises it — and the two lists that decide what a slot means had already
+// drifted apart over it: bscore priced a replacement bar for IL+ and trade.ts
+// counted it as a spot to start, while import.ts marked it injured_only.
+const withILPlus = (() => {
+  const base = cfg.leagues["yahoo:228947"]
+  return {
+    ...base,
+    roster: {
+      ...base.roster,
+      slots: { ...base.roster.slots, "IL+": 1 },
+      slot_order: [...(base.roster.slot_order ?? []), "IL+"]
+    }
+  }
+})()
+t("an IL+ slot is not a spot anybody starts",
+  !activeSlots(withILPlus).includes("IL+"),
+  activeSlots(withILPlus).join(","))
+t("and it sets no replacement bar, because nobody is claimed off waivers for it",
+  !replacementBySlot(withILPlus, rate(withILPlus, withILPlus.meta.max_teams),
+    withILPlus.meta.max_teams).has("IL+"))
+t("adding one does not change what the roster is worth", (() => {
+  const teams = withILPlus.meta.max_teams
+  const base = cfg.leagues["yahoo:228947"]
+  const pool = rate(base, teams)
+  const bars = replacementBySlot(base, pool, teams)
+  const spots = activeSlots(base)
+  const roster = (() => {
+    const taken = new Set(), out = []
+    const byPoints = pool.filter(r => r.rateable).sort((a, b) => b.points - a.points)
+    for (const slot of spots) {
+      const pick = byPoints.find(r =>
+        !taken.has(`${r.player.id}:${r.player.group}`) && r.slots.includes(slot))
+      if (pick) { taken.add(`${pick.player.id}:${pick.player.group}`); out.push(pick) }
+    }
+    return out
+  })()
+  return startingLineup(base, roster, bars).points ===
+    startingLineup(withILPlus, roster, bars).points
+})())
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

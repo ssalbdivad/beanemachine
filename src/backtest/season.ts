@@ -261,8 +261,17 @@ export const hotHandStrategy: Strategy = {
 
 export const STRATEGIES = [bscoreStrategy, projectedPointsStrategy, seasonToDateStrategy, hotHandStrategy]
 
+const vorpVariant = (name: string, opts: { recentWeight?: number; rateWeight?: number }): Strategy => ({
+	name,
+	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league)
+})
+
 /** Variants under test, to find where the season disagrees with the correlation. */
 export const SWEEP: Strategy[] = [
+	vorpVariant("vorp_rw0.75", { recentWeight: 0.75 }),
+	vorpVariant("vorp_rw0.5", { recentWeight: 0.5 }),
+	vorpVariant("vorp_rw0.25", { recentWeight: 0.25 }),
+	vorpVariant("vorp_rw0", { recentWeight: 0 }),
 	seasonToDateStrategy,
 	hotHandStrategy,
 	bscoreStrategy,

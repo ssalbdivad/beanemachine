@@ -163,7 +163,7 @@ The shipped constants live in `src/engine/project.ts` and are asserted by
 
 ```ts
 RECENT_WINDOW_WEIGHTS = { hitting: { 3: 2, 7: 1, 21: 1 }, pitching: { 5: 2, 21: 1 } }
-RECENT_BLEND_WEIGHT   = { hitting: 0.75, pitching: 0.60 }
+RECENT_BLEND_WEIGHT   = { hitting: 0.5,  pitching: 0.5 }
 RECENT_RATE_WEIGHT    = { hitting: 0,    pitching: 0.15 }
 ```
 
@@ -175,16 +175,22 @@ Three findings, two of them negative:
    structural, not statistical: a hitter's role can change in a week, so a 3-day window
    tracks it, while a starter works every fifth day, so three days of his data is
    usually zero appearances and a week is one or two starts of noise.
-2. **The Statcast blend does not earn its place.** Across ten seasons every sweep
+2. **The recency weight is set by seasons, not by correlation.** A 14-day ranking
+   preferred 0.75; playing 2023-2025 out week by week prefers **0.5**, and the
+   difference is worth ~1,500 points and lifts the weekly win rate from 41/68 to
+   48/68. The correlation cost of 0.5 is about 0.003 ρ, inside the noise band. Heavy
+   recency catches role changes, which a correlation rewards — and chases week-to-week
+   noise, which a season punishes. The season is closer to how the tool is used.
+3. **The Statcast blend does not earn its place.** Across ten seasons every sweep
    ranked `qualityWeight: 0` first. It is **off by default**. xwOBA and barrel rate are
    still displayed, because they genuinely inform a human, but they do not silently
    move a recommendation on evidence that failed — and the drill-down says so.
-3. **A light recent-RATE blend helps pitchers and not hitters.** Blending 15% of the
+4. **A light recent-RATE blend helps pitchers and not hitters.** Blending 15% of the
    21-day rate beat the previous configuration in **41 of 50** pitching folds. The same
    idea for hitters won **29 of 50** — a coin flip — so it isn't applied there. The mean
    difference for hitters was +0.0009, which is exactly the kind of number that looks
    like an improvement and is actually noise; the paired fold count is what exposed it.
-4. **Rate shrinkage made things worse.** The naive line already carries the selection
+5. **Rate shrinkage made things worse.** The naive line already carries the selection
    effect that good players accumulate more plate appearances, so shrinking the rate on
    top of a volume model double-penalises exactly the players it shouldn't.
 
@@ -215,10 +221,10 @@ The opponents are the two strategies human managers actually run: **season-to-da
 
 | strategy | points | % of perfect | weeks bscore wins |
 |---|---|---|---|
-| **bscore** | **47,859** | **50.3%** | — |
+| **bscore** | **49,432** | **52.0%** | — |
 | projected points only | 47,590 | 50.1% | — |
-| hot-hand | 47,409 | 49.9% | **42/68** (+6.6/wk) |
-| season-to-date | 45,906 | 48.3% | **41/68** (+28.7/wk) |
+| hot-hand | 47,409 | 49.9% | **40/68** (+29.8/wk) |
+| season-to-date | 45,906 | 48.3% | **48/68** (+51.8/wk) |
 | perfect hindsight | 95,063 | 100% | ceiling |
 
 bscore wins outright on points **and** takes a majority of individual weeks against

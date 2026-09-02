@@ -121,8 +121,17 @@ export const RECENT_WINDOW_WEIGHTS: Record<"hitting" | "pitching", Record<number
 	pitching: { 5: 2, 21: 1 }
 }
 
-/** How far the blended recent estimate pulls the season-long rate, per side. */
-export const RECENT_BLEND_WEIGHT = { hitting: 0.75, pitching: 0.6 } as const
+/**
+ * How far the blended recent estimate pulls the season-long rate.
+ *
+ * 0.5, decided by playing whole seasons rather than by ranking correlation. On a
+ * 14-day ranking 0.75 measured about 0.003 higher — inside the noise band — but
+ * across 2023-2025 of actual weekly roster decisions 0.5 is worth roughly 1,500
+ * points and lifts the weekly win rate against a season-to-date manager from
+ * 41/68 to 48/68. Heavy recency catches role changes, which a correlation
+ * rewards; it also chases week-to-week noise, which a season punishes.
+ */
+export const RECENT_BLEND_WEIGHT = { hitting: 0.5, pitching: 0.5 } as const
 
 /** Combines several windows into one per-team-game estimate. */
 export const blendWindows = (

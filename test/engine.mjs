@@ -89,8 +89,8 @@ t("hitters weight the most recent series double (measured 40/50 folds)",
 t("pitchers use a 5-day short window, matching a five-day turn",
   RECENT_WINDOW_WEIGHTS.pitching[5] === 2 && RECENT_WINDOW_WEIGHTS.pitching[21] === 1,
   JSON.stringify(RECENT_WINDOW_WEIGHTS.pitching))
-t("blend weight is 0.75 hitting / 0.6 pitching (measured)",
-  RECENT_BLEND_WEIGHT.hitting === 0.75 && RECENT_BLEND_WEIGHT.pitching === 0.6,
+t("blend weight is 0.5 on both sides (measured by playing seasons, not by correlation)",
+  RECENT_BLEND_WEIGHT.hitting === 0.5 && RECENT_BLEND_WEIGHT.pitching === 0.5,
   JSON.stringify(RECENT_BLEND_WEIGHT))
 t("recent-rate blend is pitchers-only at 0.15 (hitting failed its paired test)",
   RECENT_RATE_WEIGHT.hitting === 0 && RECENT_RATE_WEIGHT.pitching === 0.15,

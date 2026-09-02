@@ -77,14 +77,6 @@
     ]
   },
 
-  "park": {
-    "weight": 0,
-    "clamp": { "min": 0.92, "max": 1.08 },
-    "why": [
-      "Savant park factors, applied over the venues on the horizon schedule rather than as a season-long team constant."
-    ]
-  },
-
   "shrinkage": {
     "default": 400,
     "perStat": {

@@ -36,7 +36,6 @@ export const ModelWeights = type({
 	probables: { use: "boolean", why: Why },
 	waivers: { movesPerWeek: "number >= 0", why: Why },
 	matchup: { weight: "0 <= number <= 1", clamp: Clamp, why: Why },
-	park: { weight: "0 <= number <= 1", clamp: Clamp, why: Why },
 	shrinkage: { default: "number > 0", perStat: { "[string]": "number" }, why: Why }
 })
 

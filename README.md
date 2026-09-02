@@ -388,7 +388,7 @@ skips it entirely and is projected from his own starts instead.
 volume, with 15% of a pitcher's rate taken from his last 21 days and none of a
 hitter's — an asymmetry that exists only because the evidence was asymmetric. Then
 the context multipliers, each weighted and clamped: schedule strength at 0.5,
-Statcast contact quality at 0, park at 0 and never supplied.
+Statcast contact quality at 0.
 
 Rate *shrinkage* is the notable absence. The mechanism and its stat-specific
 constants are here — 60 batters faced for strikeouts, 1,200 plate appearances for
@@ -434,7 +434,6 @@ Every weight lives in [`model.json`](model.json), not in code:
 "statcast":   { "weight": 0, "windowDays": 21, "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 }, ... }
 "probables":  { "use": true, ... }
 "matchup":    { "weight": 0.5, "clamp": { "min": 0.88, "max": 1.12 }, ... }
-"park":       { "weight": 0, ... }
 "shrinkage":  { "default": 400, "perStat": { "homeRuns": 170, ... } }
 ```
 
@@ -649,11 +648,17 @@ measured maximum for anyone who wants it. The run is
 `data/results/matchup-5s_2021-2022-2023-2024-2025_moves1.json`.
 
 Park factors are the same shape of idea and are left at 0 — largely subsumed by the
-opponent index, since who you play and where you play it are the same schedule. Be
-precise about their state: `fetchParkFactors` exists in `src/data/savant.ts` and the
-multiplier exists in `project.ts`, but **nothing calls the fetcher**, no capture
-carries a park index, and no caller ever passes one. They are implemented and
-unwired, not fetched and ignored.
+opponent index, since who you play and where you play it are the same schedule — but
+the real reason is worse than that, and it is worth recording. `fetchParkFactors` asked
+Savant's park-factor leaderboard with `csv=true`; that endpoint returns HTML and ignores
+the parameter, so the parser produced 1,852 rows of nulls. Nothing ever noticed, because
+nothing consumed them. Same failure mode as the expected-stats leaderboard ignoring its
+own date range: HTTP 200, plausible shape, wrong content.
+
+No readable park-factor source has been found, so the fetcher, the park term in the
+projection and the `park` block in `model.json` have all been removed. The projection
+carries no park factor rather than a silently empty one. Computing park factors from the
+pitch-level data this repo already caches is the obvious route if it is ever wanted.
 
 ### Scheduled starts
 

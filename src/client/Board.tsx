@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
@@ -28,6 +28,50 @@ const MISSING_LABEL: Record<string, string> = {
 }
 
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
+
+/** The three horizons, as a tablist: three questions, not three filters. */
+const MODES = [
+	["stream", "Streaming", "the next 7 days — who wins you this week"],
+	["board", "This fortnight", "the standing board, 14 days out"],
+	["stash", "Stash", "rest of season — who to hold, not who to start"]
+] as const
+
+const tabId = (mode: Filters["mode"]) => `horizon-${mode}`
+const PANEL_ID = "horizon-panel"
+
+/**
+ * app.css gives every control one focus treatment, but `.modes .mode` sets
+ * `box-shadow:none` at a higher specificity than the shared `button:focus-visible`
+ * rule, so the horizon tabs — and only they — took keyboard focus with nothing
+ * drawn at all. Confirmed in the browser: computed outline `none`, box-shadow
+ * `none`, border unchanged. This restores the same ring the rest of the page uses.
+ * It belongs in app.css and should move there; it is here because app.css is not
+ * this change's file.
+ */
+const MODE_FOCUS_CSS = `.modes .mode:focus-visible{
+	outline:none;border-color:var(--accent);
+	box-shadow:inset 0 1px 0 var(--edge), var(--ring);
+}`
+
+/** Arrow keys walk the tab strip, because a tablist is one tab stop rather than
+ *  three. Focus moves without selecting: picking a horizon re-rates all ~1,430
+ *  players (~90 ms measured), so activating on every arrow press would make
+ *  crossing the strip stutter. Enter or Space chooses the one you land on. */
+const onTabKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+	const tabs = [...(e.currentTarget.parentElement?.children ?? [])].filter(
+		(el): el is HTMLButtonElement => el instanceof HTMLButtonElement
+	)
+	const i = tabs.indexOf(e.currentTarget)
+	const to =
+		e.key === "ArrowRight" || e.key === "ArrowDown" ? (i + 1) % tabs.length
+		: e.key === "ArrowLeft" || e.key === "ArrowUp" ? (i - 1 + tabs.length) % tabs.length
+		: e.key === "Home" ? 0
+		: e.key === "End" ? tabs.length - 1
+		: null
+	if (to === null) return
+	e.preventDefault()
+	tabs[to]?.focus()
+}
 
 /** How old the capture is. A projection built on last week's numbers is wrong in a
  *  way nothing else in the UI would reveal, so the age is always stated. */
@@ -68,8 +112,12 @@ export const Board = ({
 		}
 	}, [leagueId, league?.meta.platform])
 
-	const availableNames =
-		pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null
+	// A fresh Set on every render would invalidate the filter-and-sort memo in
+	// useBoard on every render, including ones that changed nothing about it.
+	const availableNames = useMemo(
+		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
+		[pool]
+	)
 	const { rows, scored, edgeUsable, edgeCoverage } = useBoard(snapshot, league, filters, availableNames)
 	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
@@ -135,25 +183,27 @@ export const Board = ({
 		<>
 			<section className="card full board-controls">
 				<h2>What are you deciding?</h2>
+				<style>{MODE_FOCUS_CSS}</style>
+				{/* The tabs are the tablist's only children, because a tablist that
+				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
-				{(
-					[
-						["stream", "Streaming", "the next 7 days — who wins you this week"],
-						["board", "This fortnight", "the standing board, 14 days out"],
-						["stash", "Stash", "rest of season — who to hold, not who to start"]
-					] as const
-				).map(([id, label, why]) => (
-					<button
-						key={id}
-						type="button"
-						role="tab"
-						aria-selected={filters.mode === id}
-						className={`mode${filters.mode === id ? " on" : ""}`}
-						onClick={() => setFilters(f => ({ ...f, mode: id }))}
-					>
-						<b>{label}</b>
-						<span>{why}</span>
-					</button>
+					{MODES.map(([id, label, why]) => (
+						<button
+							key={id}
+							id={tabId(id)}
+							type="button"
+							role="tab"
+							aria-selected={filters.mode === id}
+							aria-controls={PANEL_ID}
+							// roving tabindex: the strip is one stop and the arrows move within it
+							tabIndex={filters.mode === id ? 0 : -1}
+							onKeyDown={onTabKey}
+							className={`mode${filters.mode === id ? " on" : ""}`}
+							onClick={() => setFilters(f => ({ ...f, mode: id }))}
+						>
+							<b>{label}</b>
+							<span>{why}</span>
+						</button>
 					))}
 				</div>
 				{/* Position first and as chips, not a select: it is the filter people reach
@@ -265,7 +315,10 @@ export const Board = ({
 				Math.round((Date.parse(snapshot.horizon.end) - Date.parse(snapshot.horizon.start)) / 86400000)
 			} />}
 
-			<section className="card full">
+			{/* The panel the horizon tabs control. The pick, buy-low and scarcity
+			    cards below re-rank with it too, but this is the ranking itself, and
+			    the sibling cards can't be wrapped without breaking the page grid. */}
+			<section className="card full" id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(filters.mode)}>
 				<h2>
 					Recommendations
 					{age && (
@@ -558,7 +611,8 @@ const SortHead = ({
 	filters: Filters
 	setFilters: (f: (p: Filters) => Filters) => void
 	right?: boolean
-	children: React.ReactNode
+	/** A plain string, because the sort state is announced by interpolating it. */
+	children: string
 }) => {
 	const active = filters.sort === field
 	return (
@@ -572,6 +626,16 @@ const SortHead = ({
 					:	{ ...f, sort: field, desc: field !== "name" }
 				)
 			}
+			// The arrow glyph is the only thing that says which column the board is
+			// sorted by, and a screen reader gets nothing from "▾". aria-sort would be
+			// the right tool, but it is only valid on a columnheader inside a table
+			// and the board is a list of buttons, not a grid — so the state goes in
+			// the name instead. The title stays as the column's description.
+			aria-label={
+				active ?
+					`${children}, sorted ${filters.desc ? "descending" : "ascending"}, activate to reverse`
+				:	`Sort by ${children}`
+			}
 			title={COLUMN_HELP[field]}
 		>
 			{children}
@@ -580,9 +644,40 @@ const SortHead = ({
 	)
 }
 
+/**
+ * What the row says out loud. Read as markup it is nine unlabelled numbers run
+ * together — "1Pete Crow-ArmstrongOFChicago Cubs—52.74132.2579.51100%1427.8" —
+ * which is the column headings doing all the work for sighted readers and none
+ * for anyone else. Every clause here names a number that is already on the row;
+ * nothing is added, and a value that is missing says it is missing.
+ */
+const rowLabel = (rank: number, r: Ranked) =>
+	[
+		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
+		`bscore ${r.bscore}`,
+		`${r.points} projected points against ${r.replacement} for a replacement`,
+		r.marketEdge === null ?
+			"no market price"
+		:	`market edge ${r.marketEdge > 0 ? "+" : ""}${r.marketEdge}`,
+		`confidence ${pct(r.confidence.value)}`,
+		r.projection.horizonGames ?
+			`${r.projection.horizonGames} games scheduled`
+		:	"no scheduled games on record",
+		...(r.injury ? [`listed ${r.injury.toLowerCase()}`] : [])
+	].join(", ")
+
+const detailId = (r: Ranked) => `player-detail-${r.player.id}`
+
 const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boolean; onToggle: () => void }) => (
 	<>
-		<button className={`board-row${open ? " open" : ""}`} onClick={onToggle} type="button">
+		<button
+			className={`board-row${open ? " open" : ""}`}
+			onClick={onToggle}
+			type="button"
+			aria-expanded={open}
+			aria-controls={detailId(r)}
+			aria-label={rowLabel(rank, r)}
+		>
 			<span className="rank">{rank}</span>
 			<span className="who">
 				<b>{r.player.name}</b>
@@ -635,7 +730,7 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 const Detail = ({ r }: { r: Ranked }) => {
 	const top = Object.entries(r.projected.breakdown).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
 	return (
-		<div className="detail">
+		<div className="detail" id={detailId(r)} role="region" aria-label={`Where ${r.player.name}'s numbers come from`}>
 			<div className="detail-col">
 				<h3>Projected points by category</h3>
 				<dl>

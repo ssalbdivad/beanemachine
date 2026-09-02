@@ -130,9 +130,6 @@ export interface ProjectOptions {
 	 */
 	matchupIndex?: number | null
 	matchupWeight?: number
-	/** Park run index over the venues on the horizon schedule, 1 = neutral. */
-	parkIndex?: number | null
-	parkWeight?: number
 	/**
 	 * Times this pitcher is actually scheduled to start in the horizon, from MLB's
 	 * published probables. Null when unknown — which is different from zero, and is
@@ -216,8 +213,6 @@ export interface Projection {
 	qualityMultiplier: number
 	/** Modelled: schedule-strength ratio, 1 = a league-average week of opponents. */
 	matchupMultiplier: number
-	/** Modelled: park ratio over the venues on the horizon, 1 = neutral. */
-	parkMultiplier: number
 	stats: StatLine
 	modelled: string[]
 	missing: string[]
@@ -241,8 +236,6 @@ export const project = (
 		qualityScope = MODEL.statcast.scope,
 		matchupIndex = null,
 		matchupWeight = MODEL.matchup.weight,
-		parkIndex = null,
-		parkWeight = MODEL.park.weight,
 		projectedStarts = null,
 		reliefRateWeight = null
 	} = options
@@ -330,11 +323,11 @@ export const project = (
 	} else missing.push("underlying expected stats")
 
 	/**
-	 * Context multipliers. Both are OBSERVED inputs turned into a modelled scale —
-	 * the schedule and the park index are facts, how much they should move a
-	 * projection is not — so each is weighted, clamped, and named in `modelled`.
-	 * A null index means the fact was unavailable and nothing is applied, which is
-	 * different from an index of 1 meaning it was available and neutral.
+	 * Schedule strength: an OBSERVED input turned into a modelled scale. Who a team
+	 * plays is a fact; how much that should move a projection is not — so it is
+	 * weighted, clamped, and named in `modelled`. A null index means the fact was
+	 * unavailable and nothing is applied, which is different from an index of 1
+	 * meaning it was available and neutral.
 	 */
 	let matchupMultiplier = 1
 	if (matchupIndex === null) {
@@ -350,18 +343,6 @@ export const project = (
 			`matchups: opponents this week rate ${matchupIndex.toFixed(3)} vs league ` +
 				`⇒ ×${matchupMultiplier.toFixed(3)}`
 		)
-	}
-
-	let parkMultiplier = 1
-	if (parkIndex === null) {
-		if (parkWeight > 0) missing.push("park factors for the horizon venues")
-	} else if (parkWeight > 0) {
-		parkMultiplier = clamp(
-			1 + parkWeight * (parkIndex - 1),
-			MODEL.park.clamp.min,
-			MODEL.park.clamp.max
-		)
-		modelled.push(`parks: ${parkIndex.toFixed(3)} over the booked venues ⇒ ×${parkMultiplier.toFixed(3)}`)
 	}
 
 	const stats: StatLine = {}
@@ -395,7 +376,7 @@ export const project = (
 			}
 			const scaled =
 				QUALITY_SCALED[qualityScope][player.group].has(key) ?
-					qualityMultiplier * matchupMultiplier * parkMultiplier
+					qualityMultiplier * matchupMultiplier
 				:	1
 			stats[key] = Number((perUnit * projectedVolume * scaled).toFixed(3))
 		}
@@ -412,7 +393,6 @@ export const project = (
 			projectedVolume === null ? null : Number(projectedVolume.toFixed(1)),
 		qualityMultiplier: Number(qualityMultiplier.toFixed(3)),
 		matchupMultiplier: Number(matchupMultiplier.toFixed(3)),
-		parkMultiplier: Number(parkMultiplier.toFixed(3)),
 		stats,
 		modelled,
 		missing

@@ -306,3 +306,205 @@ export const EligibilityPanel = ({
 		</dl>
 	)
 }
+
+/* ---------------------------------------------------------------------------
+ * First run.
+ *
+ * Every platform_template in scoring.json ships empty — no scoring, no slots, no
+ * team count — because none of those can be known before a real league is read.
+ * So a visitor who creates one lands on a league that honestly cannot rank
+ * anything, and three tabs each refuse for their own reason. The refusals are
+ * right; on their own they are also a dead end, and they tell a partial truth:
+ * the board stops at the first missing input it hits and never mentions the
+ * other two.
+ *
+ * This is the one place that states the whole gap at once — what is missing,
+ * where each value comes from, and what it unblocks. Nothing here fills a value
+ * in: a number nobody read stays missing and stays listed.
+ * ------------------------------------------------------------------------- */
+
+export interface Gap {
+	/** Named the way League setup names it, so the fix is findable. */
+	label: string
+	/** What was actually read, or null while it is missing. Never a default. */
+	have: string | null
+	/** Why it cannot be guessed at. */
+	why: string
+	/** What stays unavailable until it exists. */
+	blocks: string
+}
+
+/** The three inputs every priced answer in the app is denominated in. */
+export const leagueGaps = (league: League): Gap[] => {
+	// A stat that exists at 0 is scored at zero — the same as unscored, as far as
+	// a projection is concerned — so the count is of non-zero values only.
+	const scored = [
+		...Object.values(league.scoring.batting),
+		...Object.values(league.scoring.pitching)
+	].filter(v => v !== 0).length
+	const slots = Object.entries(league.roster.slots).filter(([, n]) => n > 0)
+	const starters = slots
+		.filter(([slot]) => slot !== "BN" && slot !== "IL" && slot !== "NA")
+		.reduce((a, [, n]) => a + n, 0)
+	return [
+		{
+			label: "What each stat is worth",
+			have: scored ? `${scored} stats scored` : null,
+			why: "Points per stat, as your league scores them.",
+			blocks:
+				"A bscore is denominated in your league's own points, so every projection comes out at exactly zero — the board, each draft pick and every trade verdict."
+		},
+		{
+			label: "How many teams",
+			have: league.meta.max_teams == null ? null : `${league.meta.max_teams} teams`,
+			why: "The number of teams in the league, as it drafts.",
+			blocks:
+				"Replacement level is teams × slots: a player is worth what he beats the next man up by, and how deep the wire runs decides who that is. Nothing is ranked without it."
+		},
+		{
+			label: "Roster slots",
+			have: slots.length ? `${slots.length} slots, ${starters} starting` : null,
+			why: "How many of each position you start, plus bench and IL.",
+			blocks:
+				"Positional scarcity, what the draft says you still need, and the lineup a trade is judged against."
+		}
+	]
+}
+
+export const leagueReady = (league: League | null | undefined): boolean =>
+	!!league && leagueGaps(league).every(g => g.have !== null)
+
+/** What each tab is for, in the order a season actually runs. The nav can't be
+ *  reordered to match — the board is the tab people come back to, so it stays
+ *  first — so the sequence is said here instead of implied by position. */
+const TABS: [string, string][] = [
+	[
+		"League setup",
+		"Scoring, roster slots and team count. Read off the platform, or typed in — every other tab prices what it ranks in these."
+	],
+	["Draft", "Who to take next, what it gains over the next man up, and where the cliff at each position is."],
+	["My team & trades", "Your starting lineup in points, and what a proposed deal does to it."],
+	["Recommendations", "The wire ranked in your scoring, over a week, a fortnight or the rest of the season. The weekly one."]
+]
+
+/**
+ * Rendered above whichever tab is open, never instead of it: each tab still
+ * says its own piece, and this says the piece none of them can see.
+ */
+export const Setup = ({
+	leagueKey,
+	league,
+	canImport,
+	onOpenSetup
+}: {
+	leagueKey: string | null
+	league: League | null
+	/** False in the static build, where reading a league needs the local server. */
+	canImport: boolean
+	onOpenSetup: () => void
+}) => {
+	const gaps = league ? leagueGaps(league) : []
+	const missing = gaps.filter(g => g.have === null)
+	const have = gaps.filter(g => g.have !== null)
+	const name = league?.meta.league_name ?? leagueKey
+	return (
+		<div className="grid">
+			<section className="card full">
+				<h2>{league ? "Finish setting this league up" : "Start with a league"}</h2>
+				<p className="sub">
+					{!league ?
+						<>
+							There is no league in this browser yet, and nothing in beanemachine means
+							anything without one — a player&rsquo;s value is his value <i>in your
+							league&rsquo;s scoring</i>.
+						</>
+					:	<>
+							<b>{name}</b> was created from a blank template, so{" "}
+							{missing.length === 1 ? "one input is" : `${missing.length} inputs are`} still
+							missing. Nothing is assumed in their place: a value nobody read stays missing
+							and stays listed.
+						</>
+					}
+				</p>
+
+				{missing.length > 0 && (
+					<ul className="flags">
+						{missing.map(g => (
+							<li key={g.label}>
+								<b>{g.label}</b> — {g.why} {g.blocks}
+							</li>
+						))}
+					</ul>
+				)}
+
+				{have.length > 0 && (
+					<div className="chips" style={{ marginTop: "var(--sp-3)" }}>
+						{have.map(g => (
+							<span className="chip ok" key={g.label}>
+								{g.label}: <b>{g.have}</b>
+							</span>
+						))}
+					</div>
+				)}
+
+				<p className="sub" style={{ margin: "var(--sp-4) 0 0" }}>
+					{canImport ?
+						<>
+							<b>Paste your league&rsquo;s URL</b> in the field above and beanemachine reads
+							the real values off Yahoo, ESPN or Sleeper &mdash; that is the only route that
+							ends with <i>read from source</i> against them.{" "}
+						</>
+					:	<>
+							<b>Importing needs the local server</b>, and this is the static build, so the
+							values have to be typed in here. They are stored in this browser either way.{" "}
+						</>
+					}
+					{league ?
+						<>
+							Or open <b>League setup</b> and enter them by hand.
+						</>
+					:	<>
+							Or press <b>New</b> above to start one from a blank template and fill it in.
+						</>
+					}
+				</p>
+
+				{league && (
+					<p style={{ margin: "var(--sp-3) 0 0" }}>
+						<button className="primary" onClick={onOpenSetup}>
+							Open League setup
+						</button>
+					</p>
+				)}
+
+				<div className="legend">
+					<p className="tiny-note">What each tab does once those exist, in the order a season uses them:</p>
+					<dl>
+						{TABS.map(([tab, does]) => (
+							<Fragment2 key={tab} term={tab}>
+								{does}
+							</Fragment2>
+						))}
+					</dl>
+				</div>
+			</section>
+		</div>
+	)
+}
+
+/**
+ * How old the observed-data capture is. A projection built on last week's numbers
+ * is wrong in a way nothing else on the page would reveal, so the age is stated in
+ * the masthead as well as on the board — same 36-hour line as `Board.tsx`, because
+ * two different answers to "is this stale" would be worse than one repeated one.
+ */
+export const freshness = (
+	capturedAt: string | undefined,
+	now: number
+): { label: string; stale: boolean } => {
+	const hours = capturedAt == null ? NaN : (now - Date.parse(capturedAt)) / 3_600_000
+	if (!Number.isFinite(hours)) return { label: "age unknown", stale: true }
+	if (hours < 1) return { label: "just now", stale: false }
+	if (hours < 36) return { label: `${Math.round(hours)}h ago`, stale: false }
+	return { label: `${Math.round(hours / 24)}d ago`, stale: true }
+}

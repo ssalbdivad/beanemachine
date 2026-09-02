@@ -978,7 +978,7 @@ Each was implemented in full, measured, and then either shipped or left off.
 | empirical-Bayes rate shrinkage | **rejected** | worse than the stat-specific constants |
 | stat-specific rate shrinkage | **rejected**, implemented and off | double-penalises a part-time player the volume model already docked |
 | opponent schedule strength | **shipped** at 0.5, flagged | positive and monotone at every dose; no dose significant |
-| park factors | **left off, and unwired** | subsumed by the opponent index — same schedule, same information |
+| park factors | **removed** | the Savant park-factor endpoint returns HTML and ignores `csv=true`; the parser produced 1,852 rows of nulls that nothing consumed. No readable source found, so the projection carries no park term rather than an empty one |
 | scheduled starts from published probables | **shipped** | replaces an average with an observation; cannot be backtested, and that is stated, as is the coverage gap in §3.5 |
 | reliever-specific recent-rate weight | **rejected** | 111 weeks: -1.2, -2.2 and -5.9 points a week at 0.3/0.5/0.7, and 31W-45L at the top weight |
 

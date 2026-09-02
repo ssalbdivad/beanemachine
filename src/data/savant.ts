@@ -90,26 +90,21 @@ export const fetchUnderlying = async (
 	return out
 }
 
-export interface ParkFactor {
-	teamId: number | null
-	venue: string
-	runs: number | null
-	hr: number | null
-}
-
-/** Park factors, so a hitter's context is stated rather than ignored. */
-export const fetchParkFactors = async (season: number): Promise<ParkFactor[]> => {
-	const rows = await csv(
-		`${BASE}/statcast-park-factors?type=year&year=${season}&csv=true`
-	)
-	return rows.map(r => ({
-		teamId: num(r.venue_id ?? r.team_id),
-		venue: r.venue_name ?? r.name_display_club ?? "",
-		runs: num(r.index_runs ?? r.runs),
-		hr: num(r.index_hr ?? r.hr)
-	}))
-}
-
+/**
+ * Park factors are NOT available and are no longer pretended to be.
+ *
+ * There was a `fetchParkFactors` here that asked
+ * `leaderboard/statcast-park-factors?...&csv=true` and parsed the response. That
+ * endpoint returns HTML and ignores `csv=true` — the parser dutifully produced
+ * 1,852 rows of nulls, and nothing ever noticed because nothing consumed them.
+ * The same failure mode as the expected-stats leaderboard ignoring its own date
+ * range: HTTP 200, plausible shape, wrong content.
+ *
+ * The honest state is that no readable park-factor source has been found, so the
+ * projection carries no park term rather than a silently empty one. Computing
+ * park factors from the pitch-level data this repo already caches is the obvious
+ * route if it is ever wanted.
+ */
 
 /**
  * Underlying stats with the expected-stat pair taken from a ROLLING window.

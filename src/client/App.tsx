@@ -1,6 +1,7 @@
 import { useForm, useStore } from "@tanstack/react-form"
 import { type } from "arktype"
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { Snapshot } from "../data/snapshot.ts"
 import type { Config, League } from "../schema.ts"
 import { League as LeagueSchema } from "../schema.ts"
 import { api, ApiError, detectMode, getMode } from "./api.ts"
@@ -9,11 +10,64 @@ import { Board } from "./Board.tsx"
 import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
 import { leagues } from "./leagues.ts"
-import { EligibilityPanel, Fragment2, RosterPanel, StatTable } from "./panels.tsx"
+import {
+	EligibilityPanel,
+	Fragment2,
+	freshness,
+	leagueReady,
+	RosterPanel,
+	Setup,
+	StatTable
+} from "./panels.tsx"
 import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
 
 const TEMPLATES = ["custom", "yahoo", "espn", "sleeper"]
+
+type View = "board" | "league" | "trade" | "draft"
+
+/**
+ * The four tabs, in DOM order — which is deliberately not the order a season is
+ * run in.
+ *
+ * A season goes: set the league up, draft it, manage the team, then read the
+ * board every week. But the board is the tab someone opens fifty times and the
+ * setup is the tab they open once, so the board lands first and stays first.
+ * The sequence is stated instead of implied by position: the setup panel lists
+ * the tabs in season order, and every button says what it is for on hover.
+ */
+const VIEWS: { id: View; label: string; purpose: string }[] = [
+	{
+		id: "board",
+		label: "Recommendations",
+		purpose:
+			"The wire ranked in this league's scoring, over the next week, the standing fortnight, or the rest of the season. The tab you come back to."
+	},
+	{
+		id: "league",
+		label: "League setup",
+		purpose:
+			"Scoring, roster slots and team count — read off the platform or entered by hand. Everything the other tabs say is priced in these."
+	},
+	{
+		id: "trade",
+		label: "My team & trades",
+		purpose: "Your roster and starting lineup in points, and what a proposed deal does to it."
+	},
+	{
+		id: "draft",
+		label: "Draft",
+		purpose: "Who to take next, what he gains over the next man up, and where each position's cliff is."
+	}
+]
+
+/** The league picker is one control doing four jobs, so it says which one. */
+const LEAGUE_LABEL: Record<View, string> = {
+	board: "Scoring these picks against",
+	league: "League being edited",
+	trade: "Team being managed",
+	draft: "Drafting in"
+}
 
 export const App = () => {
 	const [config, setConfig] = useState<Config | null>(null)
@@ -22,7 +76,7 @@ export const App = () => {
 	const [busy, setBusy] = useState(false)
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
-	const [view, setView] = useState<"board" | "league" | "trade" | "draft">("board")
+	const [view, setView] = useState<View>("board")
 	const { snapshot, error: snapshotError } = useSnapshot()
 	const { toast, show } = useToast()
 	const acknowledge = useCallback(() => {
@@ -69,6 +123,12 @@ export const App = () => {
 	}, [run, adopt])
 
 	const league = key && config ? config.leagues[key] : undefined
+	// Nothing is known until the store has been read, so "no league" and "not
+	// looked yet" must not render as the same screen.
+	const loading = !config && !loadError
+	// The board, the draft and a trade are all priced in the same three inputs.
+	// Until they exist, the guided panel is what the page leads with.
+	const ready = leagueReady(league)
 
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
@@ -83,45 +143,30 @@ export const App = () => {
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
 						Static build — your leagues are stored in this browser, so editing and saving
-						work here. Importing one from its URL needs the local server: run{" "}
-						<code>nub run dev</code>, since browsers can&rsquo;t read Yahoo or ESPN directly.
+						work here. Importing one from its URL needs the local server (
+						<code>node src/server.ts</code> alongside <code>npx vite</code>), since browsers
+						can&rsquo;t read Yahoo or ESPN directly.
 					</p>
 				)}
 			</header>
 
-			<nav className="views" role="tablist">
-				<button
-					role="tab"
-					aria-selected={view === "board"}
-					className={view === "board" ? "on" : ""}
-					onClick={() => setView("board")}
-				>
-					Recommendations
-				</button>
-				<button
-					role="tab"
-					aria-selected={view === "league"}
-					className={view === "league" ? "on" : ""}
-					onClick={() => setView("league")}
-				>
-					League setup
-				</button>
-				<button
-					role="tab"
-					aria-selected={view === "trade"}
-					className={view === "trade" ? "on" : ""}
-					onClick={() => setView("trade")}
-				>
-					My team &amp; trades
-				</button>
-				<button
-					role="tab"
-					aria-selected={view === "draft"}
-					className={view === "draft" ? "on" : ""}
-					onClick={() => setView("draft")}
-				>
-					Draft
-				</button>
+			<nav className="views" role="tablist" aria-label="Sections">
+				{VIEWS.map(v => (
+					<button
+						key={v.id}
+						role="tab"
+						title={v.purpose}
+						aria-selected={view === v.id}
+						aria-current={view === v.id ? "page" : undefined}
+						className={view === v.id ? "on" : ""}
+						// the .on class carries the tab's state; the accent is the same "this one
+						// is live" signal .modes and .chip-btn already use for a selected control
+						style={view === v.id ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}
+						onClick={() => setView(v.id)}
+					>
+						{v.label}
+					</button>
+				))}
 				<a
 					className="views-link"
 					href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/GUIDE.md"
@@ -149,6 +194,9 @@ export const App = () => {
 				onCreate={(k, template) =>
 					void run(async () => {
 						adopt(leagues.create(k, template), k)
+						// the new league is blank on purpose, and the setup panel below now says
+						// exactly which values that leaves missing
+						setView("league")
 						show(`Created ${k} — every field is blank until you fill it in`)
 					})
 				}
@@ -169,7 +217,38 @@ export const App = () => {
 				onReject={m => show(m, true)}
 			/>
 
-			{league && <Chips league={league} />}
+			<Status
+				league={league ?? null}
+				snapshot={snapshot}
+				snapshotError={snapshotError}
+				loading={loading}
+			/>
+
+			{/* A store that can't be read is not an empty store, and every tab's own
+			    "configure a league first" would quietly claim it is. */}
+			{loadError && (
+				<div className="grid">
+					<section className="card full">
+						<h2>Your leagues couldn&rsquo;t be read</h2>
+						<ul className="flags">
+							<li>{loadError}</li>
+						</ul>
+						<p className="sub" style={{ margin: "var(--sp-3) 0 0" }}>
+							Nothing was overwritten and nothing was guessed at. <b>Load file</b> above
+							replaces what is in this browser with a <code>scoring.json</code> you keep.
+						</p>
+					</section>
+				</div>
+			)}
+
+			{!loadError && !loading && !ready && (
+				<Setup
+					leagueKey={key}
+					league={league ?? null}
+					canImport={getMode() !== "static"}
+					onOpenSetup={() => setView("league")}
+				/>
+			)}
 
 			{view === "board" ?
 				<div className="grid">
@@ -208,11 +287,13 @@ export const App = () => {
 				/>
 			:	<div className="grid">
 					<section className="card full">
+						<h2>League setup</h2>
 						<p className="empty">
-							{loadError ??
-								(config ?
-									"No league selected. Paste a league URL above to import one."
-								:	"Loading…")}
+							{loading ?
+								"Reading the leagues stored in this browser…"
+							: loadError ?
+								"There is nothing to edit until the store above is replaced."
+							:	"No league to edit yet — import one from its URL, or press New, and its scoring, slots and team count appear here."}
 						</p>
 					</section>
 				</div>
@@ -236,7 +317,7 @@ const Toolbar = ({
 	onReject
 }: {
 	config: Config | null
-	view: "board" | "league" | "trade" | "draft"
+	view: View
 	activeKey: string | null
 	onSelect: (key: string) => void
 	onImport: (url: string) => void
@@ -251,21 +332,23 @@ const Toolbar = ({
 	const picker = useRef<HTMLInputElement>(null)
 	const keys = Object.keys(config?.leagues ?? {})
 	// the same control means different things per view, so it says which
-	const labels =
-		view === "board" ?
-			{ league: "Scoring these picks against" }
-		:	{ league: "League being edited" }
+	const label = LEAGUE_LABEL[view]
 	return (
 		<>
 			<div className="bar">
 				<label className="ctl">
-					<span>{labels.league}</span>
+					<span>{label}</span>
 					<select
 						value={activeKey ?? ""}
 						disabled={!keys.length}
-						aria-label={labels.league}
+						aria-label={label}
 						onChange={e => onSelect(e.currentTarget.value)}
 					>
+						{/* an empty disabled box reads as broken; this says which of the two
+						    reasons it is empty for */}
+						{!keys.length && (
+							<option value="">{config ? "No leagues in this browser" : "Loading…"}</option>
+						)}
 						{keys.map(k => (
 							<option key={k} value={k}>
 								{config!.leagues[k]!.meta.league_name ?? k}
@@ -290,6 +373,7 @@ const Toolbar = ({
 					</select>
 				</label>
 				<button
+					title="Start an empty league you fill in yourself — no values are invented"
 					onClick={() => {
 						const k = prompt(`Key for the new ${template} league (e.g. "${template}:12345"):`, `${template}:`)
 						if (k?.trim()) onCreate(k.trim(), template)
@@ -368,10 +452,46 @@ const Toolbar = ({
 	)
 }
 
+/**
+ * The masthead strip: which league everything below is denominated in, where its
+ * values came from, and how old the observed data is. All three degrade to a
+ * stated absence rather than to nothing at all — an empty strip would read as a
+ * page that had not finished loading.
+ */
+const Status = ({
+	league,
+	snapshot,
+	snapshotError,
+	loading
+}: {
+	league: League | null
+	snapshot: Snapshot | null
+	snapshotError: string | null
+	loading: boolean
+}) => {
+	const age = freshness(snapshot?.capturedAt, Date.now())
+	const data =
+		snapshotError ? { className: "chip warn", value: "unavailable" }
+		: !snapshot ? { className: "chip", value: "loading…" }
+		: { className: `chip${age.stale ? " warn" : ""}`, value: age.label }
+	return (
+		<div className="chips">
+			{league ?
+				<Chips league={league} />
+			: loading ?
+				<span className="chip">reading this browser&rsquo;s leagues…</span>
+			:	<span className="chip warn">no league yet</span>}
+			<span className={data.className} title="Age of the MLB and Statcast capture the ranking is computed from">
+				player data <b>{data.value}</b>
+			</span>
+		</div>
+	)
+}
+
 const Chips = ({ league }: { league: League }) => {
 	const { meta, provenance } = league
 	return (
-		<div className="chips">
+		<>
 			{[meta.platform, meta.team_name].filter(Boolean).map(v => (
 				<span className="chip" key={String(v)}>
 					<b>{String(v)}</b>
@@ -387,7 +507,7 @@ const Chips = ({ league }: { league: League }) => {
 				{provenance.verified ? "read from source" : "unverified"}
 			</span>
 			{provenance.fetched_at && <span className="chip">fetched {provenance.fetched_at}</span>}
-		</div>
+		</>
 	)
 }
 

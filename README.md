@@ -125,16 +125,29 @@ doing" (season-to-date rate scaled to games ahead):**
 | side | model | ρ | vs naive | folds won |
 |---|---|---|---|---|
 | hitting | naive baseline | 0.5743 | — | — |
-| hitting | **`d7_w0.75_q0` (shipped)** | **0.6759** | **+17.7%** | **48/50** |
+| hitting | single 7d window | 0.6759 | +17.7% | 48/50 |
+| hitting | **weighted 3/7/21d (shipped)** | **0.6819** | **+18.7%** | **49/50** |
 | pitching | naive baseline | 0.4697 | — | — |
-| pitching | **`d21_w0.75_q0_rate0.15` (shipped)** | **0.5318** | **+13.2%** | **49/50** |
+| pitching | single 21d window + rate blend | 0.5318 | +13.2% | 49/50 |
+| pitching | **weighted 5/21d (shipped)** | **0.5333** | **+13.5%** | **50/50** |
+
+The shipped constants live in `src/engine/project.ts` and are asserted by
+`test/engine.mjs`, so they can't be retuned by accident:
+
+```ts
+RECENT_WINDOW_WEIGHTS = { hitting: { 3: 2, 7: 1, 21: 1 }, pitching: { 5: 2, 21: 1 } }
+RECENT_BLEND_WEIGHT   = { hitting: 0.75, pitching: 0.60 }
+RECENT_RATE_WEIGHT    = { hitting: 0,    pitching: 0.15 }
+```
 
 Three findings, two of them negative:
 
-1. **Recent playing time is the whole game**, and the right window **differs by side** —
-   7 days for hitters, 21 for pitchers. The reason is structural, not statistical: a
-   hitter's role can change in a week, so a 7-day window tracks it; a starter works
-   every fifth day, so a week of his data is one or two starts of pure noise.
+1. **Recent playing time is the whole game**, the right window **differs by side**, and
+   **the most recent series carries extra signal**. Hitters use 3/7/21-day windows with
+   the shortest weighted double; pitchers use 5/21. The reason the sides differ is
+   structural, not statistical: a hitter's role can change in a week, so a 3-day window
+   tracks it, while a starter works every fifth day, so three days of his data is
+   usually zero appearances and a week is one or two starts of noise.
 2. **The Statcast blend does not earn its place.** Across ten seasons every sweep
    ranked `qualityWeight: 0` first. It is **off by default**. xwOBA and barrel rate are
    still displayed, because they genuinely inform a human, but they do not silently

@@ -1176,6 +1176,19 @@ flip on a hunch and there is no measurement that settles the direction, so the t
 stays and the gap is written down. The fix is a rest-of-season opponent list in the
 snapshot, not a weight change.
 
+A fifth was the reverse of the usual complaint. `src/backtest/` has always asked the
+schedule for `gameType=R`, in all four of the places it asks; `src/data/statsapi.ts`,
+which builds the live snapshot, did not. So the simulator every number in this
+document comes from was measuring the regular season while the app was ranking over
+the regular season *plus the postseason*, and the second one is not a season any
+fantasy league plays. Today it is invisible — the October slots are
+placeholder-against-placeholder until clubs clinch, so no real club's count differs
+and the divergence costs nothing yet — which is exactly why it survived. `matchup.ts`
+states the principle it breaks: a knob that only steers the backtest is a knob that
+lies about what the app is doing, and a *filter* that only steers the backtest is the
+same lie with a quieter voice. The live path now asks the same question the measured
+one always did.
+
 A fourth of the same family was closed on the client rather than in the engine:
 `useBoard` chose its horizon with a fallback but selected the probables on the mode,
 so an off-season snapshot could feed a week's published starters into a fortnight's

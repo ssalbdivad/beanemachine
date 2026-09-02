@@ -368,33 +368,32 @@ Note what the leak also explains: gap~wOBA is **−0.61** on clean data versus �
 leaked data. Contact quality and results diverge far more within a real three-week
 window than a full season lets them, which is exactly the room the signal lives in.
 
-**And then the season disagreed.** Re-run on real point-in-time data over 2024 with
-`--statcast-real`, paired directly against weight 0 across 23 weeks:
+**And then the season settled it the other way.** Re-run on real point-in-time data
+across 2023-2025 — 68 paired weeks, every strategy playing the same pool — and paired
+directly against weight 0:
 
-| formulation | record vs weight 0 | points |
-|---|---|---|
-| batted-ball scope + falling λ, weight 1.0 | 11W-12L | **+3.0/wk** |
-| xwOBA ratio 0.5 | 11W-12L | −10.1/wk |
-| xwOBA ratio 1.0 | 10W-13L | −29.3/wk |
-| λ falling, 0.5 | 13W-10L | −33.8/wk |
+| formulation | record | points/wk | ties |
+|---|---|---|---|
+| **no Statcast multiplier** | — | **best total** | — |
+| xwOBA ratio 0.5 | 24W-20L | −0.6 | 24 |
+| batted-ball + falling λ | 32W-36L | −6.3 | 0 |
+| xwOBA ratio 1.0 | 28W-38L | −13.6 | 2 |
+| λ falling, 1.0 | 29W-39L | −23.8 | 0 |
 
-So the correlation is emphatic and the played season is not. That is the same
-disagreement that set the recency weight, and the rule here has always been that
-played weeks decide — but 23 weeks decides nothing either way, and running
-2021-2023 and 2025 costs about half an hour of pitch-level fetching each.
+Every formulation loses on points. The least-bad one ties 24 of 68 weeks, which means it
+changed almost no roster at all. And the per-season winner wanders: the batted-ball
+falling-λ config leads 2024 (+3.0/wk) and 2025 (+4.9/wk), then finishes dead last in
+2023 (−27.8/wk). A winner that changes every season is noise wearing a result's clothes.
 
-**The weight therefore stays 0, as a queued measurement rather than a conclusion.**
-What changed is that it is now a live question with a known answer shape, and the
-Statcast data itself has been promoted from decoration to the rolling window the
-signal actually lives in — which is where the buy-low board and the contact ranking
-draw from regardless of what the multiplier weight ends up being.
+**Both things are true, and the tension is the interesting part.** On the same clean
+data, xwOBA out-predicts actual wOBA for next-week production and its gap carries
+significant incremental signal (z 6.79). The signal is real. It still does not improve a
+roster decision, because that decision is dominated by playing time and slot scarcity —
+a ±5-10% rate multiplier almost never changes which 27 players you hold. A metric can be
+genuinely predictive and still be the wrong lever.
 
-**The remaining gap: Ranking correlation and
-played seasons have disagreed before, and the shipped `"statcast": { "weight": 0 }`
-was set by the broken measurement, so it is now a stale number rather than a
-justified one. Re-deriving it with `nub run compete --statcast-real` is the next
-change to the model, and the engine already threads the weight, the lambda shape and
-the scope from `model.json` for exactly that purpose.
+So the weight is 0, and this time that is a measured result rather than a stale one. What
+Savant earns instead is everything below.
 
 ### How Savant is actually used
 

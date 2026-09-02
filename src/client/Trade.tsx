@@ -527,11 +527,25 @@ const LineupCard = ({
 					<div className="bench">
 						<h3>On your bench</h3>
 						<div className="picks">
-							{lineup.bench.map(r => (
-								<span className="chip" key={rosterKey(r.player)} title={`${pts(r.points)} projected points`}>
-									{r.player.name}
-								</span>
-							))}
+							{lineup.bench.map(r => {
+								const under = lineup.belowBar.some(b => rosterKey(b.player) === rosterKey(r.player))
+								return (
+									<span
+										className={`chip${under ? " chip-under" : ""}`}
+										key={rosterKey(r.player)}
+										title={
+											under ?
+												`${pts(r.points)} projected points — below the replacement bar at every ` +
+												`slot he can fill, so the spot is worth more left to a free agent`
+											:	`${pts(r.points)} projected points — somebody better holds every spot ` +
+												`he can fill`
+										}
+									>
+										{r.player.name}
+										{under && <span className="chip-mark"> · under the wire</span>}
+									</span>
+								)
+							})}
 						</div>
 					</div>
 				)}

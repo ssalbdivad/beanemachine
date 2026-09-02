@@ -75,6 +75,11 @@
 .lineup-holes .notes{margin-bottom:0}
 .lineup-unprojectable{margin-top:var(--sp-3)}
 .bench{margin-top:var(--sp-4)}
+/* Two different pieces of news share this list: a man behind somebody better, and a
+   man the lineup would rather replace off the wire. Only the second is actionable,
+   so only the second is marked — the rest of the chips stay quiet. */
+.bench .chip-under{border-color:var(--flag);color:var(--ink)}
+.bench .chip-mark{color:var(--flag);font-size:var(--fs-2);letter-spacing:.02em}
 .bench h3,.slot-changes h3,.deal-side h3,.trade-verdict h3{
   margin:0 0 9px;font-size:var(--fs-2);font-weight:500;color:var(--muted);
 }

@@ -101,6 +101,12 @@ export interface Lineup {
 	 *  matching prices a spot rather than a player, both are the same answer to the
 	 *  same question — he is not worth a seat — and neither is a demotion. */
 	bench: Rated[]
+	/** The benched men who are not merely behind somebody — at every slot they are
+	 *  eligible for, they project below what that slot's replacement bar is worth, so
+	 *  the lineup would rather leave the seat to a waiver body. Empty when no bars
+	 *  were supplied, since without a bar there is nothing to be below. A subset of
+	 *  `bench`, kept separate because the two are different news about a player. */
+	belowBar: Rated[]
 	/** Startable spots left at nothing: no replacement bar is known for the slot and
 	 *  nobody on the roster is worth seating there. Usually that means nobody is
 	 *  eligible at all; it can also mean the only eligible men project below zero,
@@ -281,10 +287,22 @@ export const startingLineup = (
 		return { slot, player: null, points: bar, source: "replacement" }
 	})
 
+	const bench = startable.filter(r => !taken.has(keyOf(r)))
 	return {
 		starters,
 		points: Number(starters.reduce((sum, s) => sum + s.points, 0).toFixed(2)),
-		bench: startable.filter(r => !taken.has(keyOf(r))),
+		bench,
+		// "he lost his seat to someone better" and "he is worth less than the wire"
+		// are different news, and the second is the one that suggests a move
+		belowBar: replacement
+			? bench.filter(r => {
+					const bars = r.slots.flatMap(slot => {
+						const bar = replacement.get(slot)
+						return bar === undefined ? [] : [bar]
+					})
+					return bars.length > 0 && bars.every(bar => r.points < bar)
+				})
+			: [],
 		holes,
 		unprojectable
 	}

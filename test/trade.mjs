@@ -226,6 +226,30 @@ t("a starter worth less than the waiver wire does not take the spot",
 	barLine.points === 40 && barLine.starters[0].source === "replacement" &&
 		barLine.bench.length === 1)
 
+// Two different pieces of news share the bench, and only one of them suggests a
+// move. A man behind somebody better is fine; a man below the wire at every slot he
+// can fill is a drop candidate, and the view says which is which.
+t("a man below the bar everywhere he can play is named as such",
+	barLine.belowBar.length === 1 && barLine.bench.length === 1)
+t("a man merely behind somebody better is not", (() => {
+	const lg = mini({ "2B": 1 })
+	const line = startingLineup(lg, [man(1, 90, "2B"), man(2, 80, "2B")], new Map([["2B", 40]]))
+	return line.bench.length === 1 && line.belowBar.length === 0
+})())
+t("and with no bars in hand nobody is under a wire that was never quoted", (() => {
+	const lg = mini({ "2B": 1 })
+	const line = startingLineup(lg, [man(1, 90, "2B"), man(2, 80, "2B")], null)
+	return line.bench.length === 1 && line.belowBar.length === 0
+})())
+t("below the bar at one slot but above it at another is not under the wire", (() => {
+	const lg = mini({ "2B": 1, Util: 1 })
+	const line = startingLineup(lg, [man(1, 90, "2B", "Util"), man(2, 95, "2B", "Util"),
+		man(3, 50, "2B", "Util")], new Map([["2B", 70], ["Util", 30]]))
+	return line.bench.some(r => r.player.id === 3) && line.belowBar.length === 0
+})())
+t("every man under the wire is on the bench, never in the lineup",
+	lineup.belowBar.every(b => lineup.bench.some(r => key(r) === key(b))))
+
 // exhaustive check against brute force — a matching is only worth writing if it
 // actually returns the maximum, on shapes chosen to be awkward rather than typical
 const brute = (league, roster, bars) => {

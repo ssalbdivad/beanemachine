@@ -331,44 +331,49 @@ nub run backtest               # 100-fold ranking correlation (advisory)
 **Paired weekly win counts decide. Ranking correlation is advisory.** They have
 already disagreed once — the recent-form blend — and the season was right.
 
-### Savant: a retracted result
+### Savant: retracted, then reversed
 
-An earlier version of this file said the Statcast adjustment had been tested and
-failed. That claim was wrong, and the reason is worth keeping.
+This section has been wrong twice, so it records both the error and the correction.
 
-**Baseball Savant's `custom` leaderboard accepts `start_dt` and `end_dt` and then
-ignores them.** Three different 2023 ranges return byte-identical responses — 656
-rows, 184,104 plate appearances, every time. `month=` is ignored the same way. So
-every backtest that believed it was reading "the season up to this week" was in fact
-reading the finished season, including the very games it was about to predict.
+**The bug.** Baseball Savant's `custom` leaderboard accepts `start_dt` and `end_dt`
+and ignores them. Three disjoint 2023 ranges return byte-identical responses — 656
+rows, 184,104 plate appearances, every time; `month=` is ignored the same way.
+Nothing errors and the numbers look reasonable. They are simply the finished season,
+including the games being predicted. Every Statcast measurement this project made ran
+on that.
 
-Two things follow, and they point in opposite directions:
+**The correction.** `src/data/statcast-window.ts` aggregates the pitch-level
+`statcast_search` endpoint, which does honour dates, a day at a time — the only
+route to a real point-in-time xwOBA, at about 16 MB of pitch data per day of history.
+Re-measured over 2024, 23 weeks, 5,151 player-weeks, 21-day prior windows:
 
-- The Statcast **multiplier** lost anyway — at every weight, in all five
-  formulations, *while holding future information*. A signal that cannot help even
-  when it is allowed to cheat is not going to help when it isn't. That conclusion
-  survives.
-- The claim that **the xwOBA gap adds nothing** does **not** survive. With
-  full-season leakage the "prior" wOBA already encodes the outcomes being predicted,
-  which is exactly the condition under which a residual signal must measure as zero.
-  The tight null it produced is an artifact of the bug, not a finding.
+| predictor of the next 7 days | Spearman rho |
+|---|---|
+| **xwOBA** | **0.1019** |
+| blend, 0.7 toward xwOBA | 0.0903 |
+| blend, 0.5 | 0.0810 |
+| blend, 0.3 | 0.0716 |
+| wOBA (what a manager sees) | 0.0581 |
 
-So the honest status of Savant here is **untested, not disproven**, and the app's
-`"statcast": { "weight": 0 }` is now a placeholder awaiting a real measurement rather
-than a measured result.
+**xwOBA is the better predictor, and the ordering is monotone in how much of it you
+use.** The incremental test agrees: partial rho of the gap against future production,
+controlling for wOBA, is **+0.0944 with z = 6.79** — not a marginal call.
 
-`src/data/statcast-window.ts` is the fix: `statcast_search` does honour dates, but
-serves only pitch-level rows capped at 25,000 per response — about a day and a half
-of baseball — so a window has to be fetched a day at a time and aggregated into wOBA
-and xwOBA per player. That costs roughly 16 MB of pitch data per day of history,
-which is why the leaderboard was convenient, and is not a good enough reason to keep
-trusting it. `nub run compete --statcast-real` uses it; without that flag the
-simulator now returns **no** Statcast data rather than leaked data.
+The earlier null was an artifact of the bug, and an especially treacherous one. With
+the full season leaked into the "prior" wOBA, that wOBA already contained the outcomes
+being predicted, so any residual signal was arithmetically forced toward zero. The
+bug did not add noise; it manufactured a confident wrong answer.
 
-Savant's three other jobs never depended on the backtest and are unaffected: the
-expected-minus-actual gap drives the luck column, a missing Statcast row lowers
-confidence, and xwOBA, barrel %, exit velocity and hard-hit % are shown on every
-player card so a human can overrule the model with the underlying record in view.
+Note what the leak also explains: gap~wOBA is **−0.61** on clean data versus −0.36 on
+leaked data. Contact quality and results diverge far more within a real three-week
+window than a full season lets them, which is exactly the room the signal lives in.
+
+**What has not yet been re-run**: the season competition. Ranking correlation and
+played seasons have disagreed before, and the shipped `"statcast": { "weight": 0 }`
+was set by the broken measurement, so it is now a stale number rather than a
+justified one. Re-deriving it with `nub run compete --statcast-real` is the next
+change to the model, and the engine already threads the weight, the lambda shape and
+the scope from `model.json` for exactly that purpose.
 
 ### Matchups
 

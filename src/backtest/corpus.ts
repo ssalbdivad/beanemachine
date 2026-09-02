@@ -101,7 +101,7 @@ export interface Fold {
 	futureGames: Map<number, number>
 }
 
-export const RECENT_WINDOWS = [7, 14, 21, 30]
+export const RECENT_WINDOWS = [3, 5, 7, 10, 14, 21, 30]
 
 export const buildFold = async (
 	season: number,

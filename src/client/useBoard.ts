@@ -59,7 +59,7 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 				injuries: h.injuries,
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: h.gamesByTeam,
-				recentVolumePerGame: h.recentVolumePerGame,
+				recentVolumeByWindow: h.recentVolumeByWindow,
 				recentStats: h.recentStats,
 				teams: league.meta.max_teams
 			})

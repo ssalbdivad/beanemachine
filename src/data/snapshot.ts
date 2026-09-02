@@ -9,7 +9,7 @@ import {
 	type StatLine
 } from "./statsapi.ts"
 import { fetchUnderlying, type Underlying } from "./savant.ts"
-import { RECENT_WINDOW_DAYS } from "../engine/project.ts"
+import { RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
 
 /**
  * A point-in-time capture of every source, so the app has one consistent view of
@@ -32,8 +32,8 @@ export interface Snapshot {
 	gamesByTeam: Record<string, number>
 	/** Volume per team game over the recent window, keyed "id:group". The backtest
 	 *  showed recent playing time is the strongest predictor available. */
-	recentVolumePerGame: Record<string, number>
-	recentWindow: { hitting: number; pitching: number }
+	recentVolumeByWindow: Record<string, Record<number, number>>
+	recentWindow: { hitting: number[]; pitching: number[] }
 	/** Recent lines, keyed "id:group". Populated for pitchers only, who are the
 	 *  only side where blending the recent rate measured as a real improvement. */
 	recentStats: Record<string, StatLine>
@@ -50,14 +50,16 @@ export const buildSnapshot = async (
 	const start = iso(now)
 	const end = iso(new Date(now.getTime() + horizonDays * 86400_000))
 
-	// Side-specific windows: measured best at 7 days for hitters and 21 for
-	// pitchers across ten seasons. A starter works every fifth day, so a week of
-	// his data is one or two starts of noise.
-	const recentHitStart = iso(new Date(now.getTime() - RECENT_WINDOW_DAYS.hitting * 86400_000))
-	const recentPitStart = iso(new Date(now.getTime() - RECENT_WINDOW_DAYS.pitching * 86400_000))
+	// Every window the weights reference, per side. Short windows carry the most
+	// recent series, which measured as real extra signal over a single flat window.
+	const WINDOWS = {
+		hitting: Object.keys(RECENT_WINDOW_WEIGHTS.hitting).map(Number),
+		pitching: Object.keys(RECENT_WINDOW_WEIGHTS.pitching).map(Number)
+	}
+	const back = (d: number) => iso(new Date(now.getTime() - d * 86400_000))
 	const [
 		hitting, pitching, xBat, xPit, gamesByTeam, teamGamesPlayed, injuries,
-		recentHit, recentPit, recentHitGames, recentPitGames
+		hitWindows, pitWindows
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
 			fetchSeason(season, "pitching"),
@@ -66,27 +68,42 @@ export const buildSnapshot = async (
 			fetchGamesByTeam(start, end),
 			fetchTeamGamesPlayed(season),
 			fetchInjuries(),
-			fetchWindowStats(season, "hitting", recentHitStart, start),
-			fetchWindowStats(season, "pitching", recentPitStart, start),
-			fetchGamesByTeam(recentHitStart, start),
-			fetchGamesByTeam(recentPitStart, start)
+			Promise.all(
+				WINDOWS.hitting.map(async d => ({
+					d,
+					rows: await fetchWindowStats(season, "hitting", back(d), start),
+					games: await fetchGamesByTeam(back(d), start)
+				}))
+			),
+			Promise.all(
+				WINDOWS.pitching.map(async d => ({
+					d,
+					rows: await fetchWindowStats(season, "pitching", back(d), start),
+					games: await fetchGamesByTeam(back(d), start)
+				}))
+			)
 		])
 
 	// per-team-game volume over the recent window, the input the backtest favoured
-	const recentVolumePerGame: Record<string, number> = {}
+	// per-window volume per team game, keyed "id:group" then window length
+	const recentVolumeByWindow: Record<string, Record<number, number>> = {}
 	const recentStats: Record<string, StatLine> = {}
-	for (const r of recentPit) recentStats[`${r.id}:pitching`] = r.stats
-	for (const [rows, group, games] of [
-		[recentHit, "hitting", recentHitGames],
-		[recentPit, "pitching", recentPitGames]
+	for (const [sets, group] of [
+		[hitWindows, "hitting"],
+		[pitWindows, "pitching"]
 	] as const)
-		for (const r of rows) {
-			const g = r.teamId ? (games.get(r.teamId) ?? 0) : 0
-			if (!g) continue
-			const v = group === "hitting" ? r.stats.plateAppearances : r.stats.battersFaced
-			if (v === undefined) continue
-			recentVolumePerGame[`${r.id}:${group}`] = Number((v / g).toFixed(4))
-		}
+		for (const { d, rows, games } of sets)
+			for (const r of rows) {
+				const g = r.teamId ? (games.get(r.teamId) ?? 0) : 0
+				if (!g) continue
+				const v = group === "hitting" ? r.stats.plateAppearances : r.stats.battersFaced
+				if (v === undefined) continue
+				const key = `${r.id}:${group}`
+				;(recentVolumeByWindow[key] ??= {})[d] = Number((v / g).toFixed(4))
+				// the recent line itself, for the pitchers-only rate blend
+				if (group === "pitching" && d === Math.max(...WINDOWS.pitching))
+					recentStats[key] = r.stats
+			}
 
 	// Keyed by side, NOT merged. 133 players appear in both pools, so a flat
 	// `new Map([...xBat, ...xPit])` let each pitcher row overwrite the batter row —
@@ -124,9 +141,9 @@ export const buildSnapshot = async (
 			[...teamGamesPlayed].map(([k, v]) => [String(k), v])
 		),
 		gamesByTeam: Object.fromEntries([...gamesByTeam].map(([k, v]) => [String(k), v])),
-		recentVolumePerGame,
+		recentVolumeByWindow,
 		recentStats,
-		recentWindow: { ...RECENT_WINDOW_DAYS },
+		recentWindow: { hitting: WINDOWS.hitting, pitching: WINDOWS.pitching },
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
@@ -150,6 +167,6 @@ export const hydrate = (s: Snapshot) => ({
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])
 	),
 	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v])),
-	recentVolumePerGame: s.recentVolumePerGame ?? {},
+	recentVolumeByWindow: s.recentVolumeByWindow ?? {},
 	recentStats: s.recentStats ?? {}
 })

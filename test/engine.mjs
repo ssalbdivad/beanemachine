@@ -54,10 +54,17 @@ t("undervaluation percentiles span each side independently",
 // 10. The shipped model constants must match what the backtest actually chose.
 // These are not preferences — each was measured over 100 folds across ten seasons,
 // and a silent edit here would quietly de-tune every recommendation.
-import { RECENT_WINDOW_DAYS, RECENT_RATE_WEIGHT } from "../src/engine/project.ts"
-t("recent window is 7d for hitters, 21d for pitchers (measured optimum)",
-  RECENT_WINDOW_DAYS.hitting === 7 && RECENT_WINDOW_DAYS.pitching === 21,
-  JSON.stringify(RECENT_WINDOW_DAYS))
+import { RECENT_WINDOW_WEIGHTS, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT } from "../src/engine/project.ts"
+t("hitters weight the most recent series double (measured 40/50 folds)",
+  RECENT_WINDOW_WEIGHTS.hitting[3] === 2 && RECENT_WINDOW_WEIGHTS.hitting[7] === 1 &&
+  RECENT_WINDOW_WEIGHTS.hitting[21] === 1,
+  JSON.stringify(RECENT_WINDOW_WEIGHTS.hitting))
+t("pitchers use a 5-day short window, matching a five-day turn",
+  RECENT_WINDOW_WEIGHTS.pitching[5] === 2 && RECENT_WINDOW_WEIGHTS.pitching[21] === 1,
+  JSON.stringify(RECENT_WINDOW_WEIGHTS.pitching))
+t("blend weight is 0.75 hitting / 0.6 pitching (measured)",
+  RECENT_BLEND_WEIGHT.hitting === 0.75 && RECENT_BLEND_WEIGHT.pitching === 0.6,
+  JSON.stringify(RECENT_BLEND_WEIGHT))
 t("recent-rate blend is pitchers-only at 0.15 (hitting failed its paired test)",
   RECENT_RATE_WEIGHT.hitting === 0 && RECENT_RATE_WEIGHT.pitching === 0.15,
   JSON.stringify(RECENT_RATE_WEIGHT))

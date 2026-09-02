@@ -2,7 +2,10 @@ import type { League } from "../schema.ts"
 import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
-import { confidenceOf, project, RECENT_RATE_WEIGHT, type Projection } from "./project.ts"
+import {
+	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
+	RECENT_WINDOW_WEIGHTS, type Projection
+} from "./project.ts"
 
 /**
  * The bscore: a player's projected points over the horizon, minus what a freely
@@ -55,7 +58,8 @@ export interface RateOptions {
 	teamGamesPlayed: Map<number, number>
 	gamesByTeam: Map<number, number>
 	/** keyed "id:group" */
-	recentVolumePerGame?: Record<string, number>
+	/** keyed "id:group" then window length */
+	recentVolumeByWindow?: Record<string, Record<number, number>>
 	/** keyed "id:group" */
 	recentStats?: Record<string, StatLine>
 	/** Teams in the league — sets how deep the replacement level sits. Required:
@@ -78,7 +82,11 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			player.teamId ? o.teamGamesPlayed.get(player.teamId) : undefined,
 			horizonGames,
 			{
-				recentVolumePerGame: o.recentVolumePerGame?.[`${player.id}:${player.group}`] ?? null,
+				recentVolumePerGame: blendWindows(
+					o.recentVolumeByWindow?.[`${player.id}:${player.group}`] ?? {},
+					RECENT_WINDOW_WEIGHTS[player.group]
+				),
+				recentWeight: RECENT_BLEND_WEIGHT[player.group],
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group]
 			}

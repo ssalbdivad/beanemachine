@@ -21,6 +21,12 @@ export interface Variant {
 	recentRateWeight?: number
 	/** window used for the rate blend, if different from the volume window */
 	rateDays?: number
+	/**
+	 * Multi-window volume blend: {days: weight}. Weights are normalised, and any
+	 * remainder goes to the season-long rate. This is how "weight the most recent
+	 * series harder" gets expressed and tested rather than assumed.
+	 */
+	windowWeights?: Record<number, number>
 }
 
 export interface Score {
@@ -82,7 +88,23 @@ export const scoreVariants = (
 
 				for (const v of variants) {
 					let recentPerGame: number | null = null
-					if (v.recentDays !== null) {
+					let effectiveWeight = v.recentWeight
+					if (v.windowWeights) {
+						// combine several windows into one per-team-game estimate
+						let acc = 0, wsum = 0
+						for (const [dStr, w] of Object.entries(v.windowWeights)) {
+							const d = Number(dStr)
+							const rec = recentIndex[d]?.get(p.id)
+							const rg = fold.recentGames[d]?.get(p.teamId) ?? 0
+							if (rg <= 0) continue
+							acc += w * ((rec ? vol(rec) : 0) / rg)
+							wsum += w
+						}
+						if (wsum > 0) {
+							recentPerGame = acc / wsum
+							effectiveWeight = v.recentWeight
+						}
+					} else if (v.recentDays !== null) {
 						const rec = recentIndex[v.recentDays]?.get(p.id)
 						const rg = fold.recentGames[v.recentDays]?.get(p.teamId) ?? 0
 						if (rg > 0) recentPerGame = (rec ? vol(rec) : 0) / rg
@@ -94,7 +116,7 @@ export const scoreVariants = (
 					const proj = project(p, u, gBehind, gAhead, {
 						qualityWeight: v.qualityWeight,
 						recentVolumePerGame: recentPerGame,
-						recentWeight: v.recentWeight,
+						recentWeight: effectiveWeight,
 						recentStats: rateRec?.stats ?? null,
 						recentRateWeight: v.recentRateWeight ?? 0,
 						...(v.shrink ? { rates } : {})
@@ -177,6 +199,25 @@ if (import.meta.filename === process.argv[1]) {
 			name: `d7_rate${rw}@7`, recentDays: 7, recentWeight: 0.75,
 			qualityWeight: 0, shrink: false, recentRateWeight: rw, rateDays: 7
 		})
+	// recency-weighted multi-window blends: does the most recent series carry extra signal?
+	const COMBOS: [string, Record<number, number>][] = [
+		["s3+w14", { 3: 1, 14: 1 }],
+		["s3x2+w14", { 3: 2, 14: 1 }],
+		["s3+w7+w21", { 3: 1, 7: 1, 21: 1 }],
+		["s3x2+w7+w21", { 3: 2, 7: 1, 21: 1 }],
+		["s5+w14", { 5: 1, 14: 1 }],
+		["s5x2+w21", { 5: 2, 21: 1 }],
+		["decay_t7", { 3: 0.65, 7: 0.37, 14: 0.14, 21: 0.05, 30: 0.01 }],
+		["decay_t14", { 3: 0.81, 7: 0.61, 14: 0.37, 21: 0.22, 30: 0.12 }],
+		["decay_t21", { 3: 0.87, 7: 0.72, 14: 0.51, 21: 0.37, 30: 0.24 }],
+		["flat_all", { 3: 1, 7: 1, 14: 1, 21: 1, 30: 1 }]
+	]
+	for (const [cname, ww] of COMBOS)
+		for (const w of [0.6, 0.75, 0.9])
+			variants.push({
+				name: `${cname}_w${w}`, recentDays: null, recentWeight: w,
+				qualityWeight: 0, shrink: false, windowWeights: ww
+			})
 
 	const { byGroup, naive } = scoreVariants(folds, league, variants)
 	for (const group of ["hitting", "pitching"] as const) {

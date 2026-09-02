@@ -28,12 +28,14 @@
 
   "statcast": {
     "weight": 0,
+    "windowDays": 21,
     "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 },
     "scope": "wide",
     "clamp": { "min": 0.75, "max": 1.35 },
     "why": [
       "weight 0 is STALE, not justified. It was set by a measurement that ran on leaked data — Savant's custom leaderboard ignores its own date parameters and returns the finished season. On real point-in-time data xwOBA out-predicts wOBA (rho 0.1019 vs 0.0581 over 5,151 player-weeks) and the gap adds significant incremental signal (partial rho +0.0944, z 6.79).",
       "Re-derive this with `nub run compete --statcast-real` before trusting it either way — correlation and played seasons have disagreed here before.",
+      "windowDays 21: the signal was measured on a rolling three-week window, not on season-to-date. Contact and results diverge far more inside three weeks (gap~wOBA -0.61) than across a season (-0.36), and that divergence is the whole signal. 0 means season-to-date.",
       "lambda.mode 'rising' trusts xwOBA MORE as batted-ball sample grows; 'falling' trusts it more in SMALL samples, which is what the stabilisation literature actually argues; 'fixed' ignores sample.",
       "scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."
     ]

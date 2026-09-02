@@ -87,6 +87,13 @@ const gamesPlayed = async (start: string, end: string): Promise<Map<number, numb
  */
 const REAL_STATCAST = process.argv.includes("--statcast-real")
 
+const statcastStart = (seasonStart: string, priorEnd: string): string => {
+	const days = MODEL.statcast.windowDays
+	if (!days) return seasonStart
+	const rolled = addDays(priorEnd, -days)
+	return Date.parse(rolled) > Date.parse(seasonStart) ? rolled : seasonStart
+}
+
 const underlyingWindow = async (
 	season: number,
 	type: "batter" | "pitcher",
@@ -503,8 +510,11 @@ export const playSeason = async (
 			windowStats(season, "pitching", range.start, priorEnd),
 			gamesPlayed(range.start, priorEnd),
 			gamesPlayed(week.start, week.end),
-			underlyingWindow(season, "batter", range.start, priorEnd),
-			underlyingWindow(season, "pitcher", range.start, priorEnd)
+			// A ROLLING window, not season-to-date: the signal was measured over three
+			// weeks, and a season-long xwOBA has already regressed most of the way to
+			// the wOBA it is supposed to disagree with.
+			underlyingWindow(season, "batter", statcastStart(range.start, priorEnd), priorEnd),
+			underlyingWindow(season, "pitcher", statcastStart(range.start, priorEnd), priorEnd)
 		])
 		const recent: Record<number, PlayerSeason[]> = {}
 		const recentGames: Record<number, Map<number, number>> = {}

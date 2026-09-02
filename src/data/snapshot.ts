@@ -9,9 +9,10 @@ import {
 	type PlayerSeason,
 	type StatLine
 } from "./statsapi.ts"
-import { fetchUnderlying, type Underlying } from "./savant.ts"
+import { fetchUnderlyingRolling, type Underlying } from "./savant.ts"
 import { fetchOwnership, normalizeName } from "./yahoo-pool.ts"
 import { RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
+import { MODEL } from "../engine/weights.ts"
 
 /**
  * A point-in-time capture of every source, so the app has one consistent view of
@@ -82,8 +83,11 @@ export const buildSnapshot = async (
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
 			fetchSeason(season, "pitching"),
-			fetchUnderlying(season, "batter"),
-			fetchUnderlying(season, "pitcher"),
+			// A rolling window for the expected-stat pair: that is the window the
+			// predictive signal was measured on, and a season-long xwOBA has already
+			// converged toward the wOBA it exists to disagree with.
+			fetchUnderlyingRolling(season, "batter", back(MODEL.statcast.windowDays || 21), start),
+			fetchUnderlyingRolling(season, "pitcher", back(MODEL.statcast.windowDays || 21), start),
 			fetchSchedule(start, end),
 			fetchGamesByTeam(start, `${season}-11-05`),
 			fetchSchedule(start, iso(new Date(now.getTime() + 7 * 86400_000))),
@@ -186,6 +190,8 @@ export const buildSnapshot = async (
 			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule", rows: horizon.counts.size },
 			{ name: "Yahoo · % rostered", url: "baseball.fantasysports.yahoo.com/b1/players", rows: owned.byName.size },
 			{ name: "MLB StatsAPI · roster status", url: "statsapi.mlb.com/api/v1/teams/{id}/roster", rows: injuries.size },
+			{ name: `Baseball Savant · rolling ${MODEL.statcast.windowDays}d xwOBA (batters)`, url: "baseballsavant.mlb.com/statcast_search", rows: [...xBat.values()].filter(u => u.window === "rolling").length },
+			{ name: `Baseball Savant · rolling ${MODEL.statcast.windowDays}d xwOBA (pitchers)`, url: "baseballsavant.mlb.com/statcast_search", rows: [...xPit.values()].filter(u => u.window === "rolling").length },
 			{ name: "Baseball Savant · expected stats (batters)", url: "baseballsavant.mlb.com/leaderboard/expected_statistics", rows: xBat.size },
 			{ name: "Baseball Savant · expected stats (pitchers)", url: "baseballsavant.mlb.com/leaderboard/expected_statistics", rows: xPit.size }
 		]

@@ -40,7 +40,15 @@ export interface Filters {
 	 * other's ranking.
 	 */
 	mode: "stream" | "board" | "stash"
-	sort: "marketEdge" | "bscore" | "points" | "undervaluation" | "replacement" | "confidence" | "name"
+	sort:
+		| "marketEdge"
+		| "bscore"
+		| "points"
+		| "undervaluation"
+		| "contact"
+		| "replacement"
+		| "confidence"
+		| "name"
 	desc: boolean
 }
 
@@ -117,6 +125,9 @@ export const useBoard = (
 			// Same guard for market edge: a replacement-level body nobody rosters beats
 			// the par for his ownership by definition, and recommending him is noise.
 			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0)) return false
+			// Contact quality only means something for someone worth rostering, and only
+			// where a rolling Statcast window actually exists for him.
+			if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
 			if (q && !r.player.name.toLowerCase().includes(q)) return false
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
@@ -133,6 +144,11 @@ export const useBoard = (
 				case "confidence": return r.confidence.value
 				case "undervaluation": return r.undervaluation ?? -1
 				case "marketEdge": return r.marketEdge ?? -Infinity
+				case "contact":
+					// a pitcher benefits when his expected is BELOW his actual, so it flips
+					return (
+						(r.player.group === "hitting" ? 1 : -1) * (r.regressionGap ?? -Infinity)
+					)
 				case "name": return r.player.name
 				default: return r.bscore
 			}

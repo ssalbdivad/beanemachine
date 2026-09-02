@@ -1,4 +1,5 @@
 import { num, parseCsv } from "./csv.ts"
+import { aggregateStatcast } from "./statcast-window.ts"
 
 /**
  * Baseball Savant — the *underlying* record. These are still measurements (of
@@ -10,6 +11,10 @@ const BASE = "https://baseballsavant.mlb.com/leaderboard"
 
 export interface Underlying {
 	id: number
+	/** Which window `xwoba`/`woba` describe. The rolling window is the one the
+	 *  predictive test was run on; the season-long leaderboard is kept for the
+	 *  richer batted-ball fields, which have no point-in-time equivalent. */
+	window?: "rolling" | "season"
 	/** Expected wOBA from batted-ball quality; null when the player is below the
 	 *  leaderboard's qualifying minimum rather than assumed to be average. */
 	xwoba: number | null
@@ -103,4 +108,51 @@ export const fetchParkFactors = async (season: number): Promise<ParkFactor[]> =>
 		runs: num(r.index_runs ?? r.runs),
 		hr: num(r.index_hr ?? r.hr)
 	}))
+}
+
+
+/**
+ * Underlying stats with the expected-stat pair taken from a ROLLING window.
+ *
+ * Two sources, because neither alone is right. The pitch-level endpoint is the
+ * only one that honours a date range, so wOBA and xwOBA — the pair the whole
+ * regression signal is built on — come from there. It computes nothing else, so
+ * barrel rate, exit velocity, xBA and xSLG still come from the season-long
+ * leaderboard, and are labelled as season-long rather than passed off as recent.
+ *
+ * The window matters more than it looks. Over a season, contact quality and
+ * results converge (gap~wOBA -0.36); over three weeks they diverge far more
+ * (-0.61), and that divergence is the signal.
+ */
+export const fetchUnderlyingRolling = async (
+	season: number,
+	type: "batter" | "pitcher",
+	start: string,
+	end: string
+): Promise<Map<number, Underlying>> => {
+	const [seasonLong, rolling] = await Promise.all([
+		fetchUnderlying(season, type).catch(() => new Map<number, Underlying>()),
+		aggregateStatcast(season, type, start, end)
+	])
+	const out = new Map<number, Underlying>()
+	for (const [id, base] of seasonLong) out.set(id, { ...base, window: "season" })
+	for (const [id, r] of rolling) {
+		const base = out.get(id)
+		out.set(id, {
+			id,
+			window: "rolling",
+			xwoba: r.xwoba,
+			woba: r.woba,
+			xwobaGap: Number((r.xwoba - r.woba).toFixed(4)),
+			pa: r.pa,
+			// season-long, and only meaningful as such
+			xba: base?.xba ?? null,
+			xslg: base?.xslg ?? null,
+			barrelRate: base?.barrelRate ?? null,
+			hardHitRate: base?.hardHitRate ?? null,
+			avgExitVelocity: base?.avgExitVelocity ?? null,
+			sweetSpotRate: base?.sweetSpotRate ?? null
+		})
+	}
+	return out
 }

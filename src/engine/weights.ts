@@ -27,6 +27,7 @@ export const ModelWeights = type({
 	},
 	statcast: {
 		weight: "0 <= number <= 1",
+		windowDays: "number >= 0",
 		lambda: { mode: "'rising' | 'falling' | 'fixed'", prior: "number > 0", cap: "0 <= number <= 1" },
 		scope: "'wide' | 'battedBall'",
 		clamp: Clamp,

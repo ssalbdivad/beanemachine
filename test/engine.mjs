@@ -177,5 +177,24 @@ t("the stash horizon is longer than the fortnight",
   [...hyd.gamesRemaining.values()].reduce((a, c) => a + c, 0) >
     [...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0))
 
+// --- the rolling Statcast window, which is where the signal actually lives ---
+const rollingB = Object.values(snap.underlying.hitting).filter(u => u.window === "rolling")
+const rollingP = Object.values(snap.underlying.pitching).filter(u => u.window === "rolling")
+t("expected stats come from a rolling window, not the season",
+  rollingB.length > 200 && rollingP.length > 200, `${rollingB.length} batters, ${rollingP.length} pitchers`)
+
+// The whole point of the rolling window: over a season, contact and results
+// converge and the gap collapses. If these gaps look season-sized, the window
+// silently reverted and the signal is gone.
+const gaps = rollingB.map(u => Math.abs(u.xwobaGap)).filter(Number.isFinite).sort((a, b) => b - a)
+t("rolling gaps are wide enough to carry signal",
+  gaps.length > 100 && gaps[Math.floor(gaps.length * 0.1)] > 0.04,
+  `p90 gap ${gaps[Math.floor(gaps.length * 0.1)]}`)
+
+// a leaderboard that ignored its dates would hand back identical numbers for both
+// sides of the ball, which is how the original bug hid
+t("batter and pitcher windows are genuinely different data",
+  JSON.stringify(rollingB.slice(0, 5)) !== JSON.stringify(rollingP.slice(0, 5)))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

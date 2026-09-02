@@ -149,7 +149,9 @@ export const Board = ({
 						>
 							<option value="bscore">bscore (value over replacement)</option>
 							<option value="points">projected points</option>
+							<option value="marketEdge">market edge (what the field is wrong about)</option>
 							<option value="undervaluation">most undervalued (above replacement)</option>
+							<option value="contact">best contact vs results (last 21 days)</option>
 						</select>
 					</label>
 					<label className="ctl">
@@ -346,7 +348,9 @@ const COLUMN_HELP: Record<Filters["sort"], string> = {
 	confidence:
 		"How much real data stands behind the projection: playing time so far, whether Statcast has him, and whether he's healthy. Not the odds he plays well.",
 	undervaluation:
-		"Luck — how far his results trail the quality of his contact, ranked against everyone else on his side of the ball. 90 means only 10% have been unluckier."
+		"Luck — how far his results trail the quality of his contact over the last three weeks, ranked against everyone else on his side of the ball. 90 means only 10% have been unluckier.",
+	contact:
+		"Contact vs results — the raw gap between expected and actual wOBA over the last three weeks. Measured over a rolling window rather than the whole season, because that is where contact and results actually diverge: gap-to-wOBA correlation is −0.61 over three weeks against −0.36 across a season."
 }
 
 /** Column header that sorts. Clicking the active column flips direction. */
@@ -459,22 +463,53 @@ const Detail = ({ r }: { r: Ranked }) => {
 			<div className="detail-col">
 				<h3>Statcast model</h3>
 				<p className="tiny-note">
-					Expected stats are MLB's model of what this contact usually produces — not
-					something that happened.
+					Expected stats are MLB&rsquo;s model of what this contact usually produces —
+					not something that happened.
 				</p>
 				<dl>
 					{r.underlying?.xwoba != null ?
 						<>
-							<div className="pair"><dt>xwOBA</dt><dd>{r.underlying.xwoba}</dd></div>
+							<div className="pair">
+								<dt>xwOBA {r.underlying.window === "rolling" ? "(21d)" : "(season)"}</dt>
+								<dd>{r.underlying.xwoba}</dd>
+							</div>
+							{r.regressionGap != null && (
+								<div className="pair">
+									<dt>expected − actual</dt>
+									<dd className={r.regressionGap > 0 ? "" : "neg"}>
+										{r.regressionGap > 0 ? `+${r.regressionGap}` : r.regressionGap}
+									</dd>
+								</div>
+							)}
+							{r.underlying.pa != null && (
+								<div className="pair"><dt>PA in that window</dt><dd>{r.underlying.pa}</dd></div>
+							)}
 							{r.underlying.xba != null && (
-								<div className="pair"><dt>xBA</dt><dd>{r.underlying.xba}</dd></div>
+								<div className="pair"><dt>xBA (season)</dt><dd>{r.underlying.xba}</dd></div>
 							)}
 							{r.underlying.xslg != null && (
-								<div className="pair"><dt>xSLG</dt><dd>{r.underlying.xslg}</dd></div>
+								<div className="pair"><dt>xSLG (season)</dt><dd>{r.underlying.xslg}</dd></div>
+							)}
+							{r.underlying.hardHitRate != null && (
+								<div className="pair"><dt>hard-hit % (season)</dt><dd>{r.underlying.hardHitRate}</dd></div>
+							)}
+							{r.underlying.sweetSpotRate != null && (
+								<div className="pair"><dt>sweet-spot % (season)</dt><dd>{r.underlying.sweetSpotRate}</dd></div>
 							)}
 						</>
 					:	<p className="empty">No Statcast row for this player.</p>}
 				</dl>
+				{r.regressionGap != null && Math.abs(r.regressionGap) > 0.03 && (
+					<p className="tiny-note">
+						{r.player.group === "hitting" ?
+							r.regressionGap > 0 ?
+								`His contact over the last three weeks has been worth ${r.regressionGap} more wOBA than he got paid for.`
+							:	`He has been getting ${Math.abs(r.regressionGap)} more wOBA than his contact earned.`
+						: r.regressionGap > 0 ?
+							`He has allowed ${r.regressionGap} more expected wOBA than his line shows — the results flatter him.`
+						:	`He has been hit harder on paper than in reality by ${Math.abs(r.regressionGap)} wOBA.`}
+					</p>
+				)}
 			</div>
 			<div className="detail-col">
 				<h3>Our model</h3>

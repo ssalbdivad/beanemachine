@@ -133,9 +133,9 @@ export const Board = ({
 
 	return (
 		<>
-			<nav className="card full horizons" aria-label="What to rank for">
+			<section className="card full board-controls">
 				<h2>What are you deciding?</h2>
-			<div className="modes" role="tablist" aria-label="What to rank for">
+				<div className="modes" role="tablist" aria-label="What to rank for">
 				{(
 					[
 						["stream", "Streaming", "the next 7 days — who wins you this week"],
@@ -154,12 +154,8 @@ export const Board = ({
 						<b>{label}</b>
 						<span>{why}</span>
 					</button>
-				))}
-			</div>
-			</nav>
-
-			<section className="card full board-controls">
-				<h2>Filters</h2>
+					))}
+				</div>
 				{/* Position first and as chips, not a select: it is the filter people reach
 				    for constantly, and two clicks to change a dropdown is two too many. */}
 				<div className="chips" role="group" aria-label="Position">
@@ -265,8 +261,6 @@ export const Board = ({
 				</div>
 			</section>
 
-			<Scarcity rows={rows} league={league} />
-			<BuyLow rows={rows} />
 			{rows[0] && <BillysPick r={rows[0]} horizonDays={
 				Math.round((Date.parse(snapshot.horizon.end) - Date.parse(snapshot.horizon.start)) / 86400000)
 			} />}
@@ -338,6 +332,12 @@ export const Board = ({
 					</p>
 				)}
 			</section>
+
+			{/* Supporting analysis sits AFTER the ranking it supports. Both answer
+			    "where should I spend attention", which is a second question — putting
+			    them above the board pushed the actual recommendations below the fold. */}
+			<BuyLow rows={rows} />
+			<Scarcity rows={rows} league={league} />
 		</>
 	)
 }

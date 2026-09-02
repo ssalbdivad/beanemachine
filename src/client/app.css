@@ -504,7 +504,7 @@ pre{
 
 /* Horizon tabs. Three questions, not three filters — so they read as a choice of
    what the board is FOR, with the reason under each label. */
-.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 20px}
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0 0}
 .modes .mode{
   display:flex;flex-direction:column;gap:3px;align-items:flex-start;text-align:left;
   padding:11px 13px;border-radius:11px;cursor:pointer;
@@ -534,3 +534,16 @@ pre{
 .buylow-card dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .buylow-card dd.good{color:var(--accent);font-weight:650}
 .buylow-card .tiny-note{margin:6px 0 0;font-size:11.5px;line-height:1.45;color:var(--muted)}
+
+/* Position chips. The most-used filter, so it gets to be one click and readable at a
+   glance rather than a dropdown that hides its own state. */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 16px}
+.chip-btn{
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  border-radius:999px;padding:5px 13px;font-size:12.5px;font-weight:550;
+  letter-spacing:.2px;cursor:pointer;transition:border-color .15s,color .15s,background .15s
+}
+.chip-btn:hover{border-color:var(--accent);color:var(--text)}
+.chip-btn.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft,transparent);font-weight:650}
+.chip-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.horizons h2{margin-bottom:0}

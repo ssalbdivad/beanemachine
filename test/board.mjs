@@ -137,29 +137,29 @@ if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {
 }
 
 // "most undervalued" must surface buy-low candidates, not replacement-level noise
-await page.selectOption(".filters select >> nth=2", "undervaluation")
+await page.selectOption("[data-ctl=sort]", "undervaluation")
 await page.waitForTimeout(500)
 const uvScores = await page.$$eval(".board-row .bscore", n => n.slice(0,10).map(e => Number(e.textContent)))
 t("most-undervalued only ranks players above replacement",
   uvScores.length > 0 && uvScores.every(v => v > 0), String(uvScores.slice(0,4)))
-await page.selectOption(".filters select >> nth=2", "bscore")
+await page.selectOption("[data-ctl=sort]", "bscore")
 await page.waitForTimeout(400)
 
 // filters actually filter
 const before = await page.$$eval(".board-row", n => n.length)
-await page.selectOption(".filters select >> nth=1", "hitting")
+await page.selectOption("[data-ctl=group]", "hitting")
 await page.waitForTimeout(400)
 const after = await page.$$eval(".board-row", n => n.length)
 t("side filter changes the board", after > 0 && after <= before, `${before} → ${after}`)
 
-await page.selectOption(".filters select >> nth=0", "C")
+await page.click(".chip-btn:text-is(\"C\")")
 await page.waitForTimeout(400)
 const slots = await page.$$eval(".board-row .who .code", n => n.map(e => e.textContent))
 t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s === "C"), slots.slice(0,4).join(","))
 
 // changing the league's scoring must change the ranking — the core promise
-await page.selectOption(".filters select >> nth=0", "")
-await page.selectOption(".filters select >> nth=1", "all")
+await page.click(".chip-btn:text-is(\"All\")")
+await page.selectOption("[data-ctl=group]", "all")
 await page.waitForTimeout(300)
 const topBefore = await page.$eval(".board-row .who b", e => e.textContent)
 await page.click('.views button:nth-child(2)')

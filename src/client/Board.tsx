@@ -110,8 +110,48 @@ export const Board = ({
 
 	return (
 		<>
+			<nav className="card full horizons" aria-label="What to rank for">
+				<h2>What are you deciding?</h2>
+			<div className="modes" role="tablist" aria-label="What to rank for">
+				{(
+					[
+						["stream", "Streaming", "the next 7 days — who wins you this week"],
+						["board", "This fortnight", "the standing board, 14 days out"],
+						["stash", "Stash", "rest of season — who to hold, not who to start"]
+					] as const
+				).map(([id, label, why]) => (
+					<button
+						key={id}
+						type="button"
+						role="tab"
+						aria-selected={filters.mode === id}
+						className={`mode${filters.mode === id ? " on" : ""}`}
+						onClick={() => setFilters(f => ({ ...f, mode: id }))}
+					>
+						<b>{label}</b>
+						<span>{why}</span>
+					</button>
+				))}
+			</div>
+			</nav>
+
 			<section className="card full board-controls">
 				<h2>Filters</h2>
+				{/* Position first and as chips, not a select: it is the filter people reach
+				    for constantly, and two clicks to change a dropdown is two too many. */}
+				<div className="chips" role="group" aria-label="Position">
+					{SLOTS.map(s => (
+						<button
+							key={s || "any"}
+							type="button"
+							className={`chip-btn${filters.slot === s ? " on" : ""}`}
+							aria-pressed={filters.slot === s}
+							onClick={() => set("slot", s)}
+						>
+							{s || "All"}
+						</button>
+					))}
+				</div>
 				<div className="filters">
 					<label className="ctl">
 						<span>Search</span>
@@ -123,16 +163,9 @@ export const Board = ({
 						/>
 					</label>
 					<label className="ctl">
-						<span>Slot</span>
-						<select value={filters.slot} onChange={e => set("slot", e.currentTarget.value)}>
-							{SLOTS.map(s => (
-								<option key={s} value={s}>{s || "any slot"}</option>
-							))}
-						</select>
-					</label>
-					<label className="ctl">
 						<span>Side</span>
 						<select
+							data-ctl="group"
 							value={filters.group}
 							onChange={e => set("group", e.currentTarget.value as Filters["group"])}
 						>
@@ -144,6 +177,7 @@ export const Board = ({
 					<label className="ctl">
 						<span>Rank by</span>
 						<select
+							data-ctl="sort"
 							value={filters.sort}
 							onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
 						>
@@ -157,6 +191,7 @@ export const Board = ({
 					<label className="ctl">
 						<span>Min confidence</span>
 						<select
+							data-ctl="confidence"
 							value={String(filters.minConfidence)}
 							onChange={e => set("minConfidence", Number(e.currentTarget.value))}
 						>
@@ -200,27 +235,6 @@ export const Board = ({
 			} />}
 
 			<section className="card full">
-				<div className="modes" role="tablist" aria-label="What to rank for">
-					{(
-						[
-							["stream", "Streaming", "the next 7 days — who wins you this week"],
-							["board", "This fortnight", "the standing board, 14 days out"],
-							["stash", "Stash", "rest of season — who to hold, not who to start"]
-						] as const
-					).map(([id, label, why]) => (
-						<button
-							key={id}
-							type="button"
-							role="tab"
-							aria-selected={filters.mode === id}
-							className={`mode${filters.mode === id ? " on" : ""}`}
-							onClick={() => setFilters(f => ({ ...f, mode: id }))}
-						>
-							<b>{label}</b>
-							<span>{why}</span>
-						</button>
-					))}
-				</div>
 				<h2>
 					Recommendations
 					{age && (

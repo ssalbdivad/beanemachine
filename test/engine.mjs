@@ -334,5 +334,28 @@ t("the guard keys on coverage rather than disabling the feature outright",
     hyd.probableCoverage.get(r.player.teamId)?.published >=
     hyd.probableCoverage.get(r.player.teamId)?.games)))
 
+// --- the horizon counts only games a fantasy league plays ---
+// Every schedule read filters to gameType=R. Unfiltered, a rest-of-season window
+// running to November returns types R, F, D, L and W and 52 "teams" for 30 clubs:
+// the postseason slots are placeholder-against-placeholder until clubs clinch, and
+// then they resolve into real matchups and start crediting good teams with games no
+// league plays. The two short windows have always been clean; the reference snapshot
+// still carries the pre-filter rest-of-season shape until the next capture.
+const teamsWithPlayers = new Set(snap.players.map(p => p.teamId).filter(Boolean))
+t("every club that fields a rated player has a horizon", teamsWithPlayers.size === 30 &&
+  [...teamsWithPlayers].every(id => hyd.gamesByTeam.has(id)), `${teamsWithPlayers.size} clubs`)
+t("the fortnight and the week are keyed to real clubs only",
+  hyd.gamesByTeam.size === 30 && hyd.gamesWeek.size === 30,
+  `${hyd.gamesByTeam.size} / ${hyd.gamesWeek.size}`)
+t("no real club is credited with a postseason game it cannot play", (() => {
+  const end = new Date(`${snap.season}-09-28`)
+  const from = new Date(snap.horizon.start)
+  const days = Math.max(0, Math.round((end - from) / 86400000))
+  return [...teamsWithPlayers].every(id => (hyd.gamesRemaining.get(id) ?? 0) <= days + 1)
+})(), [...teamsWithPlayers].map(id => hyd.gamesRemaining.get(id) ?? 0).sort((a, b) => b - a)[0])
+t("and the coverage denominator is the same set of games as the schedule count",
+  [...hyd.probableCoverage].every(([team, c]) => c.games === (hyd.gamesByTeam.get(team) ?? c.games)),
+  [...hyd.probableCoverage].filter(([t2, c]) => c.games !== hyd.gamesByTeam.get(t2)).length + " disagree")
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

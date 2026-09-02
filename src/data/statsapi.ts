@@ -117,8 +117,17 @@ export const fetchSchedule = async (
 	 */
 	playedOnly = false
 ): Promise<{ counts: Map<number, number>; opponents: Map<number, number[]> }> => {
+	// `gameType=R` on every schedule read here, because a fantasy season is the
+	// REGULAR season. Unfiltered, this window returns types R, F, D, L and W, and a
+	// rest-of-season horizon running to November therefore picks up the postseason.
+	// Today that is invisible: the October games are placeholder-against-placeholder,
+	// which is why the reference snapshot carries 52 "teams" for 30 clubs and no real
+	// club's count is wrong. It stops being invisible the week clubs clinch, when the
+	// placeholders resolve into real matchups and Stash starts crediting good teams
+	// with games no league plays. Filtering also keeps the numerator and denominator
+	// of the starter-coverage scaling on the same set of games.
 	const data = await json(
-		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}`
+		`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}`
 	)
 	const counts = new Map<number, number>()
 	const opponents = new Map<number, number[]>()
@@ -208,7 +217,7 @@ export const fetchOpposingStarters = async (
 	endDate: string
 ): Promise<Map<number, number[]>> => {
 	const data = await json(
-		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}` +
+		`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}` +
 			`&hydrate=probablePitcher`
 	)
 	const out = new Map<number, number[]>()
@@ -241,7 +250,7 @@ export const fetchProbableCoverage = async (
 	endDate: string
 ): Promise<Map<number, { published: number; games: number }>> => {
 	const data = await json(
-		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}` +
+		`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}` +
 			`&hydrate=probablePitcher`
 	)
 	const out = new Map<number, { published: number; games: number }>()
@@ -263,7 +272,7 @@ export const fetchProbableStarts = async (
 	endDate: string
 ): Promise<Map<number, number>> => {
 	const data = await json(
-		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}` +
+		`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}` +
 			`&hydrate=probablePitcher`
 	)
 	const starts = new Map<number, number>()

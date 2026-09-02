@@ -959,6 +959,23 @@ draft-and-hold gives from the other direction: the in-season decisions carry the
 The simulator charges nothing for churn, and a real league charges waiver priority or
 FAAB. That caveat travels with the number.
 
+**And the human column of that table is weaker than the others.** 63/111 is a
+majority; as a paired sign test with ties excluded it is 63W-47L, z 1.53, one-sided
+p 0.064, and at one move a week it is 60W-50L, z 0.95, p 0.17. Neither clears the 5%
+bar that this document applies to the recency weight (z −3.32) or to value over
+replacement (z −4.65), both of which are reported with their z in the same section.
+Quoting the human row as a bare win count while quoting those with their strength is
+the asymmetry that makes a marginal result read as a settled one, so the sign test
+and the per-season breakdown are now printed by `test/compete.mjs` on every run:
+at one move a week the model is +27.1, +17.0 and +32.6 points a week in 2022, 2023
+and 2025, and −1.2 and −7.2 in 2021 and 2024.
+
+The honest summary is that beating an inactive or streak-chasing manager is
+established — 98/111 and 74/111 — and beating a manager who blends season and recent
+form is not yet. The model is ahead of that opponent on the pooled total and in
+three of the five seasons, at a strength that would be called a trend rather than a
+finding.
+
 ### 9.1 The same harness sets the matchup weight
 
 `compete --matchup --control=mu0.00` pairs each weight directly against the same

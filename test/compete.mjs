@@ -20,15 +20,54 @@ const t = (n, ok, x = "") => {
 
 const totals = new Map()
 const weekly = new Map()
+/** Weeks kept per season as well as pooled, so a pooled edge that lives in one
+ *  season can be seen to. */
+const bySeason = []
 for (const season of SEASONS) {
 	const { results } = await playSeason(season, league, STRATEGIES, {
 		movesPerWeek: 1,
 		warmupDays: 28
 	})
+	const here = new Map()
 	for (const r of results) {
 		totals.set(r.strategy, (totals.get(r.strategy) ?? 0) + r.total)
 		weekly.set(r.strategy, [...(weekly.get(r.strategy) ?? []), ...r.byWeek])
+		here.set(r.strategy, r.byWeek)
 	}
+	bySeason.push({ season, weekly: here })
+}
+
+/**
+ * The paired sign test this project decides by, with its strength attached.
+ *
+ * A win count on its own reads as stronger than it is: 63 of 110 decided weeks is
+ * a majority and is also p = 0.06, which is not the same claim as beating a
+ * strategy 80 of 111 times. Ties are excluded rather than split, because a tie is
+ * not half a win.
+ */
+const signTest = (mine, theirs) => {
+	let w = 0, l = 0, ties = 0, sum = 0
+	mine.forEach((v, i) => {
+		const d = v - (theirs[i] ?? 0)
+		sum += d
+		if (Math.abs(d) < 1e-9) ties++
+		else if (d > 0) w++
+		else l++
+	})
+	const n = w + l
+	const z = n ? (w - n / 2) / Math.sqrt(n * 0.25) : 0
+	// Abramowitz & Stegun 7.1.26, plenty for a figure quoted to two decimals
+	const erf = x => {
+		const t = 1 / (1 + 0.3275911 * Math.abs(x))
+		const y =
+			1 -
+			((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t +
+				0.254829592) *
+				t *
+				Math.exp(-x * x)
+		return x < 0 ? -y : y
+	}
+	return { w, l, ties, z, p: 0.5 * (1 - erf(Math.abs(z) / Math.SQRT2)), margin: sum / mine.length }
 }
 
 const bscore = totals.get("bscore")
@@ -81,10 +120,37 @@ console.log(
 t("bscore beats a streak-chaser who also understands scarcity", bscore > sharp, `${bscore} vs ${sharp}`)
 t("bscore beats a thoughtful human blending season and recent form", bscore > human, `${bscore} vs ${human}`)
 
-// the closest opponent, so it gets the paired test rather than the aggregate one
+// The closest opponent, so it gets the paired test rather than the aggregate one —
+// and the paired test gets its strength quoted with it. This is the one comparison
+// in the file where the majority is thin enough that the difference matters.
 const humanWeeks = weekly.get("thoughtful-human") ?? []
 const vsHuman = mine.filter((v, i) => v > (humanWeeks[i] ?? Infinity)).length
 t("and wins the majority of individual weeks against them", vsHuman / mine.length > 0.52, `${vsHuman}/${mine.length}`)
+
+const human5 = signTest(mine, humanWeeks)
+console.log(
+	`  vs the human, paired: ${human5.w}-${human5.l}${human5.ties ? ` (${human5.ties} tied)` : ""}` +
+		` · z ${human5.z.toFixed(2)} · one-sided p ${human5.p.toFixed(3)}` +
+		` · ${human5.margin >= 0 ? "+" : ""}${human5.margin.toFixed(1)} pts/week`
+)
+const seasonRecords = bySeason.map(({ season, weekly: w }) => ({
+	season,
+	...signTest(w.get("bscore") ?? [], w.get("thoughtful-human") ?? [])
+}))
+for (const r of seasonRecords)
+	console.log(
+		`    ${r.season}: ${r.w}-${r.l}  ${r.margin >= 0 ? "+" : ""}${r.margin.toFixed(1)} pts/week`
+	)
+
+// A pooled majority that lives entirely in one or two seasons is a different claim
+// from an edge that holds year to year, and only the second one is worth acting on.
+// This is a regression guard on the shape of the result, not a significance test.
+const seasonsWon = seasonRecords.filter(r => r.margin > 0).length
+t(
+	"the edge over the human holds in most seasons, not just in the pooled total",
+	seasonsWon >= 3,
+	`${seasonsWon}/${SEASONS.length} seasons`
+)
 
 // If in-season decisions were worthless this would tie, and every recommendation
 // the app makes after draft day would be theatre.

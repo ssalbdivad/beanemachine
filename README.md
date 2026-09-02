@@ -339,6 +339,25 @@ were measured: **thoughtful-human** 77,706 (50.1%, bscore wins 60/111),
 **hot-hand + scarcity** 75,261 (48.5%, 69/111), **draft-and-hold** 63,949 (41.2%,
 98/111). Re-run `compete` with no sweep flag to regenerate them into the ledger.
 
+**The human row is the weakest claim in this file, and it is quoted with its
+strength from here on.** Every other comparison above carries a z; that one never
+did, and it is the only one where the omission flatters the result. Paired week by
+week with ties excluded it is **60W-50L at z 0.95, one-sided p 0.17** at one move a
+week, and **63W-47L at z 1.53, p 0.064** at two. Both are directional, neither
+clears the 5% bar this project applies to everything else, and the per-season split
+at one move a week shows why:
+
+| | 2021 | 2022 | 2023 | 2024 | 2025 |
+|---|---|---|---|---|---|
+| record | 11-10 | 12-9 | 12-10 | **10-13** | 15-8 |
+| pts/week | −1.2 | +27.1 | +17.0 | **−7.2** | +32.6 |
+
+Three seasons of five carry it and 2024 goes the other way. Against a manager who
+does nothing (draft-and-hold, 98/111) or chases streaks (74/111) the model's edge is
+established beyond argument; against a manager who blends season and recent form it
+is **suggestive**. `test/compete.mjs` now prints the sign test and the per-season
+records on every run, so the number cannot be quoted without them again.
+
 **Value over replacement is what makes the difference**, and this is the one place
 the effect is large enough to be unambiguous. Paired directly against the shipped
 model over the same 111 weeks, ranking waiver decisions by raw projected points —

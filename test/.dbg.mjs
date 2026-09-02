@@ -1,0 +1,13 @@
+import { chromium } from "playwright-core"
+const b = await chromium.launch({ args:["--no-sandbox"] })
+const p = await b.newPage()
+p.on("pageerror", e => console.log("PAGEERROR", String(e)))
+p.on("console", m => console.log("CONSOLE", m.type(), m.text()))
+p.on("response", r => { if (!r.ok()) console.log("HTTP", r.status(), r.url()) })
+await p.goto("http://127.0.0.1:4174/beanemachine/", { waitUntil:"networkidle" })
+await p.waitForTimeout(3000)
+console.log("TOAST:", await p.locator(".toast").count() ? await p.locator(".toast").textContent() : "none")
+console.log("EMPTY:", await p.locator(".empty").count() ? await p.locator(".empty").textContent() : "none")
+console.log("STORE:", (await p.evaluate(() => localStorage.getItem("beanemachine:config")))?.slice(0,60))
+console.log("BODY:", (await p.locator("body").innerText()).slice(0, 500))
+await b.close()

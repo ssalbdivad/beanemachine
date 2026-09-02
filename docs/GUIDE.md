@@ -83,11 +83,11 @@ Confidence is not a vibe and not a default. It is three real measurements multip
 
 | Factor | Effect |
 |---|---|
-| Sample size | Plate appearances (batters) or batters faced (pitchers), divided by 400, capped at 1. 100 PA is a 0.25 multiplier |
+| Sample size | Playing time so far against a full season of work in that player's own role — 434 PA for a hitter, 540 batters faced for a starter, 209 for a reliever — capped at 1. 100 PA is a 0.23 multiplier |
 | Statcast data | Present: no penalty. Absent: ×0.6 |
 | Health | Healthy: no penalty. Carrying an injury designation: ×0.5 |
 
-So a healthy full-season regular with Statcast data reads near 100%. A hot rookie with 90 PA reads about 22%.
+So a healthy full-season regular with Statcast data reads near 100%, and that holds for a closer as much as for an everyday bat — the yardstick is his role's workload, not a hitter's. A hot rookie with 90 PA reads about 21%.
 
 **Distrust a row when:**
 

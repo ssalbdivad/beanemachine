@@ -276,8 +276,40 @@ export const project = (
 }
 
 /**
- * How much to trust a projection, 0–1. Driven by real sample size, whether
- * underlying data exists at all, and health — never a flat default.
+ * A full season of work for a player who holds the job outright, in the unit
+ * confidence measures: plate appearances for hitters, batters faced for pitchers.
+ *
+ * Read off the reference capture rather than chosen, because a round number is a
+ * guess about workload and the capture states it. Each is the median season
+ * volume among the players who fill that role's league-wide jobs — the top 270
+ * hitters by PA (nine lineup spots × 30 teams), the top 150 mostly-starting
+ * pitchers (a five-man rotation), the top 240 mostly-relieving ones (an eight-man
+ * bullpen). The hitting figure works out to 3.14 PA per team game, which is the
+ * rate MLB itself uses to define a qualified hitter — an independent threshold
+ * the derivation reproduces without being aimed at it.
+ */
+const FULL_SEASON = { hitting: 434, starting: 540, relieving: 209 } as const
+
+/**
+ * What a full season looks like for THIS pitcher, interpolated on the share of
+ * his appearances that were starts.
+ *
+ * A starter faces 2.6× what a reliever does, so one denominator across both makes
+ * "low confidence" mean "is a reliever" — a statement about role, not about
+ * sample. Interpolating rather than bucketing on a majority-of-starts rule keeps
+ * a swingman off a cliff where one extra start would halve his confidence, and it
+ * is the more honest reading anyway: his workload really is between the two.
+ */
+const pitcherFullSeason = (stats: StatLine): number | null => {
+	if (!stats.gamesPitched || stats.gamesStarted === undefined) return null
+	const startShare = stats.gamesStarted / stats.gamesPitched
+	return FULL_SEASON.relieving + startShare * (FULL_SEASON.starting - FULL_SEASON.relieving)
+}
+
+/**
+ * How much to trust a projection, 0–1. Driven by real sample size measured
+ * against the player's own role, whether underlying data exists at all, and
+ * health — never a flat default.
  */
 export const confidenceOf = (
 	player: PlayerSeason,
@@ -285,10 +317,19 @@ export const confidenceOf = (
 	injury: string | undefined
 ): { value: number; reasons: string[] } => {
 	const reasons: string[] = []
-	const volume =
-		player.group === "hitting" ? player.stats.plateAppearances : player.stats.battersFaced
-	const sample = Math.min(1, (volume ?? 0) / 400)
-	if (sample < 1) reasons.push(`limited sample (${volume ?? 0})`)
+	const isHitter = player.group === "hitting"
+	const volume = isHitter ? player.stats.plateAppearances : player.stats.battersFaced
+	const fullSeason = isHitter ? FULL_SEASON.hitting : pitcherFullSeason(player.stats)
+	let sample = 0
+	if (volume === undefined) reasons.push("volume not reported")
+	else if (fullSeason === null)
+		reasons.push("role not reported, so there is no workload to measure against")
+	else {
+		sample = Math.min(1, volume / fullSeason)
+		// naming the target makes the number auditable: 203 of 209 is a full-time
+		// closer, 203 of 540 is a starter who missed half a year
+		if (sample < 1) reasons.push(`limited sample (${volume} of ${Math.round(fullSeason)})`)
+	}
 	const hasUnderlying = underlying?.xwoba != null
 	if (!hasUnderlying) reasons.push("no Statcast expected stats")
 	const healthy = !injury

@@ -359,7 +359,7 @@ than bottoming out at zero.
 behind a projection. It is explicitly **not** the odds the player plays well.
 
 ```
-sample   = min(1, volume / 400)        volume = PA (hitters) or batters faced (pitchers)
+sample   = min(1, volume / fullSeason(role))
 statcast = 1 if xwOBA exists, else 0.6
 health   = 1 if not on the IL, else 0.5
 
@@ -370,26 +370,100 @@ Each factor that is below 1 pushes a human-readable reason into `reasons`, and t
 drill-down lists them. It is never a flat default: a player with no data gets a
 low number and is told why.
 
-Distribution in the reference capture, over 1,421 rateable players:
+### 5.1 The denominator is the player's own workload
 
-| bucket | players |
-|---|---|
-| 1.0 | 258 |
-| 0.8–0.99 | 80 |
-| 0.6–0.79 | 117 |
-| 0.4–0.59 | 232 |
-| 0.2–0.39 | 245 |
-| 0.0–0.19 | 489 |
+`volume` is plate appearances for a hitter and batters faced for a pitcher, and a
+full season of those is a different number in every role. A rotation starter faces
+about 2.6× what a full-time reliever does. Scoring both against one figure does not
+measure sample size — it measures role, and then reports the answer as though it
+were a statement about reliability.
 
-with 4 players missing Statcast entirely and 203 flagged on the IL.
+So the denominator is per role, and it is read off the capture rather than chosen.
+Each figure is the **median season volume among the players who fill that role's
+league-wide jobs** — the population is the league's own roster arithmetic, and the
+median of it is what holding one of those jobs actually looks like:
 
-**A known defect, stated rather than hidden.** The 400-unit sample floor is a
-hitter's number. Relievers structurally cannot reach it: a full season of relief
-work is 250–300 batters faced. Of 432 relievers on the board, **5** clear 0.70
-confidence. So a "minimum confidence 70%" filter does not remove unreliable
-players — it removes closers, which is a category error. The metric is honest
-about sample size and dishonest about what sample size *means* for a reliever, and
-that is a real bug in the number, not a presentation problem. See §8.
+| role | jobs in the league | denominator | per team game |
+|---|---|---|---|
+| hitting | 270 — nine lineup spots × 30 teams | 434 PA | 3.14 |
+| starting | 150 — a five-man rotation × 30 teams | 540 BF | 3.91 |
+| relieving | 240 — an eight-man bullpen × 30 teams | 209 BF | 1.51 |
+
+The hitting figure lands on 3.14 PA per team game. MLB's own qualification rule for
+a batting title is 3.1 PA per team game, set independently and decades earlier — the
+derivation reproduces a threshold it was not aimed at, which is the closest thing to
+external validation available here.
+
+A pitcher is not sorted into one bucket. His denominator is interpolated on the
+share of his appearances that were starts:
+
+```
+fullSeason = 209 + (gamesStarted / gamesPitched) × (540 − 209)
+```
+
+A bucketing rule would put a swingman on a cliff — 12 starts in 25 games scored as a
+reliever, 13 as a starter, and his confidence halved by one game. The interpolation
+is also the more honest reading: a pitcher who starts 60% of the time really does
+have a workload 60% of the way between the two. A pitcher whose appearances the
+source does not report has no role, so he gets no sample credit and the drill-down
+says which field was missing, rather than being scored against a role we picked
+for him.
+
+### 5.2 Distribution, before and after
+
+Over the 1,423 rateable players in the reference capture, with the old single
+400-unit floor on the left and the role denominators on the right:
+
+| bucket | before | after |
+|---|---|---|
+| 1.0 | 258 | 309 |
+| 0.8–0.99 | 80 | 139 |
+| 0.6–0.79 | 117 | 115 |
+| 0.4–0.59 | 232 | 188 |
+| 0.2–0.39 | 245 | 262 |
+| 0.0–0.19 | 491 | 410 |
+| **≥ 0.70** | **379** | **501** |
+
+with 5 players missing Statcast entirely and 203 flagged on the IL.
+
+Split by role — pitchers classified by whether most of their appearances were
+starts — the change is almost entirely where the defect was:
+
+| bucket | hitters (641) | starters (226) | relievers (556) |
+|---|---|---|---|
+| 1.0 | 147 → 126 | 104 → 79 | 7 → 104 |
+| 0.8–0.99 | 55 → 57 | 14 → 22 | 11 → 60 |
+| 0.6–0.79 | 54 → 56 | 13 → 22 | 50 → 37 |
+| 0.4–0.59 | 92 → 94 | 34 → 28 | 106 → 66 |
+| 0.2–0.39 | 103 → 106 | 33 → 36 | 109 → 120 |
+| 0.0–0.19 | 190 → 202 | 28 → 39 | 273 → 169 |
+| **≥ 0.70** | **223 → 209** | **125 → 113** | **31 → 179** |
+
+Hitters barely move: 434 is close to the 400 it replaced, and it should be, because
+400 was a hitter's number and was never wrong for hitters. Starters tighten — 540 is
+a real full season of starting work, so a pitcher who missed two months no longer
+reads 1.0 on 400 batters faced. Relievers are the fix: on the 432 pitchers who never
+started a game, **5** cleared 0.70 before and **112** do now, and 60 of them read 1.0.
+
+The busiest closers are the specific case the old number got backwards:
+
+| | saves | BF | before | after |
+|---|---|---|---|---|
+| Bryan Baker | 39 | 210 | 0.53 | 1.00 |
+| Cade Smith | 35 | 251 | 0.63 | 1.00 |
+| Mason Miller | 32 | 219 | 0.55 | 1.00 |
+| Jhoan Duran | 29 | 203 | 0.51 | 0.97 |
+| Aroldis Chapman | 30 | 189 | 0.47 | 0.90 |
+
+The median confidence of the 30 busiest closers, the 30 busiest starters and the 30
+busiest hitters is now 1.0 in all three — which is the property being asserted, and
+`test/engine.mjs` asserts it. A "minimum confidence 70%" filter is now a filter on
+sample size in every role rather than a filter on relievers.
+
+What it still does, correctly, is mark a reliever who has *not* worked a full season
+as thin: Josh Hader reads 0.64 on 134 batters faced, because 134 batters faced is
+half a season of relief work and that is a real sample limitation rather than a unit
+error.
 
 ---
 
@@ -593,11 +667,12 @@ improvement is worth, it is concentrated in the broad middle of the pool — whi
 is where waiver decisions live — and not at the very top, where the answer was
 obvious anyway. Reported plainly rather than folded into the headline.
 
-**Confidence mis-scores relievers.** The 400-unit floor is a hitter's number; 5 of
-432 relievers clear 0.70. The fix is a side-specific denominator (or an
-appearance-based one), so that "high confidence" means the same thing for a closer
-as for an everyday bat. Until that lands, a confidence filter is a position filter
-in disguise.
+**The confidence denominators are frozen to one capture.** §5.1 derives 434 / 540 /
+209 from the roster arithmetic in the reference snapshot and ships them as
+constants. They are not recomputed per capture, so if bullpen size or rotation
+usage moves — as both have over the last decade — the numbers go stale silently.
+Recomputing them from the pool being ranked would fix that, at the cost of a
+confidence scale that shifts underneath you between captures.
 
 **Multi-position eligibility is not real.** `slotsFor` derives slots from
 StatsAPI's single primary position. A player your league lists at 2B/OF is treated

@@ -1,23 +1,12 @@
 import { chromium, firefox } from "playwright-core"
-import { copyFileSync, existsSync, readFileSync, unlinkSync } from "node:fs"
+import { readFileSync } from "node:fs"
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
-// This suite drives the real app against the real Hono server, so saving writes
-// scoring.json for real. Snapshot it first and restore on ANY exit — a crash
-// partway through used to leave a test value (HR 12.25) in the league config.
-const CONFIG = "scoring.json"
-const BACKUP = "scoring.json.testbak"
-copyFileSync(CONFIG, BACKUP)
-let restored = false
-const restoreConfig = () => {
-  if (restored || !existsSync(BACKUP)) return
-  restored = true
-  copyFileSync(BACKUP, CONFIG)
-  unlinkSync(BACKUP)
-}
-process.on("exit", restoreConfig)
-for (const sig of ["SIGINT", "SIGTERM"])
-  process.on(sig, () => { restoreConfig(); process.exit(130) })
+// Leagues live in the browser, so this suite runs against a fresh profile that
+// seeds itself from the committed scoring.json and writes only to localStorage.
+// Nothing here can reach the file on disk, which is asserted below rather than
+// assumed — a save that still hit it used to leave HR 12.25 in the real config.
+const STORE = "beanemachine:config"
 
 const ENGINE = process.env.BROWSER ?? "chromium"
 const browser =
@@ -81,21 +70,38 @@ const after = await page.$$eval(".grid section:nth-of-type(1) input.val", n => n
 t("revert restores value", after[codes.indexOf("HR")] === "10.4", after.join(","))
 t("save bar hides after revert", !(await page.locator(".savebar").evaluate(e => e.classList.contains("on"))))
 
-// edit + save round-trips to disk
+// edit + save round-trips through browser storage and survives a reload
 await hr.fill("12.25"); await hr.blur(); await page.waitForTimeout(120)
 await page.click(".savebar button.primary")
 await page.waitForSelector(".toast")
 t("save toast shown", (await page.textContent(".toast")).includes("Saved"))
 await page.waitForTimeout(250)
-const onDisk = JSON.parse(readFileSync("scoring.json", "utf8"))
-t("edit hit scoring.json", onDisk.leagues["yahoo:228947"].scoring.batting.HR === 12.25,
-  String(onDisk.leagues["yahoo:228947"].scoring.batting.HR))
+const stored = await page.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE)
+t("edit hit browser storage", stored.leagues["yahoo:228947"].scoring.batting.HR === 12.25,
+  String(stored.leagues["yahoo:228947"].scoring.batting.HR))
+t("committed scoring.json is untouched",
+  JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"].scoring.batting.HR === 10.4)
+await page.reload({ waitUntil: "networkidle" })
+await toLeagueSetup(page)
+const reloaded = await page.$$eval(".grid section:nth-of-type(1) input.val", n => n.map(e => e.value))
+t("the edit survives a reload", reloaded[codes.indexOf("HR")] === "12.25", reloaded.join(","))
 
 // restore the true value through the UI
 await hr.fill("10.4"); await hr.blur(); await page.waitForTimeout(120)
 await page.click(".savebar button.primary"); await page.waitForTimeout(400)
 t("restored to real value",
-  JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"].scoring.batting.HR === 10.4)
+  (await page.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE))
+    .leagues["yahoo:228947"].scoring.batting.HR === 10.4)
+
+// the file round-trip: Download hands back exactly what is stored
+const [download] = await Promise.all([
+  page.waitForEvent("download"),
+  page.click('.bar button:text-is("Download")')
+])
+const exported = JSON.parse(readFileSync(await download.path(), "utf8"))
+t("download exports the stored config", exported.leagues["yahoo:228947"].scoring.batting.HR === 10.4,
+  download.suggestedFilename())
+t("download is named scoring.json", download.suggestedFilename() === "scoring.json")
 
 // a blank field must restore the real value, never become 0
 const first = page.locator(".grid section:nth-of-type(1) input.val").first()

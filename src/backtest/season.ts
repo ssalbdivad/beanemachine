@@ -1,0 +1,380 @@
+import { scoreStats } from "../engine/points.ts"
+import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
+import type { League } from "../schema.ts"
+import type { PlayerSeason } from "../data/statsapi.ts"
+import type { Underlying } from "../data/savant.ts"
+import { cachedFetch } from "./cache.ts"
+import { addDays, seasonRange } from "./seasons.ts"
+import { num, parseCsv } from "../data/csv.ts"
+
+/**
+ * Season-long competition.
+ *
+ * A Spearman correlation says the ranking is good; it does not say whether a
+ * manager using it wins. This plays a whole season week by week: each strategy
+ * drafts a roster, sets it every week, makes waiver moves from what it believes,
+ * and is scored on what its players ACTUALLY produced that week in the league's own
+ * scoring. Rosters may overlap between strategies — every strategy gets the same
+ * pool, so the comparison is of judgement rather than of draft position.
+ */
+
+const SAPI = "https://statsapi.mlb.com/api/v1"
+const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"
+
+const asNum = (v: unknown): number | null => {
+	const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN
+	return Number.isFinite(n) ? n : null
+}
+
+const windowStats = async (
+	season: number,
+	group: "hitting" | "pitching",
+	start: string,
+	end: string
+): Promise<PlayerSeason[]> => {
+	const text = await cachedFetch(
+		`${SAPI}/stats?stats=byDateRange&group=${group}&season=${season}&sportId=1` +
+			`&playerPool=All&limit=3000&startDate=${start}&endDate=${end}`
+	)
+	return (JSON.parse(text).stats?.[0]?.splits ?? [])
+		.map((s: any): PlayerSeason => {
+			const stat: Record<string, number> = {}
+			for (const [k, v] of Object.entries(s.stat ?? {})) {
+				const n = asNum(v)
+				if (n !== null) stat[k] = n
+			}
+			return {
+				id: s.player?.id, name: s.player?.fullName ?? "",
+				team: s.team?.name ?? null, teamId: s.team?.id ?? null,
+				position: s.position?.abbreviation ?? "", group, stats: stat
+			}
+		})
+		.filter((p: PlayerSeason) => typeof p.id === "number")
+}
+
+const gamesPlayed = async (start: string, end: string): Promise<Map<number, number>> => {
+	const data = JSON.parse(
+		await cachedFetch(`${SAPI}/schedule?sportId=1&startDate=${start}&endDate=${end}&gameType=R`)
+	)
+	const counts = new Map<number, number>()
+	for (const day of data.dates ?? [])
+		for (const g of day.games ?? []) {
+			if (g.status?.abstractGameState && g.status.abstractGameState !== "Final") continue
+			for (const side of ["home", "away"] as const) {
+				const id = g.teams?.[side]?.team?.id
+				if (typeof id === "number") counts.set(id, (counts.get(id) ?? 0) + 1)
+			}
+		}
+	return counts
+}
+
+const underlyingWindow = async (
+	season: number,
+	type: "batter" | "pitcher",
+	start: string,
+	end: string
+): Promise<Map<number, Underlying>> => {
+	const url =
+		`${SAVANT}?year=${season}&type=${type}&filter=&min=1` +
+		`&selections=pa%2Cwoba%2Cxwoba&chart=false&x=pa&y=pa&r=no&chartType=beeswarm` +
+		`&start_dt=${start}&end_dt=${end}&csv=true`
+	const out = new Map<number, Underlying>()
+	try {
+		for (const row of parseCsv(await cachedFetch(url, "text/csv"))) {
+			const id = num(row.player_id)
+			if (id === null) continue
+			const xwoba = num(row.xwoba), woba = num(row.woba)
+			out.set(id, {
+				id, xwoba, woba,
+				xwobaGap: xwoba !== null && woba !== null ? Number((xwoba - woba).toFixed(4)) : null,
+				xba: null, xslg: null, pa: num(row.pa),
+				barrelRate: null, hardHitRate: null, avgExitVelocity: null, sweetSpotRate: null
+			})
+		}
+	} catch {
+		/* a missing Savant window degrades the projection, it doesn't stop the season */
+	}
+	return out
+}
+
+/* ---------- roster shape ---------- */
+
+const ACTIVE_SLOTS = (league: League): string[] =>
+	(league.roster.slot_order ?? Object.keys(league.roster.slots)).filter(
+		s => s !== "BN" && s !== "IL" && s !== "NA"
+	)
+
+const slotsFor = (p: PlayerSeason): string[] => {
+	if (p.group === "pitching") return (p.stats.gamesStarted ?? 0) > 0 ? ["SP", "P"] : ["RP", "P"]
+	const pos = p.position
+	if (["LF", "CF", "RF", "OF"].includes(pos)) return ["OF", "Util"]
+	if (pos === "DH") return ["Util"]
+	if (["C", "1B", "2B", "3B", "SS"].includes(pos)) return [pos, "Util"]
+	return ["Util"]
+}
+
+/** Fills the league's real slots greedily from a ranked list. */
+const fillRoster = (ranked: { p: PlayerSeason; score: number }[], slots: string[]) => {
+	const taken = new Set<number>()
+	const roster: { slot: string; p: PlayerSeason }[] = []
+	// scarcest slots first, so a catcher isn't lost to a Util spot
+	const order = [...slots].sort(
+		(a, b) =>
+			ranked.filter(r => slotsFor(r.p).includes(a)).length -
+			ranked.filter(r => slotsFor(r.p).includes(b)).length
+	)
+	for (const slot of order) {
+		const pick = ranked.find(r => !taken.has(r.p.id) && slotsFor(r.p).includes(slot))
+		if (!pick) continue
+		taken.add(pick.p.id)
+		roster.push({ slot, p: pick.p })
+	}
+	return roster
+}
+
+/* ---------- strategies ---------- */
+
+export interface Context {
+	league: League
+	/** everything known strictly before the week being played */
+	prior: PlayerSeason[]
+	priorGames: Map<number, number>
+	recent: Record<number, PlayerSeason[]>
+	recentGames: Record<number, Map<number, number>>
+	underlying: Map<number, Underlying>
+	gamesAhead: Map<number, number>
+}
+
+export type Strategy = {
+	name: string
+	rank: (ctx: Context) => { p: PlayerSeason; score: number }[]
+}
+
+const tableFor = (league: League, g: "hitting" | "pitching") =>
+	g === "hitting" ? league.scoring.batting : league.scoring.pitching
+
+export const makeBscoreStrategy = (
+	name: string,
+	opts: { recentWeight?: number; rateWeight?: number; vorp?: boolean } = {}
+): Strategy => ({
+	name,
+	rank: ctx =>
+		ctx.prior
+			.map(p => {
+				const gAhead = p.teamId ? (ctx.gamesAhead.get(p.teamId) ?? 0) : 0
+				const gBehind = p.teamId ? (ctx.priorGames.get(p.teamId) ?? 0) : 0
+				if (!gAhead || !gBehind) return { p, score: -Infinity }
+				const perWindow: Record<number, number> = {}
+				for (const [d, rows] of Object.entries(ctx.recent)) {
+					const days = Number(d)
+					const rec = rows.find(r => r.id === p.id)
+					const rg = ctx.recentGames[days]?.get(p.teamId!) ?? 0
+					if (rg > 0)
+						perWindow[days] =
+							(p.group === "hitting"
+								? (rec?.stats.plateAppearances ?? 0)
+								: (rec?.stats.outs ?? 0)) / rg
+				}
+				const proj = project(p, ctx.underlying.get(p.id), gBehind, gAhead, {
+					recentVolumePerGame: blendWindows(perWindow, RECENT_WINDOW_WEIGHTS[p.group]),
+					recentWeight: opts.recentWeight ?? RECENT_BLEND_WEIGHT[p.group],
+					recentStats: ctx.recent[21]?.find(r => r.id === p.id)?.stats ?? null,
+					recentRateWeight: opts.rateWeight ?? RECENT_RATE_WEIGHT[p.group]
+				})
+				return { p, score: scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points }
+			})
+			.sort((a, b) => b.score - a.score)
+})
+
+/** Our shipped model. */
+export const bscoreStrategy = makeBscoreStrategy("bscore")
+
+/** "He'll keep doing what he's been doing" — the strategy most managers actually use. */
+export const seasonToDateStrategy: Strategy = {
+	name: "season-to-date",
+	rank: ctx =>
+		ctx.prior
+			.map(p => {
+				const gAhead = p.teamId ? (ctx.gamesAhead.get(p.teamId) ?? 0) : 0
+				const gBehind = p.teamId ? (ctx.priorGames.get(p.teamId) ?? 0) : 0
+				if (!gAhead || !gBehind) return { p, score: -Infinity }
+				const pts = scoreStats(p.stats, tableFor(ctx.league, p.group), p.group).points
+				return { p, score: (pts / gBehind) * gAhead }
+			})
+			.sort((a, b) => b.score - a.score)
+}
+
+/** Chasing the hot hand off the last fortnight — the classic active-manager move. */
+export const hotHandStrategy: Strategy = {
+	name: "hot-hand",
+	rank: ctx =>
+		ctx.prior
+			.map(p => {
+				const rec = ctx.recent[14]?.find(r => r.id === p.id)
+				const pts = rec ? scoreStats(rec.stats, tableFor(ctx.league, p.group), p.group).points : 0
+				return { p, score: pts }
+			})
+			.sort((a, b) => b.score - a.score)
+}
+
+export const STRATEGIES = [bscoreStrategy, seasonToDateStrategy, hotHandStrategy]
+
+/** Variants under test, to find where the season disagrees with the correlation. */
+export const SWEEP: Strategy[] = [
+	seasonToDateStrategy,
+	hotHandStrategy,
+	bscoreStrategy,
+	makeBscoreStrategy("bscore_rw0.5", { recentWeight: 0.5 }),
+	makeBscoreStrategy("bscore_rw0.25", { recentWeight: 0.25 }),
+	makeBscoreStrategy("bscore_rw0", { recentWeight: 0 }),
+	makeBscoreStrategy("bscore_rw0_rate0", { recentWeight: 0, rateWeight: 0 })
+]
+
+/* ---------- the season ---------- */
+
+export interface SeasonResult {
+	strategy: string
+	total: number
+	weeks: number
+	byWeek: number[]
+	moves: number
+}
+
+const RECENT = [3, 5, 7, 14, 21]
+
+export const playSeason = async (
+	season: number,
+	league: League,
+	strategies: Strategy[],
+	options: { movesPerWeek: number; warmupDays: number; swapMargin?: number } = {
+		movesPerWeek: 2,
+		warmupDays: 28
+	}
+): Promise<{ results: SeasonResult[]; oracle: number; weeks: string[] }> => {
+	const range = await seasonRange(season)
+	const weeks: { start: string; end: string }[] = []
+	let cursor = addDays(range.start, options.warmupDays)
+	while (Date.parse(addDays(cursor, 7)) <= Date.parse(range.end)) {
+		weeks.push({ start: cursor, end: addDays(cursor, 6) })
+		cursor = addDays(cursor, 7)
+	}
+
+	const slots = ACTIVE_SLOTS(league)
+	const rosters = new Map<string, { slot: string; p: PlayerSeason }[]>()
+	const totals = new Map<string, number>()
+	const byWeek = new Map<string, number[]>()
+	const moveCount = new Map<string, number>()
+	for (const s of strategies) {
+		totals.set(s.name, 0)
+		byWeek.set(s.name, [])
+		moveCount.set(s.name, 0)
+	}
+	let oracle = 0
+
+	for (const week of weeks) {
+		const priorEnd = addDays(week.start, -1)
+		const [hitPrior, pitPrior, priorGames, gamesAhead, xBat, xPit] = await Promise.all([
+			windowStats(season, "hitting", range.start, priorEnd),
+			windowStats(season, "pitching", range.start, priorEnd),
+			gamesPlayed(range.start, priorEnd),
+			gamesPlayed(week.start, week.end),
+			underlyingWindow(season, "batter", range.start, priorEnd),
+			underlyingWindow(season, "pitcher", range.start, priorEnd)
+		])
+		const recent: Record<number, PlayerSeason[]> = {}
+		const recentGames: Record<number, Map<number, number>> = {}
+		for (const d of RECENT) {
+			const s = addDays(priorEnd, -d)
+			const [h, p, g] = await Promise.all([
+				windowStats(season, "hitting", s, priorEnd),
+				windowStats(season, "pitching", s, priorEnd),
+				gamesPlayed(s, priorEnd)
+			])
+			recent[d] = [...h, ...p]
+			recentGames[d] = g
+		}
+
+		// pools, cleaned the same way the live board cleans them
+		const prior = [
+			...hitPrior.filter(p => p.position !== "P" && (p.stats.plateAppearances ?? 0) > 0),
+			...pitPrior.filter(p => p.position === "P" && (p.stats.battersFaced ?? 0) > 0)
+		]
+		const underlying = new Map([...xBat, ...xPit])
+
+		// what actually happened this week
+		const [hitActual, pitActual] = await Promise.all([
+			windowStats(season, "hitting", week.start, week.end),
+			windowStats(season, "pitching", week.start, week.end)
+		])
+		const actual = new Map<string, number>()
+		for (const p of [...hitActual, ...pitActual])
+			actual.set(
+				`${p.id}:${p.group}`,
+				scoreStats(p.stats, tableFor(league, p.group), p.group).points
+			)
+
+		const ctx: Context = { league, prior, priorGames, recent, recentGames, underlying, gamesAhead }
+
+		for (const strategy of strategies) {
+			const ranked = strategy.rank(ctx)
+			const held = rosters.get(strategy.name)
+			if (!held) {
+				rosters.set(strategy.name, fillRoster(ranked, slots))
+			} else {
+				// waiver moves: swap the weakest holds for the best available
+				const rank = new Map(ranked.map((r, i) => [r.p.id, i]))
+				const heldIds = new Set(held.map(h => h.p.id))
+				const worst = [...held].sort(
+					(a, b) => (rank.get(b.p.id) ?? 1e9) - (rank.get(a.p.id) ?? 1e9)
+				)
+				let made = 0
+				for (const out of worst) {
+					if (made >= options.movesPerWeek) break
+					const replacement = ranked.find(
+						r => !heldIds.has(r.p.id) && slotsFor(r.p).includes(out.slot)
+					)
+					if (!replacement) continue
+					const outRank = rank.get(out.p.id) ?? 1e9
+					const inRank = rank.get(replacement.p.id) ?? 1e9
+					// churn costs nothing in this sim but does in reality, and swapping on a
+					// hair's-breadth ranking difference is how a model overfits its own noise
+					if (inRank >= outRank - (options.swapMargin ?? 0)) continue
+					heldIds.delete(out.p.id)
+					heldIds.add(replacement.p.id)
+					out.p = replacement.p
+					made++
+				}
+				moveCount.set(strategy.name, (moveCount.get(strategy.name) ?? 0) + made)
+			}
+
+			const roster = rosters.get(strategy.name)!
+			const scored = roster.reduce(
+				(sum, r) => sum + (actual.get(`${r.p.id}:${r.p.group}`) ?? 0),
+				0
+			)
+			totals.set(strategy.name, (totals.get(strategy.name) ?? 0) + scored)
+			byWeek.get(strategy.name)!.push(Number(scored.toFixed(1)))
+		}
+
+		// the ceiling: the best possible legal roster with perfect hindsight
+		const hindsight = [...hitActual, ...pitActual]
+			.map(p => ({ p, score: actual.get(`${p.id}:${p.group}`) ?? 0 }))
+			.sort((a, b) => b.score - a.score)
+		oracle += fillRoster(hindsight, slots).reduce(
+			(sum, r) => sum + (actual.get(`${r.p.id}:${r.p.group}`) ?? 0),
+			0
+		)
+	}
+
+	return {
+		results: strategies.map(s => ({
+			strategy: s.name,
+			total: Number((totals.get(s.name) ?? 0).toFixed(1)),
+			weeks: weeks.length,
+			byWeek: byWeek.get(s.name) ?? [],
+			moves: moveCount.get(s.name) ?? 0
+		})),
+		oracle: Number(oracle.toFixed(1)),
+		weeks: weeks.map(w => w.start)
+	}
+}

@@ -4,28 +4,18 @@ import { arktypeValidator } from "@hono/arktype-validator"
 import { type } from "arktype"
 import { Hono } from "hono"
 import { existsSync } from "node:fs"
-import { CONFIG_PATH, ConfigError, loadConfig, saveConfig } from "./config.ts"
 import { ImportError, importLeague } from "./import.ts"
 import { fetchAvailable } from "./data/yahoo-pool.ts"
-import { League } from "./schema.ts"
 
 /**
- * The same ArkType schemas that guard scoring.json also validate every request
- * body, so a malformed edit is rejected at the edge with a real error message
- * rather than reaching the file.
+ * The API is now only what a browser genuinely cannot do for itself: read a
+ * league's own pages. Leagues live in the browser's storage, so nothing here
+ * reads or writes scoring.json and the static build behaves identically.
+ *
+ * Request bodies are still validated at the edge, so a malformed call is
+ * rejected with a real error message rather than reaching a scraper.
  */
-const LeagueKey = type("string > 0")
-
-const SaveBody = type({ key: LeagueKey, league: League })
 const ImportBody = type({ url: "string > 0" })
-const KeyBody = type({ key: LeagueKey })
-const NewBody = type({
-	key: type("string").narrow((s, ctx) =>
-		/^[A-Za-z0-9_:.-]+$/.test(s) ||
-		ctx.mustBe("non-empty, using only letters, digits, and : _ - .")
-	),
-	"template?": "string"
-})
 
 /** The free-agent pool changes slowly and Yahoo rate-limits, so cache it briefly
  *  rather than re-scraping on every page load. */
@@ -36,55 +26,21 @@ const app = new Hono()
 
 /** Our own errors are guidance; anything else is a bug and stays a 500. */
 app.onError((e, c) => {
-	if (e instanceof ImportError || e instanceof ConfigError)
-		return c.json({ error: e.message }, 400)
+	if (e instanceof ImportError) return c.json({ error: e.message }, 400)
 	console.error(e)
 	return c.json({ error: `${e.name}: ${e.message}` }, 500)
 })
 
 const api = new Hono()
-	.get("/config", async c => c.json(await loadConfig()))
+	// how the client tells a served build from a local one: on a static host there
+	// is no JSON here, so importing is off and the banner says why
+	.get("/health", c => c.json({ ok: true }))
 
-	.post("/import", arktypeValidator("json", ImportBody), async c => {
-		const { url } = c.req.valid("json")
-		const { key, league } = await importLeague(url)
-		const config = await loadConfig()
-		config.leagues[key] = league
-		config.active_league = key
-		return c.json({ key, config: await saveConfig(config) })
-	})
-
-	.post("/save", arktypeValidator("json", SaveBody), async c => {
-		const { key, league } = c.req.valid("json")
-		const config = await loadConfig()
-		config.leagues[key] = league
-		config.active_league = key
-		return c.json({ key, config: await saveConfig(config) })
-	})
-
-	.post("/activate", arktypeValidator("json", KeyBody), async c => {
-		const { key } = c.req.valid("json")
-		const config = await loadConfig()
-		if (!(key in config.leagues)) throw new ConfigError(`No league "${key}".`)
-		config.active_league = key
-		return c.json({ key, config: await saveConfig(config) })
-	})
-
-	.post("/new", arktypeValidator("json", NewBody), async c => {
-		const { key, template = "custom" } = c.req.valid("json")
-		const config = await loadConfig()
-		if (key in config.leagues) throw new ConfigError(`"${key}" already exists.`)
-		const draft = structuredClone(
-			config.platform_templates[template] ?? config.platform_templates.custom
-		) as Record<string, unknown>
-		delete draft.description
-		const league = League(draft)
-		if (league instanceof type.errors)
-			throw new ConfigError(`Template "${template}" is not a valid league:\n${league}`)
-		config.leagues[key] = league
-		config.active_league = key
-		return c.json({ key, config: await saveConfig(config) })
-	})
+	// read from the league's own pages and handed straight back: the browser is
+	// what stores it, so nothing about this league is kept here
+	.post("/import", arktypeValidator("json", ImportBody), async c =>
+		c.json(await importLeague(c.req.valid("json").url))
+	)
 
 	.post("/available", arktypeValidator("json", type({ leagueId: "string > 0" })), async c => {
 		// Browsers can't read Yahoo directly (no CORS headers), so the pool is
@@ -110,16 +66,6 @@ const api = new Hono()
 		return c.json(pool)
 	})
 
-	.post("/delete", arktypeValidator("json", KeyBody), async c => {
-		const { key } = c.req.valid("json")
-		const config = await loadConfig()
-		if (!(key in config.leagues)) throw new ConfigError(`No league "${key}".`)
-		delete config.leagues[key]
-		if (config.active_league === key)
-			config.active_league = Object.keys(config.leagues)[0] ?? null
-		return c.json({ config: await saveConfig(config) })
-	})
-
 app.route("/api", api)
 
 /** In dev Vite serves the client and proxies here; in prod we serve its build. */
@@ -135,6 +81,6 @@ export default app
 const port = Number(process.argv.find(a => a.startsWith("--port="))?.slice(7) ?? 8000)
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, info => {
 	console.log(`beanemachine api → http://localhost:${info.port}`)
-	console.log(`config            ${CONFIG_PATH}`)
+	console.log(`leagues           kept in your browser; this only reads them from their URL`)
 	if (!existsSync(DIST)) console.log(`client            run \`nub run dev\` (Vite serves it)`)
 })

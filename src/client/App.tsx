@@ -1,11 +1,12 @@
 import { useForm, useStore } from "@tanstack/react-form"
 import { type } from "arktype"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { Config, League } from "../schema.ts"
 import { League as LeagueSchema } from "../schema.ts"
-import { api, ApiError, downloadConfig, getMode } from "./api.ts"
+import { api, ApiError, detectMode, getMode } from "./api.ts"
 import { Billy } from "./Billy.tsx"
 import { Board } from "./Board.tsx"
+import { leagues } from "./leagues.ts"
 import { EligibilityPanel, Fragment2, RosterPanel, StatTable } from "./panels.tsx"
 import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
@@ -15,6 +16,7 @@ const TEMPLATES = ["custom", "yahoo", "espn", "sleeper"]
 export const App = () => {
 	const [config, setConfig] = useState<Config | null>(null)
 	const [key, setKey] = useState<string | null>(null)
+	const [loadError, setLoadError] = useState<string | null>(null)
 	const [busy, setBusy] = useState(false)
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
@@ -47,12 +49,21 @@ export const App = () => {
 			: next.active_league && keys.includes(next.active_league) ? next.active_league
 			: keys[0] ?? null
 		setConfig(next)
-		staticConfig = next
 		setKey(chosen)
+		setLoadError(null)
 	}, [])
 
 	useEffect(() => {
-		void run(async () => adopt(await api.config()))
+		void run(async () => {
+			try {
+				const [, stored] = await Promise.all([detectMode(), leagues.load()])
+				adopt(stored)
+			} catch (e) {
+				// a toast fades, and with no config the page would sit on "Loading…" forever
+				setLoadError(e instanceof ApiError ? e.message : String(e))
+				throw e
+			}
+		})
 	}, [run, adopt])
 
 	const league = key && config ? config.leagues[key] : undefined
@@ -69,8 +80,9 @@ export const App = () => {
 				<p className="tag">Optimized picks, ranked in your league&rsquo;s own scoring. Billy&mdash;named for Beane&mdash;does the counting.</p>
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
-						Static build — edits stay in this browser and Save downloads the file. Run{" "}
-						<code>nub run dev</code> locally to import leagues and write scoring.json.
+						Static build — your leagues are stored in this browser, so editing and saving
+						work here. Importing one from its URL needs the local server: run{" "}
+						<code>nub run dev</code>, since browsers can&rsquo;t read Yahoo or ESPN directly.
 					</p>
 				)}
 			</header>
@@ -107,30 +119,33 @@ export const App = () => {
 				config={config}
 				view={view}
 				activeKey={key}
-				onSelect={k =>
-					void run(async () => {
-						if (getMode() === "static") return setKey(k)
-						adopt((await api.activate(k)).config, k)
-					})
-				}
+				onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
 				onImport={url =>
 					void run(async () => {
-						const { key: k, config: next } = await api.import(url)
-						adopt(next, k)
-						show(`Imported ${next.leagues[k!]?.meta.league_name ?? k}`)
+						// reading the league needs a server; storing what it read never does
+						const { key: k, league } = await api.import(url)
+						adopt(leagues.save(k, league), k)
+						show(`Imported ${league.meta.league_name ?? k}`)
 					})
 				}
 				onCreate={(k, template) =>
 					void run(async () => {
-						const { key: made, config: next } = await api.create(k, template)
-						adopt(next, made)
-						show(`Created ${made} — every field is blank until you fill it in`)
+						adopt(leagues.create(k, template), k)
+						show(`Created ${k} — every field is blank until you fill it in`)
 					})
 				}
 				onRemove={k =>
 					void run(async () => {
-						adopt((await api.remove(k)).config)
+						adopt(leagues.remove(k))
 						show("Removed")
+					})
+				}
+				onDownload={() => void run(async () => leagues.download(config!))}
+				onLoadFile={file =>
+					void run(async () => {
+						const next = leagues.replace(await file.text())
+						adopt(next)
+						show(`Loaded ${Object.keys(next.leagues).length} leagues from ${file.name}`)
 					})
 				}
 				onReject={m => show(m, true)}
@@ -150,13 +165,7 @@ export const App = () => {
 					onSaved={next => {
 						adopt(next, key)
 						acknowledge()
-						show("Saved to scoring.json")
-					}}
-					onDownload={next => {
-						adopt(next, key)
-						acknowledge()
-						downloadConfig(next)
-						show("Downloaded scoring.json")
+						show("Saved to this browser")
 					}}
 					onError={m => show(m, true)}
 					run={run}
@@ -164,9 +173,10 @@ export const App = () => {
 			:	<div className="grid">
 					<section className="card full">
 						<p className="empty">
-							{config ?
-								"No league selected. Paste a league URL above to import one."
-							:	"Loading…"}
+							{loadError ??
+								(config ?
+									"No league selected. Paste a league URL above to import one."
+								:	"Loading…")}
 						</p>
 					</section>
 				</div>
@@ -185,6 +195,8 @@ const Toolbar = ({
 	onImport,
 	onCreate,
 	onRemove,
+	onDownload,
+	onLoadFile,
 	onReject
 }: {
 	config: Config | null
@@ -194,10 +206,13 @@ const Toolbar = ({
 	onImport: (url: string) => void
 	onCreate: (key: string, template: string) => void
 	onRemove: (key: string) => void
+	onDownload: () => void
+	onLoadFile: (file: File) => void
 	onReject: (message: string) => void
 }) => {
 	const [url, setUrl] = useState("")
 	const [template, setTemplate] = useState("custom")
+	const picker = useRef<HTMLInputElement>(null)
 	const keys = Object.keys(config?.leagues ?? {})
 	// the same control means different things per view, so it says which
 	const labels =
@@ -250,10 +265,45 @@ const Toolbar = ({
 					className="ghost"
 					disabled={!activeKey}
 					title="Remove this league"
-					onClick={() => activeKey && confirm(`Remove ${activeKey} from scoring.json?`) && onRemove(activeKey)}
+					onClick={() => activeKey && confirm(`Remove ${activeKey} from this browser?`) && onRemove(activeKey)}
 				>
 					Remove
 				</button>
+				<button
+					disabled={!keys.length}
+					title="Download every league in this browser as a scoring.json"
+					onClick={onDownload}
+				>
+					Download
+				</button>
+				<button
+					title="Replace the leagues in this browser with a scoring.json file"
+					onClick={() => picker.current?.click()}
+				>
+					Load file
+				</button>
+				<input
+					ref={picker}
+					type="file"
+					accept="application/json,.json"
+					hidden
+					aria-label="Load a scoring.json file"
+					onChange={e => {
+						const chosen = e.currentTarget.files?.[0]
+						// picking the same file twice has to fire again, so clear it either way
+						e.currentTarget.value = ""
+						if (!chosen) return
+						// the file replaces the store outright, so say what is about to go
+						if (
+							keys.length &&
+							!confirm(
+								`Replace the ${keys.length} league${keys.length === 1 ? "" : "s"} in this browser with ${chosen.name}?`
+							)
+						)
+							return
+						onLoadFile(chosen)
+					}}
+				/>
 			</div>
 			<form
 				className="bar"
@@ -305,37 +355,27 @@ const Chips = ({ league }: { league: League }) => {
 	)
 }
 
-let staticConfig: Config | null = null
-
 const LeagueEditor = ({
 	leagueKey,
 	league,
 	onSaved,
-	onDownload,
 	onError,
 	run
 }: {
 	leagueKey: string
 	league: League
 	onSaved: (config: Config) => void
-	onDownload: (config: Config) => void
 	onError: (message: string) => void
 	run: (fn: () => Promise<void>) => void
 }) => {
-	/** The ArkType League schema validates the draft on every change — the exact
-	 *  schema the server re-checks and that guards scoring.json on disk. */
+	/** The ArkType League schema validates the draft on every change — the same
+	 *  schema that guards what reaches storage. */
 	const form = useForm({
 		defaultValues: league,
 		validators: { onChange: LeagueSchema },
 		onSubmit: ({ value }) =>
 			run(async () => {
-				if (getMode() === "static") {
-					// no backend to write to: hand the edited config back as a file
-					const merged = { ...staticConfig!, leagues: { ...staticConfig!.leagues, [leagueKey]: value } }
-					form.reset(value)
-					return onDownload(merged)
-				}
-				const { config } = await api.save(leagueKey, value)
+				const config = leagues.save(leagueKey, value)
 				form.reset(value)
 				onSaved(config)
 			})
@@ -439,7 +479,7 @@ const LeagueEditor = ({
 					</span>
 					<button onClick={() => form.reset()}>Revert</button>
 					<button className="primary" disabled={!!invalid} onClick={() => void form.handleSubmit()}>
-						{getMode() === "static" ? "Download scoring.json" : "Save to scoring.json"}
+						Save
 					</button>
 				</div>
 			</div>

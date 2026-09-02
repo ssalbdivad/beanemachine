@@ -4,6 +4,12 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Config, League } from "./schema.ts"
 
+/**
+ * scoring.json on disk. The app no longer reads or writes it — leagues live in
+ * the browser's storage — so this is the offline path: `nub run import` writes
+ * the committed file, which is also what seeds a browser that has nothing stored.
+ */
+
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 export const CONFIG_PATH = join(ROOT, "scoring.json")
 

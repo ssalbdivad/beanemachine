@@ -21,7 +21,8 @@
     "evaluate": "node src/backtest/evaluate.ts",
     "test:static": "node test/static.mjs",
     "auto": "node src/auto/run.ts",
-    "auto:login": "node src/auto/run.ts --login"
+    "auto:login": "node src/auto/run.ts --login",
+    "compete": "node src/backtest/compete.ts"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

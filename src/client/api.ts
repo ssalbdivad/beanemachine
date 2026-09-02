@@ -1,17 +1,18 @@
-import type { Config, League } from "../schema.ts"
+import type { League } from "../schema.ts"
 
 export class ApiError extends Error {}
 
 /**
- * The app runs in two modes.
+ * Leagues live in this browser (see leagues.ts), so the two modes now differ in
+ * exactly one thing: whether there is a server to read a real league with.
  *
- * `server` — the Hono API is reachable, so imports scrape live leagues and saves
- * write scoring.json on disk.
+ * `server` — the Hono API is reachable, so a league can be imported from its URL
+ * and its free-agent pool read.
  *
- * `static` — a build served from somewhere with no backend (GitHub Pages). The
- * committed scoring.json is loaded as an asset, edits stay in the browser, and
- * saving downloads the file. Importing is impossible here regardless of hosting:
- * Yahoo and ESPN send no CORS headers, so a browser cannot read them.
+ * `static` — a build served from somewhere with no backend (GitHub Pages).
+ * Editing, saving and deleting are unaffected. Reading a league is impossible
+ * here regardless of hosting: Yahoo and ESPN send no CORS headers, so a browser
+ * cannot fetch them.
  */
 export type Mode = "server" | "static"
 
@@ -31,6 +32,17 @@ const send = async <T,>(path: string, body?: unknown): Promise<T> => {
 	return data as T
 }
 
+/** Asked once at startup, because nothing else reveals the mode any more: config
+ *  no longer comes from the API, so a page can now go its whole life without
+ *  calling one. */
+export const detectMode = async (): Promise<Mode> => {
+	mode = await send<{ ok: true }>("/api/health").then(
+		() => "server" as const,
+		() => "static" as const
+	)
+	return mode
+}
+
 /**
  * Rejects rather than throwing. Throwing synchronously means a caller's `.catch()`
  * never gets attached, so the error escapes as an unhandled exception — which took
@@ -40,36 +52,9 @@ const staticOnly = <T,>(action: string): Promise<T> =>
 	Promise.reject(
 		new ApiError(
 			`${action} needs the local server — this is the static build. ` +
-				`Run it with \`nub run dev\` to import leagues and write scoring.json.`
+				`Run it with \`nub run dev\`. Your leagues are stored in this browser either way.`
 		)
 	)
-
-type ConfigReply = { key?: string; config: Config }
-
-/** Falls back to the committed scoring.json when no API answers. */
-export const loadConfig = async (): Promise<Config> => {
-	try {
-		const config = await send<Config>("/api/config")
-		mode = "server"
-		return config
-	} catch {
-		mode = "static"
-		const res = await fetch(`${import.meta.env.BASE_URL}scoring.json`)
-		if (!res.ok) throw new ApiError("Couldn't load scoring.json.")
-		return (await res.json()) as Config
-	}
-}
-
-export const downloadConfig = (config: Config): void => {
-	const url = URL.createObjectURL(
-		new Blob([`${JSON.stringify(config, null, 2)}\n`], { type: "application/json" })
-	)
-	const a = document.createElement("a")
-	a.href = url
-	a.download = "scoring.json"
-	a.click()
-	URL.revokeObjectURL(url)
-}
 
 export interface AvailablePool {
 	players: { yahooId: string; name: string; team: string | null; positions: string[] }[]
@@ -82,19 +67,9 @@ export const api = {
 		mode === "static" ?
 			staticOnly<AvailablePool>("Reading your league's free agents")
 		:	send<AvailablePool>("/api/available", { leagueId }),
-	config: loadConfig,
-	import: (url: string): Promise<ConfigReply> =>
+	/** Returns the scraped league for the browser to store; the server keeps nothing. */
+	import: (url: string): Promise<{ key: string; league: League }> =>
 		mode === "static" ?
-			staticOnly<ConfigReply>("Importing a league")
-		:	send<ConfigReply>("/api/import", { url }),
-	save: (key: string, league: League) => send<ConfigReply>("/api/save", { key, league }),
-	activate: (key: string) => send<ConfigReply>("/api/activate", { key }),
-	create: (key: string, template: string): Promise<ConfigReply> =>
-		mode === "static" ?
-			staticOnly<ConfigReply>("Creating a league")
-		:	send<ConfigReply>("/api/new", { key, template }),
-	remove: (key: string): Promise<ConfigReply> =>
-		mode === "static" ?
-			staticOnly<ConfigReply>("Removing a league")
-		:	send<ConfigReply>("/api/delete", { key })
+			staticOnly<{ key: string; league: League }>("Importing a league")
+		:	send<{ key: string; league: League }>("/api/import", { url })
 }

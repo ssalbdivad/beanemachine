@@ -50,6 +50,33 @@ const ps = u.filter(x => x.player.group === "pitching").map(x => x.undervaluatio
 t("undervaluation percentiles span each side independently",
   Math.max(...hs) > 95 && Math.max(...ps) > 95 && Math.min(...hs) < 5 && Math.min(...ps) < 5)
 
+// 8. confidence must mean the same thing for a closer as for an everyday bat. Scored
+// against a hitter's 400-PA floor, 5 of 432 relievers cleared 0.70 — so "minimum
+// confidence 70%" deleted the closer population rather than the unreliable players.
+const median = rows => {
+  const v = rows.map(x => x.confidence.value).sort((a, b) => a - b)
+  return v[Math.floor(v.length / 2)]
+}
+const busiest = (rows, key, n) =>
+  [...rows].sort((a, b) => (b.player.stats[key] ?? 0) - (a.player.stats[key] ?? 0)).slice(0, n)
+const closers = busiest(
+  r10.filter(x => x.player.group === "pitching" && (x.player.stats.gamesStarted ?? 0) === 0),
+  "saves", 30)
+const [closer] = closers
+t("a well-established closer reaches high confidence", closer.confidence.value >= 0.9,
+  `${closer.player.name}: ${closer.player.stats.saves} saves, ` +
+  `${closer.player.stats.battersFaced} BF → ${closer.confidence.value}`)
+t("a confidence minimum no longer works as a position filter",
+  closers.filter(x => x.confidence.value >= 0.7).length >= 20,
+  `${closers.filter(x => x.confidence.value >= 0.7).length}/30 busiest closers clear 0.70`)
+const hitters30 = busiest(r10.filter(x => x.player.group === "hitting"), "plateAppearances", 30)
+const starters30 = busiest(
+  r10.filter(x => x.player.group === "pitching" && (x.player.stats.gamesStarted ?? 0) >= 25),
+  "battersFaced", 30)
+t("a full season of work reads the same in all three roles",
+  median(hitters30) === 1 && median(starters30) === 1 && median(closers) === 1,
+  `hitters ${median(hitters30)}, starters ${median(starters30)}, closers ${median(closers)}`)
+
 
 // 10. The shipped model constants must match what the backtest actually chose.
 // These are not preferences — each was measured over 100 folds across ten seasons,

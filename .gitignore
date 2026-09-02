@@ -10,3 +10,4 @@ logo/candidates*.json
 logo/pick.png
 public/snapshot.json
 data/backtest-cache/
+data/yahoo-session.json

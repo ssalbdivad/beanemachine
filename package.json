@@ -19,7 +19,9 @@
     "backtest": "node src/backtest/run.ts",
     "tune": "node src/backtest/tune.ts",
     "evaluate": "node src/backtest/evaluate.ts",
-    "test:static": "node test/static.mjs"
+    "test:static": "node test/static.mjs",
+    "auto": "node src/auto/run.ts",
+    "auto:login": "node src/auto/run.ts --login"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

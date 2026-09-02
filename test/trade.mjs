@@ -266,6 +266,26 @@ for (let trial = 0; trial < 300; trial++) {
 t("the matching returns the true maximum on every random instance",
 	matchedBrute === checked, `${matchedBrute}/${checked} matched brute force`)
 
+// A duplicated row must not become a second man. The greedy fill keyed its taken
+// set on id:group; the matching indexes by array position, so a duplicate would be
+// a second node in the graph and the same player would start twice.
+t("the same player twice on a roster is still one man", (() => {
+	const one = full[0]
+	const doubled = startingLineup(league, [...full, one], bars)
+	const seats = doubled.starters.filter(s => s.player && key(s.player) === key(one)).length
+	return seats === 1 && doubled.points === lineup.points
+})(), `${startingLineup(league, [...full, full[0]], bars).points} vs ${lineup.points}`)
+t("and a two-way player is still two men, because he is two rows", (() => {
+	// dedup keys on id:group, not id — Ohtani is one human and two rated rows, and
+	// the league lets him hold both spots
+	const twoWay = [
+		{ player: { id: 660271, group: "hitting" }, rateable: true, points: 90, slots: ["Util"] },
+		{ player: { id: 660271, group: "pitching" }, rateable: true, points: 70, slots: ["P"] }
+	]
+	const seated = startingLineup(mini({ Util: 1, P: 1 }), twoWay, null)
+	return seated.points === 160 && seated.starters.every(x => x.source === "roster")
+})())
+
 // and on the real roster it can only help — the old greed is the lower bound
 const greedy = (league, roster, bars) => {
 	const spotList = activeSlots(league)

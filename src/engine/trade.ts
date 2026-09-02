@@ -85,8 +85,10 @@ export interface Start {
 	/** Null when no rostered player filled the spot. */
 	player: Rated | null
 	points: number
-	/** `replacement` means a freely available body covers the spot; `empty` means
-	 *  nothing does, and the spot really is worth nothing. */
+	/** `replacement` means a freely available body covers the spot — either nobody
+	 *  you own is eligible there, or nobody you own is worth more than that body.
+	 *  `empty` means not even a bar is known for the slot, so it really is worth
+	 *  nothing. */
 	source: "roster" | "replacement" | "empty"
 }
 
@@ -94,9 +96,15 @@ export interface Lineup {
 	starters: Start[]
 	/** Projected points of the starting lineup over the horizon. */
 	points: number
-	/** Rostered players who could not crack it. */
+	/** Rostered players not in the lineup: beaten to every spot they are eligible
+	 *  for, or worth less than the replacement bar at all of them. Since the
+	 *  matching prices a spot rather than a player, both are the same answer to the
+	 *  same question — he is not worth a seat — and neither is a demotion. */
 	bench: Rated[]
-	/** Startable spots nothing could fill and no replacement bar covers. */
+	/** Startable spots left at nothing: no replacement bar is known for the slot and
+	 *  nobody on the roster is worth seating there. Usually that means nobody is
+	 *  eligible at all; it can also mean the only eligible men project below zero,
+	 *  which an empty seat beats. */
 	holes: string[]
 	/** Roster rows with no projection. They cannot be started, and saying so is the
 	 *  point — ranking them at zero next to real players would be a quiet lie. */
@@ -237,8 +245,14 @@ export const startingLineup = (
 	const unprojectable = roster.filter(r => !r.rateable)
 	// deterministic: the same roster must produce the same lineup whatever order it
 	// arrives in, or trading a player for himself would not come out at zero
+	// One row per man. The greedy fill this replaced keyed its `taken` set on
+	// `keyOf`, so a roster that carried the same player twice could only seat him
+	// once; the matching indexes players by position in this array, so a duplicate
+	// row would be a second node in the graph and the same man would start in two
+	// spots, inflating the lineup and every trade delta read off it.
+	const seen = new Set<string>()
 	const startable = roster
-		.filter(r => r.rateable)
+		.filter(r => r.rateable && !seen.has(keyOf(r)) && (seen.add(keyOf(r)), true))
 		.sort(
 			(a, b) =>
 				b.points - a.points ||
@@ -474,8 +488,10 @@ const explain = (
 	if (opened.length)
 		parts.push(
 			opened.length > 1
-				? `The spots that open are filled off the wire — ${priced} — not by anyone you own.`
-				: `The spot that opens is filled by a freely available ${priced}, not by anyone you own.`
+				? `The spots that open are priced off the wire — ${priced} — because nobody you ` +
+					`still own is worth seating there.`
+				: `The spot that opens is priced at a freely available ${priced}, because nobody ` +
+					`you still own is worth seating there.`
 		)
 	else if (short > 0)
 		parts.push(

@@ -484,10 +484,10 @@ const LineupCard = ({
 								{s.player ?
 									s.player.player.name
 								: s.source === "replacement" ?
-									<em title="Nobody you own is eligible here, so the spot is priced at what the best freely available player there projects for.">
+									<em title="Nobody you own is worth this spot — either nobody you own is eligible here, or the best one who is projects below the freely available player the spot is priced at.">
 										best free agent at {s.slot}
 									</em>
-								:	<em className="hole-name" title="Nobody in the whole pool is eligible here, so there is no price for this spot at all.">
+								:	<em className="hole-name" title="No price is known for this spot — nobody in the whole pool is eligible here, so there is no freely available body to price it at.">
 										nothing can fill this
 									</em>
 								}

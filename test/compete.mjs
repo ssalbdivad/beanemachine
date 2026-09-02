@@ -21,7 +21,6 @@ const t = (n, ok, x = "") => {
 const totals = new Map()
 const weekly = new Map()
 for (const season of SEASONS) {
-	// one move per week: the measured optimum, and what autonomous mode defaults to
 	const { results } = await playSeason(season, league, STRATEGIES, {
 		movesPerWeek: 1,
 		warmupDays: 28

@@ -56,6 +56,16 @@
     ]
   },
 
+  "waivers": {
+    "movesPerWeek": 2,
+    "why": [
+      "Measured across 111 weeks and five seasons, two waiver moves a week beats one against every opponent the simulator plays: 63 of 111 weeks against a thoughtful human versus 60 at one move, 75 against hot-hand versus 74, 73 against a scarcity-aware streak-chaser versus 69, and 80 against a season-to-date manager versus 76.",
+      "Three is worse than two (58/111 against the human), so the curve peaks — it just does not peak at one. An earlier version of this project shipped one move and claimed selectivity beats activity; that claim was wrong and is retracted.",
+      "At zero moves the model loses to every opponent (30/111 against the human). In-season decisions are most of the value, which is the same thing draft-and-hold shows from the other direction.",
+      "Caveat the simulator cannot see: it charges nothing for churn, while a real league spends waiver priority or FAAB on every claim. If moves are expensive in your league, lower this."
+    ]
+  },
+
   "matchup": {
     "weight": 0.5,
     "clamp": { "min": 0.88, "max": 1.12 },

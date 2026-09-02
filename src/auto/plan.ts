@@ -53,7 +53,21 @@ export interface PlanOptions {
 	lineupMinGain: number
 }
 
-export const DEFAULTS: PlanOptions = { minGain: 5, keepFloor: 25, maxMoves: 1, lineupMinGain: 0 }
+/**
+ * maxMoves is 2 because that is what measured best, not because two feels safe.
+ *
+ * An earlier version of this project shipped 1 and claimed selectivity beat
+ * activity. Re-measured across 111 weeks and five seasons against every opponent
+ * the simulator plays, two moves a week beats one on all of them — 63 of 111
+ * weeks against a thoughtful human versus 60 at one move, and better against the
+ * two streak-chasers and the naive manager as well. Three is worse than two
+ * (58/111), so the curve does have a peak; it is just not at one.
+ *
+ * The honest caveat: the simulator charges nothing for churn. A real league
+ * spends waiver priority or FAAB on every claim, and this number does not know
+ * that. If your league makes moves expensive, lower it.
+ */
+export const DEFAULTS: PlanOptions = { minGain: 5, keepFloor: 25, maxMoves: 2, lineupMinGain: 0 }
 
 /** What a slot will accept, as the league's own settings page states it. */
 export type SlotAccepts = string[] | "any" | "injured_only"

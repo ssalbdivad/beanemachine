@@ -493,12 +493,25 @@ export const planMoves = (
 		.sort((a, b) => a.rated.bscore - b.rated.bscore)
 	const started = belowFloor.filter(r => protect.has(normalizeName(r.spot.name)))
 	const droppable = belowFloor.filter(r => !protect.has(normalizeName(r.spot.name)))
-	for (const r of started)
-		notes.push(
-			`${r.spot.name} is ${r.rated.bscore}, below the ${options.keepFloor} keep floor, but ` +
-				`this run is starting him — dropping a man the lineup needs would leave the seat ` +
-				`empty, so he is not offered up`
-		)
+	// Protecting him is the safe half of the answer. The useful half is saying what
+	// the protection cost: a run that quietly declines an obvious upgrade is worse
+	// for the operator than one that declines it out loud, because he can make the
+	// move by hand and this planner cannot yet (the lineup is computed against the
+	// pre-move roster, so nothing would seat the man who arrives — METHODOLOGY 12.1).
+	const protectedNotes = (upgrades: Map<string, { name: string; gain: number }>) => {
+		for (const r of started) {
+			const up = upgrades.get(normalizeName(r.spot.name))
+			notes.push(
+				`${r.spot.name} is ${r.rated.bscore}, below the ${options.keepFloor} keep floor, but ` +
+					`this run is starting him, and dropping a man the lineup needs would leave the ` +
+					`seat empty — so he is not offered up` +
+					(up ?
+						`. ${up.name} would be worth ${up.gain} more there: a real upgrade, but one ` +
+						`that has to be made by hand, because this run seats nobody it adds`
+					:	"")
+			)
+		}
+	}
 
 	const free = input.rated.filter(
 		r => r.rateable && input.availableNames.has(normalizeName(r.player.name))
@@ -509,6 +522,23 @@ export const planMoves = (
 	const addable = free
 		.filter(r => !r.injury && !onRoster.has(normalizeName(r.player.name)))
 		.sort((a, b) => b.bscore - a.bscore)
+
+	// same like-for-like slot rule the real moves use, so a named upgrade is one that
+	// could actually have been made
+	protectedNotes(
+		new Map(
+			started.flatMap(r => {
+				const slots = r.legal ?? r.rated.slots
+				const best = addable.find(a => a.slots.some(x => slots.includes(x)))
+				return best && best.bscore > r.rated.bscore ?
+						[[
+							normalizeName(r.spot.name),
+							{ name: best.player.name, gain: r2(best.bscore - r.rated.bscore) }
+						] as const]
+					:	[]
+			})
+		)
+	)
 
 	if (!input.availableNames.size)
 		notes.push("the free-agent pool is empty, so no add was possible")

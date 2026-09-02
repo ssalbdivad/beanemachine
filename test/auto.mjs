@@ -471,6 +471,11 @@ t("the only body at a scarce slot is not dropped by the same run that starts him
 t("and the plan says why he was spared rather than leaving a silent gap",
 	both.notes.some(n => n.includes("Solo Catcher") && n.includes("keep floor")),
 	JSON.stringify(both.notes))
+t("and it names the upgrade the sparing cost, so the operator can make it by hand",
+	both.notes.some(n =>
+		n.includes("Solo Catcher") && n.includes("Better Catcher") && n.includes("33") &&
+			n.includes("by hand")),
+	JSON.stringify(both.notes))
 t("a run that spares everyone below the floor does not then claim nobody was below it",
 	!both.notes.some(n => n.includes("nobody on the roster is below")) &&
 		both.notes.some(n => n.includes("everyone below the 25 keep floor is in this run's lineup")),

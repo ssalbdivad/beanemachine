@@ -34,18 +34,38 @@ if (!kept.length) {
 }
 
 /**
- * One season must not be counted twice because it was run twice; the later run
- * wins. The key has to include WHICH knob was swept, though — a matchup sweep and
- * a reliever sweep over the same five seasons are not two attempts at the same
- * measurement, and collapsing them silently discards one.
+ * Runs are grouped by WHICH KNOB THEY SWEPT before anything is added up.
+ *
+ * Two sweeps over the same five seasons are not two halves of one measurement —
+ * they are two separate experiments that happen to share opponents. Summing them
+ * counted hot-hand and season-to-date twice and reported 222 weeks of a 111-week
+ * season, which made every baseline look twice as good as it is. Totals are only
+ * additive across DISJOINT seasons within a single sweep.
  */
-const bySeason = new Map<string, Result>()
+const signature = (r: Result) => Object.keys(r.totals).sort().join("|")
+const groups = new Map<string, Result[]>()
 for (const r of [...kept].sort((a, b) => a.ranAt.localeCompare(b.ranAt)))
-	bySeason.set(
-		`${r.seasons.join(",")}:${r.movesPerWeek}:${r.statcast}:` +
-			Object.keys(r.totals).sort().join("|"),
-		r
-	)
+	groups.set(signature(r), [...(groups.get(signature(r)) ?? []), r])
+
+const wanted = process.argv.find(a => a.startsWith("--sweep="))?.slice(8)
+const chosen =
+	[...groups.entries()].find(([sig]) => (wanted ? sig.includes(wanted) : false)) ??
+	// default to the sweep with the most seasons behind it, which is the one most
+	// worth believing
+	[...groups.entries()].sort(
+		(a, b) =>
+			new Set(b[1].flatMap(r => r.seasons)).size - new Set(a[1].flatMap(r => r.seasons)).size
+	)[0]
+
+if (!chosen) {
+	console.log("No runs to pool.")
+	process.exit(0)
+}
+
+const [, sweepRuns] = chosen
+// within one sweep, a season run twice is one season; the later run wins
+const bySeason = new Map<string, Result>()
+for (const r of sweepRuns) bySeason.set(`${r.seasons.join(",")}:${r.movesPerWeek}`, r)
 const pooled = [...bySeason.values()]
 
 const totals = new Map<string, number>()
@@ -60,7 +80,13 @@ for (const r of pooled) {
 const seasons = [...new Set(pooled.flatMap(r => r.seasons))].sort()
 console.log(
 	`Pooled verdict — ${pooled.length} runs · seasons ${seasons.join(", ")} · ${weeks} weeks` +
-		`${config ? ` · statcast ${config}` : ""}\n`
+		`${config ? ` · statcast ${config}` : ""}\n` +
+		`strategies: ${[...totals.keys()].join(", ")}\n` +
+		(groups.size > 1 ?
+			`(${groups.size} distinct sweeps on disk; showing the one with the most seasons. ` +
+				`--sweep=<strategy name> picks another.)\n`
+		:	"") +
+		"\n"
 )
 for (const [name, total] of [...totals].sort((a, b) => b[1] - a[1]))
 	console.log(`  ${name.padEnd(18)} ${total.toFixed(0).padStart(8)} pts`)

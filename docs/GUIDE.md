@@ -1,5 +1,36 @@
 # beanemachine user guide
 
+## Which view you want
+
+The board opens on three tabs, and they are three different questions rather than
+three filters.
+
+**Streaming** ranks over the next seven days, using that week's real slate. This is
+the daily/weekly view: it rewards a pitcher with two starts booked and a hitter whose
+team plays six games instead of four, and it is the one to use on waiver day.
+
+**This fortnight** is the standing board, fourteen days out. It is the default
+because it is long enough that a single bad week doesn't dominate and short enough to
+still be a decision you act on now.
+
+**Stash** ranks over every game left in the regular season. Playing time and role
+matter far more here than the last fortnight, so it surfaces the young player who
+just took an everyday job rather than whoever is hot. This is who to *hold*, not who
+to start. The Statcast numbers on each card matter most at this horizon in principle
+— but read the README before trusting them: this project has not yet measured that
+honestly, and says so.
+
+## The edge column
+
+The default sort is **edge**, not bscore, because a bare bscore ranking opens on
+players who are already rostered in every league. Edge compares a player's bscore
+against the median bscore of the players the field prices the same way he is priced,
+using Yahoo's "% Ros". An edge of +18 means eighteen points more than the typical
+player rostered about as widely.
+
+A dash in that column means Yahoo doesn't list the player, so there is no market
+price to compare against — unknown, which is not the same as unowned.
+
 ## What am I looking at?
 
 The board is every MLB player, ranked by how much he would add to *your* team over the next 14 days, in *your* league's scoring. The top card is Billy's pick — the number one row, with the reasons spelled out. Under it, one row per player: his value over replacement (**bscore**), his raw projected points, what a replacement at his slot projects, how confident the projection is, and how far his expected contact quality sits from his actual results. Click any row to open the drill-down, which takes that projection apart into what was measured, what was modelled, and what is missing. The heading states how old the underlying data is and the exact date window being projected. Only the top 120 rows render; narrow the filters to see further down.

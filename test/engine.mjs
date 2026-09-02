@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs"
 import { hydrate } from "../src/data/snapshot.ts"
 import { rateAll, withMarketEdge, withUndervaluation } from "../src/engine/bscore.ts"
+import { windowFrom } from "../src/engine/period.ts"
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
 const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
@@ -168,12 +169,26 @@ if (sameScore.length === 2) {
     `${cheaper.player.name} ${cheaper.rosteredPct}% edge ${cheaper.marketEdge} vs ${dearer.player.name} ${dearer.rosteredPct}% edge ${dearer.marketEdge}`)
 } else t("at equal bscore the less-rostered player carries the larger edge", true, "no comparable pair in this snapshot")
 
-// the horizons must be real, distinct schedules rather than one scaled number
-t("the week horizon is shorter than the fortnight",
-  hyd.gamesWeek.size > 0 &&
-    [...hyd.gamesWeek.values()].reduce((a, c) => a + c, 0) <
-      [...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0),
-  `${[...hyd.gamesWeek.values()].reduce((a, c) => a + c, 0)} vs ${[...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0)}`)
+// the horizons must be real, distinct schedules rather than one scaled number.
+// The week is no longer stored — it belongs to the league, not to the capture — so it
+// is counted here the way the board counts it, off the slate.
+const weekWin = windowFrom(hyd.slate, snap.horizon.start,
+  new Date(Date.parse(snap.horizon.start) + 6 * 86400000).toISOString().slice(0, 10))
+const total = m => [...m.values()].reduce((a, c) => a + c, 0)
+t("a week counted off the slate is shorter than the fortnight",
+  weekWin.games.size > 0 && total(weekWin.games) < total(hyd.gamesByTeam),
+  `${total(weekWin.games)} vs ${total(hyd.gamesByTeam)}`)
+// The bug this replaced: `start + 7 days` against an endpoint inclusive on BOTH ends
+// asked for eight dates, one more than the seven-date week the model was measured on.
+t("a seven-day period is seven dates, not the eight the old window asked for", (() => {
+  const eight = windowFrom(hyd.slate, snap.horizon.start,
+    new Date(Date.parse(snap.horizon.start) + 7 * 86400000).toISOString().slice(0, 10))
+  return total(eight.games) > total(weekWin.games)
+})(), `${total(weekWin.games)} over 7 dates vs ${(() => {
+  const e = windowFrom(hyd.slate, snap.horizon.start,
+    new Date(Date.parse(snap.horizon.start) + 7 * 86400000).toISOString().slice(0, 10))
+  return total(e.games)
+})()} over 8`)
 t("the stash horizon is longer than the fortnight",
   [...hyd.gamesRemaining.values()].reduce((a, c) => a + c, 0) >
     [...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0))
@@ -345,8 +360,8 @@ const teamsWithPlayers = new Set(snap.players.map(p => p.teamId).filter(Boolean)
 t("every club that fields a rated player has a horizon", teamsWithPlayers.size === 30 &&
   [...teamsWithPlayers].every(id => hyd.gamesByTeam.has(id)), `${teamsWithPlayers.size} clubs`)
 t("the fortnight and the week are keyed to real clubs only",
-  hyd.gamesByTeam.size === 30 && hyd.gamesWeek.size === 30,
-  `${hyd.gamesByTeam.size} / ${hyd.gamesWeek.size}`)
+  hyd.gamesByTeam.size === 30 && weekWin.games.size === 30,
+  `${hyd.gamesByTeam.size} / ${weekWin.games.size}`)
 t("no real club is credited with a postseason game it cannot play", (() => {
   const end = new Date(`${snap.season}-09-28`)
   const from = new Date(snap.horizon.start)

@@ -4,7 +4,8 @@ import {
 	fetchOpposingStarters,
 	fetchProbableCoverage,
 	fetchProbableStarts,
-	fetchSchedule,
+	fetchSlate,
+	type SlateGame,
 	fetchWindowStats,
 	fetchInjuries,
 	fetchSeason,
@@ -16,6 +17,7 @@ import { fetchUnderlyingRolling, type Underlying } from "./savant.ts"
 import { fetchOwnership, normalizeName } from "./yahoo-pool.ts"
 import { RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import { MODEL } from "../engine/weights.ts"
+import { windowFrom } from "../engine/period.ts"
 
 /**
  * A point-in-time capture of every source, so the app has one consistent view of
@@ -35,29 +37,12 @@ export interface Snapshot {
 	underlying: { hitting: Record<string, Underlying>; pitching: Record<string, Underlying> }
 	injuries: Record<string, string>
 	teamGamesPlayed: Record<string, number>
-	gamesByTeam: Record<string, number>
-	/** Who each team plays over the horizon. Optional so a snapshot captured before
-	 *  matchups existed still loads — absent means the index is null, not neutral. */
-	opponentsByTeam?: Record<string, number[]>
-	/** Games each team has left in the regular season — the horizon for a stash,
-	 *  as opposed to the next week's slate a streamer plays against. */
-	gamesRemaining?: Record<string, number>
-	/** The next seven days only. A streaming decision is made against the week that
-	 *  is actually about to happen, so it gets its own count and its own opponents
-	 *  rather than half of a fortnight. */
-	gamesWeek?: Record<string, number>
-	/** Scheduled starts per pitcher over the horizon, and over the next week. Absent
-	 *  means MLB had not published them, not that the pitcher does not start. */
-	probableStarts?: Record<string, number>
-	probableStartsWeek?: Record<string, number>
-	/** For each team, the opposing starters it faces over the horizon and the week.
-	 *  Absent means MLB has not published them, not that nobody is pitching. */
-	opposingStarters?: Record<string, number[]>
-	opposingStartersWeek?: Record<string, number[]>
-	/** Published-vs-scheduled probables per team. A partial count is not a count. */
-	probableCoverage?: Record<string, { published: number; games: number }>
-	probableCoverageWeek?: Record<string, { published: number; games: number }>
-	opponentsWeek?: Record<string, number[]>
+	/** Every regular-season game from the capture date to the end of the season, one
+	 *  row each. Counts are NOT stored: which window matters is a property of the
+	 *  reader's league, not of the capture, so `windowFrom` in src/engine/period.ts
+	 *  counts whichever window is asked for. This replaced eight schedule reads that
+	 *  each baked in one window, two of which disagreed with each other. */
+	slate: SlateGame[]
 	/** Yahoo "% Ros", keyed by MLBAM id. Absent for anyone Yahoo did not list;
 	 *  absent means unknown, never unowned. */
 	ownership?: Record<string, number>
@@ -95,7 +80,7 @@ export const buildSnapshot = async (
 	}
 	const back = (d: number) => iso(new Date(now.getTime() - d * 86400_000))
 	const [
-		hitting, pitching, xBat, xPit, horizon, restOfSeason, week, probables, probablesWeek, facing, facingWeek, coverage, coverageWeek, owned, teamGamesPlayed, injuries,
+		hitting, pitching, xBat, xPit, slate, owned, teamGamesPlayed, injuries,
 		hitWindows, pitWindows
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
@@ -105,23 +90,12 @@ export const buildSnapshot = async (
 			// converged toward the wOBA it exists to disagree with.
 			fetchUnderlyingRolling(season, "batter", back(MODEL.statcast.windowDays || 21), start),
 			fetchUnderlyingRolling(season, "pitcher", back(MODEL.statcast.windowDays || 21), start),
-			fetchSchedule(start, end),
-			fetchGamesByTeam(start, `${season}-11-05`),
-			fetchSchedule(start, iso(new Date(now.getTime() + 7 * 86400_000))),
-			fetchProbableStarts(start, end).catch(() => new Map<number, number>()),
-			fetchProbableStarts(start, iso(new Date(now.getTime() + 7 * 86400_000))).catch(
-				() => new Map<number, number>()
-			),
-			fetchOpposingStarters(start, end).catch(() => new Map<number, number[]>()),
-			fetchOpposingStarters(start, iso(new Date(now.getTime() + 7 * 86400_000))).catch(
-				() => new Map<number, number[]>()
-			),
-			fetchProbableCoverage(start, end).catch(
-				() => new Map<number, { published: number; games: number }>()
-			),
-			fetchProbableCoverage(start, iso(new Date(now.getTime() + 7 * 86400_000))).catch(
-				() => new Map<number, { published: number; games: number }>()
-			),
+			// ONE schedule read, out to the end of the regular season, carrying the games
+			// themselves rather than counts. A scoring period belongs to the league and a
+			// snapshot serves many, so the window has to be chosen at read time; and
+			// deriving every count from one set of rows is what makes it impossible for a
+			// coverage fraction's numerator and denominator to come from different windows.
+			fetchSlate(start, `${season}-11-05`).catch(() => [] as SlateGame[]),
 			fetchOwnership(leagueId).catch(() => ({
 				byName: new Map<string, number>(),
 				eligibility: new Map<string, string[]>(),
@@ -202,25 +176,7 @@ export const buildSnapshot = async (
 		teamGamesPlayed: Object.fromEntries(
 			[...teamGamesPlayed].map(([k, v]) => [String(k), v])
 		),
-		gamesByTeam: Object.fromEntries([...horizon.counts].map(([k, v]) => [String(k), v])),
-		opponentsByTeam: Object.fromEntries(
-			[...horizon.opponents].map(([k, v]) => [String(k), v])
-		),
-		gamesRemaining: Object.fromEntries([...restOfSeason].map(([k, v]) => [String(k), v])),
-		gamesWeek: Object.fromEntries([...week.counts].map(([k, v]) => [String(k), v])),
-		probableStarts: Object.fromEntries([...probables].map(([k, v]) => [String(k), v])),
-		probableStartsWeek: Object.fromEntries(
-			[...probablesWeek].map(([k, v]) => [String(k), v])
-		),
-		opposingStarters: Object.fromEntries([...facing].map(([k, v]) => [String(k), v])),
-		opposingStartersWeek: Object.fromEntries(
-			[...facingWeek].map(([k, v]) => [String(k), v])
-		),
-		probableCoverage: Object.fromEntries([...coverage].map(([k, v]) => [String(k), v])),
-		probableCoverageWeek: Object.fromEntries(
-			[...coverageWeek].map(([k, v]) => [String(k), v])
-		),
-		opponentsWeek: Object.fromEntries([...week.opponents].map(([k, v]) => [String(k), v])),
+		slate,
 		// joined on normalised name, because Yahoo exposes its own player ids and
 		// never the MLBAM one. A player Yahoo did not list is simply absent.
 		eligibility: Object.fromEntries(
@@ -241,8 +197,8 @@ export const buildSnapshot = async (
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
-			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule", rows: horizon.counts.size },
-			{ name: "MLB StatsAPI · probable starters", url: "statsapi.mlb.com/api/v1/schedule?hydrate=probablePitcher", rows: probables.size },
+			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule?hydrate=probablePitcher", rows: slate.length },
+			{ name: "MLB StatsAPI · probable starters", url: "statsapi.mlb.com/api/v1/schedule?hydrate=probablePitcher", rows: slate.filter(g => g.homeProbable !== null || g.awayProbable !== null).length },
 			{ name: "Yahoo · multi-position eligibility", url: "baseball.fantasysports.yahoo.com/b1/players", rows: owned.eligibility.size },
 			{ name: "Yahoo · % rostered", url: "baseball.fantasysports.yahoo.com/b1/players", rows: owned.byName.size },
 			{ name: "MLB StatsAPI · roster status", url: "statsapi.mlb.com/api/v1/teams/{id}/roster", rows: injuries.size },
@@ -255,7 +211,23 @@ export const buildSnapshot = async (
 }
 
 /** Rehydrate the string-keyed maps a JSON snapshot has to use. */
-export const hydrate = (s: Snapshot) => ({
+/**
+ * The snapshot with its lookups built, and every schedule-derived count taken from
+ * the slate rather than stored.
+ *
+ * The fortnight is the default horizon and is derived here; the WEEK deliberately is
+ * not, because a week is a property of the league and this function has not been
+ * shown one. `src/client/useBoard.ts` resolves the league's own scoring period and
+ * calls `windowFrom` with it.
+ */
+export const hydrate = (s: Snapshot) => {
+	const slate = s.slate ?? []
+	const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), s.horizon.end)
+	const horizon = windowFrom(slate, s.horizon.start, s.horizon.end)
+	const rest = windowFrom(slate, s.horizon.start, seasonEnd)
+	return {
+	slate,
+	seasonEnd,
 	players: s.players,
 	underlying: {
 		hitting: new Map(Object.entries(s.underlying.hitting).map(([k, v]) => [Number(k), v])),
@@ -265,39 +237,21 @@ export const hydrate = (s: Snapshot) => ({
 	teamGamesPlayed: new Map(
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])
 	),
-	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v])),
-	gamesRemaining: new Map(
-		Object.entries(s.gamesRemaining ?? {}).map(([k, v]) => [Number(k), v])
-	),
+	gamesByTeam: horizon.games,
+	opponentsByTeam: horizon.opponents,
+	probableStarts: horizon.probableStarts,
+	opposingStarters: horizon.opposingStarters,
+	probableCoverage: horizon.coverage,
+	gamesRemaining: rest.games,
+	// The rest-of-season opponent list, which no earlier capture carried at all: the
+	// Stash tab used to rate a months-long horizon against the next fortnight's
+	// opponents, which METHODOLOGY 11.1 recorded as an open gap. One slate closes it.
+	opponentsRemaining: rest.opponents,
 	ownership: new Map(Object.entries(s.ownership ?? {}).map(([k, v]) => [Number(k), v])),
 	eligibility: new Map(
 		Object.entries(s.eligibility ?? {}).map(([k, v]) => [Number(k), v])
 	),
-	gamesWeek: new Map(Object.entries(s.gamesWeek ?? {}).map(([k, v]) => [Number(k), v])),
-	probableStarts: new Map(
-		Object.entries(s.probableStarts ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	probableStartsWeek: new Map(
-		Object.entries(s.probableStartsWeek ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	opposingStarters: new Map(
-		Object.entries(s.opposingStarters ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	opposingStartersWeek: new Map(
-		Object.entries(s.opposingStartersWeek ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	probableCoverage: new Map(
-		Object.entries(s.probableCoverage ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	probableCoverageWeek: new Map(
-		Object.entries(s.probableCoverageWeek ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	opponentsWeek: new Map(
-		Object.entries(s.opponentsWeek ?? {}).map(([k, v]) => [Number(k), v])
-	),
-	opponentsByTeam: new Map(
-		Object.entries(s.opponentsByTeam ?? {}).map(([k, v]) => [Number(k), v])
-	),
 	recentVolumeByWindow: s.recentVolumeByWindow ?? {},
 	recentStats: s.recentStats ?? {}
-})
+	}
+}

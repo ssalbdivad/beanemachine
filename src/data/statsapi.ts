@@ -211,6 +211,61 @@ export const fetchTeamGamesPlayed = async (season: number): Promise<Map<number, 
  * archive of what was announced at the time exists. That is stated rather than
  * papered over — see model.json.
  */
+/**
+ * One row per scheduled game, which is the only shape that survives contact with the
+ * fact that a scoring period belongs to the LEAGUE and a snapshot serves many.
+ *
+ * Counting games per team at capture time bakes one window into the data; carrying
+ * the games themselves lets any window be counted at read time — the fortnight, the
+ * rest of the season, and whatever Monday-to-Sunday period the reader's league
+ * happens to run. It also collapses what used to be eight schedule requests into one,
+ * and removes the class of bug where the numerator and denominator of a coverage
+ * fraction were fetched over different windows.
+ */
+export interface SlateGame {
+	/** The game's own date, as MLB dates it. */
+	date: string
+	home: number
+	away: number
+	/** Published probable starters, or null where MLB has not named one yet. Null is
+	 *  "not announced", never "nobody is pitching". */
+	homeProbable: number | null
+	awayProbable: number | null
+	/** True once the game is final, so a played-only count can be taken from the same
+	 *  rows a forward-looking one is. */
+	final: boolean
+}
+
+export const fetchSlate = async (
+	startDate: string,
+	endDate: string
+): Promise<SlateGame[]> => {
+	const data = await json(
+		`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}` +
+			`&hydrate=probablePitcher`
+	)
+	const out: SlateGame[] = []
+	for (const day of data.dates ?? [])
+		for (const game of day.games ?? []) {
+			const home = game.teams?.home?.team?.id
+			const away = game.teams?.away?.team?.id
+			if (typeof home !== "number" || typeof away !== "number") continue
+			const probable = (side: "home" | "away") => {
+				const id = game.teams?.[side]?.probablePitcher?.id
+				return typeof id === "number" ? id : null
+			}
+			out.push({
+				date: day.date ?? game.officialDate ?? startDate,
+				home,
+				away,
+				homeProbable: probable("home"),
+				awayProbable: probable("away"),
+				final: game.status?.abstractGameState === "Final"
+			})
+		}
+	return out
+}
+
 /** For each team, the opposing starters it is booked against over the window. */
 export const fetchOpposingStarters = async (
 	startDate: string,

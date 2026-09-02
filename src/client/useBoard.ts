@@ -3,6 +3,7 @@ import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import { rateAll, withMarketEdge, withUndervaluation, type Ranked } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
+import { resolvePeriod, windowFrom } from "../engine/period.ts"
 
 export type { Ranked }
 
@@ -102,43 +103,43 @@ export const useBoard = (
 	filters: Filters,
 	availableNames?: Set<string> | null
 ) => {
+	// The reader's today, not the capture's. A snapshot is a set of games; which of
+	// them are still ahead of you is a question only the clock can answer.
+	const period = useMemo(() => {
+		if (!snapshot || !league) return null
+		const slate = snapshot.slate ?? []
+		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
+		return resolvePeriod(league, new Date().toISOString().slice(0, 10), seasonEnd)
+	}, [snapshot, league])
+
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
 		// Replacement depth is teams × slots. Without a real team count there is no
 		// honest bscore, so this refuses rather than assuming a league size.
 		if (league.meta.max_teams == null) return []
 		const h = hydrate(snapshot)
-		// Rest-of-season counts can be empty in the off-season, and a horizon of zero
-		// games would rank everyone at zero. Fall back rather than invent a number.
-		// Which window actually got used, not which one was asked for. The two can
-		// differ — an off-season snapshot carries no rest-of-season counts and a
-		// horizon of zero games would rank everyone at zero — and everything below is
-		// keyed on the resolved window rather than on the mode. Keying on the mode is
-		// how a week's worth of published starters ends up divided by a fortnight of
-		// games: the numerator and the denominator have to come from the same window
-		// or the coverage scaling in `starterBlendedIndex` is measuring nothing.
-		const window =
-			filters.mode === "stream" && h.gamesWeek.size ? "week"
-			: filters.mode === "stash" && h.gamesRemaining.size ? "season"
-			: "fortnight"
+		// The window is now chosen by the LEAGUE's own scoring period rather than by a
+		// rolling seven days, and every count for it comes from one slate — so the
+		// numerator and denominator of the coverage scaling in `starterBlendedIndex`
+		// cannot be drawn from different windows, because there is only one window.
+		const week = period ? windowFrom(h.slate, period.start, period.end) : null
+		// A period can legitimately resolve to nothing — a stale snapshot asked about a
+		// week that starts after its last captured game — and zero games would rank
+		// everyone at zero. Fall back to the fortnight rather than invent a number.
+		const usingWeek = filters.mode === "stream" && !!week && week.games.size > 0
+		const usingRest = filters.mode === "stash" && h.gamesRemaining.size > 0
 		const horizon =
-			window === "week" ? { games: h.gamesWeek, opponents: h.opponentsWeek }
-			: window === "season" ? { games: h.gamesRemaining, opponents: h.opponentsByTeam }
+			usingWeek ? { games: week!.games, opponents: week!.opponents }
+			: usingRest ? { games: h.gamesRemaining, opponents: h.opponentsRemaining }
 			: { games: h.gamesByTeam, opponents: h.opponentsByTeam }
 		// Probables reach about a week out, so the rest of a season has none — and an
 		// absent count must fall back to the team-games estimate, not project zero.
 		const probableStarts =
-			window === "week" ? h.probableStartsWeek
-			: window === "season" ? undefined
-			: h.probableStarts
+			usingWeek ? week!.probableStarts : usingRest ? undefined : h.probableStarts
 		const probableCoverage =
-			window === "week" ? h.probableCoverageWeek
-			: window === "season" ? undefined
-			: h.probableCoverage
+			usingWeek ? week!.coverage : usingRest ? undefined : h.probableCoverage
 		const opposingStarters =
-			window === "week" ? h.opposingStartersWeek
-			: window === "season" ? undefined
-			: h.opposingStarters
+			usingWeek ? week!.opposingStarters : usingRest ? undefined : h.opposingStarters
 		return withMarketEdge(
 			withUndervaluation(
 				rateAll({
@@ -164,7 +165,7 @@ export const useBoard = (
 			),
 			h.ownership
 		)
-	}, [snapshot, league, filters.mode])
+	}, [snapshot, league, filters.mode, period])
 
 	/** Which sides this league actually scores — an unconfigured template scores
 	 *  neither, and the board must say so rather than rank a field of zeros. */
@@ -258,5 +259,5 @@ export const useBoard = (
 		return out
 	}, [rated, filters, availableNames, edgeUsable])
 
-	return { rated, rows, scored, edgeUsable, edgeCoverage }
+	return { rated, rows, scored, edgeUsable, edgeCoverage, period }
 }

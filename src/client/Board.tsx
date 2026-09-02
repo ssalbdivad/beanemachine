@@ -6,6 +6,7 @@ import { Fragment2 } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 import { api, ApiError, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
+import type { ResolvedPeriod } from "../engine/period.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -83,16 +84,27 @@ const onTabKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
  * claimed the same fortnight while quoting 23 games in it. The horizon is the one
  * thing the three tabs differ by, so it is derived from the mode here.
  *
- * The week's end is the snapshot's own start plus seven days, which is how the
- * capture built `gamesWeek`. The rest of the season has no stated end date in the
- * snapshot, so it is named rather than given the fortnight's.
+ * The week's edges now come from the LEAGUE rather than from the calendar. A rolling
+ * seven days is the wrong window for a matchup league — on a Wednesday it counted 7.4
+ * games a club when 4.7 remained in the matchup — so `resolvePeriod` supplies the
+ * range and the phrase names the period rather than a number of days. The rest of the
+ * season has no stated end date in the snapshot, so it is named rather than given the
+ * fortnight's.
  */
-const horizonSpan = (snapshot: Snapshot, mode: Filters["mode"]) => {
+const horizonSpan = (
+	snapshot: Snapshot,
+	mode: Filters["mode"],
+	period: ResolvedPeriod | null
+) => {
 	const { start, end } = snapshot.horizon
-	if (mode === "stream") {
-		const week = new Date(Date.parse(start) + 7 * 86400000).toISOString().slice(0, 10)
-		return { range: `${start} → ${week}`, phrase: "the next 7 days" }
-	}
+	if (mode === "stream" && period)
+		return {
+			range: `${period.start} → ${period.end}`,
+			phrase:
+				period.kind === "daily" ? "today"
+				: period.kind === "rolling" ? "a rolling 7 days"
+				: "the rest of this scoring period"
+		}
 	if (mode === "stash")
 		return {
 			range: `${start} → the end of the regular season`,
@@ -154,7 +166,7 @@ export const Board = ({
 		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
 		[pool]
 	)
-	const { rows, scored, edgeUsable, edgeCoverage } = useBoard(snapshot, league, filters, availableNames)
+	const { rows, scored, edgeUsable, edgeCoverage, period } = useBoard(snapshot, league, filters, availableNames)
 	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -217,7 +229,7 @@ export const Board = ({
 
 	// Not a hook, so it belongs after the refusals above rather than among them —
 	// and it needs the snapshot they have just established exists.
-	const span = horizonSpan(snapshot, filters.mode)
+	const span = horizonSpan(snapshot, filters.mode, period)
 
 	return (
 		<>
@@ -385,7 +397,11 @@ export const Board = ({
 				)}
 				<p className="sub">
 					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
-					projected over {span.range} ·
+					projected over {span.range}
+					{filters.mode === "stream" && period && ` — ${period.basis}`}
+					{filters.mode === "stream" && period?.clipped &&
+						", cut short by the end of the captured slate"}
+					 ·
 					playing time leans on recent form: the last{" "}
 					{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
 					and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,

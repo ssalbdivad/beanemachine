@@ -51,6 +51,42 @@ export const Eligibility = type({
 	"grid_legend?": { "[string]": "string" }
 }).or("null")
 
+/**
+ * How the league carves the season into the periods a matchup is scored over.
+ *
+ * Two independent facts, not one. The PERIOD decides where a streaming window ends;
+ * the LOCK decides which period you can still act on. The shipped league is proof
+ * they do not follow from each other: it runs Monday-to-Sunday matchups AND lets you
+ * change your lineup every day.
+ *
+ * Optional, and every inner field nullable, for two load-bearing reasons found by
+ * reading the callers: `test/leagues.mjs` and `src/client/leagues.ts` both validate
+ * the platform TEMPLATES against this same `League` schema, so a required key would
+ * make "new league" throw; and `src/client/leagues.ts` re-validates every stored
+ * config on read, so a required key would brick the browser store of anyone who has
+ * saved a league. Null means "not known", never "no period" — `kind: "none"` is how
+ * a league says it genuinely has no week.
+ */
+export const ScoringPeriod = type({
+	/** `matchup` is a multi-day period; `daily` scores each day on its own; `none` is
+	 *  roto or season-long points, where a rolling window is the honest answer. */
+	kind: "'matchup' | 'daily' | 'none' | null",
+	/** Length of a matchup period in days. Null when unknown. */
+	days: "number | null",
+	/** Weekday the period opens on, lowercase three-letter. Null when unknown. */
+	starts_on: "'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' | null",
+	/** An ISO date known to be the first day of some period, for leagues whose grid
+	 *  does not fall on a fixed weekday. Null for the ordinary weekday case. */
+	anchor: "string | null",
+	/** `daily` means lineups can be changed every day, so the remainder of the
+	 *  current period is actionable. `period` means the lineup is locked for the
+	 *  period, so the next one is what a streaming decision is really about. */
+	lineup_lock: "'daily' | 'period' | null",
+	/** Where this came from, quoted, so a wrong value can be traced to its source
+	 *  rather than argued about. */
+	source: "string | null"
+}).or("null")
+
 export const Meta = type({
 	platform: "'yahoo' | 'espn' | 'sleeper' | 'custom'",
 	sport: "string | null",
@@ -78,6 +114,7 @@ export const League = type({
 	scoring: Scoring,
 	roster: Roster,
 	eligibility: Eligibility,
+	"scoring_period?": ScoringPeriod,
 	"league_rules?": "object",
 	provenance: Provenance,
 	needs_review: "string[]"
@@ -99,3 +136,4 @@ export const Config = type({
 export type Config = typeof Config.infer
 export type League = typeof League.infer
 export type Meta = typeof Meta.infer
+export type ScoringPeriod = typeof ScoringPeriod.infer

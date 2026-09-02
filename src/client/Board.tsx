@@ -19,6 +19,13 @@ const Confidence = ({ value, reasons }: { value: number; reasons: string[] }) =>
 	</span>
 )
 
+const MISSING_LABEL: Record<string, string> = {
+	plateAppearances: "no plate appearances on record, so there is no playing-time rate to project from",
+	outs: "no innings on record, so there is no workload rate to project from",
+	teamGamesPlayed: "his team's games played is unknown, so the per-game rate can't be computed",
+	"underlying expected stats": "Statcast has no expected-stats row for him"
+}
+
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
 /** How old the capture is. A projection built on last week's numbers is wrong in a
@@ -79,6 +86,17 @@ export const Board = ({
 			<section className="card full">
 				<h2>Recommendations</h2>
 				<p className="empty">Import or configure a league first — the board ranks players in your league's scoring.</p>
+			</section>
+		)
+	if (league.meta.max_teams == null)
+		return (
+			<section className="card full">
+				<h2>Recommendations</h2>
+				<p className="empty">
+					This league doesn&rsquo;t say how many teams are in it, and how deep the waiver
+					wire runs depends on that — so there is no honest bscore yet. Open{" "}
+					<b>League setup</b> and set the team count, and the board fills in.
+				</p>
 			</section>
 		)
 	if (!snapshot)
@@ -193,16 +211,16 @@ export const Board = ({
 						<span>#</span>
 						<SortHead field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
 						<SortHead field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
-						<SortHead field="points" filters={filters} setFilters={setFilters} right>proj</SortHead>
-						<SortHead field="replacement" filters={filters} setFilters={setFilters} right>repl</SortHead>
-						<SortHead field="confidence" filters={filters} setFilters={setFilters}>conf</SortHead>
-						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>x−a</SortHead>
+						<SortHead field="points" filters={filters} setFilters={setFilters} right>proj pts</SortHead>
+						<SortHead field="replacement" filters={filters} setFilters={setFilters} right>waiver pts</SortHead>
+						<SortHead field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
+						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>luck</SortHead>
 					</div>
 					{rows.slice(0, 120).map((r, i) => (
 						<Row key={r.player.id} rank={i + 1} r={r} open={open === r.player.id}
 							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)} />
 					))}
-					{!rows.length && <p className="empty">No players match these filters.</p>}
+					{!rows.length && <p className="empty">No players match these filters. Try clearing the slot filter or lowering the confidence minimum.</p>}
 				</div>
 				{rows.length > 120 && (
 					<p className="sub" style={{ marginTop: 12 }}>
@@ -220,11 +238,17 @@ export const Board = ({
  */
 const BillysPick = ({ r, horizonDays }: { r: Rated; horizonDays: number }) => {
 	const clauses: string[] = []
-	clauses.push(`${r.bscore} points clear of a replacement ${r.slot} over the next ${horizonDays} days`)
+	clauses.push(
+		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over the next ${horizonDays} days`
+	)
 	if (r.projection.volumePerTeamGame !== null)
-		clauses.push(`${r.projection.volumePerTeamGame.toFixed(1)} plate trips per team game`)
+		clauses.push(
+			r.player.group === "hitting" ?
+				`${r.projection.volumePerTeamGame.toFixed(1)} plate appearances per team game`
+			:	`${r.projection.volumePerTeamGame.toFixed(1)} outs recorded per team game`
+		)
 	if (r.projection.horizonGames)
-		clauses.push(`${r.projection.horizonGames} games scheduled`)
+		clauses.push(`his team plays ${r.projection.horizonGames} games in that stretch`)
 	const worry =
 		r.injury ? `He's listed ${r.injury.toLowerCase()}, so treat that number carefully.`
 		: r.confidence.value < 0.7 ?
@@ -251,6 +275,19 @@ const BillysPick = ({ r, horizonDays }: { r: Rated; horizonDays: number }) => {
 	)
 }
 
+const COLUMN_HELP: Record<Filters["sort"], string> = {
+	name: "Sort by player name.",
+	bscore:
+		"bscore — projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
+	points: "Projected points — what this player scores over the horizon in your league's own scoring.",
+	replacement:
+		"Waiver points — what the next man up at this slot is projected to score. bscore is this column subtracted from the one on its left.",
+	confidence:
+		"How much real data stands behind the projection: playing time so far, whether Statcast has him, and whether he's healthy. Not the odds he plays well.",
+	undervaluation:
+		"Luck — how far his results trail the quality of his contact, ranked against everyone else on his side of the ball. 90 means only 10% have been unluckier."
+}
+
 /** Column header that sorts. Clicking the active column flips direction. */
 const SortHead = ({
 	field, filters, setFilters, right, children
@@ -273,7 +310,7 @@ const SortHead = ({
 					:	{ ...f, sort: field, desc: field !== "name" }
 				)
 			}
-			title={`Sort by ${field}`}
+			title={COLUMN_HELP[field]}
 		>
 			{children}
 			<span className="arrow">{active ? (filters.desc ? "▾" : "▴") : ""}</span>
@@ -297,8 +334,15 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Rated; open: boolea
 			<span className="r dim">{r.points}</span>
 			<span className="r dim">{r.replacement}</span>
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
-			<span className={`r gap${(r.regressionGap ?? 0) > 0 ? " up" : ""}`}>
-				{r.regressionGap === null ? "—" : (r.regressionGap > 0 ? "+" : "") + r.regressionGap}
+			<span
+				className={`r gap${(r.undervaluation ?? 0) >= 70 ? " up" : ""}`}
+				title={
+					r.undervaluation === null ?
+						"No Statcast data, so no luck reading."
+					:	`Unluckier than ${r.undervaluation}% of ${r.player.group === "hitting" ? "batters" : "pitchers"} — his results trail the quality of his contact by this much.`
+				}
+			>
+				{r.undervaluation === null ? "—" : r.undervaluation}
 			</span>
 		</button>
 		{open && <Detail r={r} />}
@@ -367,7 +411,7 @@ const Detail = ({ r }: { r: Rated }) => {
 					<>
 						<h3>Missing</h3>
 						<ul className="notes warn">
-							{r.projection.missing.map(m => <li key={m}>{m}</li>)}
+							{r.projection.missing.map(m => <li key={m}>{MISSING_LABEL[m] ?? m}</li>)}
 							{r.projected.unscoreable.length > 0 && (
 								<li>league scores {r.projected.unscoreable.join(", ")} — not in any source we read</li>
 							)}

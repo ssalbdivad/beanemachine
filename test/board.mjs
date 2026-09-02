@@ -54,8 +54,10 @@ t("Billy's pick matches the top of the board", pickName === topName, `${pickName
 const why = await page.textContent(".pick-why")
 const pickScore = Number(await page.textContent(".pick-score b"))
 t("Billy's reasoning cites the actual bscore",
-  why.includes(String(pickScore)) && /points clear of a replacement/.test(why), why)
-t("Billy's reasoning cites real scheduled games", /\d+ games scheduled/.test(why), why)
+  why.includes(String(pickScore)) && /more points than the best/.test(why), why)
+t("Billy's reasoning cites real scheduled games", /plays \d+ games/.test(why), why)
+t("Billy uses the right volume unit for the side",
+  /plate appearances per team game|outs recorded per team game/.test(why), why)
 
 // the league's real free-agent pool — the board must recommend addable players
 if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {

@@ -377,7 +377,7 @@ pre{
 .board{display:flex;flex-direction:column;min-width:0;overflow-x:auto}
 .board-head,.board-row{
   display:grid;
-  grid-template-columns:34px minmax(150px,1fr) 74px 68px 62px 84px 62px;
+  grid-template-columns:34px minmax(150px,1fr) 74px 76px 82px 88px 58px;
   gap:10px;align-items:center;text-align:left;
 }
 .board-head{

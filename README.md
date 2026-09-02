@@ -37,6 +37,13 @@ theme tokens. The mark is authored against `--acc`, aliased onto the app's
 Exploration rounds that got here live in `logo/round*.mjs` with contact sheets in
 `logo/sheet*.png`.
 
+## Docs
+
+- **[docs/GUIDE.md](docs/GUIDE.md)** — how to read the board and use it on draft day,
+  waiver day and for daily streaming, including why a catcher outranks a better hitter.
+- **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — how a bscore is computed, worked
+  through with real numbers, plus the backtest design and the negative results.
+
 ## The app
 
 Ranks every MLB player by a **bscore** — projected points over the horizon, minus

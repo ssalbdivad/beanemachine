@@ -83,7 +83,15 @@ If a player is eligible at more than one slot, he is scored at whichever slot ma
 
 Switch **Rank by** to bscore — the board opens on market edge, which is a waiver-day question, not a draft-day one — leave the filters wide, and read down. The board is already telling you when to take the scarce position, so you do not need a separate "positional tier" exercise, because scarcity is priced into the number. **Where it hurts to wait**, under the board, is the same information as a shape: long bars are the slots you pay for early.
 
-Two things to watch. First, the projection horizon is 14 days from the last data capture, so early in a season the sample behind every row is thin and confidence will be low across the board. Second, the board does not know who has already been drafted — cross off names yourself as they go.
+Better still, use the **Draft** tab, which is built for exactly this. It knows what you
+have already taken, so it ranks by how much a pick improves *your* projected starting
+lineup rather than by raw value — once you hold three outfielders and no catcher, another
+outfielder is worth very little to you and the recommendation says so. Mark players as
+they go and the remaining pool, and the per-slot cliff, update as you draft.
+
+One thing to watch: the projection horizon is 14 days from the last data capture, so
+early in a season the sample behind every row is thin and confidence will be low across
+the board.
 
 ### Weekly waivers
 
@@ -114,6 +122,18 @@ The second view, **My team & trades**, is the one place the app knows what you h
 From that it fills your league's real startable spots, best legal lineup first, and shows every spot accounted for out loud: filled by one of yours, covered at the waiver bar because nobody you own is eligible there, or a hole nothing in the pool can fill. A hole is reported as a hole, not priced at zero.
 
 Then the deal. Pick who leaves and who arrives, and the verdict is **what your starting lineup projects afterwards, minus what it projects now**. That is deliberately not "who has the higher bscore": bench depth is worth nothing until it starts, so a player who arrives and doesn't crack your lineup adds nothing to the number, and a player you give up who wasn't starting costs nothing. Both cases are stated on screen rather than left as an unexplained zero, alongside the spot-by-spot changes and anything the engine could not read.
+
+## Injured players
+
+Over the **Streaming** and **fortnight** horizons an injured player is not ranked at all,
+and the row says why. This is not squeamishness: a man placed on the 10-day IL yesterday
+was healthy for most of the window the playing-time blend reads, so he projects at a
+full-time rate and lands near the top of the board while being unable to play. No source
+states a return date, so instead of inventing a discount the board says it cannot honestly
+project him over this window.
+
+**Stash** ranks him anyway, because over the rest of a season an injured man is a
+perfectly good hold. Same player, same data, different question.
 
 ## What do the columns mean?
 
@@ -178,11 +198,11 @@ One note on the hosted site: importing needs the local server (`node src/server.
 
 Be clear-eyed about the edges. It:
 
-- **Does not know the individual pitchers your hitters will face.** It does know *which teams* they face, from the real schedule, and scales a projection by how good those teams' staffs and lineups have been — at half strength, because that effect is positive at every dose it was tried at and significant at none. What it cannot tell you is that tomorrow's starter is an ace, or that the weekend is at Coors.
+- **Knows which pitcher your hitters face, but only about a week out.** MLB publishes probable starters roughly a week ahead, and where it has them the board rates a hitter against the men actually on the mound, blended with the opponent staff by innings share — a starter throws about 58% of a game, so his own quality carries that share and the bullpen behind him carries the rest. Where no probable is published it falls back to the team-level number. This one cannot be validated the way the rest can: probables are announced and then overwritten, and nothing archives what was announced at the time.
 - **Does not know your roster, on the board.** The ranking never accounts for who you already have, so it will happily rank three catchers at the top when you need one. **My team & trades** is the view that does know, and it is a separate view for that reason.
 - **Does not model keeper or dynasty value, and does not know your budget.** The **Stash** tab ranks over the rest of the season, which is the longest horizon here; nothing looks past this season at all.
 - **Does not know multi-position eligibility.** The data source reports one primary position, and your league's real eligibility rules are not exposed by any source the board reads, so they are never assumed. A catcher who also qualifies at first base is scored only as a catcher — which understates him. This is the largest known accuracy gap. (Autonomous mode is the exception: it plans a lineup against the eligibility Yahoo actually prints beside each name, and refuses to plan at all when it cannot read it.)
-- **Does not use park factors, weather, or lineup slot.** The park multiplier is written and its weight is 0, and nothing even fetches the factors — so this is "not modelled", not "modelled quietly".
+- **Does not use park factors, weather, or lineup slot.** There was a park fetcher; Savant's park-factor endpoint returns HTML and ignores `csv=true`, so it produced rows of nulls that nothing consumed. It and the park term have been removed rather than left looking like a feature. No readable source has been found, so this is "not modelled", not "modelled quietly".
 - **Ranks all of MLB, not just who is available to you.** The names at the top are usually rostered — which is exactly why the board opens on market edge instead. The **Free agents only** toggle narrows it properly by reading your league's actual free agent list, but it works only for Yahoo leagues that are publicly viewable, and only when you are running locally, because the hosted build has no server to fetch the pool through.
 - **Does not move a recommendation on Statcast.** xwOBA and barrel rate are shown, ranked and used to find buy-low candidates, because they genuinely inform a human. They are not multiplied into any projection: as a multiplier they were measured over 111 weeks and lost at every setting. The drill-down says so on every player.
 

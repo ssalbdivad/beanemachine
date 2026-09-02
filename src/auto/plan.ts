@@ -455,7 +455,21 @@ export interface MovePlan {
 	notes: string[]
 }
 
-export const planMoves = (input: PlanInput): MovePlan => {
+export const planMoves = (
+	input: PlanInput,
+	/**
+	 * Normalised names the lineup half of the run is counting on.
+	 *
+	 * The two halves rank on different quantities — the lineup on projected points,
+	 * because a seat you leave empty scores nothing, and the moves on bscore,
+	 * because a waiver body is what a dropped man is replaced by — and until they
+	 * were introduced they could contradict each other in one run. A man who is the
+	 * only legal body at a scarce slot is routinely below the keep floor AND started,
+	 * so the plan would say START him and DROP him at once. He is protected here, and
+	 * the note says why rather than leaving a silent gap where a move should be.
+	 */
+	protect: ReadonlySet<string> = new Set()
+): MovePlan => {
 	const options = input.options ?? DEFAULTS
 	const resolved = resolveRoster(input)
 	const skipped: string[] = []
@@ -465,10 +479,18 @@ export const planMoves = (input: PlanInput): MovePlan => {
 	const rostered = resolved.filter(r => !isReserve(r.spot.slot))
 	for (const r of rostered) if (r.blocked) skipped.push(`${r.spot.name}: ${r.blocked}`)
 
-	const droppable = rostered
+	const belowFloor = rostered
 		.flatMap(r => (r.rated && r.rated.rateable ? [{ ...r, rated: r.rated }] : []))
 		.filter(r => r.rated.bscore < options.keepFloor)
 		.sort((a, b) => a.rated.bscore - b.rated.bscore)
+	const started = belowFloor.filter(r => protect.has(normalizeName(r.spot.name)))
+	const droppable = belowFloor.filter(r => !protect.has(normalizeName(r.spot.name)))
+	for (const r of started)
+		notes.push(
+			`${r.spot.name} is ${r.rated.bscore}, below the ${options.keepFloor} keep floor, but ` +
+				`this run is starting him — dropping a man the lineup needs would leave the seat ` +
+				`empty, so he is not offered up`
+		)
 
 	const free = input.rated.filter(
 		r => r.rateable && input.availableNames.has(normalizeName(r.player.name))
@@ -489,7 +511,11 @@ export const planMoves = (input: PlanInput): MovePlan => {
 		)
 	if (!droppable.length)
 		notes.push(
-			`nobody on the roster is below the ${options.keepFloor} keep floor, so nothing was offered up`
+			started.length ?
+				`everyone below the ${options.keepFloor} keep floor is in this run's lineup, so ` +
+					`nothing was offered up`
+			:	`nobody on the roster is below the ${options.keepFloor} keep floor, so nothing was ` +
+					`offered up`
 		)
 
 	const moves: Move[] = []
@@ -548,7 +574,12 @@ export interface Plan {
 
 export const plan = (input: PlanInput): Plan => {
 	const lineup = planLineup(input)
-	const { moves, skipped, notes } = planMoves(input)
+	// the lineup is decided first and the moves are told about it, because a plan
+	// that starts a man and drops him in the same breath is worse than no plan
+	const { moves, skipped, notes } = planMoves(
+		input,
+		new Set(lineup.starters.map(s => normalizeName(s.name)))
+	)
 	return {
 		lineup,
 		moves,
@@ -597,6 +628,9 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 		if (!onRoster.has(drop)) out.push(`${m.drop} is not on the roster`)
 		if (seenAdd.has(add)) out.push(`${m.add} is added twice`)
 		if (seenDrop.has(drop)) out.push(`${m.drop} is dropped twice`)
+		// the two halves of a plan must agree about the same man
+		if (result.lineup.starters.some(s => normalizeName(s.name) === drop))
+			out.push(`${m.drop} is started and dropped in the same plan`)
 		seenAdd.add(add)
 		seenDrop.add(drop)
 	}

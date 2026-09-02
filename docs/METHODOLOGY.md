@@ -1122,8 +1122,11 @@ greed with augmenting paths maximises the **weight of seated players** — but t
 the wrong quantity. An unfilled spot is not worth zero here; it is worth that slot's
 replacement bar, the body any manager can claim off waivers. It measured worse than
 the greed it replaced on a real roster, 1401.12 against 1448.17, for exactly that
-reason. (The same matroid argument *is* sound in `src/auto/plan.ts`, where no body
-can be added without a transaction and seated weight really is the objective.)
+reason. (`src/auto/plan.ts` keeps the matroid argument, but for a narrower reason than
+"no body can be added": its lineup step reports a lineup of men the operator already
+owns, and the add/drop step is a separate transaction the lineup deliberately does
+not anticipate. That is a real seam rather than a proof, and the two halves used to
+be able to contradict each other — see §12.1.)
 
 The second was hill-climbing on the right objective. It cannot reach the optimum
 above: doing so needs a three-way rotation through an equal-value plateau — A moves
@@ -1149,6 +1152,31 @@ matching wins on 28, by 4.28 points on average and 77.51 at most. That is the
 honest size of it. What changed is not mainly the number but the claim: Trade and
 Draft totals were a lower bound on the best legal lineup and are now the best legal
 lineup.
+
+### 12.1 When the two halves of a plan disagreed
+
+Autonomous mode decides a lineup and an add/drop in one run, and they rank on
+different quantities on purpose: the lineup on projected points, because a seat left
+empty scores nothing, and the move on bscore, because what replaces a dropped man is
+a waiver body. Nothing reconciled them. The only C-eligible man on a roster is
+routinely both *started* — he is the only legal body — and *below the keep floor*,
+because his bscore is measured against the wire. So one run could print
+`START Cal Raleigh at C` and `ADD Drake Baldwin / DROP Cal Raleigh` together, and
+`railViolations` passed it, because it audited the lineup and the moves separately
+and never asked whether they named the same man. An operator who followed both
+instructions ended the week with an empty C.
+
+The lineup is now decided first and the move half is told what it is counting on, so
+a man the lineup needs is not offered up; the plan says which man was spared and why,
+rather than leaving a gap where a move should be. `railViolations` gained the
+cross-check as well, since a rail that only exists inside the planner is not a rail.
+
+Fixing it surfaced a second, smaller lie: with every sub-floor player protected, the
+move half fell through to "nobody on the roster is below the keep floor", which was
+false — two men were, and both were starting. It now says that instead.
+
+The seam itself is still there and is stated rather than closed: an add is not seated
+until the next run, because the lineup was computed against the pre-move roster.
 
 The board itself was never affected — a bscore takes the maximum over a player's
 eligible slots and never assigns a whole lineup — and neither is the backtest, which

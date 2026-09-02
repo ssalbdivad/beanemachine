@@ -410,5 +410,71 @@ t("name matching is case-insensitive, since Yahoo's casing is not ours",
 t("add/drop is described for a human rather than clicked",
   describeMoves([{ add: "A", drop: "B", gain: 9 }]).every(s => /by hand/.test(s)))
 
+/* ---------------- the two halves of a plan must agree ---------------- */
+
+// planLineup ranks on projected points and planMoves on bscore, so the only legal
+// body at a scarce slot is routinely started AND below the keep floor. Before the
+// halves were introduced, one run could say START him and DROP him, and the audit
+// passed it — an operator following both instructions ends the week with an empty
+// seat.
+const contradiction = {
+	roster: [
+		spot("C", "Solo Catcher", ["C"]), spot("1B", "Deb Bag", ["1B"]),
+		spot("OF", "Ed Green", ["OF"]), spot("OF", "Fay Weak", ["OF"]),
+		spot("Util", "Gil Ok", ["OF"])
+	],
+	rated: [
+		rated("Solo Catcher", { points: 82, bscore: 8, slots: ["C"] }),
+		rated("Deb Bag", { points: 40, bscore: 40, slots: ["1B"] }),
+		rated("Ed Green", { points: 45, bscore: 45, slots: ["OF"] }),
+		rated("Fay Weak", { points: 30, bscore: 30, slots: ["OF"] }),
+		rated("Gil Ok", { points: 25, bscore: 26, slots: ["OF"] }),
+		rated("Better Catcher", { points: 90, bscore: 41, slots: ["C"] })
+	],
+	availableNames: new Set(["better catcher"]),
+	shape: SHAPE
+}
+const both = plan(contradiction)
+const startedNames = new Set(both.lineup.starters.map(s => s.name))
+t("the only body at a scarce slot is not dropped by the same run that starts him",
+	!both.moves.some(m => startedNames.has(m.drop)),
+	JSON.stringify({ starters: [...startedNames], moves: both.moves.map(m => `${m.add}/${m.drop}`) }))
+t("and the plan says why he was spared rather than leaving a silent gap",
+	both.notes.some(n => n.includes("Solo Catcher") && n.includes("keep floor")),
+	JSON.stringify(both.notes))
+t("a run that spares everyone below the floor does not then claim nobody was below it",
+	!both.notes.some(n => n.includes("nobody on the roster is below")) &&
+		both.notes.some(n => n.includes("everyone below the 25 keep floor is in this run's lineup")),
+	JSON.stringify(both.notes))
+t("a plan that does contradict itself is caught by the audit", (() => {
+	const forged = {
+		...both,
+		moves: [{
+			kind: "add-drop", add: "Better Catcher", addScore: 41, drop: "Solo Catcher",
+			dropScore: 8, gain: 33, reason: "forged"
+		}]
+	}
+	return railViolations(forged, contradiction)
+		.some(v => v.includes("started and dropped in the same plan"))
+})())
+t("protecting a starter does not block a move against anyone else", (() => {
+	// Hot Bat takes the Util seat, so Gil Ok is on the roster, below the floor, and
+	// NOT in the lineup — exactly the man the move half exists to trade away
+	const spare = {
+		...contradiction,
+		roster: [...contradiction.roster, spot("BN", "Hot Bat", ["OF"])],
+		rated: [
+			...contradiction.rated.map(r => (r.player.name === "Gil Ok" ? { ...r, bscore: 3 } : r)),
+			rated("Hot Bat", { points: 70, bscore: 50, slots: ["OF"] }),
+			rated("Free Bat", { points: 60, bscore: 44, slots: ["OF"] })
+		],
+		availableNames: new Set(["better catcher", "free bat"])
+	}
+	const p = plan(spare)
+	const started = new Set(p.lineup.starters.map(s => s.name))
+	return !started.has("Gil Ok") && p.moves.some(m => m.drop === "Gil Ok") &&
+		!p.moves.some(m => m.drop === "Solo Catcher")
+})())
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -19,14 +19,27 @@ export type Mode = "server" | "static"
 let mode: Mode = "server"
 export const getMode = (): Mode => mode
 
+/**
+ * Every API path is resolved against the deployed base, not against the origin
+ * root.
+ *
+ * On GitHub Pages the app is served from /beanemachine/, and a bare "/api/health"
+ * probed ssalbdivad.github.io/api/health — a different path entirely, which
+ * 404ed and made the app fall back to static mode for the wrong reason. It
+ * happened to reach the right answer here because there is no API either way,
+ * which is exactly why nothing noticed.
+ */
+const resolve = (path: string): string =>
+	`${import.meta.env.BASE_URL.replace(/\/$/, "")}${path}`
+
 const send = async <T,>(path: string, body?: unknown): Promise<T> => {
-	const res = await fetch(path, {
+	const res = await fetch(resolve(path), {
 		method: body ? "POST" : "GET",
 		headers: body ? { "content-type": "application/json" } : undefined,
 		body: body ? JSON.stringify(body) : undefined
 	})
 	if (!res.headers.get("content-type")?.includes("application/json"))
-		throw new ApiError(`No API at ${path}.`)
+		throw new ApiError(`No API at ${resolve(path)}.`)
 	const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
 	if (!res.ok) throw new ApiError((data as { error?: string }).error ?? `HTTP ${res.status}`)
 	return data as T

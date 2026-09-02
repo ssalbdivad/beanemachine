@@ -38,7 +38,14 @@ const errors = []
  * not own is set aside and printed at the end, never silently dropped; only the
  * app's own errors are asserted on.
  */
-const NOT_OURS = /fonts\.(?:gstatic|googleapis)\.com/
+/**
+ * Two classes of noise that are not the app misbehaving. Web fonts are somebody
+ * else's origin. The `/api/health` 404 is this app's own deliberate probe: a
+ * static host has no API, and asking is how the client finds that out — the
+ * browser logs every 404 regardless of whether the caller expected it. Anything
+ * else in the console is ours and is asserted on.
+ */
+const NOT_OURS = /fonts\.(?:gstatic|googleapis)\.com|api\/health/
 const foreign = []
 const note = line => (NOT_OURS.test(line) ? foreign : errors).push(line)
 page.on("pageerror", e => note(`pageerror: ${e}`))

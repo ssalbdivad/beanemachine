@@ -217,23 +217,25 @@ compared is judgement, not draft position.
 The opponents are the two strategies human managers actually run: **season-to-date**
 ("he'll keep doing what he's been doing") and **hot-hand** (chase the last fortnight).
 
-**2023–2025, 68 weeks, at one waiver move per week:**
+**2021–2025, 111 weeks, at one waiver move per week:**
 
 | strategy | points | % of perfect | weeks bscore wins |
 |---|---|---|---|
-| **bscore** | **49,432** | **52.0%** | — |
-| projected points only | 47,590 | 50.1% | — |
-| hot-hand | 47,409 | 49.9% | **40/68** (+29.8/wk) |
-| season-to-date | 45,906 | 48.3% | **48/68** (+51.8/wk) |
-| perfect hindsight | 95,063 | 100% | ceiling |
+| **bscore** | **79,008** | **50.9%** | — |
+| hot-hand | 73,883 | 47.6% | **70/111** (+46.2/wk) |
+| projected points only | 73,336 | 47.2% | — |
+| season-to-date | 71,962 | 46.4% | **81/111** (+63.5/wk) |
+| perfect hindsight | 155,213 | 100% | ceiling |
 
-bscore wins outright on points **and** takes a majority of individual weeks against
-both human strategies — which is the test that matters, because this league is
-head-to-head and you win by winning weeks.
+bscore wins outright on points — by **7%** over hot-hand and **9.8%** over
+season-to-date — **and** takes a clear majority of individual weeks against both:
+**73%** against season-to-date and **63%** against hot-hand. That second number is the
+one that matters, because this league is head-to-head and you win by winning weeks.
 
 **Value over replacement is what makes the difference.** Ranking waiver decisions by
-raw projected points — ignoring the thing the metric exists for — splits weeks against
-hot-hand 36/68 and gives up 269 points. Dropping a replaceable outfielder for a scarce
+raw projected points — ignoring the thing the metric exists for — collapses to
+**58/111** against season-to-date and **52/111** against hot-hand, barely better than
+coin flips, and gives up 5,672 points. Dropping a replaceable outfielder for a scarce
 catcher is right even when the catcher scores fewer points, and only the replacement
 adjustment sees it.
 

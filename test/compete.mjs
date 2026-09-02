@@ -56,5 +56,16 @@ t(
 const margin = mine.reduce((a, c, i) => a + (c - (theirs[i] ?? 0)), 0) / mine.length
 t("and by a meaningful margin per week", margin > 10, `${margin.toFixed(1)}/wk`)
 
+// hot-hand is the harder opponent: ranking by raw projected points splits weeks
+// against it 36/68, and only the replacement adjustment turns that into a majority
+const hotWeeks = weekly.get("hot-hand") ?? []
+const vsHot = mine.filter((v, i) => v > (hotWeeks[i] ?? Infinity)).length
+t("bscore wins a majority of weeks vs hot-hand too", vsHot / mine.length > 0.5, `${vsHot}/${mine.length}`)
+
+// the replacement adjustment must be earning its place
+const control = totals.get("projected-points")
+t("value over replacement beats ranking by raw projected points",
+  bscore > control, `${bscore} vs ${control}`)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

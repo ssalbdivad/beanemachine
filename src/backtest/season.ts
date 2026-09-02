@@ -186,8 +186,50 @@ export const makeBscoreStrategy = (
 			.sort((a, b) => b.score - a.score)
 })
 
-/** Our shipped model. */
-export const bscoreStrategy = makeBscoreStrategy("bscore")
+/**
+ * Turns projected points into points ABOVE REPLACEMENT, which is what bscore
+ * actually means. Ranking a waiver decision by raw points ignores the thing the
+ * whole metric exists for: dropping a replaceable outfielder for a scarce catcher
+ * is right even when the catcher scores fewer points.
+ */
+const applyVorp = (
+	ranked: { p: PlayerSeason; score: number }[],
+	league: League
+): { p: PlayerSeason; score: number }[] => {
+	const teams = league.meta.max_teams ?? 10
+	const replacement = new Map<string, number>()
+	for (const [slot, count] of Object.entries(league.roster.slots)) {
+		if (slot === "BN" || slot === "IL" || slot === "NA") continue
+		const eligible = ranked.filter(r => slotsFor(r.p).includes(slot))
+		const depth = Math.min(teams * count, Math.max(eligible.length - 1, 0))
+		replacement.set(slot, eligible[depth]?.score ?? 0)
+	}
+	return ranked
+		.map(r => {
+			let best = -Infinity
+			for (const slot of slotsFor(r.p)) {
+				const repl = replacement.get(slot)
+				if (repl === undefined) continue
+				best = Math.max(best, r.score - repl)
+			}
+			return { p: r.p, score: best === -Infinity ? r.score : best }
+		})
+		.sort((a, b) => b.score - a.score)
+}
+
+/** Projected points only — retained as the control, to show what the replacement
+ *  adjustment is worth. */
+export const projectedPointsStrategy = makeBscoreStrategy("projected-points")
+
+/**
+ * bscore as the app actually defines it: points above the replacement at the
+ * player's slot. Ranking a waiver decision by raw points ignores the thing the
+ * metric exists for, and over 68 weeks it costs 269 points and six weekly wins.
+ */
+export const bscoreStrategy: Strategy = {
+	name: "bscore",
+	rank: ctx => applyVorp(makeBscoreStrategy("_").rank(ctx), ctx.league)
+}
 
 /** "He'll keep doing what he's been doing" — the strategy most managers actually use. */
 export const seasonToDateStrategy: Strategy = {
@@ -217,13 +259,14 @@ export const hotHandStrategy: Strategy = {
 			.sort((a, b) => b.score - a.score)
 }
 
-export const STRATEGIES = [bscoreStrategy, seasonToDateStrategy, hotHandStrategy]
+export const STRATEGIES = [bscoreStrategy, projectedPointsStrategy, seasonToDateStrategy, hotHandStrategy]
 
 /** Variants under test, to find where the season disagrees with the correlation. */
 export const SWEEP: Strategy[] = [
 	seasonToDateStrategy,
 	hotHandStrategy,
 	bscoreStrategy,
+	projectedPointsStrategy,
 	makeBscoreStrategy("bscore_rw0.5", { recentWeight: 0.5 }),
 	makeBscoreStrategy("bscore_rw0.25", { recentWeight: 0.25 }),
 	makeBscoreStrategy("bscore_rw0", { recentWeight: 0 }),

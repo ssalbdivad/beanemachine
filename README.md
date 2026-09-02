@@ -213,15 +213,23 @@ The opponents are the two strategies human managers actually run: **season-to-da
 
 **2023–2025, 68 weeks, at one waiver move per week:**
 
-| strategy | points | % of perfect | weeks won vs bscore |
+| strategy | points | % of perfect | weeks bscore wins |
 |---|---|---|---|
-| **bscore** | **47,590** | **50.1%** | — |
-| hot-hand | 47,409 | 49.9% | 32/68 |
-| season-to-date | 45,906 | 48.3% | 27/68 |
+| **bscore** | **47,859** | **50.3%** | — |
+| projected points only | 47,590 | 50.1% | — |
+| hot-hand | 47,409 | 49.9% | **42/68** (+6.6/wk) |
+| season-to-date | 45,906 | 48.3% | **41/68** (+28.7/wk) |
 | perfect hindsight | 95,063 | 100% | ceiling |
 
-bscore wins outright, and wins **41 of 68 weeks** against season-to-date (+24.8 points
-per week) and 36 of 68 against hot-hand.
+bscore wins outright on points **and** takes a majority of individual weeks against
+both human strategies — which is the test that matters, because this league is
+head-to-head and you win by winning weeks.
+
+**Value over replacement is what makes the difference.** Ranking waiver decisions by
+raw projected points — ignoring the thing the metric exists for — splits weeks against
+hot-hand 36/68 and gives up 269 points. Dropping a replaceable outfielder for a scarce
+catcher is right even when the catcher scores fewer points, and only the replacement
+adjustment sees it.
 
 **But the edge is in selectivity, and it disappears if you churn:**
 

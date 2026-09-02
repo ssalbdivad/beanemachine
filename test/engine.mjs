@@ -50,5 +50,30 @@ const ps = u.filter(x => x.player.group === "pitching").map(x => x.undervaluatio
 t("undervaluation percentiles span each side independently",
   Math.max(...hs) > 95 && Math.max(...ps) > 95 && Math.min(...hs) < 5 && Math.min(...ps) < 5)
 
+
+// 10. The shipped model constants must match what the backtest actually chose.
+// These are not preferences — each was measured over 100 folds across ten seasons,
+// and a silent edit here would quietly de-tune every recommendation.
+import { RECENT_WINDOW_DAYS, RECENT_RATE_WEIGHT } from "../src/engine/project.ts"
+t("recent window is 7d for hitters, 21d for pitchers (measured optimum)",
+  RECENT_WINDOW_DAYS.hitting === 7 && RECENT_WINDOW_DAYS.pitching === 21,
+  JSON.stringify(RECENT_WINDOW_DAYS))
+t("recent-rate blend is pitchers-only at 0.15 (hitting failed its paired test)",
+  RECENT_RATE_WEIGHT.hitting === 0 && RECENT_RATE_WEIGHT.pitching === 0.15,
+  JSON.stringify(RECENT_RATE_WEIGHT))
+// the Statcast blend lost on every sweep across ten seasons; it must stay off
+const { project: proj } = await import("../src/engine/project.ts")
+const probe = proj(
+  { id: 1, name: "x", team: null, teamId: 1, position: "OF", group: "hitting",
+    stats: { plateAppearances: 400, hits: 100, homeRuns: 20, runs: 50 } },
+  { id: 1, xwoba: 0.400, woba: 0.300, xwobaGap: 0.1, xba: null, xslg: null, pa: 400,
+    barrelRate: null, hardHitRate: null, avgExitVelocity: null, sweetSpotRate: null },
+  100, 14
+)
+t("Statcast adjustment is off by default", probe.qualityMultiplier === 1,
+  String(probe.qualityMultiplier))
+t("and the drill-down says so rather than implying it was used",
+  probe.modelled.some(m => /NOT applied/.test(m)), probe.modelled.join(" | "))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -96,6 +96,7 @@ export const App = () => {
 
 			<Toolbar
 				config={config}
+				view={view}
 				activeKey={key}
 				onSelect={k =>
 					void run(async () => {
@@ -169,6 +170,7 @@ export const App = () => {
 
 const Toolbar = ({
 	config,
+	view,
 	activeKey,
 	onSelect,
 	onImport,
@@ -177,6 +179,7 @@ const Toolbar = ({
 	onReject
 }: {
 	config: Config | null
+	view: "board" | "league"
 	activeKey: string | null
 	onSelect: (key: string) => void
 	onImport: (url: string) => void
@@ -187,15 +190,20 @@ const Toolbar = ({
 	const [url, setUrl] = useState("")
 	const [template, setTemplate] = useState("custom")
 	const keys = Object.keys(config?.leagues ?? {})
+	// the same control means different things per view, so it says which
+	const labels =
+		view === "board" ?
+			{ league: "Scoring these picks against" }
+		:	{ league: "League being edited" }
 	return (
 		<>
 			<div className="bar">
 				<label className="ctl">
-					<span>League being edited</span>
+					<span>{labels.league}</span>
 					<select
 						value={activeKey ?? ""}
 						disabled={!keys.length}
-						aria-label="League being edited"
+						aria-label={labels.league}
 						onChange={e => onSelect(e.currentTarget.value)}
 					>
 						{keys.map(k => (

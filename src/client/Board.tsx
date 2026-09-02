@@ -148,8 +148,11 @@ export const Board = ({
 					)}
 				</h2>
 				<p className="sub">
-					{rows.length} players ranked in {league.meta.league_name ?? "this league"}'s scoring ·
-					projected over {snapshot.horizon.start} → {snapshot.horizon.end}
+					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
+					projected over {snapshot.horizon.start} → {snapshot.horizon.end} ·
+					playing time weighted 75% toward the last{" "}
+					{snapshot.recentWindow?.hitting ?? 7}d for batters and{" "}
+					{snapshot.recentWindow?.pitching ?? 21}d for pitchers
 				</p>
 				<div className="board">
 					<div className="board-head">

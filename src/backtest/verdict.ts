@@ -33,10 +33,19 @@ if (!kept.length) {
 	process.exit(0)
 }
 
-// One season must not be counted twice because it was run twice; the later run wins.
+/**
+ * One season must not be counted twice because it was run twice; the later run
+ * wins. The key has to include WHICH knob was swept, though — a matchup sweep and
+ * a reliever sweep over the same five seasons are not two attempts at the same
+ * measurement, and collapsing them silently discards one.
+ */
 const bySeason = new Map<string, Result>()
 for (const r of [...kept].sort((a, b) => a.ranAt.localeCompare(b.ranAt)))
-	bySeason.set(`${r.seasons.join(",")}:${r.movesPerWeek}:${r.statcast}`, r)
+	bySeason.set(
+		`${r.seasons.join(",")}:${r.movesPerWeek}:${r.statcast}:` +
+			Object.keys(r.totals).sort().join("|"),
+		r
+	)
 const pooled = [...bySeason.values()]
 
 const totals = new Map<string, number>()

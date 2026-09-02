@@ -313,5 +313,27 @@ for (let trial = 0; trial < 40; trial++) {
 }
 t("and so is every thinned version of it", beatGreedy === 40, `${beatGreedy}/40`)
 
+// The sentence a spot priced at the bar produces, when you DO still own somebody
+// eligible there. Before the matching benched below-the-bar men this case could not
+// arise, and the copy said "not by anyone you own" — which the lineup contradicted.
+const weakC = [...byPoints].reverse().find(r => r.slots.includes("C") && !full.some(f => key(f) === key(r)))
+const strongC = full.find(r => r.slots.includes("C"))
+if (weakC && strongC) {
+	const withWeak = [...full, weakC]
+	const incoming = byPoints.find(r => !withWeak.some(x => key(x) === key(r)) && r.slots.includes("OF"))
+	const verdict = evaluate(withWeak, [strongC], incoming ? [incoming] : [])
+	const cSpot = verdict.lineups.after.starters.find(x => x.slot === "C")
+	t("a spot you can still fill, but not worth filling, is priced off the wire",
+		cSpot?.source === "replacement" &&
+			verdict.lineups.after.bench.some(r => key(r) === key(weakC)),
+		JSON.stringify({ source: cSpot?.source,
+			benched: verdict.lineups.after.bench.some(r => key(r) === key(weakC)) }))
+	t("and the explanation does not tell you nobody you own is eligible there",
+		!verdict.explanation.includes("not by anyone you own"), verdict.explanation)
+	t("it says why the spot is priced that way instead",
+		verdict.explanation.includes("worth seating there") || cSpot?.source !== "replacement",
+		verdict.explanation)
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

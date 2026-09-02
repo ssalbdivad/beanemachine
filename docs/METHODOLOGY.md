@@ -1153,6 +1153,34 @@ honest size of it. What changed is not mainly the number but the claim: Trade an
 Draft totals were a lower bound on the best legal lineup and are now the best legal
 lineup.
 
+### 11.1 One window, applied over another
+
+Three separate places measured something over one window and applied it over a
+different one, and all three were the same mistake wearing different clothes.
+
+The first was the probable-starts count: MLB publishes 46 of 222 slots over a
+fortnight, read as a complete count, which demoted a top-five starter 350 places.
+Guarded by per-team coverage.
+
+The second was the opposing starter's own quality, weighted at 58% — one game's
+share of innings — across a 13-to-15-game window in which one or two names are
+published. Scaled by coverage, from 58% to about 6%.
+
+The third is still open, and is stated rather than fixed: the **Stash** horizon runs
+to the end of the season, while `opponentsByTeam` is the next fortnight. No source
+read here captures a rest-of-season opponent list, so there is nothing to scale by —
+the choice is to apply a fortnight's schedule strength over months, or to drop the
+term on that tab. Dropping it moves 1,251 of 1,432 rest-of-season rankings, 166 of
+them by ten places or more, and three out of the top fifty. That is too large to
+flip on a hunch and there is no measurement that settles the direction, so the term
+stays and the gap is written down. The fix is a rest-of-season opponent list in the
+snapshot, not a weight change.
+
+A fourth of the same family was closed on the client rather than in the engine:
+`useBoard` chose its horizon with a fallback but selected the probables on the mode,
+so an off-season snapshot could feed a week's published starters into a fortnight's
+game count. Everything there now keys on the window that was actually resolved.
+
 ### 12.1 When the two halves of a plan disagreed
 
 Autonomous mode decides a lineup and an add/drop in one run, and they rank on

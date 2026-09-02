@@ -2,7 +2,9 @@ import { useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
-import { DEFAULT_FILTERS, useBoard, type Filters, type Rated } from "./useBoard.ts"
+import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Rated } from "./useBoard.ts"
+import { api, ApiError, type AvailablePool } from "./api.ts"
+import { useEffect } from "react"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -41,7 +43,26 @@ export const Board = ({
 }) => {
 	const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
 	const [open, setOpen] = useState<number | null>(null)
-	const { rows } = useBoard(snapshot, league, filters)
+	const [pool, setPool] = useState<AvailablePool | null>(null)
+	const [poolError, setPoolError] = useState<string | null>(null)
+	const leagueId = league?.meta.league_id ?? null
+
+	// the league's actual free agents — a ranking of all of MLB is only half a
+	// recommendation when its top names are already rostered
+	useEffect(() => {
+		if (!leagueId || league?.meta.platform !== "yahoo") return
+		let live = true
+		api.available(leagueId)
+			.then(p => live && setPool(p))
+			.catch((e: unknown) => live && setPoolError(e instanceof ApiError ? e.message : String(e)))
+		return () => {
+			live = false
+		}
+	}, [leagueId, league?.meta.platform])
+
+	const availableNames =
+		pool ? new Set(pool.players.map(p => normalizeName(p.name))) : null
+	const { rows } = useBoard(snapshot, league, filters, availableNames)
 	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -122,6 +143,19 @@ export const Board = ({
 							<option value="0.4">40%+</option>
 							<option value="0.7">70%+</option>
 						</select>
+					</label>
+					<label className="toggle" title={pool?.note ?? poolError ?? "Reading your league's free agents…"}>
+						<input
+							type="checkbox"
+							disabled={!availableNames}
+							checked={filters.availableOnly}
+							onChange={e => set("availableOnly", e.currentTarget.checked)}
+						/>
+						<span>
+							Free agents only
+							{pool && <em className="pool-count"> {pool.players.length}</em>}
+							{!pool && !poolError && <em className="pool-count"> …</em>}
+						</span>
 					</label>
 					<label className="toggle">
 						<input

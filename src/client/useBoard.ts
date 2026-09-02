@@ -29,6 +29,7 @@ export interface Filters {
 	slot: string
 	group: "all" | "hitting" | "pitching"
 	hideInjured: boolean
+	availableOnly: boolean
 	minConfidence: number
 	sort: "bscore" | "points" | "undervaluation" | "replacement" | "confidence" | "name"
 	desc: boolean
@@ -39,12 +40,24 @@ export const DEFAULT_FILTERS: Filters = {
 	slot: "",
 	group: "all",
 	hideInjured: false,
+	availableOnly: false,
 	minConfidence: 0,
 	sort: "bscore",
 	desc: true
 }
 
-export const useBoard = (snapshot: Snapshot | null, league: League | null, filters: Filters) => {
+/** Names vary by accent, punctuation and suffix between Yahoo and MLB. */
+export const normalizeName = (n: string): string =>
+	n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+		.replace(/[.'\u2019]/g, "").replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "")
+		.replace(/\s+/g, " ").trim()
+
+export const useBoard = (
+	snapshot: Snapshot | null,
+	league: League | null,
+	filters: Filters,
+	availableNames?: Set<string> | null
+) => {
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
 		// Replacement depth is teams × slots. Without a real team count there is no
@@ -75,6 +88,8 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
 			if (filters.hideInjured && r.injury) return false
+			if (filters.availableOnly && availableNames && !availableNames.has(normalizeName(r.player.name)))
+				return false
 			if (r.confidence.value < filters.minConfidence) return false
 			return true
 		})
@@ -94,7 +109,7 @@ export const useBoard = (snapshot: Snapshot | null, league: League | null, filte
 			return filters.desc ? -cmp : cmp
 		})
 		return out
-	}, [rated, filters])
+	}, [rated, filters, availableNames])
 
 	return { rated, rows }
 }

@@ -57,6 +57,21 @@ t("Billy's reasoning cites the actual bscore",
   why.includes(String(pickScore)) && /points clear of a replacement/.test(why), why)
 t("Billy's reasoning cites real scheduled games", /\d+ games scheduled/.test(why), why)
 
+// the league's real free-agent pool — the board must recommend addable players
+if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {
+  await page.waitForSelector(".pool-count", { timeout: 25000 })
+  const poolCount = Number((await page.textContent(".pool-count")).trim())
+  t("free-agent pool is read from the league", poolCount > 50, String(poolCount))
+  const beforeNames = await page.$$eval(".board-row .who b", n => n.slice(0,5).map(e => e.textContent))
+  await page.locator(".toggle input").first().check()
+  await page.waitForTimeout(500)
+  const afterNames = await page.$$eval(".board-row .who b", n => n.slice(0,5).map(e => e.textContent))
+  t("free-agents-only changes who is recommended",
+    afterNames.join() !== beforeNames.join(), `${beforeNames[0]} → ${afterNames[0]}`)
+  await page.locator(".toggle input").first().uncheck()
+  await page.waitForTimeout(400)
+}
+
 // filters actually filter
 const before = await page.$$eval(".board-row", n => n.length)
 await page.selectOption(".filters select >> nth=1", "hitting")

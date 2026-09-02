@@ -65,7 +65,17 @@ export const downloadConfig = (config: Config): void => {
 	URL.revokeObjectURL(url)
 }
 
+export interface AvailablePool {
+	players: { yahooId: string; name: string; team: string | null; positions: string[] }[]
+	positionsRead: string[]
+	note: string
+}
+
 export const api = {
+	available: (leagueId: string) =>
+		mode === "static" ?
+			staticOnly("Reading your league's free agents")
+		:	send<AvailablePool>("/api/available", { leagueId }),
 	config: loadConfig,
 	import: (url: string) =>
 		mode === "static" ? staticOnly("Importing a league") : send<ConfigReply>("/api/import", { url }),

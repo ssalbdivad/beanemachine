@@ -6,6 +6,7 @@ import { Hono } from "hono"
 import { existsSync } from "node:fs"
 import { CONFIG_PATH, ConfigError, loadConfig, saveConfig } from "./config.ts"
 import { ImportError, importLeague } from "./import.ts"
+import { fetchAvailable } from "./data/yahoo-pool.ts"
 import { League } from "./schema.ts"
 
 /**
@@ -78,6 +79,20 @@ const api = new Hono()
 		config.leagues[key] = league
 		config.active_league = key
 		return c.json({ key, config: await saveConfig(config) })
+	})
+
+	.post("/available", arktypeValidator("json", type({ leagueId: "string > 0" })), async c => {
+		// Browsers can't read Yahoo directly (no CORS headers), so the pool is
+		// fetched here and handed to the client.
+		const { leagueId } = c.req.valid("json")
+		if (!/^\d+$/.test(leagueId)) throw new ImportError("A numeric Yahoo league id is required.")
+		const pool = await fetchAvailable(leagueId)
+		if (!pool.players.length)
+			throw new ImportError(
+				"No free agents readable. Only publicly-viewable Yahoo leagues can be read " +
+					"without signing in."
+			)
+		return c.json(pool)
 	})
 
 	.post("/delete", arktypeValidator("json", KeyBody), async c => {

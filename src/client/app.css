@@ -486,3 +486,5 @@ pre{
 }
 .pick-bot .bot circle[r="3.8"]{animation-delay:1.2s}
 @media (prefers-reduced-motion:reduce){.bot circle[r="3.8"]{animation:none}}
+.pool-count{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--accent)}
+.toggle input:disabled + span{opacity:.5}

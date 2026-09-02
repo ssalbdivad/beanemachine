@@ -377,7 +377,7 @@ pre{
 .board{display:flex;flex-direction:column;min-width:0;overflow-x:auto}
 .board-head,.board-row{
   display:grid;
-  grid-template-columns:34px minmax(140px,1fr) 66px 70px 72px 78px 84px 58px;
+  grid-template-columns:34px minmax(132px,1fr) 62px 66px 66px 72px 40px 80px 54px;
   gap:10px;align-items:center;text-align:left;
 }
 .board-head{
@@ -554,3 +554,4 @@ pre{
   font-style:normal;font-size:10.5px;font-weight:700;letter-spacing:.3px;
   color:var(--accent);margin-left:4px;vertical-align:top
 }
+.board-row .games{font-variant-numeric:tabular-nums;color:var(--muted)}

@@ -279,6 +279,7 @@ export const Board = ({
 						<SortHead field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
 						<SortHead field="points" filters={filters} setFilters={setFilters} right>proj pts</SortHead>
 						<SortHead field="replacement" filters={filters} setFilters={setFilters} right>waiver pts</SortHead>
+						<span className="r" title="Games this player's team actually has scheduled in the window. Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start.">GP</span>
 						<SortHead field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
 						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>luck</SortHead>
 					</div>
@@ -515,6 +516,9 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 			<span className="r dim">{r.points}</span>
 			<span className="r dim">{r.replacement}</span>
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
+			<span className="r games" title={`${r.projection.horizonGames} games scheduled in this window`}>
+				{r.projection.horizonGames || "—"}
+			</span>
 			<span
 				className={`r gap${(r.undervaluation ?? 0) >= 70 ? " up" : ""}`}
 				title={

@@ -20,7 +20,7 @@
     },
     "why": [
       "volumeWeight 0.75: playing time is the single largest edge available, worth ~20% relative Spearman over a season-only estimate.",
-      "blend 0.5/0.5: chosen by playing seasons, not by correlation. A 14-day ranking mildly preferred 0.75; five played seasons prefer 0.5 by ~1,500 points and seven weekly wins.",
+      "blend 0.5/0.5: chosen by playing seasons, not by correlation. A 14-day ranking mildly preferred 0.75. Re-swept over the full 111 weeks the shipped value wins outright: 0.75 loses 22.6 points a week going 38W-73L, 0.25 loses 8.3, and 0 loses 15.8. For scale, dropping the replacement adjustment entirely costs 45 to 61 points a week — value over replacement is the dominant component and the recency blend is the refinement on top of it.",
       "rate: a reliever-specific weight was tried on the theory that his value is a ROLE that changes overnight while saves shrink toward the league rate with a heavy constant. Measured over 111 weeks it loses at every level (-1.2, -2.2, -5.9 points a week at 0.3/0.5/0.7). The heavy shrinkage is apparently correct: a reliever's recent save rate is mostly noise. The knob stays, set to null.",
       "rate: pitchers only, and lightly — 41 of 50 folds. The same blend for hitters won 29 of 50, a coin flip, so it is not applied.",
       "windows: the last series is worth more than the fortnight before it. Pitchers work a five-day turn, so their short window is 5 days rather than 3."

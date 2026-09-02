@@ -1,60 +1,69 @@
 /* The trade analyzer. Same instrument panel as the board — glass cards, a mono
  * readout for anything measured, the accent reserved for the one number that is
  * the answer. It is a tool, not a hero: only the net delta is allowed to shout.
- * Every colour is a token from app.css, so both themes come for free. */
+ * Every colour, size and gap is a token from app.css, so both themes and the one
+ * type scale come for free. */
 
 /* the store is unreadable, so the only thing left to offer is the way out of it */
-.trade-store-error{display:flex;flex-direction:column;align-items:flex-start;gap:9px;margin-bottom:14px}
+.trade-store-error{display:flex;flex-direction:column;align-items:flex-start;gap:9px;margin-bottom:var(--sp-3)}
 .trade-store-error .notes{margin:0;white-space:pre-line}
 
-.trade-search{display:flex;gap:10px;align-items:flex-end;margin-bottom:12px}
-.trade-search .ctl{flex:1}
-.trade-search input{
+.trade-search{display:flex;gap:10px;align-items:flex-end;margin-bottom:var(--sp-3);flex-wrap:wrap}
+.trade-search .ctl{flex:1;min-width:min(240px,100%)}
+.trade-search input,.deal-side input{
   width:100%;background:var(--well);border:1px solid var(--well-line);
-  border-radius:8px;padding:8px 11px;font-size:13px;
+  border-radius:8px;padding:8px 11px;font-size:var(--fs-4);
 }
-.trade-search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.trade-search input:focus,.deal-side input:focus{
+  outline:none;border-color:var(--accent);box-shadow:var(--ring);
+}
 
 .trade-results{
-  display:flex;flex-direction:column;margin-bottom:14px;
-  border:1px solid var(--well-line);border-radius:10px;background:var(--well);padding:4px 10px;
+  display:flex;flex-direction:column;margin-bottom:var(--sp-3);
+  border:1px solid var(--well-line);border-radius:10px;background:var(--well);padding:var(--sp-1) 10px;
 }
-.trade-results .empty{padding:8px 0}
-/* a real team is twenty-odd names; one long column pushes everything else off the page */
-.trade-owned{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:0 20px}
+.trade-results .empty{padding:var(--sp-2) 0}
+/* a real team is twenty-odd names; one long column pushes everything else off the
+   page, and a hard 330px minimum pushes the card off a phone */
+.trade-owned{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(330px,100%),1fr));gap:0 var(--sp-5)}
 
 /* one player: who, what he is worth, and the single thing you can do with him */
 .trade-line{
-  display:grid;grid-template-columns:minmax(0,1fr) 58px 64px 84px;
-  gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--rule);
+  display:grid;grid-template-columns:minmax(0,1fr) 54px 60px auto;
+  gap:var(--sp-3);align-items:center;padding:7px 0;border-bottom:1px solid var(--rule);
 }
 .trade-line:last-child{border-bottom:0}
-.trade-line .r{text-align:right;font-variant-numeric:tabular-nums}
-.trade-line .bs{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent)}
+.trade-line .r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.trade-line .bs{font-size:var(--fs-4);font-weight:600;color:var(--accent)}
 /* below replacement is not an achievement, so it is not painted like one */
 .trade-line .bs.neg{color:var(--neg)}
-.trade-line .proj{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
-.trade-line .none{grid-column:2/4;font-size:11.5px;color:var(--flag);font-style:italic}
+.trade-line .proj{font-size:var(--fs-3);color:var(--muted)}
+.trade-line .none{grid-column:2/4;font-size:var(--fs-2);color:var(--flag);font-style:italic;text-align:right}
 .trade-line .act{justify-self:end}
+@media(max-width:420px){
+  .trade-line{grid-template-columns:minmax(0,1fr) 48px auto;gap:var(--sp-2)}
+  .trade-line .proj{display:none}
+  .trade-line .none{grid-column:2/3}
+}
 
 /* ---------- the lineup ---------- */
-.lineup-head{display:flex;align-items:baseline;gap:11px;margin-bottom:13px;flex-wrap:wrap}
+.lineup-head{display:flex;align-items:baseline;gap:11px;margin-bottom:var(--sp-3);flex-wrap:wrap}
 .lineup-total{
-  font-family:var(--mono);font-size:30px;font-weight:600;color:var(--accent);
+  font-family:var(--mono);font-size:var(--fs-8);font-weight:600;color:var(--accent);
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1;
 }
-.lineup-unit{font-size:12.5px;color:var(--muted)}
+.lineup-unit{font-size:var(--fs-3);color:var(--muted)}
 .lineup{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));
-  gap:2px 18px;min-width:0;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(min(255px,100%),1fr));
+  gap:2px var(--sp-4);min-width:0;
 }
 .lineup-row{
-  display:grid;grid-template-columns:56px minmax(0,1fr) 62px;gap:10px;align-items:center;
-  padding:6px 0;border-bottom:1px solid var(--rule);font-size:13px;
+  display:grid;grid-template-columns:56px minmax(0,1fr) 58px;gap:10px;align-items:center;
+  padding:6px 0;border-bottom:1px solid var(--rule);font-size:var(--fs-4);
 }
 .lineup-row .lineup-who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lineup-row .lineup-pts{
-  text-align:right;font-family:var(--mono);font-size:12.5px;
+  text-align:right;font-family:var(--mono);font-size:var(--fs-3);
   font-variant-numeric:tabular-nums;color:var(--muted);
 }
 /* a spot you cannot fill yourself is dimmed, and one nothing can fill is flagged —
@@ -62,66 +71,79 @@
 .lineup-row.wire .lineup-who em{font-style:italic;color:var(--faint)}
 .lineup-row.hole .code{color:var(--flag);border-color:var(--flag)}
 .lineup-row.hole .lineup-who em{font-style:italic;color:var(--flag)}
-.lineup-holes{margin-top:14px}
+.lineup-holes{margin-top:var(--sp-3)}
 .lineup-holes .notes{margin-bottom:0}
-.lineup-unprojectable{margin-top:12px}
-.bench{margin-top:16px}
+.lineup-unprojectable{margin-top:var(--sp-3)}
+.bench{margin-top:var(--sp-4)}
 .bench h3,.slot-changes h3,.deal-side h3,.trade-verdict h3{
-  margin:0 0 9px;font-family:var(--mono);font-size:10px;font-weight:500;
-  letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 9px;font-size:var(--fs-2);font-weight:500;color:var(--muted);
 }
 .picks{display:flex;flex-wrap:wrap;gap:6px}
 
 /* ---------- the deal ---------- */
-.deal{display:grid;grid-template-columns:1fr 1fr;gap:20px;min-width:0}
+.deal{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-5);min-width:0}
 @media(max-width:820px){.deal{grid-template-columns:1fr}}
 .deal-side{min-width:0}
 .deal-side .ctl{width:100%;margin-bottom:10px}
-.deal-side input{
-  width:100%;background:var(--well);border:1px solid var(--well-line);
-  border-radius:8px;padding:8px 11px;font-size:13px;
-}
-.deal-side input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .deal-side .trade-results{margin-bottom:10px}
+/* the two sides are one exchange, so the divider between them is a seam rather
+   than a gutter — same assembly ticks the header seam uses */
+@media(min-width:821px){
+  .deal-side:first-child{
+    padding-right:var(--sp-5);
+    border-right:1px solid var(--rule);
+    background:linear-gradient(var(--tick),var(--tick)) right top/1px 7px no-repeat,
+      linear-gradient(var(--tick),var(--tick)) right bottom/1px 7px no-repeat;
+  }
+}
 
 /* ---------- the verdict ---------- */
-.verdict-nums{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+.verdict-nums{display:flex;align-items:flex-end;gap:var(--sp-4);flex-wrap:wrap;margin-bottom:var(--sp-3)}
 .vn{display:flex;flex-direction:column;gap:2px}
 .vn b{
-  font-family:var(--mono);font-size:24px;font-weight:600;
+  font-family:var(--mono);font-size:var(--fs-7);font-weight:600;
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1;color:var(--ink);
 }
-.vn span{
-  font-family:var(--mono);font-size:9px;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--faint);
-}
-.vn-arrow{color:var(--faint);font-size:15px;padding-bottom:3px}
+.vn span{font-size:var(--fs-1);letter-spacing:.16em;color:var(--faint)}
+.vn-arrow{color:var(--faint);font-size:var(--fs-5);padding-bottom:3px}
 /* the answer — the only thing on the page allowed to be loud */
 .vn.net{
-  margin-left:10px;padding:8px 16px;border-radius:10px;
+  margin-left:var(--sp-2);padding:var(--sp-2) var(--sp-4);border-radius:10px;
   background:var(--well);border:1px solid var(--well-line);
 }
-.vn.net b{font-size:34px}
+.vn.net b{font-size:var(--fs-9)}
 .vn.net.up{background:var(--accent-soft);border-color:transparent}
 .vn.net.up b{color:var(--accent)}
 .vn.net.down{background:var(--neg-soft);border-color:transparent}
 .vn.net.down b{color:var(--neg)}
-.verdict-why{margin:0 0 12px;font-size:13.5px;line-height:1.55;color:var(--muted)}
-.verdict-idle{margin:0 0 16px}
+.verdict-why{margin:0 0 var(--sp-3);font-size:var(--fs-4);line-height:var(--lh-body);color:var(--muted);max-width:80ch}
+.verdict-idle{margin:0 0 var(--sp-4)}
 .verdict-idle .tiny-note{margin:0 0 5px}
 
-.slot-changes{margin-bottom:14px}
+.slot-changes{margin-bottom:var(--sp-3)}
 .slot-change{
-  display:grid;grid-template-columns:56px minmax(0,1fr) 18px minmax(0,1fr) 68px;
-  gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule);font-size:13px;
+  display:grid;grid-template-columns:56px minmax(0,1fr) 18px minmax(0,1fr) 64px;
+  gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule);font-size:var(--fs-4);
 }
 .slot-change:last-child{border-bottom:0}
 .slot-change .was,.slot-change .now{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .slot-change .was{color:var(--muted)}
 .slot-change .pts{
-  text-align:right;font-family:var(--mono);font-size:12.5px;font-weight:600;
+  text-align:right;font-family:var(--mono);font-size:var(--fs-3);font-weight:600;
   font-variant-numeric:tabular-nums;color:var(--muted);
 }
 .slot-change .pts.up{color:var(--accent)}
 .slot-change .pts.down{color:var(--neg)}
+/* Five columns on a phone leaves the two names about 100px each, and both elide
+   past recognition — but this row exists to be read as "this one, not that one",
+   so the pair is the one thing that cannot be squeezed. The slot and its delta
+   take the first line; the exchange gets the full width of the second. */
+@media(max-width:420px){
+  .slot-change{grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);gap:var(--sp-1) 10px}
+  .slot-change .code{grid-column:1;grid-row:1;justify-self:start;min-width:auto}
+  .slot-change .pts{grid-column:3;grid-row:1}
+  .slot-change .was{grid-column:1;grid-row:2}
+  .slot-change .vn-arrow{grid-column:2;grid-row:2;padding-bottom:0;text-align:center}
+  .slot-change .now{grid-column:3;grid-row:2}
+}
 .verdict-missing{margin-top:0}

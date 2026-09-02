@@ -16,9 +16,12 @@ still be a decision you act on now.
 **Stash** ranks over every game left in the regular season. Playing time and role
 matter far more here than the last fortnight, so it surfaces the young player who
 just took an everyday job rather than whoever is hot. This is who to *hold*, not who
-to start. The Statcast numbers on each card matter most at this horizon in principle
-— but read the README before trusting them: this project has not yet measured that
-honestly, and says so.
+to start. Two things this view does not have: probable starters (MLB publishes them
+only days ahead, so a rest-of-season horizon has none, and the two-start filter is
+hidden here rather than left as a control that silently does nothing), and any
+measured claim about the Statcast numbers on each card. They have been measured at a
+one-week horizon and rejected as a multiplier; nobody has measured what they are
+worth over a rest-of-season hold. Read them as a human, not as a number the model used.
 
 ## The edge column
 
@@ -33,13 +36,15 @@ price to compare against — unknown, which is not the same as unowned.
 
 ## What am I looking at?
 
-The board is every MLB player, ranked by how much he would add to *your* team over the next 14 days, in *your* league's scoring. The top card is Billy's pick — the number one row, with the reasons spelled out. Under it, one row per player: his value over replacement (**bscore**), his raw projected points, what a replacement at his slot projects, how confident the projection is, and how far his expected contact quality sits from his actual results. Click any row to open the drill-down, which takes that projection apart into what was measured, what was modelled, and what is missing. The heading states how old the underlying data is and the exact date window being projected. Only the top 120 rows render; narrow the filters to see further down.
+The board is every MLB player, ranked by how much he would add to *your* team over the horizon you picked, in *your* league's scoring. The top card is Billy's pick — the number one row under the current sort, with the reasons spelled out as clauses assembled from numbers actually on the row. Under it, one row per player: how far he beats the field's price for him (**edge**), his value over replacement (**bscore**), his raw projected points, what a replacement at his slot projects, how confident the projection is, how many games his team actually plays in the window, and how unlucky he has been. Click any row to open the drill-down, which takes that projection apart into what was measured, what was modelled, and what is missing. The heading states how old the underlying data is and the exact date window being projected. Only the top 120 rows render; narrow the filters to see further down.
+
+Below the ranking sit two supporting reads, deliberately *below* it rather than above: **Buy low**, the handful of players hitting the ball better than their line says who are still cheap, and **Where it hurts to wait**, the drop-off at each slot. Both answer "where should I spend attention", which is a second question.
 
 ## What is a bscore?
 
 A bscore is **points above the guy you could have for free.**
 
-Everything on the board is denominated in your league's own points, not in some abstract rating. The projection says what a player will score over the 14-day horizon. The bscore subtracts what a freely available player at the same roster slot would score over the same 14 days.
+Everything on the board is denominated in your league's own points, not in some abstract rating. The projection says what a player will score over the horizon the tab you are on asks about — seven days, fourteen, or the rest of the season. The bscore subtracts what a freely available player at the same roster slot would score over that same window. The worked example below uses the 14-day default.
 
 Worked example:
 
@@ -68,7 +73,7 @@ That difference is positional scarcity, and it is where the ranking comes from:
 
 The outfielder scores 11 more points. The catcher is still the better roster move, because rostering him upgrades his slot by 43 points while the outfielder upgrades his by 38. The 11 points the outfielder has are already available to you from the waiver wire; the catcher's are not.
 
-The practical rule: **the "proj" column tells you who is better at baseball, the "bscore" column tells you who is worth more to your team.** They disagree at scarce positions, and that disagreement is the entire point of the board.
+The practical rule: **the "proj pts" column tells you who is better at baseball, the "bscore" column tells you who is worth more to your team.** They disagree at scarce positions, and that disagreement is the entire point of the board.
 
 If a player is eligible at more than one slot, he is scored at whichever slot makes him most valuable, and that slot is shown next to his name.
 
@@ -76,7 +81,7 @@ If a player is eligible at more than one slot, he is scored at whichever slot ma
 
 ### Draft day
 
-Rank by bscore, leave the filters wide, and read down. The board is already telling you when to take the scarce position — you do not need a separate "positional tier" exercise, because scarcity is priced into the number.
+Switch **Rank by** to bscore — the board opens on market edge, which is a waiver-day question, not a draft-day one — leave the filters wide, and read down. The board is already telling you when to take the scarce position, so you do not need a separate "positional tier" exercise, because scarcity is priced into the number. **Where it hurts to wait**, under the board, is the same information as a shape: long bars are the slots you pay for early.
 
 Two things to watch. First, the projection horizon is 14 days from the last data capture, so early in a season the sample behind every row is thin and confidence will be low across the board. Second, the board does not know who has already been drafted — cross off names yourself as they go.
 
@@ -88,9 +93,27 @@ Set **Min confidence** to 40%+ before acting. Low-confidence rows are usually sm
 
 ### Daily streaming
 
-Filter to **SP** and sort by bscore. The projection already multiplies each player's per-game rate by the number of games his team actually has scheduled in the window, so a team with a heavy week rises without you doing the arithmetic. Open the drill-down and check **team games in window** — that is the schedule advantage, stated plainly.
+Open the **Streaming** tab, filter to **SP**, and read the **GP** column while you do. The projection multiplies each player's per-game rate by the games his team actually has scheduled in that week, so a heavy slate rises without you doing the arithmetic; the drill-down states the same number as *team games in window*.
 
-For pitchers specifically, the model blends the last 21 days rather than the last 7. A starter works every fifth day, so a week of his data is one or two starts of noise. Do not expect the board to react to a single good outing; it is not supposed to.
+Two starts in a scoring period is roughly double the innings, and it is the single biggest thing that separates one streaming pick from another. Where MLB has published a pitcher's turns, the board projects him from **his own starts** rather than from his team's games, marks a two-start pitcher with a `×2` badge next to his bscore, and offers a **Two-start SP only** filter. Read the coverage honestly: probables reach only a few days out, so at any moment most starters have none published and the ones who do may have only their next turn announced — a starts-based projection is starts *announced*, not starts he will make. Early in a week the filter will be empty and that is the data, not a bug.
+
+For pitchers generally, recent form is read over 5 and 21 days with the 5 weighted double, rather than the 3/7/21 a batter gets. A starter works every fifth day, so five days is the shortest window that contains a start at all and a week of his data is one or two starts of noise. Do not expect the board to react to a single good outing; it is not supposed to.
+
+### Buying low
+
+The **Buy low** card under the board is the one place two independent signals are combined, and it only shows a player who clears both bars. He has to be hitting the ball better than his results say over the last three weeks — an expected-minus-actual wOBA gap above 0.035, with the sign flipped for pitchers — *and* still be rostered in under 70% of leagues. Either one alone is a trap: an unlucky player everyone already owns is not an opportunity, and a free player making weak contact is free for a reason. The score is the product of the two terms, not the sum, so being cheap cannot compensate for weak contact. At most three names appear, and often none do.
+
+### Where it hurts to wait
+
+The scarcity card shows, per slot, how far the best player you can still get sits above the next man up at that slot. A short bar is a slot you can punt; a long one is a slot worth paying for, because waiting costs you the whole gap. It is the same replacement level that sits under every bscore, drawn side by side — which is the only way to see it, since on any single row it is one number with nothing to compare against.
+
+## My team and trades
+
+The second view, **My team & trades**, is the one place the app knows what you hold. Add the players you own by name; they are stored in this browser under *this league's* key, so switching leagues switches teams and a roster never travels between them. Only ids are stored, so your team stays correct as the snapshot behind it is recaptured — and an id the current capture has no row for is named on screen rather than quietly dropped.
+
+From that it fills your league's real startable spots, best legal lineup first, and shows every spot accounted for out loud: filled by one of yours, covered at the waiver bar because nobody you own is eligible there, or a hole nothing in the pool can fill. A hole is reported as a hole, not priced at zero.
+
+Then the deal. Pick who leaves and who arrives, and the verdict is **what your starting lineup projects afterwards, minus what it projects now**. That is deliberately not "who has the higher bscore": bench depth is worth nothing until it starts, so a player who arrives and doesn't crack your lineup adds nothing to the number, and a player you give up who wasn't starting costs nothing. Both cases are stated on screen rather than left as an unexplained zero, alongside the spot-by-spot changes and anything the engine could not read.
 
 ## What do the columns mean?
 
@@ -98,15 +121,19 @@ For pitchers specifically, the model blends the last 21 days rather than the las
 |---|---|---|
 | **#** | Rank under the current sort | Changes with the filters — it is a position in this list, not a global rating |
 | **Player** | Name, then his best slot, his team, and an injury tag if he has one | The slot code is the one the bscore was computed against |
-| **bscore** | Projected points minus the replacement at that slot | The ranking number. Points you gain over a free pickup |
-| **proj** | Projected points over the 14-day horizon | Raw production. Not comparable across positions |
-| **repl** | What a freely available player at that slot projects | Your baseline. Higher at deep positions, lower at scarce ones |
-| **conf** | How much sample and data stand behind the projection, 0–100% | Hover for the specific reasons |
-| **x−a** | Expected wOBA minus actual wOBA | For a batter, positive means his results trail his contact — he has been unlucky. For a pitcher the sign reads the opposite way |
+| **edge** | bscore minus what a player rostered about as widely typically produces | The default sort. A dash means Yahoo doesn't list him: unknown, not unowned |
+| **bscore** | Projected points minus the replacement at that slot | Points you gain over a free pickup. An `×N` badge here means N starts are scheduled for him in this window; it only appears at two or more |
+| **proj pts** | Projected points over the horizon | Raw production. Not comparable across positions |
+| **waiver pts** | What a freely available player at that slot projects | Your baseline. Higher at deep positions, lower at scarce ones |
+| **confidence** | How much sample and data stand behind the projection, 0–100% | Hover for the specific reasons |
+| **GP** | Games his team actually has scheduled in the window | Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start |
+| **luck** | Where his expected-minus-actual wOBA over the last three weeks falls among his own side of the ball, as a percentile | 90 means only 10% of batters (or pitchers) have been unluckier. A dash means no Statcast row |
 
-Every header sorts; clicking the active one flips direction. The **Rank by** control adds one sort the columns do not: *most undervalued*, which ranks by where a player's x−a gap falls within his own side of the pool, in percentiles.
+Every header sorts except **GP**; clicking the active one flips direction. The **Rank by** control adds one sort the columns do not: *best contact vs results*, which orders on the raw 21-day expected-minus-actual gap rather than on its percentile.
 
-The x−a column is displayed for your judgment only. It does **not** move the projection — see the validation section.
+The luck column is displayed for your judgment only. It does **not** move the projection — see the validation section.
+
+The filters above the board: position chips, a name search, **Side**, **Rank by**, **Min confidence** (any / 40%+ / 70%+), **Free agents only** (Yahoo public leagues, local server only), **Two-start SP only** (hidden on Stash, where no probables exist), and **Hide injured**.
 
 ## What does confidence mean, and when should I distrust a row?
 
@@ -128,7 +155,9 @@ So a healthy full-season regular with Statcast data reads near 100%, and that ho
 - **The drill-down lists things under "Missing."** No Statcast row, no team games in the window, or a category your league scores that no source provides. An unscoreable category is reported rather than treated as zero, which means the projected points for that player are genuinely incomplete.
 - **The bscore is in single digits.** Below the noise floor of two weeks of baseball.
 
-One thing that is *not* a reason to distrust a row: a modest projection for a player who has been hot. Rates are shrunk toward league average in proportion to how little volume backs them, using per-stat sample weights. A .400 month over 90 PA does not project forward at face value, deliberately.
+One thing that is *not* a reason to distrust a row: a modest projection for a player who has been hot. **A batter's projected rate is his season rate**, full stop — recent form moves his *playing time* and nothing else, and even that is only half-weighted against the season. A pitcher gets 15% of his rate from his last 21 days, which is the most any measurement supported. So a .400 month over 90 PA does not project forward at face value, deliberately.
+
+Be precise about how that restraint works, because the honest version is not the one you would guess. Shrinking each rate toward the league average — the textbook fix, with per-stat stabilisation constants — is implemented in this codebase and **is not applied**: it was measured and it lost, because the volume model already docks a part-time player for playing part-time and shrinking on top of that penalises him twice. What holds a hot streak down here is the season rate and the volume blend, not a shrinkage step.
 
 Players with no projectable playing time never appear on the board at all. They are excluded, not ranked at zero next to real players.
 
@@ -143,23 +172,25 @@ Players with no projectable playing time never appear on the board at all. They 
 
 Your leagues live in the browser you set them up in — **Save** writes them there, and they are still there next time you open the page. **Download** takes the lot out as a `scoring.json` you can keep or move to another browser, and **Load file** reads one back in, replacing what that browser holds. Nothing is stored on a server, and the first visit starts from a real league rather than an empty screen by seeding itself from the copy committed to the repo.
 
-One note on the hosted site: importing needs the local server (`nub run dev`), because Yahoo and ESPN send no CORS headers and a browser cannot read them directly. Editing, saving, downloading and loading all work on the hosted build exactly as they do locally. You can also start from a blank or platform template with **New** and enter the values by hand.
+One note on the hosted site: importing needs the local server (`node src/server.ts` with `npx vite` in front of it), because Yahoo and ESPN send no CORS headers and a browser cannot read them directly. Editing, saving, downloading and loading all work on the hosted build exactly as they do locally. You can also start from a blank or platform template with **New** and enter the values by hand.
 
 ## What this tool does not know
 
 Be clear-eyed about the edges. It:
 
-- **Does not know your opponent, or the pitchers your hitters will face.** Every projection is context-free. Streaming a hitter into a weekend at Coors is a decision the board cannot help with.
-- **Does not know your roster.** It never accounts for who you already have, so it will happily rank three catchers at the top when you need one. It ranks players, you make the swap.
-- **Does not model trades, keeper values, or anything past 14 days.** There is no rest-of-season number here.
-- **Does not know multi-position eligibility.** The data source reports one primary position, and your league's real eligibility rules are not exposed by any source read here, so they are never assumed. A catcher who also qualifies at first base is scored only as a catcher — which understates him.
-- **Does not use park factors, weather, or lineup slot.** Not modelled, not adjusted for.
-- **Ranks all of MLB, not just who is available to you.** The names at the top are usually rostered. The **Free agents only** toggle fixes this by reading your league's actual free agent list, but it works only for Yahoo leagues that are publicly viewable, and only when you are running locally — the hosted build has no server to fetch the pool through. Otherwise, filter by slot and skip the names you know are taken.
-- **Does not know the Statcast adjustment is right, so it does not use it.** xwOBA and barrel rate are shown because they inform a human. They do not move a recommendation.
+- **Does not know the individual pitchers your hitters will face.** It does know *which teams* they face, from the real schedule, and scales a projection by how good those teams' staffs and lineups have been — at half strength, because that effect is positive at every dose it was tried at and significant at none. What it cannot tell you is that tomorrow's starter is an ace, or that the weekend is at Coors.
+- **Does not know your roster, on the board.** The ranking never accounts for who you already have, so it will happily rank three catchers at the top when you need one. **My team & trades** is the view that does know, and it is a separate view for that reason.
+- **Does not model keeper or dynasty value, and does not know your budget.** The **Stash** tab ranks over the rest of the season, which is the longest horizon here; nothing looks past this season at all.
+- **Does not know multi-position eligibility.** The data source reports one primary position, and your league's real eligibility rules are not exposed by any source the board reads, so they are never assumed. A catcher who also qualifies at first base is scored only as a catcher — which understates him. This is the largest known accuracy gap. (Autonomous mode is the exception: it plans a lineup against the eligibility Yahoo actually prints beside each name, and refuses to plan at all when it cannot read it.)
+- **Does not use park factors, weather, or lineup slot.** The park multiplier is written and its weight is 0, and nothing even fetches the factors — so this is "not modelled", not "modelled quietly".
+- **Ranks all of MLB, not just who is available to you.** The names at the top are usually rostered — which is exactly why the board opens on market edge instead. The **Free agents only** toggle narrows it properly by reading your league's actual free agent list, but it works only for Yahoo leagues that are publicly viewable, and only when you are running locally, because the hosted build has no server to fetch the pool through.
+- **Does not move a recommendation on Statcast.** xwOBA and barrel rate are shown, ranked and used to find buy-low candidates, because they genuinely inform a human. They are not multiplied into any projection: as a multiplier they were measured over 111 weeks and lost at every setting. The drill-down says so on every player.
 
 ## How the model was validated
 
-The evaluation harness builds a corpus from every season of the Statcast era, **2016–2026** (2020 excluded — a 60-game season cannot hold a 14-day horizon after warm-up), and scores projection variants against what actually happened over the following two weeks. It is leak-free by construction: every stat line is pulled with a date range ending at the as-of date, so nothing from the evaluation window reaches the projection. 100 folds total, 50 per side. The baseline is the honest naive one — "he'll keep doing what he's been doing," his season rate scaled to the games ahead.
+Two harnesses, and they answer different questions. The first ranks; the second plays.
+
+**The ranking harness** builds a corpus from every season of the Statcast era, **2016–2026** (2020 excluded — a 60-game season cannot hold a 14-day horizon after warm-up), and scores projection variants against what actually happened over the following two weeks. Every stat line it scores is pulled with a date range ending at the as-of date, so nothing from the evaluation window reaches the projection. 100 folds total, 50 per side. The baseline is the honest naive one — "he'll keep doing what he's been doing," his season rate scaled to the games ahead.
 
 | Side | Model | Spearman ρ | vs naive | Folds won |
 |---|---|---|---|---|
@@ -172,8 +203,16 @@ What survived the sweeps:
 
 - **Recent playing time is nearly the whole gain**, and the right window differs by side — a batter's role can change in a week; a starter needs three weeks before his workload is even visible. Several windows are blended (3, 7 and 21 days for batters with the shortest weighted double; 5 and 21 for pitchers), and the recent estimate then carries **half** the weight against the season line. That 0.5 was chosen by playing whole seasons rather than by ranking correlation — a 14-day ranking mildly preferred heavier recency, but across five seasons of real weekly decisions 0.5 wins by roughly 1,500 points and seven weekly wins.
 - **A light recent-rate blend helps pitchers only** — 15% of the 21-day rate, which won 41 of 50 pitching folds. The identical idea for batters won 29 of 50, a coin flip, so it is not applied. The mean difference there was +0.0009: exactly the kind of number that looks like an improvement and is noise.
-- **The Statcast blend was measured and rejected.** Every sweep across ten seasons ranked it best at zero weight. It is off.
-- **Extra rate shrinkage made things worse.** The naive line already carries the fact that good players accumulate more plate appearances; shrinking on top of a volume model double-penalises the players it shouldn't.
+- **Extra rate shrinkage made things worse.** The naive line already carries the fact that good players accumulate more plate appearances; shrinking on top of a volume model double-penalises the players it shouldn't. It is implemented and switched off.
+
+**The season harness** plays whole seasons out week by week: each strategy drafts from the same pool, sets a legal roster, makes waiver moves on what it believed at the time, and is scored on what those players actually produced. This is the harness that decides anything, because paired weekly wins are how a head-to-head league is actually won, and it has already overruled the correlation once — on the recency weight. Over 2021-2025, 111 weeks, one waiver move a week, the model beats a season-to-date manager by 65 points a week and a hot-hand manager by 48, both significant.
+
+It is also the harness that settled the two questions people ask about most:
+
+- **The Statcast multiplier was measured and rejected.** Every formulation — five weights, two λ shapes, two scopes — loses points over those 111 weeks, and the per-season winner is a different configuration nearly every year, which is what noise looks like. It is off. Note what this does *not* say: on clean point-in-time data xwOBA out-predicts actual wOBA for next-week production, and the gap carries real incremental signal. The metric is predictive; multiplying a projection by it still doesn't change which 27 players you roster, because that decision is dominated by playing time and slot scarcity.
+- **Schedule strength ships at half weight.** Positive at every dose and monotone in the total, significant at none, so the smallest dose that shows the effect is the one that risks least.
+
+An earlier version of this page said the Statcast blend had been ruled out by the ranking harness. That measurement ran on a Savant endpoint which accepts date parameters and ignores them, so its "prior" numbers contained the future it was predicting. It was void and has been retracted; the paragraph above replaces it.
 
 ### What ρ ≈ 0.68 does and does not mean
 

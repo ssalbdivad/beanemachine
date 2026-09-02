@@ -6,6 +6,7 @@ import { League as LeagueSchema } from "../schema.ts"
 import { api, ApiError, detectMode, getMode } from "./api.ts"
 import { Billy } from "./Billy.tsx"
 import { Board } from "./Board.tsx"
+import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
 import { leagues } from "./leagues.ts"
 import { EligibilityPanel, Fragment2, RosterPanel, StatTable } from "./panels.tsx"
@@ -21,7 +22,7 @@ export const App = () => {
 	const [busy, setBusy] = useState(false)
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
-	const [view, setView] = useState<"board" | "league" | "trade">("board")
+	const [view, setView] = useState<"board" | "league" | "trade" | "draft">("board")
 	const { snapshot, error: snapshotError } = useSnapshot()
 	const { toast, show } = useToast()
 	const acknowledge = useCallback(() => {
@@ -113,6 +114,14 @@ export const App = () => {
 				>
 					My team &amp; trades
 				</button>
+				<button
+					role="tab"
+					aria-selected={view === "draft"}
+					className={view === "draft" ? "on" : ""}
+					onClick={() => setView("draft")}
+				>
+					Draft
+				</button>
 				<a
 					className="views-link"
 					href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/GUIDE.md"
@@ -166,6 +175,15 @@ export const App = () => {
 				<div className="grid">
 					<Board snapshot={snapshot} league={league ?? null} error={snapshotError} />
 				</div>
+			: view === "draft" ?
+				<div className="grid">
+					<Draft
+						snapshot={snapshot}
+						league={league ?? null}
+						leagueKey={key}
+						error={snapshotError}
+					/>
+				</div>
 			: view === "trade" ?
 				<div className="grid">
 					<Trade
@@ -218,7 +236,7 @@ const Toolbar = ({
 	onReject
 }: {
 	config: Config | null
-	view: "board" | "league" | "trade"
+	view: "board" | "league" | "trade" | "draft"
 	activeKey: string | null
 	onSelect: (key: string) => void
 	onImport: (url: string) => void

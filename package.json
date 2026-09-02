@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "start": "nub src/server.ts",
     "import": "nub src/cli.ts",
-    "test": "node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/auto.mjs && node test/ui.mjs && node test/board.mjs && node test/trade-ui.mjs",
+    "test": "node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/draft.mjs && node test/auto.mjs && node test/ui.mjs && node test/board.mjs && node test/trade-ui.mjs",
     "check": "tsc --noEmit",
     "refresh": "node src/refresh.ts",
     "test:board": "node test/board.mjs",
@@ -28,7 +28,8 @@
     "test:leagues": "node test/leagues.mjs",
     "test:trade": "node test/trade.mjs",
     "test:auto": "node test/auto.mjs",
-    "test:trade-ui": "node test/trade-ui.mjs"
+    "test:trade-ui": "node test/trade-ui.mjs",
+    "test:draft": "node test/draft.mjs"
   },
   "dependencies": {
     "@hono/arktype-validator": "^2.0.1",

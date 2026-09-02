@@ -1,0 +1,126 @@
+/* Draft mode. Same instrument panel as the board and the trade page — glass cards,
+ * a mono readout for anything measured, the accent kept for the one number that is
+ * the answer. Here that number is what a pick adds to your lineup; the cliff beside
+ * it is read in the muted ink, because it is evidence rather than the verdict.
+ * Every colour, size and gap is a token from app.css, so both themes and the one
+ * type scale come for free. */
+
+/* the store is unreadable, so the only thing left to offer is the way out of it */
+.draft-store-error{display:flex;flex-direction:column;align-items:flex-start;gap:9px;margin:0 0 var(--sp-3)}
+.draft-store-error .notes{margin:0;white-space:pre-line}
+
+/* one uppercase-mono label, the same one app.css gives every other section head */
+.draft-pick h3,.draft-gone h3{
+  margin:0 0 9px;font-family:var(--mono);font-size:var(--fs-2);font-weight:500;
+  letter-spacing:var(--caps);text-transform:uppercase;color:var(--muted);
+}
+
+/* ---------- the pick ---------- */
+.pick-head{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:var(--sp-4);align-items:center;
+  padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);border-radius:var(--r-md);
+  background:var(--well);border:1px solid var(--well-line);
+}
+@media(max-width:620px){.pick-head{grid-template-columns:1fr;gap:var(--sp-2)}}
+/* the answer, and the only thing on this page allowed to be loud */
+.pick-gain{
+  font-family:var(--mono);font-size:var(--fs-9);font-weight:600;color:var(--muted);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1;
+}
+.pick-gain.up{color:var(--accent)}
+.pick-who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pick-who b{font-size:var(--fs-6);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick-acts{display:flex;gap:7px;align-items:center}
+.pick-why{margin:0 0 var(--sp-4);font-size:var(--fs-4);line-height:var(--lh-body);color:var(--muted);max-width:80ch}
+
+.alts{display:flex;flex-direction:column}
+/* one candidate: who he is, what he adds, what he projects, and the two things
+   that can happen to him */
+.draft-line{
+  display:grid;grid-template-columns:minmax(0,1fr) 66px 58px auto;
+  gap:var(--sp-3);align-items:center;padding:7px 0;border-bottom:1px solid var(--rule);
+}
+.draft-line:last-child{border-bottom:0}
+.draft-line .who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.draft-line .who b{font-size:var(--fs-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.draft-line .r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.draft-line .alt-gain{font-size:var(--fs-4);font-weight:600;color:var(--muted)}
+.draft-line .alt-gain.up{color:var(--accent)}
+.draft-line .proj{font-size:var(--fs-3);color:var(--muted)}
+@media(max-width:520px){
+  .draft-line{grid-template-columns:minmax(0,1fr) 66px auto;gap:var(--sp-2)}
+  .draft-line .proj{display:none}
+}
+.draft-missing{margin-top:0}
+
+/* ---------- the cliff ---------- */
+.cliff-head,.cliff-row{
+  display:grid;grid-template-columns:56px minmax(0,1fr) 66px minmax(0,1fr) 84px 52px;
+  gap:var(--sp-3);align-items:center;
+}
+.cliff-head{
+  padding-bottom:6px;border-bottom:1px solid var(--rule-strong);
+  font-family:var(--mono);font-size:var(--fs-1);letter-spacing:var(--caps);
+  text-transform:uppercase;color:var(--faint);
+}
+.cliff-head .r{text-align:right}
+.cliff-row{padding:7px 0;border-bottom:1px solid var(--rule);font-size:var(--fs-4)}
+.cliff-row:last-of-type{border-bottom:0}
+.cliff-row .r{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.cliff-who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the man you get instead is the consolation, so he is not painted as an equal */
+.cliff-who.next{color:var(--muted)}
+.cliff-who .none{color:var(--flag);font-style:italic;font-size:var(--fs-2)}
+.cliff-gain{font-size:var(--fs-3);color:var(--accent)}
+/* the drop carries a rule scaled to the steepest one on this board. The shape is
+   the point: one long bar among short ones is the spot to spend a pick on, which
+   is the same reading the sentence above gives in words */
+.cliff-drop{position:relative;font-size:var(--fs-3);font-weight:600;padding-bottom:5px}
+.cliff-bar{
+  position:absolute;right:0;bottom:0;height:2px;
+  background:var(--accent);opacity:.55;border-radius:1px;
+}
+.cliff-gone{font-size:var(--fs-3);color:var(--faint)}
+.cliff-gone .run{color:var(--flag);font-weight:600}
+.draft-cliffs .tiny-note{margin:var(--sp-3) 0 0;max-width:80ch}
+@media(max-width:720px){
+  /* the second name and the count are the first things to go: the slot, the man
+     you would take and the drop are the row */
+  .cliff-head,.cliff-row{grid-template-columns:52px minmax(0,1fr) 66px 84px}
+  .cliff-who.next,.cliff-gone,.cliff-head span:nth-child(4),.cliff-head span:nth-child(6){display:none}
+}
+
+/* ---------- the board ---------- */
+.draft-search{display:flex;gap:10px;align-items:flex-end;margin-bottom:var(--sp-3);flex-wrap:wrap}
+.draft-search .ctl{flex:1;min-width:min(240px,100%)}
+.draft-search input{
+  width:100%;background:var(--well);border:1px solid var(--well-line);
+  border-radius:var(--r-sm);padding:var(--sp-2) 11px;font-size:var(--fs-4);
+}
+.draft-search input:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring)}
+.draft-results{
+  display:flex;flex-direction:column;margin-bottom:var(--sp-3);
+  border:1px solid var(--well-line);border-radius:var(--r-md);background:var(--well);
+  padding:var(--sp-1) 10px;
+}
+.draft-results .draft-line{grid-template-columns:minmax(0,1fr) 86px auto}
+.draft-results .empty{padding:var(--sp-2) 0}
+/* a full draft is a couple of hundred names, and the page still has to be usable
+   under it */
+.draft-gone .draft-picks{max-height:230px;overflow-y:auto}
+.draft-unresolved{margin-top:var(--sp-3)}
+
+/* ---------- what you have drafted ---------- */
+.draft-picks{display:flex;flex-wrap:wrap;gap:6px}
+.draft-tally{display:flex;align-items:baseline;gap:11px;margin-bottom:var(--sp-3);flex-wrap:wrap}
+.draft-tally-num{
+  font-family:var(--mono);font-size:var(--fs-8);font-weight:600;color:var(--accent);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1;
+}
+.draft-tally-unit{font-size:var(--fs-3);color:var(--muted)}
+.draft-mine .draft-picks .chip b{
+  font-family:var(--mono);font-size:var(--fs-2);letter-spacing:.06em;
+  color:var(--faint);margin-right:5px;
+}
+/* drafted but starting nowhere — the bench is real, and it is not worth as much */
+.draft-mine .bench-chip{opacity:.62}

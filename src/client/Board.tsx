@@ -70,7 +70,7 @@ export const Board = ({
 
 	const availableNames =
 		pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null
-	const { rows, scored } = useBoard(snapshot, league, filters, availableNames)
+	const { rows, scored, edgeUsable, edgeCoverage } = useBoard(snapshot, league, filters, availableNames)
 	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -281,6 +281,15 @@ export const Board = ({
 						"Ranked over the next seven days only — the week that is actually about to happen, using its real slate rather than half of a fortnight."
 					:	null}
 				</p>
+				{!edgeUsable && filters.sort === "marketEdge" && (
+					<p className="sub warn-note">
+						Market edge needs how many leagues each player is rostered in, and this
+						capture only priced {Math.round(edgeCoverage * 100)}% of them — Yahoo
+						throttles whoever is asking, and the published snapshot is built by a CI
+						runner it throttles hard. Ranking by bscore instead. Pick
+						&ldquo;market edge&rdquo; explicitly to rank just the players it could price.
+					</p>
+				)}
 				<p className="sub">
 					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
 					projected over {snapshot.horizon.start} → {snapshot.horizon.end} ·

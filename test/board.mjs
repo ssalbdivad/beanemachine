@@ -23,11 +23,22 @@ t("bscores are finite numbers", scores.every(Number.isFinite), String(scores.sli
 const edges = await page.$$eval(".board-row .edge", n =>
   n.map(e => Number(String(e.textContent).replace("+", "")))
 )
-t("board opens sorted by market edge descending",
-  edges.length > 50 && edges.every((v, i) => i === 0 || edges[i - 1] >= v),
-  String(edges.slice(0, 5)))
-t("every opening recommendation beats its ownership par",
-  edges.slice(0, 20).every(v => v > 0), String(edges.slice(0, 5)))
+// Ownership is optional data and how much arrives depends on who Yahoo is
+// throttling, so the DEFAULT ranking has to survive it being thin. Either the
+// board is ranked by edge, or it fell back to bscore and said so — never a board
+// that silently shrank to the handful of players it could price.
+const fellBack = await page.$$eval(".warn-note", n => n.length > 0)
+const bscores = await page.$$eval(".board-row .bscore", n =>
+  n.map(e => Number(String(e.textContent).replace(/[^0-9.\-]/g, "")))
+)
+t("board opens sorted by whichever ranking is usable",
+  fellBack
+    ? bscores.every((v, i) => i === 0 || bscores[i - 1] >= v)
+    : edges.every((v, i) => i === 0 || edges[i - 1] >= v),
+  `${fellBack ? "bscore fallback" : "market edge"}: ${String((fellBack ? bscores : edges).slice(0, 5))}`)
+t("a thin ownership capture says so instead of emptying the board",
+  fellBack ? bscores.length > 50 : edges.slice(0, 20).every(v => v > 0),
+  `fellBack=${fellBack}, rows=${bscores.length}`)
 
 // and bscore still sorts when asked for
 await page.click(".board-head .sort-head:has-text('bscore')")

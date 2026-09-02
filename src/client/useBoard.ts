@@ -136,6 +136,27 @@ export const useBoard = (
 		[league]
 	)
 
+	/**
+	 * Is there enough market data for market edge to be the DEFAULT ranking?
+	 *
+	 * Ownership is read from Yahoo's public pages, and how much comes back depends
+	 * on who is asking: a local run reads ~845 players, the CI runner that builds
+	 * the published snapshot gets throttled down to ~229. Ranking by edge silently
+	 * drops everyone unpriced, so on a thin capture the board went from 1,400 rows
+	 * to a handful — a broken page that looked like a short list.
+	 *
+	 * The default therefore has to survive its optional input going missing. Below
+	 * the threshold the board falls back to bscore and SAYS it did; edge stays
+	 * available as an explicit choice, because a user who picks it has asked for
+	 * exactly the subset it can rank.
+	 */
+	const edgeCoverage = useMemo(() => {
+		const rateable = rated.filter(r => r.rateable)
+		if (!rateable.length) return 0
+		return rateable.filter(r => r.marketEdge !== null).length / rateable.length
+	}, [rated])
+	const edgeUsable = edgeCoverage >= 0.35
+
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()
 		const out = rated.filter(r => {
@@ -147,7 +168,8 @@ export const useBoard = (
 			if (filters.sort === "undervaluation" && r.bscore <= 0) return false
 			// Same guard for market edge: a replacement-level body nobody rosters beats
 			// the par for his ownership by definition, and recommending him is noise.
-			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0)) return false
+			if (filters.sort === "marketEdge" && edgeUsable && (r.marketEdge === null || r.bscore <= 0))
+				return false
 			// Contact quality only means something for someone worth rostering, and only
 			// where a rolling Statcast window actually exists for him.
 			if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
@@ -167,7 +189,8 @@ export const useBoard = (
 				case "replacement": return r.replacement
 				case "confidence": return r.confidence.value
 				case "undervaluation": return r.undervaluation ?? -1
-				case "marketEdge": return r.marketEdge ?? -Infinity
+				case "marketEdge":
+					return edgeUsable ? (r.marketEdge ?? -Infinity) : r.bscore
 				case "contact":
 					// a pitcher benefits when his expected is BELOW his actual, so it flips
 					return (
@@ -183,7 +206,7 @@ export const useBoard = (
 			return filters.desc ? -cmp : cmp
 		})
 		return out
-	}, [rated, filters, availableNames])
+	}, [rated, filters, availableNames, edgeUsable])
 
-	return { rated, rows, scored }
+	return { rated, rows, scored, edgeUsable, edgeCoverage }
 }

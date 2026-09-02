@@ -148,10 +148,27 @@ export const fetchOwnership = async (
 			const url =
 				`https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/players` +
 				`?status=ALL&pos=${encodeURIComponent(pos)}&sort=AR&sdir=1&count=${page * 25}`
+			/**
+			 * One retry with a long pause before giving up on a page.
+			 *
+			 * How much of the priced universe comes back depends on who is asking: a
+			 * local run reads ~845 players, the CI runner that builds the published
+			 * snapshot gets throttled to ~229. Bailing on the first non-200 turned a
+			 * slow page into a permanently missing position. The board no longer
+			 * depends on this succeeding, but more of it arriving is strictly better.
+			 */
+			let text: string | null = null
+			for (let attempt = 0; attempt < 2 && text === null; attempt++) {
+				if (attempt) await new Promise(r => setTimeout(r, 2000))
+				try {
+					const res = await fetch(url, { headers: { "user-agent": UA } })
+					if (res.ok) text = await res.text()
+				} catch {
+					/* retried once, then treated as unread rather than as empty */
+				}
+			}
 			try {
-				const res = await fetch(url, { headers: { "user-agent": UA } })
-				if (!res.ok) break
-				const text = await res.text()
+				if (text === null) break
 				if (/Please sign in/i.test(documentText(text).slice(0, 400))) break
 				const rows = parsePage(text)
 				if (!rows.length) break

@@ -61,8 +61,11 @@ export const fetchAvailable = async (
 	const seen = new Set<string>()
 	const positionsRead: string[] = []
 
-	const pages = await Promise.all(
-		POSITIONS.map(async pos => {
+	// Sequential with a small gap. Nine simultaneous requests get throttled, which
+	// silently collapsed the pool from 177 players to 25.
+	const pages: { pos: string; rows: PoolEntry[] }[] = []
+	for (const pos of POSITIONS) {
+		pages.push(await (async () => {
 			const url =
 				`https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/players` +
 				`?status=A&pos=${encodeURIComponent(pos)}&sort=AR&sdir=1&count=25`
@@ -76,8 +79,9 @@ export const fetchAvailable = async (
 			} catch {
 				return { pos, rows: [] as PoolEntry[] }
 			}
-		})
-	)
+		})())
+		await new Promise(r => setTimeout(r, 120))
+	}
 	for (const { pos, rows } of pages) {
 		if (!rows.length) continue
 		positionsRead.push(pos)

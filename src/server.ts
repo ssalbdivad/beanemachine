@@ -27,6 +27,11 @@ const NewBody = type({
 	"template?": "string"
 })
 
+/** The free-agent pool changes slowly and Yahoo rate-limits, so cache it briefly
+ *  rather than re-scraping on every page load. */
+const POOL_TTL = 10 * 60_000
+const poolCache = new Map<string, { at: number; pool: unknown }>()
+
 const app = new Hono()
 
 /** Our own errors are guidance; anything else is a bug and stays a 500. */
@@ -86,12 +91,22 @@ const api = new Hono()
 		// fetched here and handed to the client.
 		const { leagueId } = c.req.valid("json")
 		if (!/^\d+$/.test(leagueId)) throw new ImportError("A numeric Yahoo league id is required.")
+		// An empty pool is a STATE, not an error: the league may be private, or Yahoo
+		// may be rate-limiting. Returning 400 made the browser log a failed request on
+		// every load. The client shows the filter disabled with this note instead.
+		const cached = poolCache.get(leagueId)
+		if (cached && Date.now() - cached.at < POOL_TTL) return c.json(cached.pool)
 		const pool = await fetchAvailable(leagueId)
 		if (!pool.players.length)
-			throw new ImportError(
-				"No free agents readable. Only publicly-viewable Yahoo leagues can be read " +
-					"without signing in."
-			)
+			return c.json({
+				players: [],
+				positionsRead: [],
+				note:
+					"Couldn't read this league's free agents. Only publicly-viewable Yahoo " +
+					"leagues can be read without signing in, and Yahoo rate-limits repeated " +
+					"requests — try again in a few minutes."
+			})
+		poolCache.set(leagueId, { at: Date.now(), pool })
 		return c.json(pool)
 	})
 

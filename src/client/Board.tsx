@@ -69,7 +69,7 @@ export const Board = ({
 	}, [leagueId, league?.meta.platform])
 
 	const availableNames =
-		pool ? new Set(pool.players.map(p => normalizeName(p.name))) : null
+		pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null
 	const { rows } = useBoard(snapshot, league, filters, availableNames)
 	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
@@ -172,7 +172,12 @@ export const Board = ({
 						/>
 						<span>
 							Free agents only
-							{pool && <em className="pool-count"> {pool.players.length}</em>}
+							{pool && pool.players.length > 0 && (
+								<em className="pool-count"> {pool.players.length}</em>
+							)}
+							{pool && pool.players.length === 0 && (
+								<em className="pool-count"> unavailable</em>
+							)}
 							{!pool && !poolError && <em className="pool-count"> …</em>}
 						</span>
 					</label>

@@ -7,10 +7,19 @@ const p = await b.newPage({ viewport:{width:1280,height:1000} })
 const errs = []
 p.on("pageerror", e => errs.push(String(e)))
 await p.goto(BASE, { waitUntil:"networkidle" })
-await p.waitForSelector(".grid section.card .rows", { timeout: 20000 })
+// The board is the default view and must render with NO server. A synchronous
+// throw in the static-mode guard once killed the whole render here.
+await p.waitForSelector(".board-row", { timeout: 25000 })
 let pass=0, fail=0
 const t=(n,ok,x="")=>{ok?pass++:fail++; console.log(`${ok?"PASS":"FAIL"}  ${n}${ok?"":"  "+x}`)}
 t("no page errors", errs.length===0, errs.join(" | "))
+t("the board renders with no server", (await p.$$eval(".board-row", n=>n.length)) > 50)
+t("free-agents toggle is disabled rather than failing",
+  await p.$eval(".toggle input", e => e.disabled))
+t("Billy's pick renders", await p.locator(".card.pick").isVisible())
+// now switch to the config editor for the remaining assertions
+await p.click(".views button:nth-child(2)")
+await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
 t("static banner shown", await p.locator(".static-note").isVisible())
 const codes = await p.$$eval(".grid section:nth-of-type(1) .code", n=>n.map(e=>e.textContent))
 const vals = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))

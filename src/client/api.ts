@@ -31,12 +31,18 @@ const send = async <T,>(path: string, body?: unknown): Promise<T> => {
 	return data as T
 }
 
-const staticOnly = (action: string): never => {
-	throw new ApiError(
-		`${action} needs the local server — this is the static build. ` +
-			`Run it with \`nub run dev\` to import leagues and write scoring.json.`
+/**
+ * Rejects rather than throwing. Throwing synchronously means a caller's `.catch()`
+ * never gets attached, so the error escapes as an unhandled exception — which took
+ * the whole static build's render down until this was fixed.
+ */
+const staticOnly = <T,>(action: string): Promise<T> =>
+	Promise.reject(
+		new ApiError(
+			`${action} needs the local server — this is the static build. ` +
+				`Run it with \`nub run dev\` to import leagues and write scoring.json.`
+		)
 	)
-}
 
 type ConfigReply = { key?: string; config: Config }
 
@@ -72,17 +78,23 @@ export interface AvailablePool {
 }
 
 export const api = {
-	available: (leagueId: string) =>
+	available: (leagueId: string): Promise<AvailablePool> =>
 		mode === "static" ?
-			staticOnly("Reading your league's free agents")
+			staticOnly<AvailablePool>("Reading your league's free agents")
 		:	send<AvailablePool>("/api/available", { leagueId }),
 	config: loadConfig,
-	import: (url: string) =>
-		mode === "static" ? staticOnly("Importing a league") : send<ConfigReply>("/api/import", { url }),
+	import: (url: string): Promise<ConfigReply> =>
+		mode === "static" ?
+			staticOnly<ConfigReply>("Importing a league")
+		:	send<ConfigReply>("/api/import", { url }),
 	save: (key: string, league: League) => send<ConfigReply>("/api/save", { key, league }),
 	activate: (key: string) => send<ConfigReply>("/api/activate", { key }),
-	create: (key: string, template: string) =>
-		mode === "static" ? staticOnly("Creating a league") : send<ConfigReply>("/api/new", { key, template }),
-	remove: (key: string) =>
-		mode === "static" ? staticOnly("Removing a league") : send<ConfigReply>("/api/delete", { key })
+	create: (key: string, template: string): Promise<ConfigReply> =>
+		mode === "static" ?
+			staticOnly<ConfigReply>("Creating a league")
+		:	send<ConfigReply>("/api/new", { key, template }),
+	remove: (key: string): Promise<ConfigReply> =>
+		mode === "static" ?
+			staticOnly<ConfigReply>("Removing a league")
+		:	send<ConfigReply>("/api/delete", { key })
 }

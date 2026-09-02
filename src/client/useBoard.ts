@@ -33,6 +33,13 @@ export interface Filters {
 	hideInjured: boolean
 	availableOnly: boolean
 	minConfidence: number
+	/**
+	 * Which question the board is answering. The three differ only in horizon, but
+	 * that changes the answer completely: a two-start pitcher wins a week and a
+	 * 22-year-old with a rising role wins a September, and neither shows up in the
+	 * other's ranking.
+	 */
+	mode: "stream" | "board" | "stash"
 	sort: "marketEdge" | "bscore" | "points" | "undervaluation" | "replacement" | "confidence" | "name"
 	desc: boolean
 }
@@ -47,6 +54,7 @@ export const DEFAULT_FILTERS: Filters = {
 	// The default answers "who is the field wrong about", not "who is best" — the
 	// best players are already rostered, so a bare bscore ranking opens on names
 	// nobody reading this can actually add.
+	mode: "board",
 	sort: "marketEdge",
 	desc: true
 }
@@ -69,6 +77,14 @@ export const useBoard = (
 		// honest bscore, so this refuses rather than assuming a league size.
 		if (league.meta.max_teams == null) return []
 		const h = hydrate(snapshot)
+		// Rest-of-season counts can be empty in the off-season, and a horizon of zero
+		// games would rank everyone at zero. Fall back rather than invent a number.
+		const horizon =
+			filters.mode === "stream" && h.gamesWeek.size ?
+				{ games: h.gamesWeek, opponents: h.opponentsWeek }
+			: filters.mode === "stash" && h.gamesRemaining.size ?
+				{ games: h.gamesRemaining, opponents: h.opponentsByTeam }
+			:	{ games: h.gamesByTeam, opponents: h.opponentsByTeam }
 		return withMarketEdge(
 			withUndervaluation(
 				rateAll({
@@ -77,8 +93,8 @@ export const useBoard = (
 				underlying: h.underlying,
 				injuries: h.injuries,
 				teamGamesPlayed: h.teamGamesPlayed,
-				gamesByTeam: h.gamesByTeam,
-			opponentsByTeam: h.opponentsByTeam,
+				gamesByTeam: horizon.games,
+				opponentsByTeam: horizon.opponents,
 				recentVolumeByWindow: h.recentVolumeByWindow,
 				recentStats: h.recentStats,
 				ownership: h.ownership,
@@ -87,7 +103,7 @@ export const useBoard = (
 			),
 			h.ownership
 		)
-	}, [snapshot, league])
+	}, [snapshot, league, filters.mode])
 
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()

@@ -74,7 +74,7 @@ if (seasons.length > 1) {
  * aggregate but loses most individual weeks has won a coin toss, so the paired
  * week-by-week count is the number that decides anything.
  */
-const BASELINES = ["season-to-date", "hot-hand"]
+const BASELINES = ["season-to-date", "hot-hand", "hot-hand+vorp", "thoughtful-human", "draft-and-hold"]
 
 /**
  * Comparing two variants by how each does against a THIRD strategy is the wrong

@@ -38,6 +38,11 @@ export interface Snapshot {
 	/** Games each team has left in the regular season — the horizon for a stash,
 	 *  as opposed to the next week's slate a streamer plays against. */
 	gamesRemaining?: Record<string, number>
+	/** The next seven days only. A streaming decision is made against the week that
+	 *  is actually about to happen, so it gets its own count and its own opponents
+	 *  rather than half of a fortnight. */
+	gamesWeek?: Record<string, number>
+	opponentsWeek?: Record<string, number[]>
 	/** Yahoo "% Ros", keyed by MLBAM id. Absent for anyone Yahoo did not list;
 	 *  absent means unknown, never unowned. */
 	ownership?: Record<string, number>
@@ -72,7 +77,7 @@ export const buildSnapshot = async (
 	}
 	const back = (d: number) => iso(new Date(now.getTime() - d * 86400_000))
 	const [
-		hitting, pitching, xBat, xPit, horizon, restOfSeason, owned, teamGamesPlayed, injuries,
+		hitting, pitching, xBat, xPit, horizon, restOfSeason, week, owned, teamGamesPlayed, injuries,
 		hitWindows, pitWindows
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
@@ -81,6 +86,7 @@ export const buildSnapshot = async (
 			fetchUnderlying(season, "pitcher"),
 			fetchSchedule(start, end),
 			fetchGamesByTeam(start, `${season}-11-05`),
+			fetchSchedule(start, iso(new Date(now.getTime() + 7 * 86400_000))),
 			fetchOwnership(leagueId).catch(() => ({ byName: new Map<string, number>(), read: 0, note: "" })),
 			fetchTeamGamesPlayed(season),
 			fetchInjuries(),
@@ -161,6 +167,8 @@ export const buildSnapshot = async (
 			[...horizon.opponents].map(([k, v]) => [String(k), v])
 		),
 		gamesRemaining: Object.fromEntries([...restOfSeason].map(([k, v]) => [String(k), v])),
+		gamesWeek: Object.fromEntries([...week.counts].map(([k, v]) => [String(k), v])),
+		opponentsWeek: Object.fromEntries([...week.opponents].map(([k, v]) => [String(k), v])),
 		// joined on normalised name, because Yahoo exposes its own player ids and
 		// never the MLBAM one. A player Yahoo did not list is simply absent.
 		ownership: Object.fromEntries(
@@ -200,6 +208,10 @@ export const hydrate = (s: Snapshot) => ({
 		Object.entries(s.gamesRemaining ?? {}).map(([k, v]) => [Number(k), v])
 	),
 	ownership: new Map(Object.entries(s.ownership ?? {}).map(([k, v]) => [Number(k), v])),
+	gamesWeek: new Map(Object.entries(s.gamesWeek ?? {}).map(([k, v]) => [Number(k), v])),
+	opponentsWeek: new Map(
+		Object.entries(s.opponentsWeek ?? {}).map(([k, v]) => [Number(k), v])
+	),
 	opponentsByTeam: new Map(
 		Object.entries(s.opponentsByTeam ?? {}).map(([k, v]) => [Number(k), v])
 	),

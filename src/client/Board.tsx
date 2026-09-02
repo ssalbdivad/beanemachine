@@ -197,6 +197,27 @@ export const Board = ({
 			} />}
 
 			<section className="card full">
+				<div className="modes" role="tablist" aria-label="What to rank for">
+					{(
+						[
+							["stream", "Streaming", "the next 7 days — who wins you this week"],
+							["board", "This fortnight", "the standing board, 14 days out"],
+							["stash", "Stash", "rest of season — who to hold, not who to start"]
+						] as const
+					).map(([id, label, why]) => (
+						<button
+							key={id}
+							type="button"
+							role="tab"
+							aria-selected={filters.mode === id}
+							className={`mode${filters.mode === id ? " on" : ""}`}
+							onClick={() => setFilters(f => ({ ...f, mode: id }))}
+						>
+							<b>{label}</b>
+							<span>{why}</span>
+						</button>
+					))}
+				</div>
 				<h2>
 					Recommendations
 					{age && (

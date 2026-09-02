@@ -501,3 +501,20 @@ pre{
 }
 .views-link:hover{background:var(--accent-soft)}
 .views-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Horizon tabs. Three questions, not three filters — so they read as a choice of
+   what the board is FOR, with the reason under each label. */
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 20px}
+.modes .mode{
+  display:flex;flex-direction:column;gap:3px;align-items:flex-start;text-align:left;
+  padding:11px 13px;border-radius:11px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  transition:border-color .16s,color .16s,background .16s
+}
+.modes .mode b{font-size:13.5px;font-weight:650;color:var(--text);letter-spacing:.1px}
+.modes .mode span{font-size:11.5px;line-height:1.35}
+.modes .mode:hover{border-color:var(--accent)}
+.modes .mode.on{border-color:var(--accent);background:var(--accent-soft,var(--panel))}
+.modes .mode.on b{color:var(--accent)}
+.modes .mode:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:700px){.modes{grid-template-columns:1fr}.modes .mode span{display:none}}

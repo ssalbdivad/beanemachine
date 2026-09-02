@@ -38,6 +38,27 @@ t("sorting by bscore still orders by bscore",
 await page.click(".board-head .sort-head:has-text('edge')")
 await page.waitForTimeout(150)
 
+// The three horizons must actually be three different questions. A stash ranking
+// that matches the streaming ranking is a tab that does nothing.
+const topOf = async () => page.$$eval(".board-row .name, .board-row b", n =>
+  n.slice(0, 10).map(e => e.textContent.trim()))
+const boardTop = await topOf()
+await page.click(".modes .mode:has-text('Streaming')")
+await page.waitForTimeout(250)
+const streamTop = await topOf()
+t("streaming mode re-ranks against the next 7 days",
+  streamTop.length > 0 && streamTop.join() !== boardTop.join(),
+  `${streamTop.slice(0, 3)} vs ${boardTop.slice(0, 3)}`)
+await page.click(".modes .mode:has-text('Stash')")
+await page.waitForTimeout(250)
+const stashTop = await topOf()
+t("stash mode re-ranks against the rest of the season",
+  stashTop.length > 0 && stashTop.join() !== streamTop.join(),
+  `${stashTop.slice(0, 3)} vs ${streamTop.slice(0, 3)}`)
+t("every horizon still produces a full board", stashTop.length >= 5, String(stashTop.length))
+await page.click(".modes .mode:has-text('This fortnight')")
+await page.waitForTimeout(250)
+
 // bscore must be value OVER REPLACEMENT, so proj − repl should equal it
 const row = await page.$eval(".board-row", r => ({
   bscore: Number(r.querySelector(".bscore").textContent),

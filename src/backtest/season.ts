@@ -340,7 +340,58 @@ export const hotHandStrategy: Strategy = {
 			.sort((a, b) => b.score - a.score)
 }
 
-export const STRATEGIES = [bscoreStrategy, projectedPointsStrategy, seasonToDateStrategy, hotHandStrategy]
+/**
+ * The harder opponents.
+ *
+ * season-to-date and hot-hand are the managers who are not really trying. These
+ * three are: a streak-chaser who also understands scarcity, a manager who blends
+ * the season with recent form the way a thoughtful human eyeballs it, and one who
+ * drafts well and then leaves it alone. If bscore cannot beat these, it is not
+ * worth the tab it opens in.
+ */
+const withVorp = (name: string, inner: Strategy): Strategy => ({
+	name,
+	rank: ctx => applyVorp(inner.rank(ctx), ctx.league)
+})
+
+/** Chases the hot hand but knows a catcher is scarce. The strongest naive play. */
+export const sharpHotHandStrategy = withVorp("hot-hand+vorp", hotHandStrategy)
+
+/** What a good human actually does: recent form, weighted against the season. */
+export const humanStrategy: Strategy = {
+	name: "thoughtful-human",
+	rank: ctx =>
+		applyVorp(
+			ctx.prior
+				.map(p => {
+					const gAhead = p.teamId ? (ctx.gamesAhead.get(p.teamId) ?? 0) : 0
+					const gBehind = p.teamId ? (ctx.priorGames.get(p.teamId) ?? 0) : 0
+					if (!gAhead || !gBehind) return { p, score: -Infinity }
+					const table = tableFor(ctx.league, p.group)
+					const season = (scoreStats(p.stats, table, p.group).points / gBehind) * gAhead
+					const rec = ctx.recent[14]?.find(r => r.id === p.id)
+					const recent = rec ? (scoreStats(rec.stats, table, p.group).points / 14) * 7 : 0
+					return { p, score: 0.5 * season + 0.5 * recent }
+				})
+				.sort((a, b) => b.score - a.score),
+			ctx.league
+		)
+}
+
+/**
+ * Drafts on our own numbers and then never touches the roster. Isolates what the
+ * in-season decisions are worth, as opposed to the draft — if this ties bscore,
+ * every waiver move the model recommends is theatre.
+ */
+export const draftAndHoldStrategy: Strategy = {
+	name: "draft-and-hold",
+	rank: ctx => applyVorp(makeBscoreStrategy("_").rank(ctx), ctx.league)
+}
+
+export const STRATEGIES = [
+	bscoreStrategy, projectedPointsStrategy, seasonToDateStrategy, hotHandStrategy,
+	sharpHotHandStrategy, humanStrategy, draftAndHoldStrategy
+]
 
 type VariantOpts = Parameters<typeof makeBscoreStrategy>[1]
 
@@ -497,6 +548,8 @@ export const playSeason = async (
 			const held = rosters.get(strategy.name)
 			if (!held) {
 				rosters.set(strategy.name, fillRoster(ranked, slots))
+			} else if (strategy.name === "draft-and-hold") {
+				// deliberately makes no moves — that is the whole point of the control
 			} else {
 				// waiver moves: swap the weakest holds for the best available
 				const rank = new Map(ranked.map((r, i) => [r.p.id, i]))

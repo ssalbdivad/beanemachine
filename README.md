@@ -222,9 +222,12 @@ The opponents are the two strategies human managers actually run: **season-to-da
 | strategy | points | % of perfect | weeks bscore wins |
 |---|---|---|---|
 | **bscore** | **79,208** | **51.0%** | — |
-| hot-hand | 73,883 | 47.6% | **70/111** (+46.2/wk) |
+| thoughtful-human | 77,706 | 50.1% | **60/111** (+13.5/wk) |
+| hot-hand + scarcity | 75,261 | 48.5% | **69/111** (+35.6/wk) |
+| hot-hand | 73,883 | 47.6% | **74/111** (+48.0/wk) |
 | projected points only | 73,336 | 47.2% | — |
-| season-to-date | 71,962 | 46.4% | **81/111** (+63.5/wk) |
+| season-to-date | 71,962 | 46.4% | **76/111** (+65.3/wk) |
+| draft-and-hold | 63,949 | 41.2% | **98/111** (+137.5/wk) |
 | perfect hindsight | 155,213 | 100% | ceiling |
 
 bscore wins outright on points — by **7%** over hot-hand and **9.8%** over

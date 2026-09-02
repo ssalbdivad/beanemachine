@@ -67,5 +67,32 @@ const control = totals.get("projected-points")
 t("value over replacement beats ranking by raw projected points",
   bscore > control, `${bscore} vs ${control}`)
 
+/**
+ * The harder opponents. Beating a manager who does nothing is not evidence of
+ * anything; these are the ones worth beating.
+ */
+const sharp = totals.get("hot-hand+vorp")
+const human = totals.get("thoughtful-human")
+const hold = totals.get("draft-and-hold")
+console.log(
+	`  hot-hand+vorp ${sharp.toFixed(0)} · thoughtful-human ${human.toFixed(0)} · ` +
+		`draft-and-hold ${hold.toFixed(0)}`
+)
+
+t("bscore beats a streak-chaser who also understands scarcity", bscore > sharp, `${bscore} vs ${sharp}`)
+t("bscore beats a thoughtful human blending season and recent form", bscore > human, `${bscore} vs ${human}`)
+
+// the closest opponent, so it gets the paired test rather than the aggregate one
+const humanWeeks = weekly.get("thoughtful-human") ?? []
+const vsHuman = mine.filter((v, i) => v > (humanWeeks[i] ?? Infinity)).length
+t("and wins the majority of individual weeks against them", vsHuman / mine.length > 0.52, `${vsHuman}/${mine.length}`)
+
+// If in-season decisions were worthless this would tie, and every recommendation
+// the app makes after draft day would be theatre.
+const holdWeeks = weekly.get("draft-and-hold") ?? []
+const vsHold = mine.filter((v, i) => v > (holdWeeks[i] ?? Infinity)).length
+t("acting on the model beats drafting on it and walking away", vsHold / mine.length > 0.8, `${vsHold}/${mine.length}`)
+t("and that gap is large", bscore - hold > 10000, `${(bscore - hold).toFixed(0)} pts`)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

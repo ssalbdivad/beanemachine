@@ -194,6 +194,7 @@ export const Board = ({
 				</div>
 			</section>
 
+			<BuyLow rows={rows} />
 			{rows[0] && <BillysPick r={rows[0]} horizonDays={
 				Math.round((Date.parse(snapshot.horizon.end) - Date.parse(snapshot.horizon.start)) / 86400000)
 			} />}
@@ -286,6 +287,77 @@ export const Board = ({
 				)}
 			</section>
 		</>
+	)
+}
+
+/**
+ * Buy low: the two new signals, which are only interesting together.
+ *
+ * A big expected-minus-actual gap on its own finds unlucky players who everyone
+ * already owns. A low ownership on its own finds players nobody wants for good
+ * reason. The intersection — hitting the ball better than his line says AND still
+ * cheap — is the one case where the field is demonstrably behind the data, and it
+ * is the reason to read Statcast at all.
+ *
+ * Scored as the product of two normalised terms rather than a sum, so a player has
+ * to clear both bars: being free does not compensate for making weak contact.
+ */
+const BuyLow = ({ rows }: { rows: Ranked[] }) => {
+	const picks = rows
+		.filter(
+			r =>
+				r.regressionGap !== null &&
+				r.rosteredPct !== null &&
+				r.rosteredPct < 70 &&
+				r.bscore > 0 &&
+				(r.player.group === "hitting" ? r.regressionGap : -r.regressionGap) > 0.035
+		)
+		.map(r => {
+			const gap = (r.player.group === "hitting" ? 1 : -1) * r.regressionGap!
+			return { r, gap, score: gap * (100 - r.rosteredPct!) }
+		})
+		.sort((a, b) => b.score - a.score)
+		.slice(0, 3)
+
+	if (!picks.length) return null
+	return (
+		<section className="card full buylow">
+			<h2>Buy low</h2>
+			<p className="sub">
+				Hitting the ball harder than their results show over the last three weeks, and
+				still cheap. Both conditions, not either — an unlucky player everyone already
+				owns is not an opportunity.
+			</p>
+			<div className="buylow-grid">
+				{picks.map(({ r, gap }) => (
+					<article key={r.player.id} className="buylow-card">
+						<b>{r.player.name}</b>
+						<span className="pos">
+							{r.player.team ?? "FA"} · {r.slot}
+						</span>
+						<dl>
+							<div className="pair">
+								<dt>expected − actual</dt>
+								<dd className="good">+{gap.toFixed(3)}</dd>
+							</div>
+							<div className="pair">
+								<dt>rostered</dt>
+								<dd>{r.rosteredPct}%</dd>
+							</div>
+							<div className="pair">
+								<dt>bscore</dt>
+								<dd>{r.bscore}</dd>
+							</div>
+						</dl>
+						<p className="tiny-note">
+							{r.player.group === "hitting" ?
+								`His contact over the last three weeks was worth ${gap.toFixed(3)} more wOBA than he was paid for, and ${100 - r.rosteredPct!}% of leagues still have him free.`
+							:	`He has been hit softer than his line suggests by ${gap.toFixed(3)} wOBA, with ${100 - r.rosteredPct!}% of leagues not rostering him.`}
+						</p>
+					</article>
+				))}
+			</div>
+		</section>
 	)
 }
 

@@ -518,3 +518,19 @@ pre{
 .modes .mode.on b{color:var(--accent)}
 .modes .mode:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:700px){.modes{grid-template-columns:1fr}.modes .mode span{display:none}}
+
+/* Buy low. Deliberately quieter than the main board: it is a shortlist to consider,
+   not a ranking to act on, and styling it like a verdict would oversell it. */
+.buylow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
+.buylow-card{
+  border:1px solid var(--line);border-radius:12px;padding:13px 15px;background:var(--panel);
+  display:flex;flex-direction:column;gap:6px;min-width:0
+}
+.buylow-card b{font-size:14.5px;letter-spacing:.1px}
+.buylow-card .pos{font-size:11.5px;color:var(--muted);letter-spacing:.3px;text-transform:uppercase}
+.buylow-card dl{margin:4px 0 0;display:grid;grid-template-columns:1fr auto;gap:3px 12px;font-size:12.5px}
+.buylow-card .pair{display:contents}
+.buylow-card dt{color:var(--muted)}
+.buylow-card dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.buylow-card dd.good{color:var(--accent);font-weight:650}
+.buylow-card .tiny-note{margin:6px 0 0;font-size:11.5px;line-height:1.45;color:var(--muted)}

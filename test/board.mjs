@@ -38,6 +38,17 @@ t("sorting by bscore still orders by bscore",
 await page.click(".board-head .sort-head:has-text('edge')")
 await page.waitForTimeout(150)
 
+// Buy low must be an intersection, not a rebrand of the main board: every card
+// has to be both cheap and out-hitting its line, or the panel is decoration.
+const buylow = await page.$$eval(".buylow-card", cards =>
+  cards.map(c => ({
+    gap: Number(c.querySelector("dd.good")?.textContent),
+    own: Number(String([...c.querySelectorAll("dd")][1]?.textContent).replace("%", ""))
+  }))
+)
+t("buy-low picks all beat their line on contact", buylow.every(c => c.gap > 0.03), JSON.stringify(buylow))
+t("buy-low picks are all actually cheap", buylow.every(c => c.own < 70), JSON.stringify(buylow))
+
 // The three horizons must actually be three different questions. A stash ranking
 // that matches the streaming ranking is a tab that does nothing.
 const topOf = async () => page.$$eval(".board-row .name, .board-row b", n =>

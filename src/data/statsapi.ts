@@ -186,6 +186,30 @@ export const fetchTeamGamesPlayed = async (season: number): Promise<Map<number, 
  * archive of what was announced at the time exists. That is stated rather than
  * papered over — see model.json.
  */
+/** For each team, the opposing starters it is booked against over the window. */
+export const fetchOpposingStarters = async (
+	startDate: string,
+	endDate: string
+): Promise<Map<number, number[]>> => {
+	const data = await json(
+		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}` +
+			`&hydrate=probablePitcher`
+	)
+	const out = new Map<number, number[]>()
+	for (const day of data.dates ?? [])
+		for (const game of day.games ?? [])
+			for (const [side, other] of [
+				["home", "away"],
+				["away", "home"]
+			] as const) {
+				const team = game.teams?.[side]?.team?.id
+				const starter = game.teams?.[other]?.probablePitcher?.id
+				if (typeof team === "number" && typeof starter === "number")
+					out.set(team, [...(out.get(team) ?? []), starter])
+			}
+	return out
+}
+
 export const fetchProbableStarts = async (
 	startDate: string,
 	endDate: string

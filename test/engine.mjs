@@ -197,5 +197,31 @@ t("rolling gaps are wide enough to carry signal",
 t("batter and pitcher windows are genuinely different data",
   JSON.stringify(rollingB.slice(0, 5)) !== JSON.stringify(rollingP.slice(0, 5)))
 
+// --- starter-level matchups: a hitter faces a man, not a staff average ---
+const { pitcherQuality, starterBlendedIndex } = await import("../src/engine/matchup.ts")
+const q = pitcherQuality(snap.players)
+t("pitcher quality is measured for a real population", q.size > 150, `${q.size} pitchers`)
+t("and is centred on the league", (() => {
+  const v = [...q.values()]
+  const mean = v.reduce((a, c) => a + c, 0) / v.length
+  return Math.abs(mean - 1) < 0.05
+})())
+
+// the blend must collapse to the team index when no probable is published — absent
+// is not neutral, and it is not zero either
+const hitter = snap.players.find(p => p.group === "hitting" && p.teamId)
+t("no published starter falls back to the team index",
+  starterBlendedIndex(hitter, 1.07, new Map(), q) === 1.07)
+t("an unknown starter falls back too, rather than scoring him as average",
+  starterBlendedIndex(hitter, 1.07, new Map([[hitter.teamId, [999999999]]]), q) === 1.07)
+t("a known starter actually moves the index", (() => {
+  const known = [...q.entries()].find(([, v]) => Math.abs(v - 1) > 0.1)
+  if (!known) return true
+  const blended = starterBlendedIndex(hitter, 1, new Map([[hitter.teamId, [known[0]]]]), q)
+  return blended !== null && Math.abs(blended - 1) > 0.05
+})())
+t("a pitcher is never given a hitter's opposing-starter blend",
+  starterBlendedIndex(snap.players.find(p => p.group === "pitching"), 0.9, new Map(), q) === 0.9)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

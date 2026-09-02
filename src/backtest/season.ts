@@ -511,6 +511,16 @@ export const MIRAGE_SWEEP: Strategy[] = [
 	hotHandStrategy
 ]
 
+/**
+ * Hysteresis on the swap decision.
+ *
+ * The simulator charges nothing for churn, so a strategy will swap on a
+ * hair's-breadth ranking difference — which is how a model overfits its own
+ * noise. swapMargin requires the incoming player to clear the outgoing one by
+ * that many ranks before the move is made.
+ */
+export const MARGIN_SWEEP: Strategy[] = [bscoreStrategy, seasonToDateStrategy, hotHandStrategy]
+
 /** Does knowing who they play this week help? */
 export const MATCHUP_SWEEP: Strategy[] = [
 	vorpVariant("mu0.00", { matchupWeight: 0 }),

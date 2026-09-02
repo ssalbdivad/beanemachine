@@ -499,6 +499,12 @@ const BillysPick = ({ r, horizonDays }: { r: Ranked; horizonDays: number }) => {
 				`${r.projection.volumePerTeamGame.toFixed(1)} plate appearances per team game`
 			:	`${r.projection.volumePerTeamGame.toFixed(1)} outs recorded per team game`
 		)
+	if (r.projection.matchupMultiplier !== 1)
+		clauses.push(
+			r.projection.matchupMultiplier > 1 ?
+				`the schedule ahead of him is soft (×${r.projection.matchupMultiplier.toFixed(3)})`
+			:	`the schedule ahead of him is hard (×${r.projection.matchupMultiplier.toFixed(3)})`
+		)
 	if (r.projection.horizonGames)
 		clauses.push(`his team plays ${r.projection.horizonGames} games in that stretch`)
 	const worry =

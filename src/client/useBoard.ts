@@ -102,6 +102,10 @@ export const useBoard = (
 			filters.mode === "stream" ? h.probableStartsWeek
 			: filters.mode === "stash" ? undefined
 			: h.probableStarts
+		const opposingStarters =
+			filters.mode === "stream" ? h.opposingStartersWeek
+			: filters.mode === "stash" ? undefined
+			: h.opposingStarters
 		return withMarketEdge(
 			withUndervaluation(
 				rateAll({
@@ -116,6 +120,7 @@ export const useBoard = (
 				recentStats: h.recentStats,
 				ownership: h.ownership,
 				probableStarts,
+				opposingStarters,
 				teams: league.meta.max_teams
 				})
 			),

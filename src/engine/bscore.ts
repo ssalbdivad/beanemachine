@@ -1,7 +1,7 @@
 import type { League } from "../schema.ts"
 import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
-import { matchupIndexFor, teamStrength } from "./matchup.ts"
+import { matchupIndexFor, pitcherQuality, starterBlendedIndex, teamStrength } from "./matchup.ts"
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
 import {
 	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
@@ -76,6 +76,8 @@ export interface RateOptions {
 	ownership?: Map<number, number>
 	/** Scheduled starts over the horizon, by MLBAM id. */
 	probableStarts?: Map<number, number>
+	/** For each team, the opposing starters its hitters face over the horizon. */
+	opposingStarters?: Map<number, number[]>
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -101,13 +103,20 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	// Opponent quality is derived from the same pool being rated, so it moves with
 	// whatever the board is showing and never needs a separate capture.
 	const strength = teamStrength(o.players)
+	// each pitcher's own wOBA allowed, so a hitter can be matched against the man on
+	// the mound rather than against an average of an ace and a fifth starter
+	const quality = pitcherQuality(o.players)
 
 	const rated: Rated[] = o.players.map(player => {
 		const underlying = o.underlying[player.group].get(player.id)
 		const injury = o.injuries.get(player.id)
 		const horizonGames = player.teamId ? (o.gamesByTeam.get(player.teamId) ?? 0) : 0
-		const matchupIndex =
-			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null
+		const matchupIndex = starterBlendedIndex(
+			player,
+			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null,
+			o.opposingStarters,
+			quality
+		)
 		const projection = project(
 			player,
 			underlying,

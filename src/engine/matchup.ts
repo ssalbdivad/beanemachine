@@ -81,3 +81,57 @@ export const matchupIndexFor = (
 	if (!vals.length) return null
 	return vals.reduce((a, c) => a + c, 0) / vals.length
 }
+
+
+/**
+ * The sharper matchup: WHO is actually starting against you.
+ *
+ * Team-level staff quality averages an ace and a fifth starter into one number,
+ * and a hitter does not face a staff — he faces the man on the mound. MLB
+ * publishes probable starters about a week out, so for the streaming horizon the
+ * specific pitcher is an observation rather than an estimate.
+ *
+ * A starter covers roughly 58% of a game's innings league-wide (about 5.2 of 9),
+ * so the two indices are blended in that proportion rather than by a tuned
+ * weight: the starter's own quality for his share, the opponent staff's for the
+ * bullpen innings behind him. Where no probable is published the blend collapses
+ * to the team index, which is what the model did before.
+ *
+ * This cannot be backtested — probables are announced and then overwritten, and
+ * nothing archives what was announced at the time. It ships because it replaces
+ * an average with an observation, which is the same reason scheduled starts ship,
+ * and it is flagged here rather than dressed up as a measured gain.
+ */
+const STARTER_INNINGS_SHARE = 0.58
+
+/** Each pitcher's wOBA allowed, relative to the league. >1 means easier to hit. */
+export const pitcherQuality = (players: PlayerSeason[]): Map<number, number> => {
+	const raw = new Map<number, number>()
+	for (const p of players) {
+		if (p.group !== "pitching") continue
+		const r = wobaish(p.stats, p.stats.battersFaced)
+		// a September call-up with nine batters faced is not a matchup signal
+		if (r !== null && (p.stats.battersFaced ?? 0) >= 100) raw.set(p.id, r)
+	}
+	const mean = [...raw.values()].reduce((a, c) => a + c, 0) / Math.max(raw.size, 1)
+	const out = new Map<number, number>()
+	if (mean > 0) for (const [id, r] of raw) out.set(id, r / mean)
+	return out
+}
+
+export const starterBlendedIndex = (
+	player: PlayerSeason,
+	teamIndex: number | null,
+	opposingStarters: Map<number, number[]> | undefined,
+	quality: Map<number, number>
+): number | null => {
+	if (player.group !== "hitting" || !player.teamId) return teamIndex
+	const facing = opposingStarters?.get(player.teamId)
+	if (!facing?.length) return teamIndex
+	const known = facing.map(id => quality.get(id)).filter((v): v is number => v !== undefined)
+	if (!known.length) return teamIndex
+	const starters = known.reduce((a, c) => a + c, 0) / known.length
+	// with no team index there is no bullpen estimate, so the starter carries it all
+	if (teamIndex === null) return starters
+	return STARTER_INNINGS_SHARE * starters + (1 - STARTER_INNINGS_SHARE) * teamIndex
+}

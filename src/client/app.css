@@ -411,6 +411,35 @@ dd{margin:0;min-width:0;font-weight:500;font-variant-numeric:tabular-nums;overfl
 .unit{color:var(--muted);font-weight:400;font-size:var(--fs-3)}
 dd code,.mono{font-family:var(--mono);font-size:var(--fs-3)}
 
+/* ---------- scoring period ----------
+   A league's own week, entered by hand for a league whose period could not be read
+   off its platform. These are toolbar controls inside a card: `.ctl` already pairs a
+   mono label with its control, and the period's fields read as a row of instrument
+   settings rather than as a list. Number and date inputs get the glass treatment
+   `select` and `input[type=text]` carry above — they are scoped to this group rather
+   than made global because `input.val` and the roster bays deliberately wear a
+   different, recessed well instead. */
+.period{display:flex;flex-wrap:wrap;gap:var(--sp-3) var(--sp-4);align-items:flex-end;min-width:0}
+.period .ctl{max-width:100%}
+.period .field{margin-right:0}
+.period input[type=number],.period input[type=date]{
+  background:var(--glass);border:1px solid var(--edge-line);
+  border-radius:var(--r-md);padding:9px var(--sp-3);max-width:100%;min-width:0;
+  box-shadow:inset 0 1px 0 var(--edge);
+  font-family:var(--mono);font-size:var(--fs-4);font-variant-numeric:tabular-nums;
+  transition:border-color .14s, background .14s, box-shadow .14s;
+}
+.period input[type=number]{width:5em;text-align:right}
+.period input[type=number]:hover,.period input[type=date]:hover{border-color:var(--rule-strong)}
+/* the lines under the controls are consequences of them rather than a new subject,
+   so they open tighter than a card's own opening `.sub` */
+.period-reads,.period-source{margin-top:var(--sp-3)}
+/* On a phone the row becomes a column: a select is as wide as its widest option, and
+   four of them side by side overflow the card rather than wrapping inside it. */
+@media(max-width:640px){
+  .period{display:grid;grid-template-columns:minmax(0,1fr)}
+}
+
 /* ---------- notes ---------- */
 .flags{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
 .flags li{

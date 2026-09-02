@@ -548,7 +548,12 @@ export const playSeason = async (
 	season: number,
 	league: League,
 	strategies: Strategy[],
-	options: { movesPerWeek: number; warmupDays: number; swapMargin?: number } = {
+	options: {
+		movesPerWeek: number
+		warmupDays: number
+		swapMargin?: number
+		anchorMonday?: boolean
+	} = {
 		movesPerWeek: 2,
 		warmupDays: 28
 	}
@@ -556,6 +561,20 @@ export const playSeason = async (
 	const range = await seasonRange(season)
 	const weeks: { start: string; end: string }[] = []
 	let cursor = addDays(range.start, options.warmupDays)
+	/**
+	 * The week grid lands on whatever weekday the warm-up happens to end on, which is
+	 * a property of the season's opening date and nothing else: Thursday in 2021-2023,
+	 * Wednesday in 2024, Tuesday in 2025. A head-to-head league scores a fixed matchup
+	 * period instead, and the shipped one runs Monday through Sunday. anchorMonday
+	 * snaps the first cursor forward to a Monday so the simulated weeks line up with a
+	 * period a manager would actually be playing.
+	 *
+	 * It is off by default because every result already stored under data/results was
+	 * measured on the unanchored grid, and moving the grid underneath them would change
+	 * what those numbers mean without changing the files that record them.
+	 */
+	if (options.anchorMonday)
+		while (new Date(Date.parse(cursor)).getUTCDay() !== 1) cursor = addDays(cursor, 1)
 	while (Date.parse(addDays(cursor, 7)) <= Date.parse(range.end)) {
 		weeks.push({ start: cursor, end: addDays(cursor, 6) })
 		cursor = addDays(cursor, 7)

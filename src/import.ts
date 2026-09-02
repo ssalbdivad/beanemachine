@@ -100,6 +100,142 @@ const STAT_CODE = /\(([A-Za-z0-9/]+)\)\s*$/
 
 const IL_SLOTS = ["IL", "NA", "IL+"]
 
+/** The lock is a weekday when lineups are set for the whole period, e.g. "Monday". */
+const WEEKDAY_NAMES: readonly string[] = [
+	"sunday",
+	"monday",
+	"tuesday",
+	"wednesday",
+	"thursday",
+	"friday",
+	"saturday"
+]
+
+/** Schema spelling: lowercase three-letter, Sunday first. */
+const WEEKDAY_CODES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const
+
+/** Yahoo dates the END of the playoff period ("ends Sunday, Sep 27"). A period that
+ *  ends on a Sunday and runs seven inclusive days opens on the Monday before, so the
+ *  start is the day after the stated end. */
+const dayAfter = (name: string): (typeof WEEKDAY_CODES)[number] =>
+	WEEKDAY_CODES[(WEEKDAY_NAMES.indexOf(name.toLowerCase()) + 1) % 7]!
+
+export interface DerivedPeriod {
+	period: NonNullable<League["scoring_period"]>
+	needsReview: string[]
+}
+
+/**
+ * Reads the scoring period out of the verbatim settings map `importYahoo` harvests.
+ *
+ * Yahoo states the period nowhere and implies it in two places, so this reads both and
+ * says which is which. "Weekly Deadline" is the LINEUP LOCK — when a day's starters
+ * stop being editable — and not the period; the shipped league proves the two are
+ * independent, since its deadline is "Daily - Today" while its matchups still run a
+ * Monday-to-Sunday week. The period itself is evidenced only by "Playoffs", which
+ * names Yahoo's numbered weeks and the weekday the last one ends on.
+ *
+ * Every value here is free text Yahoo can restyle at any time, so an unrecognized one
+ * nulls its field and quotes itself into `needs_review` instead of being guessed at,
+ * the rule `numericSetting` already follows for a non-numeric number.
+ *
+ * Exported so the shipped league's own `league_rules.raw_settings` can be run through
+ * it in a test without a network call: those are the strings Yahoo actually printed,
+ * and a fixture written here would only prove the fixture matches the parser.
+ */
+export const deriveScoringPeriod = (settings: Record<string, string>): DerivedPeriod => {
+	const needsReview: string[] = []
+	// Each entry names what it established as well as quoting itself, so a value that
+	// turns out wrong can be traced to the line that produced it.
+	const source: string[] = []
+	let lockSource: string | null = null
+
+	const deadline = settings["Weekly Deadline"]
+	let lineupLock: "daily" | "period" | null = null
+	if (deadline === undefined) {
+		needsReview.push(
+			'No "Weekly Deadline" row on the settings page, so lineup_lock is null: the ' +
+				"board will treat the rest of the current period as still actionable."
+		)
+	} else if (/^daily\b/i.test(deadline)) {
+		lineupLock = "daily"
+		lockSource = `Weekly Deadline "${deadline}" is the lineup lock, not the period`
+	} else if (WEEKDAY_NAMES.includes(deadline.trim().toLowerCase())) {
+		// A weekday deadline is Yahoo's weekly lock: the lineup is set once for the
+		// period, so the period a decision can still act on is the next one.
+		lineupLock = "period"
+		lockSource = `Weekly Deadline "${deadline}" locks the lineup for the whole period`
+	} else {
+		needsReview.push(
+			`"Weekly Deadline" is "${deadline}", which is neither "Daily…" nor a weekday; ` +
+				"lineup_lock is null."
+		)
+	}
+
+	// A weekly grid alone does not make a matchup period: Yahoo runs numbered weeks
+	// for acquisition limits in season-long leagues too, and scoring one of those over
+	// a Monday-to-Sunday window would be a window nothing measured.
+	const scoringType = settings["Scoring Type"]
+	const headToHead = scoringType !== undefined && /head-to-head/i.test(scoringType)
+	const playoffs = settings["Playoffs"]
+	const weeks = playoffs !== undefined && /\bWeek\s*\d+/i.test(playoffs)
+	const ends = playoffs?.match(
+		/\bends\s+(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\b/i
+	)
+
+	let kind: "matchup" | "daily" | "none" | null = null
+	let days: number | null = null
+	let startsOn: (typeof WEEKDAY_CODES)[number] | null = null
+
+	if (headToHead && weeks) {
+		kind = "matchup"
+		// The periods Yahoo names are "Week"s, which is also the only evidence for
+		// their length; a seven-day week is what that word claims and nothing else on
+		// the page states a number of days.
+		days = 7
+		if (ends) startsOn = dayAfter(ends[1]!)
+		source.push(
+			`Scoring Type "${scoringType}" with Playoffs "${playoffs}" names numbered ` +
+				(startsOn ?
+					`weeks ending ${ends![1]}, so a period opens the day after, on ${startsOn}`
+				:	"weeks of seven days, with no weekday one ends on")
+		)
+		if (!startsOn)
+			needsReview.push(
+				`"Playoffs" is "${playoffs}": it names numbered weeks but no weekday one ` +
+					"ends on, so starts_on is null and the board will assume a Monday start."
+			)
+	} else if (!headToHead) {
+		needsReview.push(
+			`Scoring Type is ${scoringType === undefined ? "absent" : `"${scoringType}"`}, ` +
+				"which does not state head-to-head play, so no matchup period was derived; " +
+				"scoring_period.kind is null and the board will rank a rolling window."
+		)
+	} else {
+		needsReview.push(
+			`"Playoffs" is ${playoffs === undefined ? "absent" : `"${playoffs}"`}, which ` +
+				"names no numbered week, so no scoring period was derived; " +
+				"scoring_period.kind is null and the board will rank a rolling window."
+		)
+	}
+
+	return {
+		period: {
+			kind,
+			days,
+			starts_on: startsOn,
+			// Yahoo's periods fall on a fixed weekday, so there is nothing to pin.
+			anchor: null,
+			lineup_lock: lineupLock,
+			source:
+				source.length || lockSource ?
+					`league settings: ${[...source, ...(lockSource ? [lockSource] : [])].join("; ")}`
+				:	null
+		},
+		needsReview
+	}
+}
+
 const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<League> => {
 	const base = `https://${t.yahooGame}.fantasysports.yahoo.com/b1/${t.leagueId}`
 	const settingsUrl = `${base}/settings`
@@ -267,6 +403,9 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 		.filter(([slot]) => slot !== "BN" && !IL_SLOTS.includes(slot))
 		.reduce((sum, [, n]) => sum + n, 0)
 
+	const { period, needsReview: periodReview } = deriveScoringPeriod(settings)
+	needsReview.push(...periodReview)
+
 	const scoring: League["scoring"] = { unit: "points", batting, pitching }
 	if (unmapped.length) {
 		scoring.unmapped = unmapped
@@ -305,6 +444,7 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 			slot_accepts: slotAccepts
 		},
 		eligibility,
+		scoring_period: period,
 		// Verbatim label/value pairs exactly as the settings page prints them.
 		league_rules: { raw_settings: settings },
 		provenance: {
@@ -378,6 +518,9 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 			verified: false
 		},
 		needs_review: [
+			"The scoring period was not read. ESPN may state it under " +
+				"settings.scheduleSettings, but no fixture or test here has ever seen that " +
+				"shape, so scoring_period is null and the board ranks a rolling window.",
 			"ESPN stat ids and lineup-slot ids are numeric and kept raw under " +
 				"scoring.unmapped and roster.slots. Map them to canonical stat keys before " +
 				"optimizing — they are deliberately not guessed.",
@@ -432,6 +575,9 @@ const importSleeper = async (t: Extract<Target, { platform: "sleeper" }>): Promi
 			verified: false
 		},
 		needs_review: [
+			"The scoring period was not read. Sleeper's period grid is NFL-shaped and " +
+				"nothing here has verified it against a baseball league, so scoring_period " +
+				"is null and the board ranks a rolling window.",
 			"Sleeper scoring keys are kept raw under scoring.unmapped; split them into " +
 				"batting/pitching against stat_keys before optimizing.",
 			"This endpoint doesn't expose position-eligibility rules; eligibility is null."

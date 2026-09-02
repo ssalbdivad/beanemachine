@@ -214,6 +214,14 @@
           "-": "no appearances yet"
         }
       },
+      "scoring_period": {
+        "kind": "matchup",
+        "days": 7,
+        "starts_on": "mon",
+        "anchor": null,
+        "lineup_lock": "daily",
+        "source": "league settings: Playoffs \"6 teams - Week 24, 25 and 26 (ends Sunday, Sep 27)\" fixes the period end on a Sunday, so it opens on Monday; Weekly Deadline \"Daily - Today\" is the lineup lock, not the period"
+      },
       "league_rules": {
         "raw_settings": {
           "League ID#": "228947",

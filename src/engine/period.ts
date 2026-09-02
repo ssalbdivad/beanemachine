@@ -106,9 +106,16 @@ export const resolvePeriod = (
 			basis: "today only, because this league scores each day as its own period"
 		}
 
+	// Both of these fill a null, and both therefore have to be declared. The Monday
+	// fallback always said so; the length did not, so a league stating `matchup` with
+	// no `days` was ranked over a seven-day period and the board never mentioned it —
+	// exactly the silent assumption this module exists to prevent.
 	const days = p.days ?? 7
 	const weekday = p.starts_on ?? "mon"
-	const stated = p.starts_on !== null || p.anchor !== null
+	const assumptions = [
+		p.starts_on === null && p.anchor === null ? "a Monday start" : "",
+		p.days === null ? "a seven-day period" : ""
+	].filter(Boolean)
 	let start = periodStartFor(today, weekday, days, p.anchor)
 	let periodEnd = shift(start, days - 1)
 	// A lineup locked for the period means the rest of THIS one cannot be acted on,
@@ -125,13 +132,15 @@ export const resolvePeriod = (
 		end,
 		periodEnd,
 		kind: "matchup",
-		assumed: !stated,
+		assumed: assumptions.length > 0,
 		clipped: periodEnd > slateEnd,
 		basis:
 			(locked ?
 				`the next scoring period, ${start} to ${periodEnd}, because lineups are locked for the current one`
 			:	`the rest of this scoring period, through ${periodEnd}`) +
-			(stated ? "" : ", assuming a Monday start because the league has not said")
+			(assumptions.length ?
+				`, assuming ${assumptions.join(" and ")} because the league has not said`
+			:	"")
 	}
 }
 

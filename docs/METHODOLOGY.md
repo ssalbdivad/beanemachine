@@ -8,9 +8,12 @@ it true.
 
 **A bscore is a player's projected fantasy points over the horizon, in your
 league's own scoring, minus what a freely available replacement at the same roster
-slot would score over that same window.** The board offers three horizons — the next
-seven days, the next fourteen (the default, and what this document works through),
-and every game left in the season. A bscore of 40 means forty more points
+slot would score over that same window.** The board offers three horizons — whatever
+is left of the league's own scoring period (`src/engine/period.ts`; the rest of this
+matchup, or today in a daily league, or the next period where lineups are already
+locked, or a rolling seven days where the league has stated none), the next fourteen
+days (the default, and what this document works through), and every game left in the
+season. A bscore of 40 means forty more points
 than the next man up. It is denominated in your league's points, so it is not
 comparable across leagues, and that is the point: the same player is worth
 different amounts in different leagues, and the board shows you which.
@@ -38,8 +41,7 @@ state its own age.
 |---|---|---|---|
 | MLB StatsAPI — season lines | `/stats?stats=season&group=…&playerPool=All` | every counting stat, season to date, per player, plus team, primary position, MLBAM id | 726 hitters, 841 pitchers |
 | MLB StatsAPI — window lines | `/stats?stats=byDateRange&startDate=…&endDate=…` | the same counting stats accumulated strictly inside a date window; this is the recent-form input | one pull per window per side: 3/7/21d batters, 5/21d pitchers |
-| MLB StatsAPI — schedule | `/schedule?startDate=…&endDate=…` | real games each team has scheduled in a window, who they are against, and real games played in each lookback window | 30 teams, three horizons |
-| MLB StatsAPI — probables | `/schedule?…&hydrate=probablePitcher` | how many starts a pitcher is actually booked for in the window | 46 pitchers |
+| MLB StatsAPI — the slate | `/schedule?…&gameType=R&hydrate=probablePitcher` | **one** read: every regular-season game from the capture to the end of the season, one row per game, carrying both clubs and each side's probable starter | 30 teams, 46 pitchers with a published start |
 | MLB StatsAPI — roster status | `/teams/{id}/roster?rosterType=fullSeason` | injured-list status | 203 players |
 | MLB StatsAPI — standings | `/standings?standingsTypes=regularSeason` | team games played to date, the denominator for a per-team-game rate | 30 teams |
 | Baseball Savant — pitch level | `/statcast_search/csv?…&game_date_gt=…&game_date_lt=…` | wOBA and xwOBA over a **rolling 21-day window**, aggregated a day at a time | 449 batters, 509 pitchers |
@@ -49,7 +51,12 @@ state its own age.
 
 Everything above is **observed**. The snapshot stores no projections and no
 bscores, because those depend on a league's scoring and have to be recomputed
-whenever it changes.
+whenever it changes. It also stores no schedule *counts*: games, opponents, probable
+starts and their coverage are all counted out of the slate rows at read time
+(`windowFrom` in `src/engine/period.ts`), because which window matters is a property
+of the reader's league and one snapshot serves many. That is also what makes it
+structurally impossible for a coverage fraction's numerator and denominator to come
+from different windows — there is only one window.
 
 ### Coverage decisions that materially change the answer
 
@@ -305,17 +312,28 @@ The same coverage arithmetic governs the other side of the probables feed, the
 *opposing* starter a hitter is booked against. A starter throws about 58% of a
 game's innings, so his own quality carries that share of the matchup index and the
 opponent's staff carries the rest. That 58% is the share of **one game**, and in
-the reference capture the published names cover **44 of 402 games** on the 14-day
-board (10.9%) and 44 of 222 over the week (19.8%) — one rated name per team,
-typically. Weighting that name at 58% of a fortnight let a single announced ace
-speak for thirteen games he will not pitch: the identical mistake as reading a
-partial probable *count* as a complete one, in the term next to it. The starter
-share is therefore scaled by coverage — 58% × rated-names ÷ games, so about 6% of
-the 14-day index and 11% of the week's — with unrated names (a call-up under 100
-batters faced) counting as uncovered rather than as average. Correcting it moved
-**596 of 646** hitters and **206 by ten places or more**, at up to 6.46 points over
-the horizon, and reshuffled the top ten. Like the term it corrects, it cannot be
+the reference capture the published names cover **44 of 402 team-games** on the
+14-day board (10.9%) — one rated name per team, typically. Weighting that name at 58%
+of a fortnight let a single announced ace speak for thirteen games he will not pitch:
+the identical mistake as reading a partial probable *count* as a complete one, in the
+term next to it. The starter share is therefore scaled by coverage — 58% ×
+rated-names ÷ games, so about 6% of the 14-day index — with unrated names (a call-up
+under 100 batters faced) counting as uncovered rather than as average. Correcting it
+moved **596 of 646** hitters and **206 by ten places or more**, at up to 6.46 points
+over the horizon, and reshuffled the top ten. Like the term it corrects, it cannot be
 backtested; the argument is that one man's game is one game.
+
+This paragraph used to quote a second figure beside the fortnight one — "44 of 222
+over the week (19.8%)", and "11% of the week's" index — and both are gone rather than
+restated, because there is no fixed streaming denominator to restate them with. The
+Streaming window is now however many games fall in what remains of the reader's own
+scoring period, and the coverage is computed per team over that window out of the
+same slate rows, so a shorter remaining period means the same published names cover
+more of it and the starter's share of the index rises with them. The old denominator
+is worth recording on its way out: 222 is **eight** dates of this slate, not seven.
+Counting the committed `data/snapshot.json` from its own horizon start,
+`start … start + 6` holds 192 team-games and `start … start + 7` holds 222 — which is
+the off-by-one in §11.1, visible in a number this document printed for months.
 
 ### 3.6 The Statcast quality multiplier — present, off
 
@@ -885,7 +903,7 @@ This one is a live wart, not a solved problem.
 
 **Injuries are binary.** On the IL or not: a flat 0.5 confidence multiplier, and a
 horizon-dependent policy rather than a modelled return — an injured man is dropped from
-the seven-day and fortnight boards altogether and ranked normally on Stash. Nothing
+the Streaming and fortnight boards altogether and ranked normally on Stash. Nothing
 reads a return date, so a 60-day IL player and a day-to-day one are treated
 identically.
 
@@ -908,9 +926,16 @@ on your own machine; private leagues need OAuth and are unsupported. On the stat
 demo the whole board is a ranking of MLB rather than of your waiver wire, which is
 half a recommendation.
 
-**The horizon is fixed at capture time.** 14 days, set when the snapshot is built.
-A shorter horizon (a weekend, a two-day streaming decision) would need a different
-capture, and the schedule denominator would change with it.
+**The forward horizon is no longer fixed at capture time; the backward one still
+is.** The snapshot stores the slate — every regular-season game from the capture to
+the end of the season, one row each — and `windowFrom` counts whichever window is
+asked for when the board is read, so a weekend, a two-day streaming decision or a
+league whose matchups run Thursday-to-Wednesday all come out of the same capture with
+no new fetch. What remains fixed at capture time are the *lookback* windows: the
+recent-form pulls (3/7/21 days for batters, 5/21 for pitchers) and the rolling 21-day
+Statcast window are fetched as date ranges when the snapshot is built, so changing
+those does need a recapture. The 14 days in this document is the default the middle
+tab and every worked example use, not a limit of the data.
 
 ---
 
@@ -970,11 +995,27 @@ and the per-season breakdown are now printed by `test/compete.mjs` on every run:
 at one move a week the model is +27.1, +17.0 and +32.6 points a week in 2022, 2023
 and 2025, and −1.2 and −7.2 in 2021 and 2024.
 
+**And the number moves with the week grid, which is a larger caveat than the
+p-value.** `playSeason` walks weeks from `range.start + warmupDays`, so its grid opens
+on whatever weekday the warm-up happens to end on — not on the Monday a real league
+scores. Snapping it forward to a Monday (`anchorMonday`, measured and left off by
+default) takes the pooled record from **60-50, z 0.95** to **64-45, z 1.82**, which
+looks like the claim getting stronger. It is not. The entire move is one season: 2021
+goes from 11-10 at −1.2 points a week to **19-3 at +119.1**, and with 2021 removed the
+anchored grid is 45-43 at −14.5 while the unanchored one is 49-40 at +17.2. Reporting
+"anchoring takes it to p = 0.034" would have been a story rather than a result.
+
+The same measurement removed an assertion from `test/compete.mjs`. It guarded that the
+edge held in at least three of five seasons; on the anchored grid that is two of five.
+A guard that fails when the simulation is made *more* realistic is measuring the phase
+of the grid rather than the model, so it is printed now and not asserted, with the
+reason recorded where the assertion used to be.
+
 The honest summary is that beating an inactive or streak-chasing manager is
-established — 98/111 and 74/111 — and beating a manager who blends season and recent
-form is not yet. The model is ahead of that opponent on the pooled total and in
-three of the five seasons, at a strength that would be called a trend rather than a
-finding.
+established — 98/111 and 74/111, and stable across both grids — and beating a manager
+who blends season and recent form is not. That comparison is a trend rather than a
+finding, and it is a trend whose size depends on a modelling choice that has nothing
+to do with the model.
 
 ### 9.1 The same harness sets the matchup weight
 
@@ -1155,8 +1196,10 @@ lineup.
 
 ### 11.1 One window, applied over another
 
-Three separate places measured something over one window and applied it over a
-different one, and all three were the same mistake wearing different clothes.
+Six separate places measured something over one window and applied it over a
+different one, and every one of them was the same mistake wearing different clothes.
+All six are now closed; the entries stay, because the pattern is worth more than any
+of the fixes and not one of these announced itself.
 
 The first was the probable-starts count: MLB publishes 46 of 222 slots over a
 fortnight, read as a complete count, which demoted a top-five starter 350 places.
@@ -1166,15 +1209,24 @@ The second was the opposing starter's own quality, weighted at 58% — one game'
 share of innings — across a 13-to-15-game window in which one or two names are
 published. Scaled by coverage, from 58% to about 6%.
 
-The third is still open, and is stated rather than fixed: the **Stash** horizon runs
-to the end of the season, while `opponentsByTeam` is the next fortnight. No source
-read here captures a rest-of-season opponent list, so there is nothing to scale by —
-the choice is to apply a fortnight's schedule strength over months, or to drop the
-term on that tab. Dropping it moves 1,251 of 1,432 rest-of-season rankings, 166 of
-them by ten places or more, and three out of the top fifty. That is too large to
-flip on a hunch and there is no measurement that settles the direction, so the term
-stays and the gap is written down. The fix is a rest-of-season opponent list in the
-snapshot, not a weight change.
+The third is **closed**, and the entry is rewritten rather than deleted because a
+gap that existed for months is part of the record. It read: the **Stash** horizon
+runs to the end of the season, while `opponentsByTeam` is the next fortnight; no
+source read here captures a rest-of-season opponent list, so there is nothing to
+scale by, and the choice is to apply a fortnight's schedule strength over months or
+to drop the term on that tab. Dropping it moved 1,251 of 1,432 rest-of-season
+rankings, 166 of them by ten places or more, and three out of the top fifty — too
+large to flip on a hunch, with no measurement to settle the direction, so the term
+stayed and the gap was written down.
+
+What closed it was the capture, not the weight. The snapshot now stores the slate,
+every regular-season game to the end of the season, and `windowFrom` counts opponents
+over whichever window it is handed — so `hydrate` builds `opponentsRemaining` across
+the rest of the season and `useBoard` gives Stash that list instead of the
+fortnight's. The stated fix was "a rest-of-season opponent list in the snapshot", and
+that is exactly what landed. The half weight and the ±12% clamp are untouched and are
+still set by fourteen-day evidence (§9); that is a live question, but it is a
+different one from this entry, which was about the window.
 
 A fifth was the reverse of the usual complaint. `src/backtest/` has always asked the
 schedule for `gameType=R`, in all four of the places it asks; `src/data/statsapi.ts`,
@@ -1193,6 +1245,24 @@ A fourth of the same family was closed on the client rather than in the engine:
 `useBoard` chose its horizon with a fallback but selected the probables on the mode,
 so an off-season snapshot could feed a week's published starters into a fortnight's
 game count. Everything there now keys on the window that was actually resolved.
+
+A sixth is the fifth's twin — the measured thing not being the shipped thing — and it
+hid inside an off-by-one. The MLB schedule endpoint is inclusive on both ends, so the
+live path's `now + 7 days` asked for **eight** dates. The backtest walks seven
+(`src/backtest/season.ts` builds `cursor … cursor + 6`), so the streaming board in
+production was ranking over a window a day longer than anything in this document ever
+measured. Nothing errored and nothing looked wrong, because an eight-date week still
+produces an entirely plausible-looking game count: over the slate committed as
+`data/snapshot.json`, seven dates from the horizon start hold 192 team-games and eight
+hold 222 — and 222 is the denominator §3.5 used to quote for "the week". `resolvePeriod`
+now says so in its header, every boundary it returns is inclusive, and `datesBetween`
+adds the day back on purpose so that a single date spans one day rather than zero.
+
+One loose end, flagged rather than quietly tidied: the first entry above describes
+"46 of 222 slots over a fortnight", and a fortnight of this slate holds 402
+team-games, not 222. The two 222s cannot both be what their labels say. That
+measurement predates the slate and is not re-derivable from anything committed here,
+so it is left standing with the discrepancy named.
 
 ### 12.1 When the two halves of a plan disagreed
 

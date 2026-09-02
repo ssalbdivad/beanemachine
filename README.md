@@ -58,10 +58,16 @@ league's* scoring. Points above replacement is the honest unit: a bscore of 40 m
 forty more points than the next man up, in your league's own currency.
 
 Four tabs. **Recommendations** is the board, and it opens on three horizons, which
-are three different questions rather than three filters: **Streaming** ranks over the
-next seven days against that week's real slate, **This fortnight** is the standing
-14-day board and the default, and **Stash** ranks over every game left in the regular
-season. Alongside the ranking the board carries **Buy low** (a rolling-window contact
+are three different questions rather than three filters: **Streaming** ranks over
+whatever is left of *your league's own* scoring period, against that period's real
+slate — the rest of this matchup in a weekly league, today in a daily one, the next
+period where lineups lock for the whole of the current one, and a rolling seven days
+only where the league scores no periods at all or has not said which it runs
+(`src/engine/period.ts`). The board prints which of those it used and where the
+window's edges came from, because there is no neutral default to fall back on
+silently. **This fortnight** is the standing 14-day board and the default, and
+**Stash** ranks over every game left in the regular season. Alongside the ranking
+the board carries **Buy low** (a rolling-window contact
 gap that the field has not priced) and **Where it hurts to wait** (the drop-off at
 each slot). The other three tabs are **League setup**, which everything else is priced
 in; **My team & trades**, which prices a deal by what it does to your starting lineup;
@@ -90,6 +96,18 @@ connection rather than on a defect. Two of those four — `ui` and `board` — r
 into nothing and the page logs a 502 that reads like a client bug. Both lines
 above, both running, is the state every suite expects. `BASE=` points them
 elsewhere, `BROWSER=chromium|firefox` picks the engine.
+
+One more, and it costs an afternoon if you meet it cold. **Refreshing the snapshot
+while Vite is running does not change what the browser is served.** `vite.config.ts`'s
+`publishSnapshot` plugin copies `data/snapshot.json` to `public/snapshot.json` in
+`buildStart`, which fires when Vite *starts* and never again; `node src/refresh.ts`
+writes `data/` and nothing re-copies it, and `public/snapshot.json` is gitignored, so
+git will not tell you either. Nothing errors, because a stale snapshot is still a
+valid one. If the stale copy predates the slate the board renders **zero rows** and
+the console stays clean: `hydrate` reads `s.slate ?? []`, every club's game count
+comes back empty, `projectedVolume` is 0, `rateable` is false for every player, and
+the row filter drops all of them. Restart Vite after a refresh, or copy the file
+across by hand.
 
 Two more suites sit outside `npm test` because each needs something built first.
 `npm run test:compete` replays 2021-2025 from a warm backtest cache and passes.
@@ -175,8 +193,7 @@ are from the shipped capture (2026-09-02T09:56Z):
 |---|---|---|
 | MLB StatsAPI `/stats?stats=season&playerPool=All` | the whole pool and its season lines | 726 hitters, 841 pitchers |
 | MLB StatsAPI `/stats?stats=byDateRange` | the same stats inside a window — recent form | 3/7/21d batters, 5/21d pitchers |
-| MLB StatsAPI `/schedule` | real games and real opponents per team, per horizon | 30 teams |
-| MLB StatsAPI `/schedule?hydrate=probablePitcher` | who is actually booked to start | 46 pitchers |
+| MLB StatsAPI `/schedule?hydrate=probablePitcher` | one read: every regular-season game from the capture to the end of the season, one row per game, carrying both clubs and each side's probable starter. No counts are stored — every window's games, opponents and probables are counted from these rows at read time, because which window matters is a property of the reader's league | 30 teams, 46 pitchers with a published start |
 | MLB StatsAPI `/standings` | team games played to date — the per-game denominator | 30 teams |
 | MLB StatsAPI `/teams/{id}/roster` | IL status, filtered to the D-prefixed IL codes | 203 players |
 | Baseball Savant `statcast_search` (pitch level, a day at a time) | rolling 21-day wOBA and xwOBA | 449 batters, 509 pitchers |

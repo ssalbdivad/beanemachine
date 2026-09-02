@@ -5,9 +5,15 @@
 The board opens on three tabs, and they are three different questions rather than
 three filters.
 
-**Streaming** ranks over the next seven days, using that week's real slate. This is
-the daily/weekly view: it rewards a pitcher with two starts booked and a hitter whose
-team plays six games instead of four, and it is the one to use on waiver day.
+**Streaming** ranks over whatever is left of your league's own scoring period, using
+that period's real slate. In a Monday-to-Sunday matchup league opened on a Wednesday
+that is Wednesday through Sunday — not seven days from Wednesday, which would count
+games from a matchup you are not being scored on. In a daily league it is today. Where
+lineups lock for the whole of the current period it is the *next* period, because
+that is the only one you can still act on. This is the daily/weekly view: it rewards
+a pitcher with two starts booked and a hitter whose team plays six games instead of
+four, and it is the one to use on waiver day. The exact dates, and where those edges
+came from, are printed under the heading every time.
 
 **This fortnight** is the standing board, fourteen days out. It is the default
 because it is long enough that a single bad week doesn't dominate and short enough to
@@ -44,7 +50,7 @@ Below the ranking sit two supporting reads, deliberately *below* it rather than 
 
 A bscore is **points above the guy you could have for free.**
 
-Everything on the board is denominated in your league's own points, not in some abstract rating. The projection says what a player will score over the horizon the tab you are on asks about — seven days, fourteen, or the rest of the season. The bscore subtracts what a freely available player at the same roster slot would score over that same window. The worked example below uses the 14-day default.
+Everything on the board is denominated in your league's own points, not in some abstract rating. The projection says what a player will score over the horizon the tab you are on asks about — the rest of your league's scoring period, fourteen days, or the rest of the season. The bscore subtracts what a freely available player at the same roster slot would score over that same window. The worked example below uses the 14-day default.
 
 Worked example:
 
@@ -101,9 +107,9 @@ Set **Min confidence** to 40%+ before acting. Low-confidence rows are usually sm
 
 ### Daily streaming
 
-Open the **Streaming** tab, filter to **SP**, and read the **GP** column while you do. The projection multiplies each player's per-game rate by the games his team actually has scheduled in that week, so a heavy slate rises without you doing the arithmetic; the drill-down states the same number as *team games in window*.
+Open the **Streaming** tab, filter to **SP**, and read the **GP** column while you do. The projection multiplies each player's per-game rate by the games his team actually has scheduled in the window the tab resolved — the rest of your scoring period, not a flat seven days — so a heavy slate rises without you doing the arithmetic; the drill-down states the same number as *team games in window*.
 
-Two starts in a scoring period is roughly double the innings, and it is the single biggest thing that separates one streaming pick from another. Where MLB has published a pitcher's turns, the board projects him from **his own starts** rather than from his team's games, marks a two-start pitcher with a `×2` badge next to his bscore, and offers a **Two-start SP only** filter. Read the coverage honestly: probables reach only a few days out, so at any moment most starters have none published and the ones who do may have only their next turn announced — a starts-based projection is starts *announced*, not starts he will make. Early in a week the filter will be empty and that is the data, not a bug.
+Two starts in a scoring period is roughly double the innings, and it is the single biggest thing that separates one streaming pick from another. Where MLB has published a pitcher's turns, the board projects him from **his own starts** rather than from his team's games, marks a two-start pitcher with a `×2` badge next to his bscore, and offers a **Two-start SP only** filter. Read the coverage honestly: probables reach only a few days out, so at any moment most starters have none published and the ones who do may have only their next turn announced — a starts-based projection is starts *announced*, not starts he will make. Early in a scoring period the filter will be empty and that is the data, not a bug.
 
 For pitchers generally, recent form is read over 5 and 21 days with the 5 weighted double, rather than the 3/7/21 a batter gets. A starter works every fifth day, so five days is the shortest window that contains a start at all and a week of his data is one or two starts of noise. Do not expect the board to react to a single good outing; it is not supposed to.
 
@@ -199,9 +205,10 @@ One note on the hosted site: importing needs the local server (`node src/server.
 
 Be clear-eyed about the edges. It:
 
-- **Knows which pitcher your hitters face, but only about a week out.** MLB publishes probable starters roughly a week ahead, and where it has them the board rates a hitter against the men actually on the mound, blended with the opponent staff by innings share — a starter throws about 58% of *one game*, so his own quality carries that share of that game and the bullpen behind him carries the rest. Over a fortnight only a game or two is usually published, so in practice the named starters carry about 6% of the board's matchup number and 11% of the week's; the rest is the opponent staff. Where no probable is published it falls back to the team-level number entirely. This one cannot be validated the way the rest can: probables are announced and then overwritten, and nothing archives what was announced at the time.
+- **Knows which pitcher your hitters face, but only about a week out.** MLB publishes probable starters roughly a week ahead, and where it has them the board rates a hitter against the men actually on the mound, blended with the opponent staff by innings share — a starter throws about 58% of *one game*, so his own quality carries that share of that game and the bullpen behind him carries the rest. Over a fortnight only a game or two is usually published, so in practice the named starters carry about 6% of the board's matchup number; the rest is the opponent staff. On Streaming the same names cover a shorter window, so they carry a larger share of it — how much larger depends on how much of your scoring period is left, which is why the number is scaled per team rather than fixed. Where no probable is published it falls back to the team-level number entirely. This one cannot be validated the way the rest can: probables are announced and then overwritten, and nothing archives what was announced at the time.
 - **Does not know your roster, on the board.** The ranking never accounts for who you already have, so it will happily rank three catchers at the top when you need one. **My team & trades** is the view that does know, and it is a separate view for that reason.
-- **Rates the Stash horizon against the wrong fortnight of opponents.** The **Stash** tab ranks over the rest of the season, but the only opponent list any source here captures is the next two weeks, so the schedule-strength adjustment on that tab is measured over a fortnight and applied over months. It is bounded — the adjustment is clamped to ±12% and weighted at half — but it is not the thing it claims to be. Dropping it moves 166 players by ten places or more, which is why it has not been dropped on a hunch: the real fix is to capture a rest-of-season opponent list, and until that lands this is stated rather than quietly corrected.
+- **Rates the Stash horizon against the right opponents now, at a weight nothing has measured over that horizon.** This entry used to say the **Stash** tab applied a fortnight of schedule strength over months, because the only opponent list any capture carried was the next two weeks. The snapshot now stores the whole slate to the end of the season, so Stash reads a genuine rest-of-season opponent list and the window mismatch is gone. What is left is the weight: the adjustment is still clamped to ±12% and still carried at half, and that half was set by playing five seasons of weekly waiver decisions out. Nothing here has measured what it should be over a months-long hold.
+- **Does not know your scoring period unless the league stated one.** Streaming ranks over the remainder of your league's period, and that period comes from the league's own `scoring_period` settings. Not every platform states it and not every import can derive it, and the platform templates a new league starts from carry none — so where it is missing the board falls back to a rolling seven days from today and says on the page that that is the assumption it made, rather than presenting it to you as your week. Where a league says it runs matchup periods but not which weekday they open on, the board assumes a Monday start — a Monday-to-Sunday week, unless the league gave a period length — and says that too. A printed assumption is not the same as a quiet one, and neither is the same as knowing. Anything an import could not read is listed under **Needs review** in League setup.
 - **Does not model keeper or dynasty value, and does not know your budget.** The **Stash** tab ranks over the rest of the season, which is the longest horizon here; nothing looks past this season at all.
 - **Knows multi-position eligibility for the players your platform prints it for.** This was the largest known accuracy gap and is now mostly closed: Yahoo prints real eligibility beside every name ("MIN - 1B,3B"), the same sweep that reads ownership captures it, and a player is valued at his *scarcest* eligible slot — so a catcher who also qualifies at first is finally worth what he is worth. Roughly 430 players come back with a genuine multi-position line. For anyone the platform did not list, the board still has only the one primary position StatsAPI reports, and it does not guess.
 - **Does not use park factors, weather, or lineup slot.** There was a park fetcher; Savant's park-factor endpoint returns HTML and ignores `csv=true`, so it produced rows of nulls that nothing consumed. It and the park term have been removed rather than left looking like a feature. No readable source has been found, so this is "not modelled", not "modelled quietly".

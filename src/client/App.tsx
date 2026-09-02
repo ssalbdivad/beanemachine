@@ -1,8 +1,9 @@
 import { useForm, useStore } from "@tanstack/react-form"
 import { type } from "arktype"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
-import type { Config, League } from "../schema.ts"
+import { resolvePeriod } from "../engine/period.ts"
+import type { Config, League, ScoringPeriod } from "../schema.ts"
 import { League as LeagueSchema } from "../schema.ts"
 import { api, ApiError, detectMode, getMode } from "./api.ts"
 import { Billy } from "./Billy.tsx"
@@ -286,6 +287,7 @@ export const App = () => {
 					key={key}
 					leagueKey={key}
 					league={league}
+					snapshot={snapshot}
 					onSaved={next => {
 						adopt(next, key)
 						acknowledge()
@@ -528,15 +530,331 @@ const Chips = ({ league }: { league: League }) => {
 	)
 }
 
+/** The scoring period as the league states it, with every field present. */
+type Period = NonNullable<ScoringPeriod>
+
+/** Every field null: a league that has said nothing about its period. Written only
+ *  when an edit actually lands. Opening the editor must not turn an unstated period
+ *  into a stored one — null means "not known", and a control that defaults itself on
+ *  mount would turn the reader's silence into the league's answer. */
+const NO_PERIOD: Period = {
+	kind: null,
+	days: null,
+	starts_on: null,
+	anchor: null,
+	lineup_lock: null,
+	source: null
+}
+
+/** Lowercase three-letter, as `resolvePeriod` matches them against `Date.getUTCDay`. */
+const WEEKDAYS = [
+	["mon", "Monday"],
+	["tue", "Tuesday"],
+	["wed", "Wednesday"],
+	["thu", "Thursday"],
+	["fri", "Friday"],
+	["sat", "Saturday"],
+	["sun", "Sunday"]
+] as const
+
+/**
+ * How long a matchup period runs.
+ *
+ * Uncontrolled for the reason `ValueInput` and `TeamCountInput` in panels.tsx are:
+ * the element has to be allowed to hold text the number is not finished being, and a
+ * field React rewrites on every keystroke cannot be typed into. Empty is a real
+ * answer — it is the league not having said, which is the state the panel above
+ * prints the board's assumption for.
+ */
+const PeriodDaysInput = ({
+	value,
+	onChange,
+	onReject
+}: {
+	value: number | null
+	onChange: (next: number | null) => void
+	onReject: (message: string) => void
+}) => {
+	const el = useRef<HTMLInputElement>(null)
+	/** The number this field last handed up. It comes straight back as `value`, and
+	 *  rewriting the field on that echo would eat a digit mid-number. */
+	const sent = useRef<number | null | undefined>(undefined)
+	const show = (to: number | null) => {
+		if (el.current) el.current.value = to == null ? "" : String(to)
+	}
+	useEffect(() => {
+		if (value === sent.current) return
+		sent.current = undefined
+		show(value)
+	}, [value])
+	return (
+		<span className="field">
+			<input
+				ref={el}
+				type="number"
+				min="1"
+				step="1"
+				placeholder="—"
+				aria-label="Days in a scoring period"
+				defaultValue={value == null ? "" : String(value)}
+				onChange={e => {
+					const node = e.currentTarget
+					const raw = node.value.trim()
+					// "" with badInput set is a keystroke the browser cannot parse yet — a
+					// stray "-", say. It is not somebody clearing the field.
+					if (raw === "" && node.validity.badInput) return
+					// empty is a real answer: it means nobody has said how long the period
+					// is, and the panel says what the board reads in place of it
+					if (raw === "") {
+						sent.current = null
+						return onChange(null)
+					}
+					const n = Math.round(Number(raw))
+					// unlike the team count, no valid length is a prefix of another one that
+					// this rejects — "1" is itself a period — so the minimum holds per
+					// keystroke rather than waiting for blur
+					if (Number.isFinite(n) && n >= 1) {
+						sent.current = n
+						onChange(n)
+					} else {
+						show(value)
+						onReject("Enter a whole number of days.")
+					}
+				}}
+				onBlur={e => {
+					// text the browser never parsed committed nothing, so the field must not
+					// be left showing it
+					if (e.currentTarget.validity.badInput) {
+						show(value)
+						return onReject("Enter a whole number of days.")
+					}
+					// and once the typing is over the field shows what was actually stored,
+					// so "007" does not sit there as a length no league holds
+					show(value)
+				}}
+			/>
+			<span className="unit">days</span>
+		</span>
+	)
+}
+
+/**
+ * The league's own week, for a league whose period could not be read off its
+ * platform.
+ *
+ * Everything here is nullable and the key itself is optional, so the panel's job is
+ * as much to print what the board does with a null as to collect a value. It prints
+ * `resolvePeriod`'s own `basis` sentence rather than a second copy of that reasoning,
+ * because a second copy is a thing that can drift: the board's footer and this panel
+ * would then disagree about the same league on the same day.
+ */
+const ScoringPeriodPanel = ({
+	draft,
+	saved,
+	snapshot,
+	onChange,
+	onReject
+}: {
+	draft: League
+	saved: ScoringPeriod | undefined
+	snapshot: Snapshot | null
+	onChange: (next: ScoringPeriod) => void
+	onReject: (message: string) => void
+}) => {
+	const stated = draft.scoring_period ?? null
+	/** The end of the captured slate, exactly as `useBoard` derives it, so the window
+	 *  printed here is the window the board ranks over. Null with no snapshot: there
+	 *  is then nothing to clip a window to, and dates are left unstated rather than
+	 *  guessed. */
+	const slateEnd = useMemo(
+		() =>
+			snapshot ?
+				(snapshot.slate ?? []).reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
+			:	null,
+		[snapshot]
+	)
+	const resolved = useMemo(() => {
+		const today = new Date().toISOString().slice(0, 10)
+		// `resolvePeriod` takes a slate end only to clip the window to what was
+		// captured. With no snapshot there is nothing to clip to, so it is handed
+		// `today` and only `basis` — which period.ts derives from the league alone,
+		// never from the slate — is printed.
+		return resolvePeriod(draft, today, slateEnd ?? today)
+	}, [draft, slateEnd])
+
+	/** An edit starts from whatever the league already said, with null — not a
+	 *  default — everywhere it said nothing, so changing one field cannot invent the
+	 *  other five. */
+	const patch = (fields: Partial<Period>) => {
+		const next = { ...NO_PERIOD, ...(stated ?? {}), ...fields }
+		// Knowing nothing again is a state the league has to be able to return to:
+		// clearing a mistaken entry must leave silence rather than an object claiming
+		// six unknowns. `source` counts as something known, because it is the quote a
+		// wrong value would be traced back through.
+		const says = Object.values(next).some(v => v !== null)
+		onChange(says ? next : null)
+	}
+
+	/** Which of these fields the board actually reads, given the period chosen. It is
+	 *  stated rather than shown by disabling anything, because a fact the league does
+	 *  hold is worth recording whether or not today's window is ranked on it. */
+	const reads =
+		stated?.kind === "matchup" ?
+			"The length, the start day, the lock and the anchor are all read — the anchor in place of the start day, wherever one is set."
+		: stated?.kind === "daily" ?
+			"A daily league's window is today, so nothing else here is read."
+		: stated?.kind === "none" ?
+			"A league with no periods is ranked over a rolling week, so nothing else here is read."
+		:	"Until the period is stated the board takes a rolling week and reads nothing else here."
+
+	/** What the board fills each null in with. Every line names a fallback that is in
+	 *  period.ts and would otherwise move a ranking without saying so — `days ?? 7`
+	 *  and `lineup_lock === "period"` are read whether or not the league stated them,
+	 *  and unlike the Monday fallback they leave no trace in the sentence above. */
+	const assumptions: string[] = []
+	if ((stated?.kind ?? null) === null)
+		assumptions.push(
+			"This league has not said how its scoring period runs, so that window is an assumption rather than its own."
+		)
+	else if (resolved.assumed)
+		assumptions.push("Neither a start day nor an anchor is stated, so the board falls back to a Monday start.")
+	if (stated?.kind === "matchup" && stated.days === null)
+		assumptions.push("No length is stated, so the board reads the period as seven days long.")
+	if (stated?.kind === "matchup" && stated.lineup_lock === null)
+		assumptions.push(
+			"No lineup lock is stated, so the board treats the rest of the current period as still yours to act on."
+		)
+
+	const edited = JSON.stringify(stated) !== JSON.stringify(saved ?? null)
+
+	return (
+		<>
+			<p className="sub">
+				Which days a matchup is scored over, and whether the lineup can still be changed
+				inside it — two facts that do not follow from each other. The period decides
+				where the streaming window ends; the lock decides which period you can still
+				act on. Ranked as a rolling seven days instead, on a Wednesday against the
+				shipped league, the board counted 7.4 games a club when 4.7 remained in the
+				matchup.
+			</p>
+
+			<div className="period">
+				<label className="ctl">
+					<span>Period</span>
+					<select
+						value={stated?.kind ?? ""}
+						aria-label="How this league's scoring period runs"
+						onChange={e => patch({ kind: (e.currentTarget.value || null) as Period["kind"] })}
+					>
+						<option value="">not stated</option>
+						<option value="matchup">a matchup over days</option>
+						<option value="daily">one day at a time</option>
+						<option value="none">no periods at all</option>
+					</select>
+				</label>
+				<label className="ctl">
+					<span>Length</span>
+					<PeriodDaysInput
+						value={stated?.days ?? null}
+						onReject={onReject}
+						onChange={days => patch({ days })}
+					/>
+				</label>
+				<label className="ctl">
+					<span>Starts on</span>
+					<select
+						value={stated?.starts_on ?? ""}
+						aria-label="Weekday the scoring period opens on"
+						onChange={e =>
+							patch({ starts_on: (e.currentTarget.value || null) as Period["starts_on"] })
+						}
+					>
+						<option value="">not stated</option>
+						{WEEKDAYS.map(([value, label]) => (
+							<option key={value} value={value}>
+								{label}
+							</option>
+						))}
+					</select>
+				</label>
+				<label className="ctl">
+					<span>Lineups lock</span>
+					<select
+						value={stated?.lineup_lock ?? ""}
+						aria-label="When this league locks the lineup"
+						onChange={e =>
+							patch({ lineup_lock: (e.currentTarget.value || null) as Period["lineup_lock"] })
+						}
+					>
+						<option value="">not stated</option>
+						<option value="daily">every day</option>
+						<option value="period">for the whole period</option>
+					</select>
+				</label>
+			</div>
+
+			<p className="sub period-reads">{reads}</p>
+
+			<p className="sub">
+				The board ranks the streaming week over {resolved.basis}.
+				{slateEnd !== null &&
+					` Right now that window is ${resolved.start} → ${resolved.end}${
+						resolved.clipped ? ", cut short by the end of the captured slate" : ""
+					}.`}
+			</p>
+
+			{assumptions.length > 0 && (
+				<ul className="flags">
+					{assumptions.map(a => (
+						<li key={a}>{a}</li>
+					))}
+				</ul>
+			)}
+
+			<details>
+				<summary>Anchor the period to a date</summary>
+				<p className="sub">
+					For a league whose grid does not fall on a fixed weekday. Any date known to be
+					the first day of some period: the board steps forward from it in strides of the
+					length above, so an anchor without a length is stepped in sevens. It replaces
+					the start day rather than adjusting it — with an anchor set, the weekday above
+					is not read at all.
+				</p>
+				<div className="period">
+					<label className="ctl">
+						<span>First day of a period</span>
+						<input
+							type="date"
+							value={stated?.anchor ?? ""}
+							aria-label="A date known to be the first day of a scoring period"
+							onChange={e => patch({ anchor: e.currentTarget.value || null })}
+						/>
+					</label>
+				</div>
+			</details>
+
+			{stated?.source && (
+				<p className="sub period-source">
+					Read from: {stated.source}
+					{edited &&
+						" — that is where the stored values came from, not what is in the boxes now."}
+				</p>
+			)}
+		</>
+	)
+}
+
 const LeagueEditor = ({
 	leagueKey,
 	league,
+	snapshot,
 	onSaved,
 	onError,
 	run
 }: {
 	leagueKey: string
 	league: League
+	snapshot: Snapshot | null
 	onSaved: (config: Config) => void
 	onError: (message: string) => void
 	run: (fn: () => Promise<void>) => void
@@ -568,12 +886,16 @@ const LeagueEditor = ({
 
 	return (
 		<>
-			{/* Its own grid, above the scoring one: the team count is the only league
-			    value that is neither a stat nor a slot, and until this card existed
-			    the board, the draft and the trade page all told you to "open League
-			    setup and set the team count" against a page that had no field for it.
-			    Kept out of the grid below because that grid's first two cards are
-			    batting and pitching, which is what the suites read them as. */}
+			{/* Its own grid, above the scoring one: the team count and the scoring
+			    period are the two league-wide facts a ranking turns on that are
+			    neither a stat nor a slot, and neither had a field on this page. The
+			    board, the draft and the trade page all told you to "open League
+			    setup and set the team count" against a page that had no field for
+			    it; the streaming week is ranked over whatever period the league
+			    states, and a league whose period could not be read off its platform
+			    had no way to state one. Kept out of the grid below because that
+			    grid's first two cards are batting and pitching, which is what the
+			    suites read them as. */}
 			<div className="grid">
 				<section className="card full">
 					<h2>This league</h2>
@@ -592,6 +914,17 @@ const LeagueEditor = ({
 							Not set. Nothing is assumed in its place, so nothing is ranked.
 						</p>
 					)}
+				</section>
+
+				<section className="card full">
+					<h2>Scoring period</h2>
+					<ScoringPeriodPanel
+						draft={draft}
+						saved={league.scoring_period}
+						snapshot={snapshot}
+						onReject={onError}
+						onChange={p => form.setFieldValue("scoring_period", p)}
+					/>
 				</section>
 			</div>
 

@@ -5,10 +5,12 @@
 import { readFileSync } from "node:fs"
 import { type } from "arktype"
 import { hydrate } from "../src/data/snapshot.ts"
-import { League } from "../src/schema.ts"
+import { League, ScoringPeriod } from "../src/schema.ts"
 import { rateAll, slotsFor } from "../src/engine/bscore.ts"
 import { activeSlots, replacementBySlot, startingLineup } from "../src/engine/trade.ts"
 import { HITTING_MAP, PITCHING_MAP } from "../src/engine/points.ts"
+import { deriveScoringPeriod, importLeague } from "../src/import.ts"
+import { resolvePeriod } from "../src/engine/period.ts"
 
 const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
@@ -251,6 +253,147 @@ t("adding one does not change what the roster is worth", (() => {
   return startingLineup(base, roster, bars).points ===
     startingLineup(withILPlus, roster, bars).points
 })())
+
+
+// ── The Yahoo importer derives the scoring period ────────────────────────────────
+// Every assertion below runs on the strings the shipped league's settings page really
+// printed, read straight out of its own league_rules.raw_settings. A fixture written
+// here would only prove that the fixture matches the parser; this way, a change in
+// what Yahoo prints breaks the test instead of silently moving the board's window.
+const shippedRaw = cfg.leagues["yahoo:228947"].league_rules.raw_settings
+const storedPeriod = cfg.leagues["yahoo:228947"].scoring_period
+
+t("the shipped league still carries the two settings the derivation reads",
+  shippedRaw["Weekly Deadline"] === "Daily - Today" &&
+    shippedRaw["Playoffs"] === "6 teams - Week 24, 25 and 26 (ends Sunday, Sep 27)" &&
+    shippedRaw["Scoring Type"] === "Head-to-Head - Points",
+  JSON.stringify([shippedRaw["Scoring Type"], shippedRaw["Weekly Deadline"], shippedRaw["Playoffs"]]))
+
+const derived = deriveScoringPeriod(shippedRaw)
+const periodOut = ScoringPeriod(derived.period)
+t("the derived period validates against the schema that guards storage",
+  !(periodOut instanceof type.errors), String(periodOut))
+
+// The values in scoring.json were derived by hand from these same two lines. If the
+// importer reproduces them from the page alone, nobody has to hand-edit the file again.
+t("the importer reproduces the shipped league's period from its settings page alone",
+  ["kind", "days", "starts_on", "anchor", "lineup_lock"]
+    .every(k => derived.period[k] === storedPeriod[k]),
+  `${JSON.stringify(derived.period)} vs ${JSON.stringify(storedPeriod)}`)
+t("and it does so with nothing left needing review", derived.needsReview.length === 0,
+  JSON.stringify(derived.needsReview))
+
+// "Daily - Today" is when the lineup locks, not when the period ends. Conflating the
+// two is the bug this whole derivation exists to avoid, so assert they differ: the
+// lock is daily while the period is still a seven-day matchup.
+t("the weekly deadline is read as the lock, leaving the period a seven-day matchup",
+  derived.period.lineup_lock === "daily" && derived.period.kind === "matchup" &&
+    derived.period.days === 7,
+  JSON.stringify(derived.period))
+
+// The arithmetic, checked on real dates rather than by counting on fingers. Yahoo
+// names the period's END ("ends Sunday, Sep 27"), and the season is 2026 — the same
+// settings table dates the trade deadline "August 6, 2026". Sep 27 2026 is indeed a
+// Sunday, so the string is internally consistent, and the seven inclusive days ending
+// on it open on Monday Sep 21. The day after the stated end is therefore the start.
+const DAY_MS = 86400000
+const endUTC = Date.UTC(2026, 8, 27)
+const startUTC = endUTC - 6 * DAY_MS
+t("the stated end weekday is real, and the day after it is where the period starts",
+  /\b2026\b/.test(shippedRaw["Trade End Date"] ?? "") &&
+    new Date(endUTC).getUTCDay() === 0 &&
+    new Date(startUTC).getUTCDay() === 1 &&
+    new Date(startUTC).toISOString().slice(0, 10) === "2026-09-21" &&
+    derived.period.starts_on === "mon",
+  `Sep 27 2026 is day ${new Date(endUTC).getUTCDay()}, start ${new Date(startUTC).toISOString().slice(0, 10)}, derived ${derived.period.starts_on}`)
+
+// What the derivation is FOR: fed to the resolver, it must end the window on the
+// Sunday the settings page named, not seven days from whenever you happen to look.
+// Wednesday Sep 2 2026 sits inside the week that ends Sunday Sep 6.
+const resolved = resolvePeriod({ scoring_period: derived.period }, "2026-09-02", "2026-09-27")
+t("the derived period ends a Wednesday's window on the Sunday Yahoo named",
+  resolved.kind === "matchup" && resolved.assumed === false &&
+    resolved.start === "2026-09-02" && resolved.end === "2026-09-06" &&
+    new Date(Date.parse("2026-09-06T00:00:00Z")).getUTCDay() === 0,
+  JSON.stringify(resolved))
+
+// source has to quote the settings verbatim, so a wrong value is traced rather than argued about
+t("the period quotes both settings it was read from",
+  derived.period.source.includes(`"${shippedRaw["Playoffs"]}"`) &&
+    derived.period.source.includes(`"${shippedRaw["Weekly Deadline"]}"`),
+  derived.period.source)
+
+// Yahoo can restyle any of these strings at any time. Every unrecognized shape has to
+// null its field and quote itself into needs_review — the rule numericSetting already
+// follows for a non-numeric number — because a guessed period silently moves the board.
+const withSettings = extra => ({ ...shippedRaw, ...extra })
+const unparseable = deriveScoringPeriod(withSettings({ "Weekly Deadline": "Whenever, mostly" }))
+t("an unparseable weekly deadline nulls the lock and quotes itself for review",
+  unparseable.period.lineup_lock === null &&
+    unparseable.needsReview.some(l => l.includes('"Whenever, mostly"')),
+  JSON.stringify(unparseable.needsReview))
+t("and it leaves the period itself alone, because the deadline is not the period",
+  unparseable.period.kind === "matchup" && unparseable.period.days === 7 &&
+    unparseable.period.starts_on === "mon",
+  JSON.stringify(unparseable.period))
+
+const weekdayLock = deriveScoringPeriod(withSettings({ "Weekly Deadline": "Monday" }))
+t("a bare weekday deadline reads as a lineup locked for the period",
+  weekdayLock.period.lineup_lock === "period" && weekdayLock.needsReview.length === 0,
+  JSON.stringify(weekdayLock.period))
+
+const noDeadline = (() => { const x = { ...shippedRaw }; delete x["Weekly Deadline"]; return x })()
+t("a missing weekly deadline is unknown and said so, never assumed daily",
+  deriveScoringPeriod(noDeadline).period.lineup_lock === null &&
+    deriveScoringPeriod(noDeadline).needsReview.length > 0,
+  JSON.stringify(deriveScoringPeriod(noDeadline).needsReview))
+
+// A league that evidences no matchup period gets null, not a Monday-to-Sunday guess.
+const roto = deriveScoringPeriod(withSettings({ "Scoring Type": "Rotisserie" }))
+t("a league that does not state head-to-head play gets no period, and says why",
+  roto.period.kind === null && roto.period.days === null && roto.period.starts_on === null &&
+    roto.needsReview.some(l => l.includes('"Rotisserie"')),
+  JSON.stringify(roto))
+
+const noWeeks = deriveScoringPeriod(withSettings({ Playoffs: "No playoffs" }))
+t("a playoffs line naming no numbered week evidences no period",
+  noWeeks.period.kind === null && noWeeks.period.days === null &&
+    noWeeks.needsReview.some(l => l.includes('"No playoffs"')),
+  JSON.stringify(noWeeks))
+
+const noEndDay = deriveScoringPeriod(withSettings({ Playoffs: "6 teams - Week 24, 25 and 26" }))
+t("weeks with no weekday named keep the matchup but leave the start unknown",
+  noEndDay.period.kind === "matchup" && noEndDay.period.days === 7 &&
+    noEndDay.period.starts_on === null && noEndDay.needsReview.length > 0,
+  JSON.stringify(noEndDay.period))
+
+// The helper being right is worth nothing if importYahoo never calls it. This runs the
+// real importer end to end against a stubbed fetch. Only the table markup is synthetic
+// — every settings VALUE inside it is the shipped league's own, and the assertion is
+// about the wiring: a freshly imported league arrives with its period already set.
+const settingsPage = `<h1>Scoring &amp; Settings</h1>
+<table><tr><th>Batters Stat Category</th><th>Value</th></tr>
+<tr><td>Home Runs (HR)</td><td>10.4</td></tr></table>
+<table><tr><th>Setting</th><th>Value</th></tr>${
+  Object.entries(shippedRaw).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")
+}</table>`
+const realFetch = globalThis.fetch
+globalThis.fetch = async url =>
+  String(url).endsWith("/settings") ?
+    { ok: true, status: 200, text: async () => settingsPage }
+  : { ok: false, status: 404, text: async () => "" }
+try {
+  const imported = await importLeague("https://baseball.fantasysports.yahoo.com/b1/228947")
+  t("a freshly imported Yahoo league arrives with its scoring period already set",
+    ["kind", "days", "starts_on", "anchor", "lineup_lock"]
+      .every(k => imported.league.scoring_period[k] === storedPeriod[k]),
+    JSON.stringify(imported.league.scoring_period))
+  const out = League(imported.league)
+  t("and the imported league still validates against the League schema",
+    !(out instanceof type.errors), String(out))
+} finally {
+  globalThis.fetch = realFetch
+}
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

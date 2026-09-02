@@ -58,6 +58,17 @@ t("a stated length with no weekday assumes Monday out loud", (() => {
   const r = resolvePeriod(lg({ ...WEEK, starts_on: null }), WED, FAR)
   return r.assumed === true && r.basis.includes("assuming a Monday start")
 })())
+t("a stated period with no length says it is assuming seven days", (() => {
+  const r = resolvePeriod(lg({ ...WEEK, days: null }), WED, FAR)
+  return r.assumed === true && r.basis.includes("a seven-day period")
+})(), resolvePeriod(lg({ ...WEEK, days: null }), WED, FAR).basis)
+t("and a league missing both says both", (() => {
+  const r = resolvePeriod(lg({ ...WEEK, days: null, starts_on: null }), WED, FAR)
+  return r.basis.includes("a Monday start and a seven-day period")
+})(), resolvePeriod(lg({ ...WEEK, days: null, starts_on: null }), WED, FAR).basis)
+t("a fully stated period claims no assumptions at all",
+  resolvePeriod(lg(WEEK), WED, FAR).basis.includes("assuming") === false)
+
 t("an anchored grid ignores the weekday and counts from the pin", (() => {
   // anchored on a Thursday, ten-day periods: 2026-08-27 + 10 = 2026-09-06
   const r = resolvePeriod(

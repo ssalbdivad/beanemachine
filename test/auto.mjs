@@ -376,5 +376,39 @@ t("a man off the board is blocked with the reason, and his slots stay null",
 t("no eligibility read means no legal slots — never a guessed one",
 	resolved[2].legal === null && /position eligibility/.test(resolved[2].blocked))
 
+// --- execution gates: the one place in this repo where being wrong is expensive ---
+const { permits, alreadyApplied, describeMoves } = await import("../src/auto/execute.ts")
+
+t("dry run is the default and permits nothing",
+  (() => { const p = permits({ execute: false, allowDrops: false }); return !p.lineup && !p.moves })())
+t("--allow-drops alone still permits nothing",
+  (() => { const p = permits({ execute: false, allowDrops: true }); return !p.lineup && !p.moves })(),
+  "the drop flag must never be sufficient on its own")
+t("--execute permits lineups but withholds add/drop",
+  (() => { const p = permits({ execute: true, allowDrops: false }); return p.lineup && !p.moves })())
+t("both flags are required before an irreversible action",
+  (() => { const p = permits({ execute: true, allowDrops: true }); return p.lineup && p.moves })())
+t("every withheld capability says why",
+  permits({ execute: false, allowDrops: false }).reasons.length > 0 &&
+    permits({ execute: true, allowDrops: false }).reasons.length > 0)
+
+// idempotence is decided from the world, not from a record of what we did — a run
+// that half-applied and died leaves no such record
+t("a seat already filled correctly is not re-applied",
+  alreadyApplied({ start: "Kyle Tucker", startSlot: "OF" },
+    [{ name: "Kyle Tucker", slot: "OF" }]))
+t("a seat filled by someone else is still pending",
+  !alreadyApplied({ start: "Kyle Tucker", startSlot: "OF" },
+    [{ name: "Aaron Judge", slot: "OF" }]))
+t("the same man in the wrong seat is still pending",
+  !alreadyApplied({ start: "Kyle Tucker", startSlot: "OF" },
+    [{ name: "Kyle Tucker", slot: "BN" }]))
+t("name matching is case-insensitive, since Yahoo's casing is not ours",
+  alreadyApplied({ start: "kyle tucker", startSlot: "OF" },
+    [{ name: "Kyle Tucker", slot: "OF" }]))
+
+t("add/drop is described for a human rather than clicked",
+  describeMoves([{ add: "A", drop: "B", gain: 9 }]).every(s => /by hand/.test(s)))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

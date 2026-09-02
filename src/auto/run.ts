@@ -4,6 +4,7 @@ import { fetchAvailable, normalizeName } from "../data/yahoo-pool.ts"
 import { rateAll, withUndervaluation } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
 import { DEFAULTS, plan, railViolations, type PlanInput } from "./plan.ts"
+import { applyLineup, describeMoves, permits as permitsFor } from "./execute.ts"
 import { readRoster } from "./roster.ts"
 import { checkSession, login, openSession, type ReadFailure } from "./session.ts"
 
@@ -90,7 +91,11 @@ for (const [name, value] of Object.entries(options))
 
 console.log(`Billy is looking at ${league.meta.team_name ?? teamId} in ${league.meta.league_name}`)
 console.log(
-	`mode: dry run (nothing is changed) · min gain ${options.minGain} · ` +
+	`mode: ${
+		!flag("execute") ? "dry run (nothing is changed)"
+		: flag("allow-drops") ? "EXECUTING — lineup and add/drop"
+		: "EXECUTING — lineup only (add/drop withheld)"
+	} · min gain ${options.minGain} · ` +
 		`keep floor ${options.keepFloor} · max ${options.maxMoves} move(s)\n`
 )
 
@@ -226,4 +231,57 @@ else {
 		console.log(`  why  ${m.reason}\n`)
 	}
 }
-console.log("\nThis is a dry run — nothing was changed on your team.")
+/**
+ * Execution. Two flags, because the two capabilities carry different risk:
+ * `--execute` sets lineups, which is reversible in one click; `--allow-drops` is
+ * needed on top of it before anything irreversible, and even then this build
+ * prints the add/drop rather than clicking it.
+ */
+const gates = permitsFor({ execute: flag("execute"), allowDrops: flag("allow-drops") })
+for (const why of gates.reasons) console.log(`\n${why}`)
+
+if (!gates.lineup) {
+	console.log("\nThis is a dry run — nothing was changed on your team.")
+	process.exit(0)
+}
+
+console.log("\nABOUT TO CHANGE YOUR TEAM")
+for (const s of result.lineup.swaps)
+	console.log(`  start ${s.start} at ${s.startSlot}, sitting ${s.sit ?? "nobody"}`)
+if (!result.lineup.swaps.length) {
+	console.log("  nothing — the lineup already matches the plan.")
+	process.exit(0)
+}
+
+const writing = await openSession(!flag("headed"))
+if (!writing.ok) stop(writing.failure)
+const page = await writing.value.context.newPage()
+// edit mode is where the position dropdowns exist at all
+await page.goto(`https://baseball.fantasysports.yahoo.com/b1/${leagueId}/${teamId}`, {
+	waitUntil: "domcontentloaded"
+})
+const applied = await applyLineup(
+	page,
+	result.lineup,
+	async () => {
+		const back = await readRoster(writing.value.context, leagueId, teamId)
+		// a re-read that fails must not read as "the change is not there" — those are
+		// different claims, and only one of them is about the roster
+		if (!back.ok) throw new Error(`could not re-read the roster to verify: ${back.failure.what}`)
+		return back.value.spots.map(r => ({ name: r.name, slot: r.slot }))
+	},
+	{ dryRun: false }
+)
+await writing.value.close()
+
+console.log("\nRESULT")
+for (const a of applied)
+	console.log(`  ${a.verified ? "OK  " : "??  "}${a.action} — ${a.detail}`)
+const unverified = applied.filter(a => !a.verified)
+if (unverified.length)
+	console.log(
+		`\n${unverified.length} action(s) could not be confirmed by re-reading the page. ` +
+			`Check the roster by hand before trusting this run — a click that did not throw ` +
+			`is not a click that worked.`
+	)
+if (result.moves.length) for (const m of describeMoves(result.moves)) console.log(`\n  ${m}`)

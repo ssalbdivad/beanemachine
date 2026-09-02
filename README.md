@@ -1,5 +1,7 @@
 # beanemachine
 
+> How can you not be robotic about baseball?
+
 Lineup optimizer for **Mrs. Met's Harem** (Yahoo H2H-points league 228947, team 8).
 
 ## Billy
@@ -23,7 +25,8 @@ and any future artwork.
   its measured bounding box. Hand-simplified monograms were tried across several
   rounds and never held up — the interlock is the recognisable part and it does not
   survive simplification. It's the real trademarked mark: fine for a personal league
-  tool, not for merch.
+  tool, not for merch. The tagline is borrowed on the same terms: it adapts the
+  *Moneyball* line "How can you not be romantic about baseball?".
 
 `logo/reference-ny.json` holds that vector. Measured: the glyph is 341x499 —
 markedly taller than wide, stems ~8% of its height. Getting those proportions wrong

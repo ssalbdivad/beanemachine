@@ -208,6 +208,13 @@ h1{
 h1 b{font-weight:600;color:var(--accent)}
 /* aligned under the wordmark, not under Billy: 76px of robot plus the 11px gap */
 .tag{margin:var(--sp-2) 0 0 87px;color:var(--muted);font-size:var(--fs-4);max-width:66ch}
+/* The wordmark's subtitle: h1's serif, and --ink rather than --muted so the
+   header steps accent wordmark → subtitle → muted description. At --muted it
+   would tie with the description line directly below it, leaving the header
+   two equal greys and no hierarchy. Not italic — this sheet spends italics on
+   quiet asides (.empty, .tiny-note), so an italic line here would read as a
+   footnote rather than as a subtitle. */
+.tagline{font-family:var(--serif);font-size:var(--fs-6);color:var(--ink);line-height:var(--lh-tight)}
 .static-note{
   margin-top:var(--sp-2);font-size:var(--fs-3);color:var(--flag);
   background:var(--flag-soft);border:1px solid var(--edge-line);
@@ -222,6 +229,7 @@ h1 b{font-weight:600;color:var(--accent)}
 @media(max-width:640px){
   header{padding:var(--sp-6) 0 var(--sp-4)}
   h1{font-size:var(--fs-8)}
+  .tagline{font-size:var(--fs-5)}
   .tag{margin-left:0}
 }
 

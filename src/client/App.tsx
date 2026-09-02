@@ -146,7 +146,8 @@ export const App = () => {
 						beane<b>machine</b>
 					</h1>
 				</div>
-				<p className="tag">Optimized picks, ranked in your league&rsquo;s own scoring. Billy&mdash;named for Beane&mdash;does the counting.</p>
+				<p className="tag tagline">How can you not be robotic about baseball?</p>
+				<p className="tag">Optimized picks, ranked in your league&rsquo;s own scoring.</p>
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
 						Static build — your leagues are stored in this browser, so editing and saving

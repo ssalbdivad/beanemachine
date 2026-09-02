@@ -1,7 +1,7 @@
 {
   "name": "beanemachine",
   "version": "0.1.0",
-  "description": "Fantasy league scoring configuration for the Mrs. Met's Harem lineup optimizer",
+  "description": "How can you not be robotic about baseball?",
   "type": "module",
   "scripts": {
     "dev": "nub run dev:api & vite",

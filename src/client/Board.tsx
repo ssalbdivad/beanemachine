@@ -203,9 +203,10 @@ export const Board = ({
 				<p className="sub">
 					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
 					projected over {snapshot.horizon.start} → {snapshot.horizon.end} ·
-					playing time weighted 75% toward the last{" "}
-					{snapshot.recentWindow?.hitting ?? 7}d for batters and{" "}
-					{snapshot.recentWindow?.pitching ?? 21}d for pitchers
+					playing time leans on recent form: the last{" "}
+					{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
+					and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,
+					weighting the most recent window double
 				</p>
 				<div className="board">
 					<div className="board-head">

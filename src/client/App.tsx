@@ -92,6 +92,15 @@ export const App = () => {
 				>
 					League setup
 				</button>
+				<a
+					className="views-link"
+					href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/GUIDE.md"
+					target="_blank"
+					rel="noreferrer"
+					title="How to read the board, and how it was validated"
+				>
+					How to read this →
+				</a>
 			</nav>
 
 			<Toolbar

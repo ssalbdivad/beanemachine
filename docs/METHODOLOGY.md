@@ -768,6 +768,11 @@ Each was implemented in full, measured, and then either shipped or left off.
 | empirical-Bayes rate shrinkage | **rejected** | worse than the stat-specific constants |
 | opponent schedule strength | **shipped** at 0.5, flagged | positive and monotone at every dose; no dose significant |
 | park factors | **left off** | subsumed by the opponent index — same schedule, same information |
+| Statcast xwOBA multiplier, on CLEAN point-in-time data | **rejected** | 68 paired weeks: every formulation negative on points; the per-season winner moves around, which is what noise looks like |
+| xwOBA as a ranking/discovery signal | **shipped** | out-predicts actual wOBA for next-week production; gap adds incremental signal at z 6.79 |
+| rolling 21-day Statcast window instead of season-long | **shipped** | gap-to-wOBA is -0.61 over three weeks against -0.36 across a season; the divergence is the signal |
+| scheduled starts from published probables | **shipped** | replaces an average with an observation; cannot be backtested, and that is stated |
+| reliever-specific recent-rate weight | **rejected** | 111 weeks: -1.2, -2.2 and -5.9 points a week at 0.3/0.5/0.7, and 31W-45L at the top weight |
 
 Two of these are worth reading as a pair. The Statcast adjustment is the one everybody
 expects to work, and it does not; the matchup adjustment is the one that sounds like

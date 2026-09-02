@@ -109,6 +109,16 @@ export interface ProjectOptions {
 	 * over-trusts it.
 	 */
 	recentRateWeight?: number
+	/**
+	 * Recent-rate weight for a pitcher who mostly relieves.
+	 *
+	 * A reliever's fantasy value is almost entirely a ROLE — whether he is getting
+	 * the ninth inning — and a role changes overnight. Season-long shrinkage treats
+	 * a pitcher who has just been handed the job as the middle reliever he was in
+	 * April, because saves shrink toward the league rate with a heavy constant. Null
+	 * falls back to the shared pitching weight rather than inventing a separate one.
+	 */
+	reliefRateWeight?: number | null
 	/** Overrides for the Statcast formulation, so a sweep can ask the season which
 	 *  shape of the adjustment works rather than only how much of one to apply. */
 	qualityLambda?: ModelWeights["statcast"]["lambda"]
@@ -233,7 +243,8 @@ export const project = (
 		matchupWeight = MODEL.matchup.weight,
 		parkIndex = null,
 		parkWeight = MODEL.park.weight,
-		projectedStarts = null
+		projectedStarts = null,
+		reliefRateWeight = null
 	} = options
 	const modelled: string[] = []
 	const missing: string[] = []
@@ -368,11 +379,18 @@ export const project = (
 					value / volume
 				:	(value + k * leagueRate) / (volume + k)
 			// optionally pull the rate toward what the player has done lately
-			if (recentRateWeight > 0 && recentStats) {
+			// a mostly-relieving pitcher can be given a different weight than a starter
+			const startShare =
+				!isHitter && s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 1
+			const rateWeight =
+				!isHitter && reliefRateWeight !== null && startShare < 0.5 ?
+					reliefRateWeight
+				:	recentRateWeight
+			if (rateWeight > 0 && recentStats) {
 				const rv = isHitter ? recentStats.plateAppearances : recentStats.outs
 				if (rv && rv > 0) {
 					const recentRate = (recentStats[key] ?? 0) / rv
-					perUnit = (1 - recentRateWeight) * perUnit + recentRateWeight * recentRate
+					perUnit = (1 - rateWeight) * perUnit + rateWeight * recentRate
 				}
 			}
 			const scaled =

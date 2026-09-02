@@ -236,6 +236,7 @@ export const makeBscoreStrategy = (
 		matchupWeight?: number
 		qualityLambda?: { mode: "rising" | "falling" | "fixed"; prior: number; cap: number }
 		qualityScope?: "wide" | "battedBall"
+		reliefRateWeight?: number | null
 	} = {}
 ): Strategy => ({
 	name,
@@ -267,7 +268,8 @@ export const makeBscoreStrategy = (
 					recentVolumePerGame: blendWindows(perWindow, RECENT_WINDOW_WEIGHTS[p.group]),
 					recentWeight: opts.recentWeight ?? RECENT_BLEND_WEIGHT[p.group],
 					recentStats: ctx.recent[21]?.find(r => r.id === p.id)?.stats ?? null,
-					recentRateWeight: opts.rateWeight ?? RECENT_RATE_WEIGHT[p.group]
+					recentRateWeight: opts.rateWeight ?? RECENT_RATE_WEIGHT[p.group],
+					reliefRateWeight: opts.reliefRateWeight ?? null
 				})
 				return { p, score: scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points }
 			})
@@ -447,6 +449,23 @@ export const QUALITY_SWEEP: Strategy[] = [
 		qualityWeight: 1, qualityScope: "battedBall",
 		qualityLambda: { mode: "falling", prior: 300, cap: 0.7 }
 	}),
+	seasonToDateStrategy,
+	hotHandStrategy
+]
+
+/**
+ * Is a reliever's recent line worth more than a starter's?
+ *
+ * His value is a role — the ninth inning — and roles change overnight, while saves
+ * shrink toward the league rate with a heavy constant. If that shrinkage is
+ * mispricing newly-installed closers, a heavier recent weight for relievers only
+ * should show up here.
+ */
+export const RELIEF_SWEEP: Strategy[] = [
+	vorpVariant("rel-off", { reliefRateWeight: null }),
+	vorpVariant("rel0.30", { reliefRateWeight: 0.3 }),
+	vorpVariant("rel0.50", { reliefRateWeight: 0.5 }),
+	vorpVariant("rel0.70", { reliefRateWeight: 0.7 }),
 	seasonToDateStrategy,
 	hotHandStrategy
 ]

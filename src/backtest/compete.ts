@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { League } from "../schema.ts"
-import { MATCHUP_SWEEP, playSeason, QUALITY_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
+import { MATCHUP_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
  * Season-long head-to-head: `nub run compete`
@@ -31,6 +31,7 @@ for (const season of seasons) {
 	const strategies =
 		process.argv.includes("--quality") ? QUALITY_SWEEP
 		: process.argv.includes("--matchup") ? MATCHUP_SWEEP
+		: process.argv.includes("--relief") ? RELIEF_SWEEP
 		: process.argv.includes("--sweep") ? SWEEP
 		: STRATEGIES
 	const { results, oracle, weeks } = await playSeason(season, league, strategies, {

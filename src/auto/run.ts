@@ -3,9 +3,9 @@ import { hydrate, type Snapshot } from "../data/snapshot.ts"
 import { fetchAvailable, normalizeName } from "../data/yahoo-pool.ts"
 import { rateAll, withUndervaluation } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
-import { DEFAULTS, planMoves } from "./plan.ts"
+import { DEFAULTS, plan, railViolations, type PlanInput } from "./plan.ts"
 import { readRoster } from "./roster.ts"
-import { hasSession, login, openSession } from "./session.ts"
+import { checkSession, login, openSession, type ReadFailure } from "./session.ts"
 
 /**
  * Autonomous mode: let Billy look after the team.
@@ -16,7 +16,14 @@ import { hasSession, login, openSession } from "./session.ts"
  *   · at most `--max-moves` per run (default 1);
  *   · nobody at or above `--keep-floor` is ever proposed for a drop;
  *   · a swap needs to clear `--min-gain` projected points to be worth making;
- *   · every proposal is printed with the numbers behind it.
+ *   · nobody MLB lists on the IL is ever proposed as an add or a starter;
+ *   · every proposal is printed with the numbers behind it, and the finished plan
+ *     is re-audited against those rails before anything is printed at all.
+ *
+ * Every step that reads the live site reports what it could not read. Exit 1 means
+ * Billy was blind, exit 2 means he produced a plan that broke his own rails and
+ * withheld it, and exit 0 means the plan below is the whole picture. "No move
+ * clears the bar" and "the roster could not be read" must never look alike.
  *
  * Credentials are never handled by this code. You log into Yahoo by hand once and
  * Playwright reuses the resulting cookies from a gitignored file.
@@ -24,21 +31,62 @@ import { hasSession, login, openSession } from "./session.ts"
 const arg = (name: string) => process.argv.find(a => a.startsWith(`--${name}=`))?.split("=")[1]
 const flag = (name: string) => process.argv.includes(`--${name}`)
 
+/** A margin is only ever printed with its own sign — a "+-3" reads as a typo, and
+ *  a plan that is worth less than today's is exactly the one to notice. */
+const signed = (n: number): string => (n >= 0 ? `+${n}` : String(n))
+
+const stop: (failure: ReadFailure) => never = failure => {
+	console.log(`\nBILLY IS BLIND — ${failure.step}`)
+	console.log(`  could not read: ${failure.what}`)
+	if (failure.detail) console.log(`  the page said:  ${failure.detail}`)
+	if (failure.fix) console.log(`  to fix:         ${failure.fix}`)
+	console.log("\nNo plan was produced. This is NOT the same as having nothing to do.")
+	process.exit(1)
+}
+
 if (flag("login")) {
-	await login()
+	const result = await login()
+	if (!result.ok) stop(result.failure)
+	else console.log(`Session saved to ${result.value}. It is gitignored; treat it like a password.`)
 	process.exit(0)
 }
 
-const league: League = JSON.parse(readFileSync("scoring.json", "utf8")).leagues[
-	arg("league") ?? "yahoo:228947"
-]
-const leagueId = league.meta.league_id!
-const teamId = arg("team") ?? league.meta.team_id ?? "1"
+/** Reads a local file this run cannot proceed without, and names it when it can't. */
+const readJson: (path: string, step: string, fix: string) => unknown = (path, step, fix) => {
+	try {
+		return JSON.parse(readFileSync(path, "utf8"))
+	} catch (e) {
+		stop({ step, what: `${path} could not be read`, fix, detail: String(e) })
+	}
+}
+
+const key = arg("league") ?? "yahoo:228947"
+const config = readJson("scoring.json", "config", "run: node src/cli.ts") as {
+	leagues: Record<string, League | undefined>
+}
+const league = config.leagues[key]
+if (!league) stop({ step: "config", what: `scoring.json has no league "${key}"`, fix: "pass --league=<key>" })
+const leagueId = league.meta.league_id
+const teamId = arg("team") ?? league.meta.team_id
+const teams = league.meta.max_teams
+if (!leagueId)
+	stop({ step: "config", what: `league "${key}" has no league_id`, fix: "re-import the league" })
+if (!teamId)
+	stop({ step: "config", what: `league "${key}" has no team_id`, fix: "pass --team=<id>" })
+// Never defaulted: the team count sets every replacement level, so guessing it
+// would move every bscore in the plan.
+if (!teams)
+	stop({ step: "config", what: `league "${key}" has no max_teams, which sets every replacement level`, fix: "re-import the league" })
+
 const options = {
 	minGain: Number(arg("min-gain") ?? DEFAULTS.minGain),
 	keepFloor: Number(arg("keep-floor") ?? DEFAULTS.keepFloor),
-	maxMoves: Number(arg("max-moves") ?? DEFAULTS.maxMoves)
+	maxMoves: Number(arg("max-moves") ?? DEFAULTS.maxMoves),
+	lineupMinGain: Number(arg("lineup-min-gain") ?? DEFAULTS.lineupMinGain)
 }
+for (const [name, value] of Object.entries(options))
+	if (!Number.isFinite(value))
+		stop({ step: "config", what: `--${name} was not a number`, fix: "pass a number, or leave it out" })
 
 console.log(`Billy is looking at ${league.meta.team_name ?? teamId} in ${league.meta.league_name}`)
 console.log(
@@ -46,51 +94,136 @@ console.log(
 		`keep floor ${options.keepFloor} · max ${options.maxMoves} move(s)\n`
 )
 
-const snapshot: Snapshot = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+// Checked before a single page is fetched. A run with no usable cookies cannot end
+// in a plan, and there is no reason to spend nine free-agent page loads against
+// Yahoo's rate limit discovering it.
+const saved = checkSession()
+if (!saved.ok) stop(saved.failure)
+
+const snapshot = readJson("data/snapshot.json", "snapshot", "run: node src/refresh.ts") as Snapshot
 const h = hydrate(snapshot)
 const rated = withUndervaluation(
 	rateAll({
-		league,
+		league: league,
 		players: h.players,
 		underlying: h.underlying,
 		injuries: h.injuries,
 		teamGamesPlayed: h.teamGamesPlayed,
 		gamesByTeam: h.gamesByTeam,
-			opponentsByTeam: h.opponentsByTeam,
+		opponentsByTeam: h.opponentsByTeam,
 		recentVolumeByWindow: h.recentVolumeByWindow,
 		recentStats: h.recentStats,
-		teams: league.meta.max_teams!
+		teams
 	})
 )
+console.log(`read: ${rated.length} players rated from the snapshot`)
 
 const pool = await fetchAvailable(leagueId)
+// Yahoo answers a throttled or signed-out request with an empty page rather than
+// an error, so nine empty pages means we could not see the wire — not that the
+// wire is empty.
+if (!pool.positionsRead.length)
+	stop({
+		step: "free-agents",
+		what: `no free-agent page could be read for league ${leagueId} (all positions came back empty or blocked)`,
+		fix: "check the league is publicly viewable, then wait a few minutes and try again"
+	})
 const availableNames = new Set(pool.players.map(p => normalizeName(p.name)))
-console.log(`free agents readable: ${pool.players.length}`)
+console.log(`read: ${pool.players.length} free agents across ${pool.positionsRead.join(", ")}`)
 
-if (!hasSession()) {
-	console.log("\nNo saved Yahoo session. Run with --login to sign in once by hand.")
-	console.log("Until then Billy can rank players but can't see your roster.")
-	process.exit(1)
+const session = await openSession(!flag("headed"))
+if (!session.ok) stop(session.failure)
+const read = await readRoster(session.value.context, leagueId, teamId)
+await session.value.close()
+if (!read.ok) stop(read.failure)
+
+const roster = read.value.spots
+const expected = league.roster.counts?.total ?? null
+console.log(
+	`read: ${roster.length} roster spots` +
+		(expected === null ? "" : ` (the league's roster holds ${expected})`)
+)
+if (expected !== null && roster.length !== expected)
+	console.log(
+		`  NOTE: that is not the ${expected} the league settings describe, so at least one row ` +
+			`did not parse. The plan below sees only what is listed.`
+	)
+for (const w of read.value.warnings) console.log(`  could not read: ${w}`)
+
+const input: PlanInput = {
+	roster,
+	rated,
+	availableNames,
+	shape: {
+		slots: league.roster.slots,
+		slot_order: league.roster.slot_order,
+		slot_accepts: league.roster.slot_accepts
+	},
+	options
+}
+const result = plan(input)
+
+const violations = railViolations(result, input)
+if (violations.length) {
+	console.log("\nPLAN WITHHELD — it broke Billy's own rails:")
+	for (const v of violations) console.log(`  · ${v}`)
+	console.log("\nNothing is printed as a recommendation. This is a bug in the planner.")
+	process.exit(2)
 }
 
-const context = await openSession(!flag("headed"))
-const roster = await readRoster(context, leagueId, teamId)
-await context.close()
-console.log(`roster read: ${roster.length} spots`)
+for (const s of result.skipped) console.log(`  skipped: ${s}`)
 
-const { moves, skipped } = planMoves(roster, rated, availableNames, options)
-for (const s of skipped) console.log(`  skipped: ${s}`)
-
-if (!moves.length) {
-	console.log("\nNo move clears the bar. Billy is standing pat.")
-	process.exit(0)
+console.log("\nLINEUP")
+if (result.lineup.blocked) console.log(`  not planned: ${result.lineup.blocked}`)
+else if (!result.lineup.swaps.length && !result.lineup.shifts.length && !result.lineup.sits.length)
+	// A lineup nothing beats and a lineup whose only improvement was held back by
+	// --lineup-min-gain are different facts, and only the first one is "optimal".
+	console.log(
+		result.lineup.gain > 0 ?
+			`  left alone — ${result.lineup.pointsNow} projected points. The best legal ` +
+				`rearrangement is worth ${signed(result.lineup.gain)}, below the ` +
+				`${options.lineupMinGain}-point lineup bar.`
+		:	`  already optimal — ${result.lineup.pointsNow} projected points, and no legal ` +
+				`rearrangement of your own players beats it.`
+	)
+else {
+	// Every exit past the paired swaps still has to be named: a seat freed by a
+	// shift, or by a man nobody can replace, is a change to your lineup too.
+	const unpaired = result.lineup.sits.slice(result.lineup.swaps.length)
+	console.log(
+		`  ${result.lineup.swaps.length + result.lineup.shifts.length + unpaired.length} change(s), ` +
+			`${result.lineup.pointsNow} → ${result.lineup.pointsPlanned} projected points ` +
+			`(${signed(result.lineup.gain)})\n`
+	)
+	for (const s of result.lineup.swaps) {
+		console.log(`  START ${s.start}  (${s.startSlot}, ${s.startPoints} projected)`)
+		console.log(
+			`  SIT   ${s.sit ?? "— the seat is empty"}` +
+				(s.sitPoints === null ? "" : `  (${s.sitPoints} projected)`)
+		)
+		console.log(`  net   ${signed(s.gain)} projected points`)
+		console.log(`  why   ${s.reason}\n`)
+	}
+	for (const s of unpaired)
+		console.log(
+			`  SIT   ${s.name}${s.why ? ` — ${s.why}` : ""}, and no bench man is eligible to take the seat`
+		)
+	for (const s of result.lineup.shifts)
+		console.log(`  MOVE  ${s.name}: ${s.from} → ${s.to}, to make the above legal`)
 }
+for (const slot of result.lineup.emptySlots)
+	console.log(`  EMPTY ${slot}: nobody on your roster is eligible there`)
 
-console.log(`\nBILLY WOULD MAKE ${moves.length} MOVE${moves.length > 1 ? "S" : ""}:`)
-for (const m of moves) {
-	console.log(`  ADD  ${m.add}   (bscore ${m.addScore})`)
-	console.log(`  DROP ${m.drop}  (bscore ${m.dropScore})`)
-	console.log(`  net  +${m.gain} projected points`)
-	console.log(`  why  ${m.reason}\n`)
+console.log("\nADD / DROP")
+for (const n of result.notes) console.log(`  ${n}`)
+if (!result.moves.length) console.log("  no move clears the bar. Billy is standing pat.")
+else {
+	console.log(`  Billy would make ${result.moves.length} move(s):\n`)
+	for (const m of result.moves) {
+		console.log(`  ADD  ${m.add}   (bscore ${m.addScore})`)
+		console.log(`  DROP ${m.drop}  (bscore ${m.dropScore})`)
+		console.log(`  net  ${signed(m.gain)} projected points`)
+		console.log(`  why  ${m.reason}\n`)
+	}
 }
-console.log("This is a dry run — nothing was changed on your team.")
+console.log("\nThis is a dry run — nothing was changed on your team.")

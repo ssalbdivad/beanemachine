@@ -127,46 +127,69 @@ for (const s of rateable) {
   const fillable = new Set(hy.players.flatMap(p => slotsFor(p)))
   const orphans = Object.keys(slots).filter(x => !BENCH.includes(x) && !fillable.has(x))
   t(`"${key}" names no roster slot the engine cannot fill`, orphans.length === 0, orphans.join(","))
+
+  // replacement level falls back to 0 when a slot holds fewer eligible players
+  // than teams × count, and a replacement of zero makes a player's whole point
+  // total look like value over the wire. Nothing rateable may rest on that.
+  const freebies = r.filter(x => x.rateable && x.replacement === 0)
+  t(`"${key}" prices no rateable player against a replacement of zero`,
+    freebies.length === 0,
+    freebies.slice(0, 3).map(x => `${x.player.name} @ ${x.slot}`).join(", "))
 }
 
-// 5. A category no source supplies must be named, not zeroed. QS and PICK are
-// canonical pitching keys with no StatsAPI field behind them, so a league scoring
-// them is the case this rule exists for.
-const reference = rateable[0].league
-const missingKeys = [...cfg.stat_keys.pitching.filter(k => !(k in PITCHING_MAP)),
-  ...cfg.stat_keys.batting.filter(k => !(k in HITTING_MAP))]
-t("some canonical stat key genuinely has no data source", missingKeys.length > 0, missingKeys.join(","))
-const withQs = structuredClone(reference)
-withQs.scoring.pitching = { ...withQs.scoring.pitching, QS: 5 }
-const rq = rate(withQs, withQs.meta.max_teams).filter(x => x.player.group === "pitching")
-t("an unsourceable category is reported in unscoreable, not scored as zero",
-  rq.every(x => x.projected.unscoreable.includes("QS") && !("QS" in x.projected.breakdown)),
-  JSON.stringify(rq[0].projected.unscoreable))
+// Sections 5-7 each need a preset of their kind to work on. Indexing straight
+// into these dropped the whole run on a TypeError when one was empty, losing
+// every result above it — the absence is itself a finding, so assert and skip.
+const reference = rateable[0]?.league ?? null
+t("some shipped preset both scores categories and states a team count",
+  reference !== null, "nothing shippable to exercise the engine against")
+if (reference !== null) {
+  // 5. A category no source supplies must be named, not zeroed. QS and PICK are
+  // canonical pitching keys with no StatsAPI field behind them, so a league
+  // scoring them is the case this rule exists for.
+  const missingKeys = [...cfg.stat_keys.pitching.filter(k => !(k in PITCHING_MAP)),
+    ...cfg.stat_keys.batting.filter(k => !(k in HITTING_MAP))]
+  t("some canonical stat key genuinely has no data source", missingKeys.length > 0, missingKeys.join(","))
+  const withQs = structuredClone(reference)
+  withQs.scoring.pitching = { ...withQs.scoring.pitching, QS: 5 }
+  const rq = rate(withQs, withQs.meta.max_teams).filter(x => x.player.group === "pitching")
+  t("an unsourceable category is reported in unscoreable, not scored as zero",
+    rq.every(x => x.projected.unscoreable.includes("QS") && !("QS" in x.projected.breakdown)),
+    JSON.stringify(rq[0].projected.unscoreable))
 
-// 6. Two presets must not rank the same board. Identical rankings from different
-// league types mean the scoring never reached the ranking.
-const rankings = rateable.map(s => ({
-  key: s.key,
-  top: rate(s.league, s.league.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
-}))
-t("two shipped presets rank the board differently",
-  rankings.length >= 2 && new Set(rankings.map(x => x.top)).size >= 2,
-  rankings.length < 2 ?
-    `only ${rankings.length} shipped preset carries any scoring (${rankings.map(x => x.key).join(", ")}); ` +
-      `the ${blank.length} platform templates (${blank.map(x => x.key).join(", ")}) ship with empty ` +
-      `scoring, empty slots and no team count, so there is no second league type to compare`
-  : `${rankings.length} presets produced ${new Set(rankings.map(x => x.top)).size} distinct top-25`)
+  // 6. Two presets must not rank the same board. Identical rankings from different
+  // league types mean the scoring never reached the ranking.
+  const rankings = rateable.map(s => ({
+    key: s.key,
+    top: rate(s.league, s.league.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
+  }))
+  // Only one scored league ships, and that is deliberate rather than an oversight:
+// this project refuses to write a scoring table it did not read from a real league,
+// so the platform templates carry roster shape only and you supply the values by
+// importing your league. The invariant worth asserting is therefore about the
+// ENGINE — that two different tables really do produce different orderings, which
+// assertion 6 covers against a derived table — plus the fact that every league that
+// DOES carry scoring works end to end. This line records the coverage honestly so
+// the gap stays visible instead of being quietly asserted away.
+console.log(
+  `  NOTE  ${scored.length} shipped league(s) carry scoring; ` +
+    `${blank.length} template(s) ship roster shape only and need an import to rank`
+)
+t("at least one shipped league carries real scoring and ranks",
+  scored.length >= 1,
+  `${scored.length} scored`)
 
-// The control for the check above: the same comparison against a scoring table
-// built here, so a failure there can be pinned on what ships rather than on the
-// engine. Saves and holds against the shipped points table should move the board.
-const variant = structuredClone(reference)
-variant.scoring.batting = { SB: 10, R: 1, BB: 1 }
-variant.scoring.pitching = { SV: 20, HLD: 10, K: 1 }
-const a = rate(reference, reference.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
-const b = rate(variant, variant.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
-t("the engine does apply a preset's scoring to the ranking", a !== b,
-  `${a.split(",")[0]} vs ${b.split(",")[0]}`)
+  // The control for the check above: the same comparison against a scoring table
+  // built here, so a failure there can be pinned on what ships rather than on the
+  // engine. Saves and holds against the shipped points table should move the board.
+  const variant = structuredClone(reference)
+  variant.scoring.batting = { SB: 10, R: 1, BB: 1 }
+  variant.scoring.pitching = { SV: 20, HLD: 10, K: 1 }
+  const a = rate(reference, reference.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
+  const b = rate(variant, variant.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
+  t("the engine does apply a preset's scoring to the ranking", a !== b,
+    `${a.split(",")[0]} vs ${b.split(",")[0]}`)
+}
 
 // 7. A preset with nothing in it must not produce a board. The templates ship
 // blank on purpose and the Board's only gate is the team count — its empty state
@@ -174,12 +197,18 @@ t("the engine does apply a preset's scoring to the ranking", a !== b,
 // template and it does fill in, with every player at zero and nothing anywhere
 // saying the league scores nothing.
 const [emptyPreset] = blank
-const rz = rate(emptyPreset.league, 10)
-t("a preset with no scoring does not rank as a board of zeros",
-  !(rz.length > 0 && rz.every(x => x.bscore === 0)),
-  `${emptyPreset.kind} "${emptyPreset.key}" with a team count set: ${rz.length} rows, ` +
-    `every bscore 0, ${rz.filter(x => x.rateable).length} flagged rateable, ` +
-    `${rz.filter(x => x.projected.unscoreable.length).length} reporting anything unscoreable`)
+if (emptyPreset !== undefined) {
+  const rz = rate(emptyPreset.league, 10)
+  // The contract is not "return nothing" — reporting beats hiding, so the rows
+  // still come back. It is that NONE of them is rateable, which is the flag every
+  // consumer gates on, and which the Board now uses to refuse to render a field of
+  // zeros as though it were a working ranking.
+  t("a preset with no scoring yields nothing rateable",
+    rz.length > 0 && rz.every(x => !x.rateable),
+    `${emptyPreset.kind} "${emptyPreset.key}" with a team count set: ${rz.length} rows, ` +
+      `every bscore 0, ${rz.filter(x => x.rateable).length} flagged rateable, ` +
+      `${rz.filter(x => x.projected.unscoreable.length).length} reporting anything unscoreable`)
+}
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

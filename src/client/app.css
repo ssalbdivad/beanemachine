@@ -555,3 +555,14 @@ pre{
   color:var(--accent);margin-left:4px;vertical-align:top
 }
 .board-row .games{font-variant-numeric:tabular-nums;color:var(--muted)}
+
+/* Scarcity. A bar chart because the comparison IS the point — the numbers alone
+   make you do the ranking in your head. */
+.scarcity{display:flex;flex-direction:column;gap:7px;margin-top:14px}
+.scar{display:grid;grid-template-columns:44px 1fr 52px minmax(0,1.1fr);gap:11px;align-items:center;font-size:12.5px}
+.scar b{font-weight:650;letter-spacing:.3px}
+.scar .bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.scar .bar i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.scar .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--text);font-weight:600}
+.scar .who{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:640px){.scar{grid-template-columns:38px 1fr 46px}.scar .who{display:none}}

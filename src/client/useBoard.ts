@@ -123,6 +123,19 @@ export const useBoard = (
 		)
 	}, [snapshot, league, filters.mode])
 
+	/** Which sides this league actually scores — an unconfigured template scores
+	 *  neither, and the board must say so rather than rank a field of zeros. */
+	const scored = useMemo(
+		() =>
+			!league ?
+				null
+			:	{
+					hitting: Object.values(league.scoring.batting).some(v => v !== 0),
+					pitching: Object.values(league.scoring.pitching).some(v => v !== 0)
+				},
+		[league]
+	)
+
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()
 		const out = rated.filter(r => {
@@ -172,5 +185,5 @@ export const useBoard = (
 		return out
 	}, [rated, filters, availableNames])
 
-	return { rated, rows }
+	return { rated, rows, scored }
 }

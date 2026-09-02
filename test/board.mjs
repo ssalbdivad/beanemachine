@@ -38,6 +38,17 @@ t("sorting by bscore still orders by bscore",
 await page.click(".board-head .sort-head:has-text('edge')")
 await page.waitForTimeout(150)
 
+// Scarcity must reflect the league's real slots and rank by the actual cliff.
+const scars = await page.$$eval(".scar", n => n.map(e => ({
+  slot: e.querySelector("b").textContent.trim(),
+  val: Number(String(e.querySelector(".val").textContent).replace("+", ""))
+})))
+t("scarcity lists the league's active slots", scars.length >= 5, JSON.stringify(scars.map(s => s.slot)))
+t("scarcity is ordered by how steep the drop-off is",
+  scars.every((s, i) => i === 0 || scars[i - 1].val >= s.val), JSON.stringify(scars))
+t("a scarce slot really is scarcer than a deep one",
+  scars[0].val > scars[scars.length - 1].val, `${scars[0]?.slot} ${scars[0]?.val} vs ${scars.at(-1)?.slot} ${scars.at(-1)?.val}`)
+
 // Buy low must be an intersection, not a rebrand of the main board: every card
 // has to be both cheap and out-hitting its line, or the panel is decoration.
 const buylow = await page.$$eval(".buylow-card", cards =>

@@ -51,6 +51,16 @@ const drifted = pool.filter(r => r.rateable && bars.has(r.slot) && bars.get(r.sl
 t("replacement bars match the ones bscore used", drifted.length === 0,
 	drifted.slice(0, 3).map(r => `${r.slot}: ${bars.get(r.slot)} vs ${r.replacement}`).join(", "))
 
+// ...and the reason they have to be recomputed rather than read back: Rated.replacement
+// only ever reports a player's BEST slot, so a slot nobody is best at is missing from it
+// entirely. SP is that slot here — its bar sits above P's, so every starter is worth more
+// at P — which is exactly the bar the drift check above cannot see.
+const bestSlots = new Set(pool.filter(r => r.rateable).map(r => r.slot))
+const unreachable = [...bars.keys()].filter(s => !bestSlots.has(s))
+t("a bar nobody is best at cannot be read back off Rated.replacement",
+	unreachable.includes("SP") && bars.get("SP") > bars.get("P"),
+	`unreachable [${unreachable.join(",")}], SP ${bars.get("SP")} vs P ${bars.get("P")}`)
+
 // --- filling a lineup ---
 const full = draft(spots)
 const lineup = startingLineup(league, full, bars)
@@ -170,6 +180,17 @@ const bogus = evaluate(full, [notMine], [])
 t("giving up someone you do not own is reported, not quietly honoured",
 	bogus.missing.some(m => m.includes(notMine.player.name)) && bogus.delta === 0,
 	bogus.missing.join(" | "))
+t("and it does not leave you a body short, because nobody left",
+	!/short/.test(bogus.explanation), bogus.explanation)
+
+// The sentence has to name the spot this deal opened, not whichever covered spot
+// happens to sit last in the lineup. This roster is already starting four wire
+// pitchers before the trade; giving up the catcher opens C and nothing else.
+const noArms = draft(spots.filter(s => !["SP", "RP", "P"].includes(s)))
+const armless = evaluate(noArms, [noArms.find(r => r.slots[0] === "C")], [])
+t("the spot named as opening is the one that actually opened",
+	/freely available C \(/.test(armless.explanation) && !/available P /.test(armless.explanation),
+	armless.explanation)
 t("an empty roster is holes, not zeroes, when no bar exists",
 	startingLineup(league, [], null).starters.every(s => s.source === "empty") &&
 		startingLineup(league, [], null).holes.length === spots.length)

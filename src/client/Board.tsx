@@ -70,7 +70,7 @@ export const Board = ({
 
 	const availableNames =
 		pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null
-	const { rows } = useBoard(snapshot, league, filters, availableNames)
+	const { rows, scored } = useBoard(snapshot, league, filters, availableNames)
 	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -105,6 +105,29 @@ export const Board = ({
 			<section className="card full">
 				<h2>Recommendations</h2>
 				<p className="empty">Loading player data…</p>
+			</section>
+		)
+
+	// An unconfigured template has a roster shape but no scoring, and a board of
+	// 1,432 players all worth zero reads as working rather than as empty.
+	if (scored && !scored.hitting && !scored.pitching)
+		return (
+			<section className="card full">
+				<h2>This league has no scoring yet</h2>
+				<p className="sub">
+					<b>{league.meta.league_name ?? "This template"}</b> gives you the roster shape —{" "}
+					{Object.entries(league.roster.slots)
+						.filter(([s]) => s !== "BN" && s !== "IL" && s !== "NA")
+						.map(([s, n]) => `${n}\u00d7${s}`)
+						.join(", ")}{" "}
+					— but not what each stat is worth, and every projection would score exactly
+					zero. Rather than rank a field of zeros, the board is waiting.
+				</p>
+				<p className="sub">
+					Paste your league URL above to read the real values off the platform, or open
+					<b> Scoring</b> and enter them. A bscore is denominated in your league&rsquo;s
+					own points, so it cannot mean anything until those exist.
+				</p>
 			</section>
 		)
 
@@ -242,6 +265,7 @@ export const Board = ({
 				</div>
 			</section>
 
+			<Scarcity rows={rows} league={league} />
 			<BuyLow rows={rows} />
 			{rows[0] && <BillysPick r={rows[0]} horizonDays={
 				Math.round((Date.parse(snapshot.horizon.end) - Date.parse(snapshot.horizon.start)) / 86400000)
@@ -315,6 +339,64 @@ export const Board = ({
 				)}
 			</section>
 		</>
+	)
+}
+
+/**
+ * Positional scarcity — the shape of the drop-off, per slot.
+ *
+ * Replacement level is already the denominator of every bscore, but it is invisible
+ * as a single number on one row. Seen side by side it answers the question people
+ * actually ask while building a team: where does it hurt to wait? A slot where the
+ * starter and the waiver-wire body are close is one you can punt; a slot where the
+ * cliff is steep is one you pay for early.
+ */
+const Scarcity = ({ rows, league }: { rows: Ranked[]; league: League }) => {
+	// slot_order lists every roster SPOT, so a 3-outfielder league names OF three
+	// times. Scarcity is a property of the slot, not of each seat in it.
+	const active = [
+		...new Set(
+			(league.roster.slot_order ?? Object.keys(league.roster.slots)).filter(
+				s => s !== "BN" && s !== "IL" && s !== "NA"
+			)
+		)
+	]
+	const cards = active
+		.map(slot => {
+			const pool = rows.filter(r => r.slots.includes(slot) && r.rateable)
+			if (pool.length < 3) return null
+			// the best available, against what the next man up at the same slot gives you
+			const best = pool[0]!
+			return { slot, cliff: best.bscore, replacement: best.replacement, best }
+		})
+		.filter((x): x is NonNullable<typeof x> => x !== null)
+		.sort((a, b) => b.cliff - a.cliff)
+
+	if (cards.length < 2) return null
+	const widest = cards[0]!.cliff || 1
+	return (
+		<section className="card full">
+			<h2>Where it hurts to wait</h2>
+			<p className="sub">
+				How far the best player you can still get at each slot sits above the next man
+				up there. A short bar is a slot you can punt; a long one is a slot worth paying
+				for, because waiting costs you the whole gap.
+			</p>
+			<div className="scarcity">
+				{cards.map(c => (
+					<div className="scar" key={c.slot}>
+						<b>{c.slot}</b>
+						<div className="bar" aria-hidden="true">
+							<i style={{ width: `${Math.max(3, (c.cliff / widest) * 100)}%` }} />
+						</div>
+						<span className="val">+{c.cliff.toFixed(0)}</span>
+						<span className="who" title={`${c.best.player.name} is the best ${c.slot} on this board`}>
+							{c.best.player.name}
+						</span>
+					</div>
+				))}
+			</div>
+		</section>
 	)
 }
 

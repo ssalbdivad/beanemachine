@@ -85,6 +85,19 @@ export interface RateOptions {
 
 export const rateAll = (o: RateOptions): Rated[] => {
 	const slotCounts = o.league.roster.slots
+	/**
+	 * A league that scores nothing must not produce a board of zeros.
+	 *
+	 * The roster templates ship a shape, not a scoring table — you supply that by
+	 * importing your league or entering values. Until then every projection scores
+	 * exactly 0, and a ranked list of 1,432 players all worth 0 reads as a working
+	 * board rather than as an unconfigured one. That is the project's own rule
+	 * broken in the most visible place: absent was being rendered as zero.
+	 */
+	const scores = {
+		hitting: Object.values(o.league.scoring.batting).some(v => v !== 0),
+		pitching: Object.values(o.league.scoring.pitching).some(v => v !== 0)
+	}
 	// Opponent quality is derived from the same pool being rated, so it moves with
 	// whatever the board is showing and never needs a separate capture.
 	const strength = teamStrength(o.players)
@@ -126,7 +139,10 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			slot: "",
 			replacement: 0,
 			confidence: confidenceOf(player, underlying, injury),
-			rateable: projection.projectedVolume !== null && projection.projectedVolume > 0,
+			rateable:
+				scores[player.group] &&
+				projection.projectedVolume !== null &&
+				projection.projectedVolume > 0,
 			regressionGap: underlying?.xwobaGap ?? null,
 			scheduledStarts: o.probableStarts?.get(player.id) ?? null
 		}

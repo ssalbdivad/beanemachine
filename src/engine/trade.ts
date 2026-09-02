@@ -51,10 +51,11 @@ export const activeSlots = (league: League): string[] => {
  * Same rule and same arithmetic as `rateAll`, which computes these bars to make a
  * bscore but does not hand them back. They cannot be read off `Rated.replacement`
  * either, because that field reports the bar at the slot where a player was worth
- * MOST: the highest bar in the league (Util in the reference league, drawing on
- * every batter in baseball) is therefore nobody's best slot and never appears
- * there at all. `test/trade.mjs` pins the two computations against each other so
- * they cannot drift apart silently.
+ * MOST, so a slot that is nobody's best is absent from it altogether. SP is that
+ * slot in the reference league: its bar (64.97) sits above P's (57.59), so every
+ * starting pitcher is worth more at P and no `Rated.slot` ever reads "SP".
+ * `test/trade.mjs` pins the two computations against each other and names that
+ * gap, so neither the bars nor the gap can drift silently.
  *
  * `teams` is required and never defaulted, for the reason bscore.ts gives: a
  * guessed team count moves every bar and therefore every number on this page.
@@ -107,9 +108,17 @@ export interface Lineup {
  *
  * Scarcest-first is what stops a catcher being spent on a Util spot and leaving C
  * empty — the same greedy order `src/backtest/season.ts` fills a weekly roster
- * with. It is "optimally enough" rather than optimal: it is not a maximum-weight
- * matching, and a contrived eligibility graph can beat it. Scarcity is the failure
- * mode that actually occurs in a fantasy roster, and it is the one this handles.
+ * with. On the eligibility `slotsFor` gives us it is not merely good enough, it
+ * cannot be beaten: every player has one kind slot (C, OF, SP…) plus one catch-all
+ * (Util, P) whose eligible set is a superset of it, so the catch-all is never the
+ * scarcer slot and seating the best man at his kind slot first can never cost a
+ * point — the exchange argument closes.
+ *
+ * That guarantee is a property of the eligibility, not of the greed. If a league's
+ * real multi-position eligibility ever reaches this engine — no source we read
+ * exposes it, which is the standing gap in METHODOLOGY §8 — the graph stops being
+ * two-level and this would need a real assignment, of the kind `src/auto/plan.ts`
+ * runs against the league's own `slot_accepts`.
  *
  * `replacement` is required rather than optional so the caller states which
  * question is being asked: pass the bars to model a manager who would cover an
@@ -297,7 +306,7 @@ export const evaluateTrade = (proposal: TradeProposal): TradeVerdict => {
 		delta,
 		lineups,
 		changes,
-		explanation: explain(proposal, lineups, delta),
+		explanation: explain(proposal, lineups, delta, leaving.size),
 		missing
 	}
 }
@@ -308,7 +317,10 @@ export const evaluateTrade = (proposal: TradeProposal): TradeVerdict => {
 const explain = (
 	proposal: TradeProposal,
 	lineups: { before: Lineup; after: Lineup },
-	delta: number
+	delta: number,
+	/** Players who really left. Naming someone in `out` who was never on the roster
+	 *  must not make the deal look a body short. */
+	departing: number
 ): string => {
 	const wasStarting = startersOf(lineups.before)
 	const isStarting = startersOf(lineups.after)
@@ -350,18 +362,23 @@ const explain = (
 	if (alsoIn.length)
 		parts.push(`${alsoIn.join(" and ")} also start${alsoIn.length > 1 ? "" : "s"}.`)
 
-	// a 2-for-1 leaves the roster a body short; the spot it opens is covered at the
-	// league's own replacement level, because nobody appears to fill it
-	const coveredBefore = lineups.before.starters.filter(s => s.source === "replacement").length
-	const covered = lineups.after.starters.filter(s => s.source === "replacement")
-	const short = proposal.out.length - proposal.in.length
-	if (covered.length > coveredBefore) {
-		const opened = covered[covered.length - 1]!
+	// a 2-for-1 leaves the roster a body short; the spots it opens are covered at the
+	// league's own replacement level, because nobody appears to fill them. Which spots
+	// those are is read off the two lineups position by position — a spot that was
+	// already on the wire before the deal did not open, and naming it would blame this
+	// trade for a hole it did not make.
+	const opened = lineups.after.starters.filter(
+		(s, i) => s.source === "replacement" && lineups.before.starters[i]!.source !== "replacement"
+	)
+	const priced = opened.map(s => `${s.slot} (${s.points} pts)`).join(" and ")
+	const short = departing - proposal.in.length
+	if (opened.length)
 		parts.push(
-			`The spot that opens is filled by a freely available ${opened.slot} ` +
-				`(${opened.points} pts), not by anyone you own.`
+			opened.length > 1
+				? `The spots that open are filled off the wire — ${priced} — not by anyone you own.`
+				: `The spot that opens is filled by a freely available ${priced}, not by anyone you own.`
 		)
-	} else if (short > 0)
+	else if (short > 0)
 		parts.push(
 			`You end up ${short} ${short > 1 ? "bodies" : "body"} short, but your bench ` +
 				`covers every startable spot, so the shortfall costs you nothing.`

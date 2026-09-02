@@ -82,8 +82,11 @@ install, so they fail; the lines above are what they were meant to do, and
 runs, five are pure Node (`engine`, `leagues`, `trade`, `draft`, `auto`) while four
 (`ui`, `board`, `trade-ui`, `journey`) drive a real page at
 `http://127.0.0.1:5173`, so **the Vite server has to be running** or they fail on a
-connection rather than on a defect. `BASE=` points them elsewhere,
-`BROWSER=chromium|firefox` picks the engine.
+connection rather than on a defect. Two of those four — `ui` and `board` — reach
+`/api` as well, so **`node src/server.ts` has to be up beside it** or Vite proxies
+into nothing and the page logs a 502 that reads like a client bug. Both lines
+above, both running, is the state every suite expects. `BASE=` points them
+elsewhere, `BROWSER=chromium|firefox` picks the engine.
 
 Two more suites sit outside `npm test` because each needs something built first.
 `npm run test:compete` replays 2021-2025 from a warm backtest cache and passes.

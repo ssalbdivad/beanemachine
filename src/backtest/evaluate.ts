@@ -199,8 +199,16 @@ if (import.meta.filename === process.argv[1]) {
 			name: `d7_rate${rw}@7`, recentDays: 7, recentWeight: 0.75,
 			qualityWeight: 0, shrink: false, recentRateWeight: rw, rateDays: 7
 		})
-	// recency-weighted multi-window blends: does the most recent series carry extra signal?
+	// SHIPPED configuration, plus the next questions worth asking
 	const COMBOS: [string, Record<number, number>][] = [
+		["SHIPPED_hit", { 3: 2, 7: 1, 21: 1 }],
+		["SHIPPED_pit", { 5: 2, 21: 1 }],
+		["hit_3x3", { 3: 3, 7: 1, 21: 1 }],
+		["hit_3x2_10_30", { 3: 2, 10: 1, 30: 1 }],
+		["hit_3_5_7_21", { 3: 2, 5: 1, 7: 1, 21: 1 }],
+		["pit_5x2_14_30", { 5: 2, 14: 1, 30: 1 }],
+		["pit_5x3_21", { 5: 3, 21: 1 }],
+		["pit_7x2_21", { 7: 2, 21: 1 }],
 		["s3+w14", { 3: 1, 14: 1 }],
 		["s3x2+w14", { 3: 2, 14: 1 }],
 		["s3+w7+w21", { 3: 1, 7: 1, 21: 1 }],

@@ -161,6 +161,14 @@ Three findings, two of them negative:
    effect that good players accumulate more plate appearances, so shrinking the rate on
    top of a volume model double-penalises exactly the players it shouldn't.
 
+**Window tuning is now exhausted.** A further sweep — a 4-window hitter blend, a
+3-window pitcher blend, exponential decay at three time constants — lands within
+**±0.001 ρ** of the shipped configuration. That is inside the noise this corpus can
+resolve, so nothing was changed on it. The remaining gains are not in retuning windows;
+they need *different information*: probable pitchers (a two-start week is worth roughly
+double a one-start week and the model currently can't tell them apart), opponent
+strength over the horizon, and your league's real multi-position eligibility.
+
 Honest limits: ρ ≈ 0.68 is a real ranking signal, not clairvoyance — fourteen days of
 baseball is mostly variance, and the top-20 actual-points column barely separates the
 variants, meaning the gain is in ranking the broad pool (waiver decisions) rather than

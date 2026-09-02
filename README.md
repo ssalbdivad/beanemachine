@@ -59,6 +59,29 @@ nub run check    # tsc --noEmit
 nub run build    # static bundle into dist/
 ```
 
+### Autonomous mode
+
+`nub run auto` lets Billy look after the team: it reads your real roster through a
+logged-in Playwright session, ranks it and the league's free agents by bscore, and
+reports the swaps it would make and why.
+
+```sh
+nub run auto:login                     # sign into Yahoo by hand, once
+nub run auto                           # dry run — reports, changes nothing
+nub run auto --min-gain=8 --keep-floor=30 --max-moves=2
+```
+
+It is **dry-run only, on purpose.** This reasons about real and hard-to-reverse
+actions — a dropped player can be claimed within seconds — so the default changes
+nothing, at most `--max-moves` are proposed per run, nobody at or above
+`--keep-floor` is ever offered up, and a swap must clear `--min-gain` projected
+points to appear at all.
+
+Credentials are never handled by this code. `--login` opens a real browser for you to
+sign in; Playwright reuses the cookies from a gitignored file. There is nowhere for a
+password to be stored, typed or logged. Wiring up actual execution is a separate,
+deliberate decision — take the dry run for a few days first.
+
 ### The two dev servers
 
 They are not interchangeable:

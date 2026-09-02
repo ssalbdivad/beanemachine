@@ -70,6 +70,63 @@ const after = await page.$$eval(".grid section:nth-of-type(1) input.val", n => n
 t("revert restores value", after[codes.indexOf("HR")] === "10.4", after.join(","))
 t("save bar hides after revert", !(await page.locator(".savebar").evaluate(e => e.classList.contains("on"))))
 
+/**
+ * A penalty must be typeable. `<input type=number>` reports an empty value with
+ * validity.badInput while a lone "-" is on screen; a controlled field read that as
+ * "cleared" and React restored the committed number over the keystroke, so typing
+ * -3 produced 83. Most pitching categories ARE penalties, so the path this app
+ * exists to serve could not express them. No suite saw it.
+ */
+const erIndex = (await page.$$eval(".grid section:nth-of-type(2) .code", n =>
+  n.map(e => e.textContent)
+)).indexOf("ER")
+if (erIndex >= 0) {
+  const er = page.locator(".grid section:nth-of-type(2) input.val").nth(erIndex)
+  await er.click()
+  await page.keyboard.press("ControlOrMeta+a")
+  await page.keyboard.type("-3.5")
+  await er.blur()
+  await page.waitForTimeout(150)
+  t("a negative point value can actually be typed", (await er.inputValue()) === "-3.5",
+    await er.inputValue())
+  await page.click(".savebar button:not(.primary)")
+  await page.waitForTimeout(150)
+}
+
+// A field that displays a number the league does not hold is the one thing this
+// project says it never does, so whole-number fields normalise on blur.
+const teams = page.locator("input[aria-label='Teams in this league']")
+if (await teams.count()) {
+  await teams.click()
+  await page.keyboard.press("ControlOrMeta+a")
+  await page.keyboard.type("12.7")
+  await teams.blur()
+  await page.waitForTimeout(150)
+  t("a whole-number field shows what it stored, not what was typed",
+    (await teams.inputValue()) === "13", await teams.inputValue())
+
+  // and a stray minus must not be read as "cleared" and wipe a stored count
+  await teams.click()
+  await page.keyboard.press("ControlOrMeta+a")
+  await page.keyboard.type("-")
+  await page.waitForTimeout(120)
+  // `input[type=number]` reports "" for a lone "-", so the field's own value cannot
+  // witness this. What matters is that nothing was COMMITTED: the count the league
+  // holds must be untouched while the keystroke is unfinished.
+  const midTyping = await page.evaluate(
+    k => JSON.parse(localStorage.getItem(k))?.leagues?.["yahoo:228947"]?.meta?.max_teams,
+    STORE
+  )
+  t("a half-typed count commits nothing, rather than wiping the stored one",
+    midTyping === null || typeof midTyping === "number", String(midTyping))
+  await teams.blur()
+  await page.waitForTimeout(150)
+  t("and an unfinished count is restored on blur",
+    /^\d+$/.test(await teams.inputValue()), await teams.inputValue())
+  await page.click(".savebar button:not(.primary)").catch(() => {})
+  await page.waitForTimeout(150)
+}
+
 // edit + save round-trips through browser storage and survives a reload
 await hr.fill("12.25"); await hr.blur(); await page.waitForTimeout(120)
 await page.click(".savebar button.primary")

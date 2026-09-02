@@ -34,7 +34,8 @@
     "clamp": { "min": 0.75, "max": 1.35 },
     "why": [
       "weight 0 is STALE, not justified. It was set by a measurement that ran on leaked data — Savant's custom leaderboard ignores its own date parameters and returns the finished season. On real point-in-time data xwOBA out-predicts wOBA (rho 0.1019 vs 0.0581 over 5,151 player-weeks) and the gap adds significant incremental signal (partial rho +0.0944, z 6.79).",
-      "Re-derive this with `nub run compete --statcast-real` before trusting it either way — correlation and played seasons have disagreed here before.",
+      "Re-derived on real point-in-time data over 2024, and the two tests DISAGREE. The ranking correlation is emphatic (partial rho +0.0944, z 6.79); the played season is not — over 23 paired weeks the best formulation goes 11W-12L against weight 0 at +3.0 points a week, and every other formulation is worse on points.",
+      "23 weeks is far too few to settle it, and this project's rule is that played weeks decide. So the weight stays 0 pending 2021-2023 and 2025, which need roughly 30 minutes of pitch-level fetching each. It is a queued measurement now, not a stale one.",
       "windowDays 21: the signal was measured on a rolling three-week window, not on season-to-date. Contact and results diverge far more inside three weeks (gap~wOBA -0.61) than across a season (-0.36), and that divergence is the whole signal. 0 means season-to-date.",
       "lambda.mode 'rising' trusts xwOBA MORE as batted-ball sample grows; 'falling' trusts it more in SMALL samples, which is what the stabilisation literature actually argues; 'fixed' ignores sample.",
       "scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."

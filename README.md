@@ -368,7 +368,28 @@ Note what the leak also explains: gap~wOBA is **−0.61** on clean data versus �
 leaked data. Contact quality and results diverge far more within a real three-week
 window than a full season lets them, which is exactly the room the signal lives in.
 
-**What has not yet been re-run**: the season competition. Ranking correlation and
+**And then the season disagreed.** Re-run on real point-in-time data over 2024 with
+`--statcast-real`, paired directly against weight 0 across 23 weeks:
+
+| formulation | record vs weight 0 | points |
+|---|---|---|
+| batted-ball scope + falling λ, weight 1.0 | 11W-12L | **+3.0/wk** |
+| xwOBA ratio 0.5 | 11W-12L | −10.1/wk |
+| xwOBA ratio 1.0 | 10W-13L | −29.3/wk |
+| λ falling, 0.5 | 13W-10L | −33.8/wk |
+
+So the correlation is emphatic and the played season is not. That is the same
+disagreement that set the recency weight, and the rule here has always been that
+played weeks decide — but 23 weeks decides nothing either way, and running
+2021-2023 and 2025 costs about half an hour of pitch-level fetching each.
+
+**The weight therefore stays 0, as a queued measurement rather than a conclusion.**
+What changed is that it is now a live question with a known answer shape, and the
+Statcast data itself has been promoted from decoration to the rolling window the
+signal actually lives in — which is where the buy-low board and the contact ranking
+draw from regardless of what the multiplier weight ends up being.
+
+**The remaining gap: Ranking correlation and
 played seasons have disagreed before, and the shipped `"statcast": { "weight": 0 }`
 was set by the broken measurement, so it is now a stale number rather than a
 justified one. Re-deriving it with `nub run compete --statcast-real` is the next

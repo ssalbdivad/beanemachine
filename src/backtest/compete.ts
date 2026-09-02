@@ -74,7 +74,10 @@ if (seasons.length > 1) {
  * aggregate but loses most individual weeks has won a coin toss, so the paired
  * week-by-week count is the number that decides anything.
  */
-const BASELINES = ["season-to-date", "hot-hand", "hot-hand+vorp", "thoughtful-human", "draft-and-hold"]
+const ALL_BASELINES = ["season-to-date", "hot-hand", "hot-hand+vorp", "thoughtful-human", "draft-and-hold"]
+// Only report baselines this run actually played. A missing opponent scores zero
+// every week, which reads as a 700-point-per-week rout rather than as absence.
+const BASELINES = ALL_BASELINES.filter(b => (weekly.get(b)?.length ?? 0) > 0)
 
 /**
  * Comparing two variants by how each does against a THIRD strategy is the wrong

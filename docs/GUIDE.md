@@ -125,8 +125,9 @@ Then the deal. Pick who leaves and who arrives, and the verdict is **what your s
 
 ## Injured players
 
-Over the **Streaming** and **fortnight** horizons an injured player is not ranked at all,
-and the row says why. This is not squeamishness: a man placed on the 10-day IL yesterday
+Over the **Streaming** and **fortnight** horizons an injured player is not ranked at
+all — he is dropped from the board rather than shown with a caveat. This is not
+squeamishness: a man placed on the 10-day IL yesterday
 was healthy for most of the window the playing-time blend reads, so he projects at a
 full-time rate and lands near the top of the board while being unable to play. No source
 states a return date, so instead of inventing a discount the board says it cannot honestly
@@ -215,9 +216,9 @@ Two harnesses, and they answer different questions. The first ranks; the second 
 | Side | Model | Spearman ρ | vs naive | Folds won |
 |---|---|---|---|---|
 | Hitting | naive baseline | 0.574 | — | — |
-| Hitting | shipped | **0.676** | +17.7% | 48 / 50 |
+| Hitting | shipped windows (3/7/21d) | **0.682** | +18.7% | 49 / 50 |
 | Pitching | naive baseline | 0.470 | — | — |
-| Pitching | shipped | **0.532** | +13.2% | 49 / 50 |
+| Pitching | shipped windows (5/21d) | **0.533** | +13.5% | 50 / 50 |
 
 What survived the sweeps:
 
@@ -236,7 +237,7 @@ An earlier version of this page said the Statcast blend had been ruled out by th
 
 ### What ρ ≈ 0.68 does and does not mean
 
-It means the ordering is real. Across ten seasons, ranking players this way lands substantially closer to the true 14-day order than assuming everyone keeps doing what they have been doing, and it did so in 48 of 50 folds — the consistency matters more than the size of the gap.
+It means the ordering is real. Across ten seasons, ranking players this way lands substantially closer to the true 14-day order than assuming everyone keeps doing what they have been doing, and it did so in 49 of 50 folds — the consistency matters more than the size of the gap.
 
 It does not mean the numbers are predictions. A rank correlation of 0.68 leaves a great deal of disagreement between the projected order and the real one. Fourteen days of baseball is mostly variance, and no model removes that. A bscore of 55 is not a forecast that you will gain 55 points; it is a statement that this player currently grades well above his replacement given what is known.
 

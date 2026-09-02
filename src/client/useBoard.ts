@@ -122,6 +122,10 @@ export const useBoard = (
 			filters.mode === "stream" ? h.probableStartsWeek
 			: filters.mode === "stash" ? undefined
 			: h.probableStarts
+		const probableCoverage =
+			filters.mode === "stream" ? h.probableCoverageWeek
+			: filters.mode === "stash" ? undefined
+			: h.probableCoverage
 		const opposingStarters =
 			filters.mode === "stream" ? h.opposingStartersWeek
 			: filters.mode === "stash" ? undefined
@@ -141,6 +145,7 @@ export const useBoard = (
 				ownership: h.ownership,
 				eligibility: h.eligibility,
 				probableStarts,
+				probableCoverage,
 				opposingStarters,
 				// over the rest of a season an injured man is a legitimate hold; over the
 				// next week he is simply unavailable
@@ -206,7 +211,14 @@ export const useBoard = (
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
 			if (filters.hideInjured && r.injury) return false
-			if (filters.twoStartOnly && (r.scheduledStarts ?? 0) < 2) return false
+			// Scoped to the horizons that HAVE probable starters, which is exactly the
+			// condition Board.tsx renders the checkbox under. Left unscoped it kept
+			// filtering on the Stash view, where `scheduledStarts` is null for everyone
+			// by construction: the board emptied completely, the message blamed the slot
+			// and confidence filters, and the control that would undo it was no longer on
+			// screen. A filter you cannot see must not be one you cannot escape.
+			if (filters.mode !== "stash" && filters.twoStartOnly && (r.scheduledStarts ?? 0) < 2)
+				return false
 			if (filters.availableOnly && availableNames && !availableNames.has(normalizeName(r.player.name)))
 				return false
 			if (r.confidence.value < filters.minConfidence) return false

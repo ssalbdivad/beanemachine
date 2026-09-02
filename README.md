@@ -54,13 +54,15 @@ what a freely available replacement at the same roster slot would produce, in *y
 league's* scoring. Points above replacement is the honest unit: a bscore of 40 means
 forty more points than the next man up, in your league's own currency.
 
-Three tabs, which are three different questions rather than three filters:
-**Streaming** ranks over the next seven days against that week's real slate,
-**This fortnight** is the standing 14-day board and the default, and **Stash**
-ranks over every game left in the regular season. Alongside the ranking the board
-carries **Buy low** (a rolling-window contact gap that the field has not priced)
-and **Where it hurts to wait** (the drop-off at each slot). A second view,
-**My team & trades**, prices a deal by what it does to your starting lineup.
+Four tabs. **Recommendations** is the board, and it opens on three horizons, which
+are three different questions rather than three filters: **Streaming** ranks over the
+next seven days against that week's real slate, **This fortnight** is the standing
+14-day board and the default, and **Stash** ranks over every game left in the regular
+season. Alongside the ranking the board carries **Buy low** (a rolling-window contact
+gap that the field has not priced) and **Where it hurts to wait** (the drop-off at
+each slot). The other three tabs are **League setup**, which everything else is priced
+in; **My team & trades**, which prices a deal by what it does to your starting lineup;
+and **Draft**, which ranks by what a pick adds to the lineup you have already taken.
 
 ### Running it
 
@@ -70,32 +72,32 @@ npx vite                # Vite client on :5173, proxying /api — this is the on
 node src/refresh.ts     # capture a fresh snapshot of MLB + Savant into data/snapshot.json
 npm run check           # tsc --noEmit
 npm run build           # static bundle into dist/
-npm test                # every suite: engine, leagues, trade, auto, ui, board, trade-ui
+npm test                # every suite: engine, leagues, trade, draft, auto, ui, board, trade-ui, journey
 ```
 
 Two notes a new reader will otherwise hit. The `dev`, `start` and `import` entries
 in `package.json` shell out to `nub`, a TypeScript runner this repo does not
 install, so they fail; the lines above are what they were meant to do, and
-`node src/cli.ts` is the `import` one. And of the seven suites `npm test`
-runs, four are pure Node (`engine`, `leagues`, `trade`, `auto`) while three (`ui`,
-`board`, `trade-ui`) drive a real page at `http://127.0.0.1:5173`, so **the Vite
-server has to be running** or they fail on a connection rather than on a defect.
-`BASE=` points them elsewhere, `BROWSER=chromium|firefox` picks the engine.
+`node src/cli.ts` is the `import` one. And of the nine suites `npm test`
+runs, five are pure Node (`engine`, `leagues`, `trade`, `draft`, `auto`) while four
+(`ui`, `board`, `trade-ui`, `journey`) drive a real page at
+`http://127.0.0.1:5173`, so **the Vite server has to be running** or they fail on a
+connection rather than on a defect. `BASE=` points them elsewhere,
+`BROWSER=chromium|firefox` picks the engine.
 
 Two more suites sit outside `npm test` because each needs something built first.
 `npm run test:compete` replays 2021-2025 from a warm backtest cache and passes.
 
-`npm run test:static` checks the Pages build, and **it does not currently pass.**
-Two separate things are broken and neither is in the test. First, `npm run preview`
-cannot serve the build at all: `vite.config.ts` applies `base: "/beanemachine/"`
-only when `command === "build"`, and preview runs as `serve`, so it mounts at `/`
-while the built `index.html` asks for `/beanemachine/assets/…`. Those requests fall
-through to the SPA handler and come back as `text/html`, the module never executes,
-and the board never renders. `npx vite preview --base=/beanemachine/` serves it
-correctly. Second, even against a correctly-based preview, two assertions still
-fail — the free-agents toggle is not disabled, and the `.static-note` banner
-(`getMode() === "static"` in `src/client/App.tsx`) does not render. Both are live
-defects in the static build, not stale assertions.
+`npm run test:static` checks the Pages build, and **it needs a correctly-based
+preview or it cannot run at all.** `vite.config.ts` applies `base: "/beanemachine/"`
+only when `command === "build"`, and preview runs as `serve`, so `npm run preview`
+mounts at `/` while the built `index.html` asks for `/beanemachine/assets/…`. Those
+requests fall through to the SPA handler and come back as `text/html`, the module
+never executes, and the board never renders. `npx vite preview --base=/beanemachine/`
+serves it correctly, and against that the suite passes 15 of 15 — including the two
+assertions that used to fail, the disabled free-agents toggle and the `.static-note`
+banner (`getMode() === "static"` in `src/client/App.tsx`). The base mismatch in
+`preview` is still a live defect; the two static-build defects have been fixed.
 
 Node strips TypeScript types natively from 22.18 on, which is why every command
 here is a plain `node src/….ts`; on an older Node add `--experimental-strip-types`.
@@ -151,16 +153,17 @@ They are not interchangeable:
 - **`:8000` — the Hono API only.** Serves `/api/*` — reading a league from its URL
   and its free-agent pool, the two things a browser can't do for itself. It does not
   watch for changes, so restart it after editing anything server-side. Opening it in
-  a browser shows no UI. Your
-  leagues are not kept here: they live in the browser's storage, so the hosted
-  static build behaves identically for everything except those two calls.
+  a browser shows no UI, unless you have run `npm run build`, in which case it also
+  serves what is in `dist/`. Your leagues are not kept here: they live in the
+  browser's storage, so the hosted static build behaves identically for everything
+  except those two calls.
 - **`:5173` — the Vite client**, with HMR, proxying `/api` through to `:8000`.
   **This is the one to open.**
 
 ### Where the numbers come from
 
 All unauthenticated, all captured server-side into `data/snapshot.json`. Row counts
-are from the shipped capture (2026-09-02T05:49Z):
+are from the shipped capture (2026-09-02T09:56Z):
 
 | Source | What it gives | Rows |
 |---|---|---|
@@ -173,7 +176,7 @@ are from the shipped capture (2026-09-02T05:49Z):
 | Baseball Savant `statcast_search` (pitch level, a day at a time) | rolling 21-day wOBA and xwOBA | 449 batters, 509 pitchers |
 | Baseball Savant `expected_statistics?min=1` | season-long xBA, xSLG | 641 batters, 834 pitchers |
 | Baseball Savant `statcast?min=1` | barrel %, exit velocity, hard-hit %, sweet-spot % | joined by `player_id` |
-| Yahoo public player pages | "% Ros" — the market's price | 845 of the pool priced |
+| Yahoo public player pages | "% Ros" — the market's price, and the eligibility Yahoo prints beside each name | 300 rows read, 228 of the pool priced; 433 multi-position lines, 322 matched into the pool |
 
 Three coverage decisions matter. `playerPool=All` instead of the default, because
 the qualified leaderboard is roughly a third of the real pool and hides exactly the
@@ -282,7 +285,11 @@ they need *different information*. Two of the three named here have since landed
 probable pitchers, and opponent strength over the horizon — and neither could be
 credited by this harness: probables cannot be replayed leak-free at all, and matchups
 were judged by playing seasons instead. The third, your league's real multi-position
-eligibility, is still missing and is still the largest accuracy gap left.
+eligibility, has since landed as well — Yahoo prints it beside every name and the
+ownership sweep reads it — and this harness could not credit that one either: it
+scores projected points, and slot eligibility plays no part in them. What is left of
+that gap is everyone Yahoo does not list, who still carries StatsAPI's single primary
+position and nothing more.
 
 Honest limits: ρ ≈ 0.68 is a real ranking signal, not clairvoyance — fourteen days of
 baseball is mostly variance, and the top-20 actual-points column barely separates the
@@ -418,10 +425,13 @@ percentile difference would have crowned every unrostered replacement-level body
 Ownership is read from Yahoo's own player pages. They cap an anonymous reader at 24
 rows and ignore the paging offset, but `count=` shifts the window — `count=50`
 returns the next two dozen — so sweeping it per position exposes the whole priced
-universe without an account. In the shipped capture 1,115 rows came back and 845 of
-the pooled players carry a price. Anyone Yahoo does not list has **no** market edge
-and shows a dash: unknown is not the same as unowned, and the board will not rank a
-player on a price it never read.
+universe without an account. How much comes back depends on who is asking: a local
+sweep reads about 845 players, while the CI runner that builds the published
+snapshot is throttled down — the shipped capture read 300 rows, of which 228 are
+pooled players. Below 35% coverage the board falls back to ranking by bscore and
+says so on screen, because ranking by edge drops everyone unpriced. Anyone Yahoo
+does not list has **no** market edge and shows a dash: unknown is not the same as
+unowned, and the board will not rank a player on a price it never read.
 
 ### Tuning it — `model.json`
 
@@ -473,9 +483,9 @@ baseline stored in N runs therefore gets N×111 week-entries paired against a co
 that has 111, and every unmatched one is scored as a win against a control of
 nothing. That is the one thing this project says it never does — substitute a
 plausible default for a value that isn't there — and it inverts the conclusion
-rather than blurring it. Measured against the twelve runs stored on 2 September,
-bare `node src/backtest/verdict.ts` ranked hot-hand *first* at 588,575 points and
-called it significant at z +24.77, where the same weeks paired honestly have it
+rather than blurring it. Measured against the thirteen runs pooled on 2 September,
+bare `node src/backtest/verdict.ts` ranked hot-hand *first* at 664,205 points and
+called it significant at z +26.86, where the same weeks paired honestly have it
 losing 37-74 to the shipped model. The exact figures move as runs are added; the
 direction of the error does not.
 

@@ -210,6 +210,38 @@ export const fetchOpposingStarters = async (
 	return out
 }
 
+/**
+ * How much of a team's horizon MLB has actually published probables for.
+ *
+ * This is the difference between an observation and a fragment of one. MLB fills
+ * today and tomorrow and then thins out fast — 46 of 222 slots over a fortnight
+ * is typical — so a starter who happens to pitch today carries
+ * `projectedStarts = 1` while everyone else is projected off team games at two or
+ * three. Read as a complete count that DEMOTED him by roughly 350 places. The
+ * count is only usable where it covers the whole window.
+ */
+export const fetchProbableCoverage = async (
+	startDate: string,
+	endDate: string
+): Promise<Map<number, { published: number; games: number }>> => {
+	const data = await json(
+		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}` +
+			`&hydrate=probablePitcher`
+	)
+	const out = new Map<number, { published: number; games: number }>()
+	for (const day of data.dates ?? [])
+		for (const game of day.games ?? [])
+			for (const side of ["home", "away"] as const) {
+				const team = game.teams?.[side]?.team?.id
+				if (typeof team !== "number") continue
+				const cur = out.get(team) ?? { published: 0, games: 0 }
+				cur.games++
+				if (typeof game.teams?.[side]?.probablePitcher?.id === "number") cur.published++
+				out.set(team, cur)
+			}
+	return out
+}
+
 export const fetchProbableStarts = async (
 	startDate: string,
 	endDate: string

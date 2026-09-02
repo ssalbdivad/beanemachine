@@ -73,6 +73,35 @@ const onTabKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
 	tabs[to]?.focus()
 }
 
+/**
+ * The window the SELECTED horizon is actually ranked over.
+ *
+ * `snapshot.horizon` states one range — the fortnight — and every mode was quoting
+ * it. So the streaming view, ranked over the next seven days, said "projected over
+ * 2026-09-02 → 2026-09-16", and Billy's pick said "over the next 14 days · his team
+ * plays 7 games in that stretch"; the stash view, ranked over every game left,
+ * claimed the same fortnight while quoting 23 games in it. The horizon is the one
+ * thing the three tabs differ by, so it is derived from the mode here.
+ *
+ * The week's end is the snapshot's own start plus seven days, which is how the
+ * capture built `gamesWeek`. The rest of the season has no stated end date in the
+ * snapshot, so it is named rather than given the fortnight's.
+ */
+const horizonSpan = (snapshot: Snapshot, mode: Filters["mode"]) => {
+	const { start, end } = snapshot.horizon
+	if (mode === "stream") {
+		const week = new Date(Date.parse(start) + 7 * 86400000).toISOString().slice(0, 10)
+		return { range: `${start} → ${week}`, phrase: "the next 7 days" }
+	}
+	if (mode === "stash")
+		return {
+			range: `${start} → the end of the regular season`,
+			phrase: "the rest of the regular season"
+		}
+	const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000)
+	return { range: `${start} → ${end}`, phrase: `the next ${days} days` }
+}
+
 /** How old the capture is. A projection built on last week's numbers is wrong in a
  *  way nothing else in the UI would reveal, so the age is always stated. */
 const freshness = (capturedAt: string, now: number) => {
@@ -185,6 +214,10 @@ export const Board = ({
 				</p>
 			</section>
 		)
+
+	// Not a hook, so it belongs after the refusals above rather than among them —
+	// and it needs the snapshot they have just established exists.
+	const span = horizonSpan(snapshot, filters.mode)
 
 	return (
 		<>
@@ -320,9 +353,7 @@ export const Board = ({
 				</div>
 			</section>
 
-			{rows[0] && <BillysPick r={rows[0]} horizonDays={
-				Math.round((Date.parse(snapshot.horizon.end) - Date.parse(snapshot.horizon.start)) / 86400000)
-			} />}
+			{rows[0] && <BillysPick r={rows[0]} horizon={span.phrase} />}
 
 			{/* The panel the horizon tabs control. The pick, buy-low and scarcity
 			    cards below re-rank with it too, but this is the ranking itself, and
@@ -354,7 +385,7 @@ export const Board = ({
 				)}
 				<p className="sub">
 					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
-					projected over {snapshot.horizon.start} → {snapshot.horizon.end} ·
+					projected over {span.range} ·
 					playing time leans on recent form: the last{" "}
 					{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
 					and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,
@@ -436,8 +467,12 @@ const Scarcity = ({ rows, league }: { rows: Ranked[]; league: League }) => {
 		.map(slot => {
 			const pool = rows.filter(r => r.slots.includes(slot) && r.rateable)
 			if (pool.length < 3) return null
-			// the best available, against what the next man up at the same slot gives you
-			const best = pool[0]!
+			// The best available, against what the next man up at the same slot gives you.
+			// Chosen by bscore rather than taken as `pool[0]`, which was whichever row the
+			// board's CURRENT sort happened to put first: sorting by name turned this card
+			// into "+-29 · A.J. Minter" — the alphabetically first reliever, his negative
+			// bscore printed with a plus in front of it — and every slot's ranking with it.
+			const best = pool.reduce((a, b) => (b.bscore > a.bscore ? b : a))
 			return { slot, cliff: best.bscore, replacement: best.replacement, best }
 		})
 		.filter((x): x is NonNullable<typeof x> => x !== null)
@@ -546,10 +581,10 @@ const BuyLow = ({ rows }: { rows: Ranked[] }) => {
  * Billy's read on the top of the board. Every clause is assembled from a number
  * that is actually on the row — no adjectives the data doesn't support.
  */
-const BillysPick = ({ r, horizonDays }: { r: Ranked; horizonDays: number }) => {
+const BillysPick = ({ r, horizon }: { r: Ranked; horizon: string }) => {
 	const clauses: string[] = []
 	clauses.push(
-		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over the next ${horizonDays} days`
+		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over ${horizon}`
 	)
 	if (r.marketEdge !== null && r.rosteredPct !== null)
 		clauses.push(

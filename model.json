@@ -6,7 +6,7 @@
     "the recommendation — no code edit, no rebuild of anything but the bundle.",
     "Each block carries a `why` recording what evidence set the number, because a",
     "weight with no provenance is a guess, and this project does not ship guesses.",
-    "Re-measure any change with `nub run compete --seasons=2021,2022,2023,2024,2025 --moves=1`.",
+    "Re-measure any change with `node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2`.",
     "Season win/loss counts decide; ranking correlation is advisory only."
   ],
 
@@ -50,7 +50,8 @@
   "probables": {
     "use": true,
     "why": [
-      "MLB publishes probable starters about a week out and fills every slot — 212 of 212 over a sample week, with 49 pitchers carrying two starts.",
+      "MLB publishes probable starters for the next day or two and then thins out fast. A sample week in mid-season filled 212 of 212 slots; a fortnight horizon measured live filled 46 of 222, and 0 of 30 teams had a complete window. The count is therefore only an observation where it COVERS the window, and the snapshot records published-versus-scheduled per team so the engine can tell.",
+      "Read as complete when it was partial, this actively harmed the ranking: a starter who happened to pitch today carried one start over a fortnight while everyone else was projected off team games at two or three, and he fell about 350 places. That is the never-infer rule inverted — a fragment of an observation treated as the whole of one.",
       "A starter projected from outs per TEAM game averages a two-start week and a one-start week into one number, and in a points league those weeks are worth roughly double one another. This is the largest documented hole in the projection.",
       "It cannot be backtested. Probables are announced and then overwritten, and no archive of what was announced at the time exists, so there is no leak-free way to replay them. Set to true because it replaces an average with an observation, not because a fold count said so — and that distinction is stated rather than hidden."
     ]

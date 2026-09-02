@@ -1,6 +1,7 @@
 # generated at build time from scoring.json
 # regenerable logo exploration output (run logo/round*.mjs to rebuild)
 *.tmp
+.audit/
 .perf/
 data/backtest-cache/
 data/yahoo-session.json

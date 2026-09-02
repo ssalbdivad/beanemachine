@@ -33,6 +33,16 @@ export interface Underlying {
 const csv = async (url: string): Promise<Record<string, string>[]> => {
 	const res = await fetch(url, { headers: { accept: "text/csv" } })
 	if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`)
+	/**
+	 * A 200 is not evidence that the answer is a leaderboard. Savant serves the
+	 * INTERACTIVE HTML page — 830 KB of it, still HTTP 200 — whenever it decides to
+	 * ignore `csv=true`, which is exactly what killed the park-factor pipeline: the
+	 * parser read the markup as 1,852 rows of nulls and nothing noticed. Checking the
+	 * content type turns that into a reported failure instead of an empty map.
+	 */
+	const kind = res.headers.get("content-type") ?? ""
+	if (!/csv|download|octet-stream|text\/plain/i.test(kind))
+		throw new Error(`${url} → expected CSV, got ${kind || "no content-type"}`)
 	return parseCsv(await res.text())
 }
 

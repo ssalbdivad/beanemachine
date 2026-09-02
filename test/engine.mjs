@@ -278,5 +278,31 @@ t("a real two-position line grants both slots",
     return s2.includes("C") && s2.includes("1B")
   })())
 
+// --- a partial probable count is not a count ---
+// MLB publishes today and tomorrow and then thins out. Read as complete, a starter
+// who happens to pitch today gets projectedStarts=1 over a fortnight and is buried
+// ~350 places, while everyone else is projected off team games at two or three.
+const coverage = [...hyd.probableCoverage.values()]
+t("probable coverage is recorded, not assumed", coverage.length > 0, `${coverage.length} teams`)
+t("and it records both halves of the fraction",
+  coverage.every(c => typeof c.published === "number" && typeof c.games === "number"))
+
+const withStarts = rateAll({
+  ...base, eligibility: hyd.eligibility,
+  probableStarts: hyd.probableStarts, probableCoverage: hyd.probableCoverage
+})
+const noStarts = rateAll({ ...base, eligibility: hyd.eligibility })
+const complete = coverage.filter(c => c.published >= c.games).length
+t("a team whose window is only partly published contributes no scheduled starts",
+  complete > 0 ||
+    withStarts.every((r, i) => r.scheduledStarts === null && r.points === noStarts[i].points),
+  `${complete}/${coverage.length} teams complete`)
+
+// and where it IS complete the count must be used, or the guard is just an off switch
+t("the guard keys on coverage rather than disabling the feature outright",
+  withStarts.every(r => r.scheduledStarts === null || (
+    hyd.probableCoverage.get(r.player.teamId)?.published >=
+    hyd.probableCoverage.get(r.player.teamId)?.games)))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

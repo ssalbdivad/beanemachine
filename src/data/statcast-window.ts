@@ -54,8 +54,13 @@ export const aggregateStatcast = async (
 	type: "batter" | "pitcher",
 	start: string,
 	end: string,
-	fetchDay: (url: string) => Promise<string> = async url =>
-		(await fetch(url, { headers: { accept: "text/csv", "user-agent": UA } })).text()
+	fetchDay: (url: string) => Promise<string> = async url => {
+		const res = await fetch(url, { headers: { accept: "text/csv", "user-agent": UA } })
+		// Without this an error page is 200-shaped text that parseCsv turns into rows
+		// of nulls, and the day silently contributes nothing instead of being reported.
+		if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`)
+		return res.text()
+	}
 ): Promise<Map<number, WindowLine>> => {
 	const acc = new Map<number, { w: number; x: number; d: number }>()
 	for (const day of eachDay(start, end)) {
@@ -66,6 +71,14 @@ export const aggregateStatcast = async (
 			continue // a missing day degrades the window; it does not invent one
 		}
 		for (const r of rows) {
+			/**
+			 * The window is only leak-free if the rows really are from the day asked
+			 * for. Savant does not validate `game_date_gt`/`game_date_lt`: hand it a
+			 * date it cannot parse and it answers 200 with the WHOLE SEASON (17 MB),
+			 * which is the same silent-wrong-content failure the leaderboard has and
+			 * would quietly reintroduce the future-leak this module exists to remove.
+			 */
+			if (r.game_date !== day) continue
 			const id = num(r[type === "batter" ? "batter" : "pitcher"])
 			const denom = num(r.woba_denom)
 			if (id === null || !denom) continue

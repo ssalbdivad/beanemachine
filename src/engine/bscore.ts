@@ -113,6 +113,13 @@ export interface RateOptions {
 	/** Multi-position eligibility as the platform prints it, by MLBAM id. */
 	eligibility?: Map<number, string[]>
 	/**
+	 * Published-vs-scheduled probables per team. A scheduled-start count is only an
+	 * observation where it covers the whole horizon; MLB typically publishes today
+	 * and tomorrow and then stops, so a partial count read as a complete one says a
+	 * starter makes ONE start in a fortnight and buries him.
+	 */
+	probableCoverage?: Map<number, { published: number; games: number }>
+	/**
 	 * What to do with a player currently on the injured list.
 	 *
 	 * "exclude" refuses to rank him over this horizon; "keep" ranks him anyway.
@@ -155,6 +162,9 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		const injury = o.injuries.get(player.id)
 		const horizonGames = player.teamId ? (o.gamesByTeam.get(player.teamId) ?? 0) : 0
 		const eligible = o.eligibility?.get(player.id)
+		// only trust the count where MLB has published every game of this team's window
+		const cov = player.teamId ? o.probableCoverage?.get(player.teamId) : undefined
+		const startsUsable = cov !== undefined && cov.games > 0 && cov.published >= cov.games
 		const matchupIndex = starterBlendedIndex(
 			player,
 			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null,
@@ -175,7 +185,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
 				matchupIndex,
-				projectedStarts: o.probableStarts?.get(player.id) ?? null
+				projectedStarts: startsUsable ? (o.probableStarts?.get(player.id) ?? null) : null
 			}
 		)
 		const table = tableFor(o.league, player.group)
@@ -212,7 +222,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 						`projection over this horizon. The Stash view ranks him anyway.`
 				:	null,
 			regressionGap: underlying?.xwobaGap ?? null,
-			scheduledStarts: o.probableStarts?.get(player.id) ?? null
+			scheduledStarts: startsUsable ? (o.probableStarts?.get(player.id) ?? null) : null
 		}
 	})
 

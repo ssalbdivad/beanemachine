@@ -2,6 +2,7 @@ import { type } from "arktype"
 import {
 	fetchGamesByTeam,
 	fetchOpposingStarters,
+	fetchProbableCoverage,
 	fetchProbableStarts,
 	fetchSchedule,
 	fetchWindowStats,
@@ -53,6 +54,9 @@ export interface Snapshot {
 	 *  Absent means MLB has not published them, not that nobody is pitching. */
 	opposingStarters?: Record<string, number[]>
 	opposingStartersWeek?: Record<string, number[]>
+	/** Published-vs-scheduled probables per team. A partial count is not a count. */
+	probableCoverage?: Record<string, { published: number; games: number }>
+	probableCoverageWeek?: Record<string, { published: number; games: number }>
 	opponentsWeek?: Record<string, number[]>
 	/** Yahoo "% Ros", keyed by MLBAM id. Absent for anyone Yahoo did not list;
 	 *  absent means unknown, never unowned. */
@@ -91,7 +95,7 @@ export const buildSnapshot = async (
 	}
 	const back = (d: number) => iso(new Date(now.getTime() - d * 86400_000))
 	const [
-		hitting, pitching, xBat, xPit, horizon, restOfSeason, week, probables, probablesWeek, facing, facingWeek, owned, teamGamesPlayed, injuries,
+		hitting, pitching, xBat, xPit, horizon, restOfSeason, week, probables, probablesWeek, facing, facingWeek, coverage, coverageWeek, owned, teamGamesPlayed, injuries,
 		hitWindows, pitWindows
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
@@ -111,6 +115,12 @@ export const buildSnapshot = async (
 			fetchOpposingStarters(start, end).catch(() => new Map<number, number[]>()),
 			fetchOpposingStarters(start, iso(new Date(now.getTime() + 7 * 86400_000))).catch(
 				() => new Map<number, number[]>()
+			),
+			fetchProbableCoverage(start, end).catch(
+				() => new Map<number, { published: number; games: number }>()
+			),
+			fetchProbableCoverage(start, iso(new Date(now.getTime() + 7 * 86400_000))).catch(
+				() => new Map<number, { published: number; games: number }>()
 			),
 			fetchOwnership(leagueId).catch(() => ({
 				byName: new Map<string, number>(),
@@ -206,6 +216,10 @@ export const buildSnapshot = async (
 		opposingStartersWeek: Object.fromEntries(
 			[...facingWeek].map(([k, v]) => [String(k), v])
 		),
+		probableCoverage: Object.fromEntries([...coverage].map(([k, v]) => [String(k), v])),
+		probableCoverageWeek: Object.fromEntries(
+			[...coverageWeek].map(([k, v]) => [String(k), v])
+		),
 		opponentsWeek: Object.fromEntries([...week.opponents].map(([k, v]) => [String(k), v])),
 		// joined on normalised name, because Yahoo exposes its own player ids and
 		// never the MLBAM one. A player Yahoo did not list is simply absent.
@@ -271,6 +285,12 @@ export const hydrate = (s: Snapshot) => ({
 	),
 	opposingStartersWeek: new Map(
 		Object.entries(s.opposingStartersWeek ?? {}).map(([k, v]) => [Number(k), v])
+	),
+	probableCoverage: new Map(
+		Object.entries(s.probableCoverage ?? {}).map(([k, v]) => [Number(k), v])
+	),
+	probableCoverageWeek: new Map(
+		Object.entries(s.probableCoverageWeek ?? {}).map(([k, v]) => [Number(k), v])
 	),
 	opponentsWeek: new Map(
 		Object.entries(s.opponentsWeek ?? {}).map(([k, v]) => [Number(k), v])

@@ -64,8 +64,12 @@ export const detectMode = async (): Promise<Mode> => {
 const staticOnly = <T,>(action: string): Promise<T> =>
 	Promise.reject(
 		new ApiError(
+			// The command has to be one that exists: there is no `nub` binary, so the
+			// instruction this toast used to give failed for anyone who followed it.
+			// Same pair the masthead's static-build note names.
 			`${action} needs the local server — this is the static build. ` +
-				`Run it with \`nub run dev\`. Your leagues are stored in this browser either way.`
+				`Run \`node src/server.ts\` alongside \`npx vite\`. ` +
+				`Your leagues are stored in this browser either way.`
 		)
 	)
 

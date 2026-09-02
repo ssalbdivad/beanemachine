@@ -1,13 +1,14 @@
-node_modules/
-dist/
-*.tmp
-logo/.preview.html
 # generated at build time from scoring.json
 # regenerable logo exploration output (run logo/round*.mjs to rebuild)
-logo/sheet*.png
-logo/sheet*.html
-logo/candidates*.json
-logo/pick.png
-public/snapshot.json
+*.tmp
+.perf/
 data/backtest-cache/
 data/yahoo-session.json
+dist/
+logo/.preview.html
+logo/candidates*.json
+logo/pick.png
+logo/sheet*.html
+logo/sheet*.png
+node_modules/
+public/snapshot.json

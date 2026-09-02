@@ -103,11 +103,6 @@ export const useBoard = (
 	availableNames?: Set<string> | null
 ) => {
 	const rated = useMemo(() => {
-		const __t0 = performance.now()
-		const __g: any = globalThis
-		__g.__M ??= { rate: 0, rateMs: 0, rows: 0, rowsMs: 0 }
-		__g.__M.rate++
-		try {
 		if (!snapshot || !league) return []
 		// Replacement depth is teams × slots. Without a real team count there is no
 		// honest bscore, so this refuses rather than assuming a league size.
@@ -146,12 +141,14 @@ export const useBoard = (
 				ownership: h.ownership,
 				probableStarts,
 				opposingStarters,
+				// over the rest of a season an injured man is a legitimate hold; over the
+				// next week he is simply unavailable
+				injuryPolicy: filters.mode === "stash" ? "keep" : "exclude",
 				teams: league.meta.max_teams
 				})
 			),
 			h.ownership
 		)
-		} finally { __g.__M.rateMs += performance.now() - __t0 }
 	}, [snapshot, league, filters.mode])
 
 	/** Which sides this league actually scores — an unconfigured template scores
@@ -189,11 +186,6 @@ export const useBoard = (
 	const edgeUsable = edgeCoverage >= 0.35
 
 	const rows = useMemo(() => {
-		const __t0 = performance.now()
-		const __g: any = globalThis
-		__g.__M ??= { rate: 0, rateMs: 0, rows: 0, rowsMs: 0 }
-		__g.__M.rows++
-		try {
 		const q = filters.search.trim().toLowerCase()
 		const out = rated.filter(r => {
 			// a player with no projectable volume has no bscore to rank
@@ -242,7 +234,6 @@ export const useBoard = (
 			return filters.desc ? -cmp : cmp
 		})
 		return out
-		} finally { __g.__M.rowsMs += performance.now() - __t0 }
 	}, [rated, filters, availableNames, edgeUsable])
 
 	return { rated, rows, scored, edgeUsable, edgeCoverage }

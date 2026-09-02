@@ -223,5 +223,28 @@ t("a known starter actually moves the index", (() => {
 t("a pitcher is never given a hitter's opposing-starter blend",
   starterBlendedIndex(snap.players.find(p => p.group === "pitching"), 0.9, new Map(), q) === 0.9)
 
+// --- the injured must not be ranked as though they can play ---
+const base = {
+  league, players: hyd.players, underlying: hyd.underlying, injuries: hyd.injuries,
+  teamGamesPlayed: hyd.teamGamesPlayed, gamesByTeam: hyd.gamesByTeam,
+  opponentsByTeam: hyd.opponentsByTeam, recentVolumeByWindow: hyd.recentVolumeByWindow,
+  recentStats: hyd.recentStats, ownership: hyd.ownership, teams: league.meta.max_teams
+}
+const shortHorizon = rateAll({ ...base, injuryPolicy: "exclude" })
+const restOfSeason = rateAll({ ...base, injuryPolicy: "keep" })
+const injured = shortHorizon.filter(r => r.injury)
+t("some players are actually flagged injured", injured.length > 20, `${injured.length}`)
+t("no injured player is rateable over a short horizon",
+  injured.every(r => !r.rateable))
+t("and each one says why rather than vanishing",
+  injured.every(r => typeof r.unrateable === "string" && /return date/.test(r.unrateable)))
+t("a healthy player is unaffected by the policy",
+  shortHorizon.filter(r => !r.injury && r.rateable).length ===
+    restOfSeason.filter(r => !r.injury && r.rateable).length)
+t("the rest-of-season view does rank them, because there he is a hold",
+  restOfSeason.filter(r => r.injury && r.rateable).length > 0)
+t("a rateable player never carries an unrateable reason",
+  shortHorizon.every(r => !r.rateable || r.unrateable === null))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

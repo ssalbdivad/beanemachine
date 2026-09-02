@@ -52,6 +52,9 @@ export interface Rated {
 	/** Starts actually scheduled in the horizon. Null when MLB has not published
 	 *  them yet, which is why a null falls back to the team-games estimate. */
 	scheduledStarts?: number | null
+	/** Why this player carries no ranking, when he does not. Null when he is
+	 *  rateable — an empty string and "no reason given" are different claims. */
+	unrateable?: string | null
 	/** Yahoo "% Ros" — the share of leagues this player is rostered in. Null when
 	 *  the platform did not list him, which is not the same as nobody owning him. */
 	rosteredPct?: number | null
@@ -78,6 +81,15 @@ export interface RateOptions {
 	probableStarts?: Map<number, number>
 	/** For each team, the opposing starters its hitters face over the horizon. */
 	opposingStarters?: Map<number, number[]>
+	/**
+	 * What to do with a player currently on the injured list.
+	 *
+	 * "exclude" refuses to rank him over this horizon; "keep" ranks him anyway.
+	 * The right answer depends on the horizon and nothing else: over the next week
+	 * a man on the 10-day IL cannot help you, while over the rest of the season he
+	 * may be the best thing on your bench.
+	 */
+	injuryPolicy?: "exclude" | "keep"
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -148,10 +160,25 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			slot: "",
 			replacement: 0,
 			confidence: confidenceOf(player, underlying, injury),
+			/**
+			 * An injured player is not projectable over a short horizon, and pretending
+			 * otherwise is the most expensive mistake this board can make: he was
+			 * healthy for most of the window the recent-volume blend reads, so he
+			 * projects at a full-time rate and ranks among the best available while
+			 * being unable to play at all. No source states a return date, so rather
+			 * than invent a discount the honest answer is that he cannot be projected
+			 * over this window — and that is reported, not hidden.
+			 */
 			rateable:
 				scores[player.group] &&
 				projection.projectedVolume !== null &&
-				projection.projectedVolume > 0,
+				projection.projectedVolume > 0 &&
+				!(injury !== undefined && (o.injuryPolicy ?? "exclude") === "exclude"),
+			unrateable:
+				injury !== undefined && (o.injuryPolicy ?? "exclude") === "exclude" ?
+					`${injury} — no source states a return date, so there is no honest ` +
+						`projection over this horizon. The Stash view ranks him anyway.`
+				:	null,
 			regressionGap: underlying?.xwobaGap ?? null,
 			scheduledStarts: o.probableStarts?.get(player.id) ?? null
 		}

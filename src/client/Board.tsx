@@ -227,6 +227,13 @@ export const Board = ({
 					)}
 				</h2>
 				<p className="sub">
+					{filters.mode === "stash" ?
+						"Ranked over every game left in the regular season, so playing time and role matter more than the last fortnight. This is the view for who to hold — the underlying contact numbers on each player are here because a long horizon is where they would matter, though this project has not yet measured that honestly (see the README)."
+					: filters.mode === "stream" ?
+						"Ranked over the next seven days only — the week that is actually about to happen, using its real slate rather than half of a fortnight."
+					:	null}
+				</p>
+				<p className="sub">
 					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
 					projected over {snapshot.horizon.start} → {snapshot.horizon.end} ·
 					playing time leans on recent form: the last{" "}
@@ -260,6 +267,7 @@ export const Board = ({
 								["proj pts", COLUMN_HELP.points],
 								["waiver pts", COLUMN_HELP.replacement],
 								["confidence", COLUMN_HELP.confidence],
+								["edge", COLUMN_HELP.marketEdge],
 								["luck", COLUMN_HELP.undervaluation]
 							] as const
 						).map(([term, text]) => (
@@ -288,6 +296,10 @@ const BillysPick = ({ r, horizonDays }: { r: Ranked; horizonDays: number }) => {
 	clauses.push(
 		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over the next ${horizonDays} days`
 	)
+	if (r.marketEdge !== null && r.rosteredPct !== null)
+		clauses.push(
+			`he's rostered in ${r.rosteredPct}% of leagues, and that's ${r.marketEdge > 0 ? `${r.marketEdge} points more` : `${Math.abs(r.marketEdge)} points less`} than players priced like him usually give you`
+		)
 	if (r.projection.volumePerTeamGame !== null)
 		clauses.push(
 			r.player.group === "hitting" ?

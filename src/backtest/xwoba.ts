@@ -1,5 +1,6 @@
 import { num, parseCsv } from "../data/csv.ts"
 import type { PlayerSeason } from "../data/statsapi.ts"
+import { aggregateStatcast } from "../data/statcast-window.ts"
 import { cachedFetch } from "./cache.ts"
 import { addDays, seasonRange } from "./seasons.ts"
 
@@ -56,7 +57,23 @@ const lines = async (season: number, start: string, end: string): Promise<Player
 	})
 }
 
-const savant = async (season: number, start: string, end: string) => {
+/**
+ * Point-in-time contact numbers, aggregated a day at a time from pitch-level data.
+ *
+ * The leaderboard route below is kept only to reproduce the broken measurement:
+ * it ignores its own date parameters, so it answers every window with the whole
+ * season. `--real` is the one that tells the truth.
+ */
+const REAL = process.argv.includes("--real")
+
+const savantReal = async (season: number, start: string, end: string) => {
+	const lines = await aggregateStatcast(season, "batter", start, end, url =>
+		cachedFetch(url, "text/csv")
+	)
+	return new Map([...lines].map(([id, l]) => [id, { pa: l.pa, woba: l.woba, xwoba: l.xwoba }]))
+}
+
+const savantLeaderboard = async (season: number, start: string, end: string) => {
 	const url =
 		`${SAVANT}?year=${season}&type=batter&filter=&min=1` +
 		`&selections=pa%2Cwoba%2Cxwoba&chart=false&x=pa&y=pa&r=no&chartType=beeswarm` +
@@ -68,6 +85,9 @@ const savant = async (season: number, start: string, end: string) => {
 	}
 	return out
 }
+
+const savant = (season: number, start: string, end: string) =>
+	REAL ? savantReal(season, start, end) : savantLeaderboard(season, start, end)
 
 /** Linear weights, same formula the matchup module uses. */
 const wobaish = (s: Record<string, number>): number | null => {
@@ -131,6 +151,7 @@ console.log(
 	`Predicting the NEXT ${FUTURE_DAYS} DAYS of production from prior-season contact numbers\n` +
 		`${seasons.join(", ")} · ${weeks} weeks · ${buckets.woba!.length} player-weeks · ` +
 		`prior ${PRIOR_DAYS > 0 ? `last ${PRIOR_DAYS}d` : "season to date"} · ` +
+		`${REAL ? "POINT-IN-TIME pitch data" : "LEAKED leaderboard (dates ignored)"} · ` +
 		`min ${MIN_PRIOR} prior PA, ${MIN_FUTURE} future PA\n`
 )
 /**

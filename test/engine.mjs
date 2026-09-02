@@ -107,7 +107,8 @@ const probe = proj(
 t("Statcast adjustment is off by default", probe.qualityMultiplier === 1,
   String(probe.qualityMultiplier))
 t("and the drill-down says so rather than implying it was used",
-  probe.modelled.some(m => /NOT applied/.test(m)), probe.modelled.join(" | "))
+  probe.modelled.some(m => /Statcast weight is 0/.test(m) && /shown but not applied/.test(m)),
+  probe.modelled.join(" | "))
 
 
 

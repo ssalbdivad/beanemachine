@@ -123,6 +123,13 @@ export interface ProjectOptions {
 	/** Park run index over the venues on the horizon schedule, 1 = neutral. */
 	parkIndex?: number | null
 	parkWeight?: number
+	/**
+	 * Times this pitcher is actually scheduled to start in the horizon, from MLB's
+	 * published probables. Null when unknown — which is different from zero, and is
+	 * why an absent value falls back to the team-games estimate rather than
+	 * projecting him at nothing.
+	 */
+	projectedStarts?: number | null
 }
 
 /**
@@ -225,7 +232,8 @@ export const project = (
 		matchupIndex = null,
 		matchupWeight = MODEL.matchup.weight,
 		parkIndex = null,
-		parkWeight = MODEL.park.weight
+		parkWeight = MODEL.park.weight,
+		projectedStarts = null
 	} = options
 	const modelled: string[] = []
 	const missing: string[] = []
@@ -246,9 +254,30 @@ export const project = (
 		: recentVolumePerGame === null ?
 			seasonPerTeamGame
 		:	(1 - recentWeight) * seasonPerTeamGame + recentWeight * recentVolumePerGame
+	/**
+	 * A starter's volume comes from his STARTS, not from his team's games, whenever
+	 * the starts are actually known. Outs-per-team-game averages a two-start week
+	 * and a one-start week into the same projection, and those weeks are worth about
+	 * double one another.
+	 */
+	const startsBased =
+		!isHitter &&
+		projectedStarts !== null &&
+		MODEL.probables.use &&
+		(s.gamesStarted ?? 0) > 0 &&
+		s.outs !== undefined ?
+			(s.outs / s.gamesStarted!) * projectedStarts
+		:	null
 	const projectedVolume =
-		volumePerTeamGame === null ? null : volumePerTeamGame * horizonGames
-	if (projectedVolume !== null) {
+		startsBased !== null ? startsBased
+		: volumePerTeamGame === null ? null
+		: volumePerTeamGame * horizonGames
+	if (startsBased !== null)
+		modelled.push(
+			`starts: ${projectedStarts} scheduled × ${(s.outs! / s.gamesStarted!).toFixed(1)} outs per start ` +
+				`= ${startsBased.toFixed(1)} outs (from MLB's published probables, not from team games)`
+		)
+	if (projectedVolume !== null && startsBased === null) {
 		if (recentVolumePerGame !== null && seasonPerTeamGame !== null)
 			modelled.push(
 				`playing time: ${seasonPerTeamGame.toFixed(2)}/game season, ` +
@@ -282,8 +311,10 @@ export const project = (
 			)
 		else
 			modelled.push(
-				`Statcast adjustment evaluated and NOT applied — it did not beat a naive ` +
-					`baseline in backtest, so xwOBA ${underlying.xwoba} is shown but not used`
+				`Statcast weight is 0, so xwOBA ${underlying.xwoba} is shown but not applied. ` +
+					`The earlier "it does not help" result ran on leaked data and has been ` +
+					`retracted; on clean point-in-time data the ranking evidence is strong and ` +
+					`the played-season evidence is not yet settled`
 			)
 	} else missing.push("underlying expected stats")
 

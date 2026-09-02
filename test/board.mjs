@@ -89,10 +89,14 @@ t("drill-down separates measured, Statcast model and our model",
   sections.some(s => s.includes("our model")),
   sections.join("|"))
 const modelled = await page.$$eval(".detail .notes li", n => n.map(e => e.textContent))
-t("modelled assumptions name the playing-time blend and its weight",
-  modelled.some(m => /playing time/i.test(m) && /% recent/.test(m)), modelled.join(" | "))
+// Volume is derived one of two legitimate ways: blended playing time, or — for a
+// starter whose starts MLB has published — outs per start times scheduled starts.
+// The invariant is that the drill-down states WHICH, not that it always says the same.
+t("modelled assumptions name how playing time was derived",
+  modelled.some(m => (/playing time/i.test(m) && /% recent/.test(m)) ||
+    (/^starts:/.test(m) && /outs per start/.test(m))), modelled.join(" | "))
 t("the drill-down states whether the Statcast adjustment was applied",
-  modelled.some(m => /Statcast adjustment (evaluated and NOT applied|)/i.test(m)) ||
+  modelled.some(m => /Statcast weight is 0/.test(m)) ||
   modelled.some(m => /quality: wOBA/.test(m)), modelled.join(" | "))
 
 // Billy's pick must be the top row, and every clause backed by a real number

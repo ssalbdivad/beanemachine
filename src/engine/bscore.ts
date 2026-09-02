@@ -49,6 +49,9 @@ export interface Rated {
 	rateable: boolean
 	/** est_woba − woba: positive means results trail contact quality. */
 	regressionGap: number | null
+	/** Starts actually scheduled in the horizon. Null when MLB has not published
+	 *  them yet, which is why a null falls back to the team-games estimate. */
+	scheduledStarts?: number | null
 	/** Yahoo "% Ros" — the share of leagues this player is rostered in. Null when
 	 *  the platform did not list him, which is not the same as nobody owning him. */
 	rosteredPct?: number | null
@@ -71,6 +74,8 @@ export interface RateOptions {
 	recentStats?: Record<string, StatLine>
 	/** Market price by MLBAM id — how many leagues have already taken him. */
 	ownership?: Map<number, number>
+	/** Scheduled starts over the horizon, by MLBAM id. */
+	probableStarts?: Map<number, number>
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -103,7 +108,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				recentWeight: RECENT_BLEND_WEIGHT[player.group],
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
-				matchupIndex
+				matchupIndex,
+				projectedStarts: o.probableStarts?.get(player.id) ?? null
 			}
 		)
 		const table = tableFor(o.league, player.group)
@@ -121,7 +127,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			replacement: 0,
 			confidence: confidenceOf(player, underlying, injury),
 			rateable: projection.projectedVolume !== null && projection.projectedVolume > 0,
-			regressionGap: underlying?.xwobaGap ?? null
+			regressionGap: underlying?.xwobaGap ?? null,
+			scheduledStarts: o.probableStarts?.get(player.id) ?? null
 		}
 	})
 

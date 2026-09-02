@@ -31,6 +31,8 @@ export interface Filters {
 	slot: string
 	group: "all" | "hitting" | "pitching"
 	hideInjured: boolean
+	/** Only pitchers with two or more scheduled starts in the horizon. */
+	twoStartOnly: boolean
 	availableOnly: boolean
 	minConfidence: number
 	/**
@@ -57,6 +59,7 @@ export const DEFAULT_FILTERS: Filters = {
 	slot: "",
 	group: "all",
 	hideInjured: false,
+	twoStartOnly: false,
 	availableOnly: false,
 	minConfidence: 0,
 	// The default answers "who is the field wrong about", not "who is best" — the
@@ -93,6 +96,12 @@ export const useBoard = (
 			: filters.mode === "stash" && h.gamesRemaining.size ?
 				{ games: h.gamesRemaining, opponents: h.opponentsByTeam }
 			:	{ games: h.gamesByTeam, opponents: h.opponentsByTeam }
+		// Probables only exist about a week out, so the stash horizon has none — and an
+		// absent count must fall back to the team-games estimate, not project zero.
+		const probableStarts =
+			filters.mode === "stream" ? h.probableStartsWeek
+			: filters.mode === "stash" ? undefined
+			: h.probableStarts
 		return withMarketEdge(
 			withUndervaluation(
 				rateAll({
@@ -106,6 +115,7 @@ export const useBoard = (
 				recentVolumeByWindow: h.recentVolumeByWindow,
 				recentStats: h.recentStats,
 				ownership: h.ownership,
+				probableStarts,
 				teams: league.meta.max_teams
 				})
 			),
@@ -132,6 +142,7 @@ export const useBoard = (
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
 			if (filters.hideInjured && r.injury) return false
+			if (filters.twoStartOnly && (r.scheduledStarts ?? 0) < 2) return false
 			if (filters.availableOnly && availableNames && !availableNames.has(normalizeName(r.player.name)))
 				return false
 			if (r.confidence.value < filters.minConfidence) return false

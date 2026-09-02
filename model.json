@@ -42,6 +42,15 @@
     ]
   },
 
+  "probables": {
+    "use": true,
+    "why": [
+      "MLB publishes probable starters about a week out and fills every slot — 212 of 212 over a sample week, with 49 pitchers carrying two starts.",
+      "A starter projected from outs per TEAM game averages a two-start week and a one-start week into one number, and in a points league those weeks are worth roughly double one another. This is the largest documented hole in the projection.",
+      "It cannot be backtested. Probables are announced and then overwritten, and no archive of what was announced at the time exists, so there is no leak-free way to replay them. Set to true because it replaces an average with an observation, not because a fold count said so — and that distinction is stated rather than hidden."
+    ]
+  },
+
   "matchup": {
     "weight": 0.5,
     "clamp": { "min": 0.88, "max": 1.12 },

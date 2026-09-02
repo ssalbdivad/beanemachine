@@ -218,6 +218,19 @@ export const Board = ({
 							{!pool && !poolError && <em className="pool-count"> …</em>}
 						</span>
 					</label>
+					{/* Only meaningful where probables exist — about a week out. Offering it
+					    on the rest-of-season view would be a control that silently does
+					    nothing. */}
+					{filters.mode !== "stash" && (
+						<label className="toggle" title="MLB publishes probable starters about a week ahead. Two starts in a scoring period is roughly double the innings.">
+							<input
+								type="checkbox"
+								checked={filters.twoStartOnly}
+								onChange={e => set("twoStartOnly", e.currentTarget.checked)}
+							/>
+							<span>Two-start SP only</span>
+						</label>
+					)}
 					<label className="toggle">
 						<input
 							type="checkbox"
@@ -491,7 +504,14 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 			>
 				{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}
 			</span>
-			<span className="r bscore">{r.bscore}</span>
+			<span className="r bscore">
+				{r.bscore}
+				{(r.scheduledStarts ?? 0) >= 2 && (
+					<em className="starts" title={`${r.scheduledStarts} starts scheduled in this window — roughly double the innings of a one-start turn.`}>
+						×{r.scheduledStarts}
+					</em>
+				)}
+			</span>
 			<span className="r dim">{r.points}</span>
 			<span className="r dim">{r.replacement}</span>
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />

@@ -170,3 +170,36 @@ export const fetchTeamGamesPlayed = async (season: number): Promise<Map<number, 
 		}
 	return out
 }
+
+
+/**
+ * Who is actually scheduled to start, and how many times, over a window.
+ *
+ * This closes the largest documented hole in the projection. A starter works every
+ * fifth day, so projecting him from outs-per-TEAM-game silently averages a
+ * two-start week and a one-start week into the same number — and in a points
+ * league those two weeks are worth roughly double one another. MLB publishes
+ * probable starters about a week ahead and fills every slot, so the count is an
+ * observation rather than a guess.
+ *
+ * It cannot be backtested: probables are announced and then overwritten, and no
+ * archive of what was announced at the time exists. That is stated rather than
+ * papered over — see model.json.
+ */
+export const fetchProbableStarts = async (
+	startDate: string,
+	endDate: string
+): Promise<Map<number, number>> => {
+	const data = await json(
+		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}` +
+			`&hydrate=probablePitcher`
+	)
+	const starts = new Map<number, number>()
+	for (const day of data.dates ?? [])
+		for (const game of day.games ?? [])
+			for (const side of ["home", "away"] as const) {
+				const id = game.teams?.[side]?.probablePitcher?.id
+				if (typeof id === "number") starts.set(id, (starts.get(id) ?? 0) + 1)
+			}
+	return starts
+}

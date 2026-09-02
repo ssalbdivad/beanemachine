@@ -237,6 +237,18 @@ export const makeBscoreStrategy = (
 		qualityLambda?: { mode: "rising" | "falling" | "fixed"; prior: number; cap: number }
 		qualityScope?: "wide" | "battedBall"
 		reliefRateWeight?: number | null
+		/**
+		 * Demote anyone whose results have outrun his contact by more than this much
+		 * wOBA over the window.
+		 *
+		 * A different mechanism from the quality multiplier, and the one humans
+		 * actually use: not "scale his projection by 4%" but "his hot fortnight is a
+		 * mirage, do not pick him up". It acts on the DECISION rather than on the
+		 * estimate, which is why it can matter where a smooth ±5% provably does not —
+		 * a veto changes which player you take, and a small multiplier almost never
+		 * does.
+		 */
+		mirage?: number | null
 	} = {}
 ): Strategy => ({
 	name,
@@ -271,7 +283,19 @@ export const makeBscoreStrategy = (
 					recentRateWeight: opts.rateWeight ?? RECENT_RATE_WEIGHT[p.group],
 					reliefRateWeight: opts.reliefRateWeight ?? null
 				})
-				return { p, score: scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points }
+				const points = scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points
+				if (opts.mirage != null) {
+					const u = ctx.underlying[p.group].get(p.id)
+					// positive gap = contact better than results. The mirage is the other
+					// sign: he has been paid more than he earned. Flipped for pitchers,
+					// whose "good" gap runs the other way.
+					const gap = u?.xwobaGap
+					if (gap != null) {
+						const overperformance = p.group === "hitting" ? -gap : gap
+						if (overperformance > opts.mirage) return { p, score: -Infinity }
+					}
+				}
+				return { p, score: points }
 			})
 			.sort((a, b) => b.score - a.score)
 })
@@ -466,6 +490,23 @@ export const RELIEF_SWEEP: Strategy[] = [
 	vorpVariant("rel0.30", { reliefRateWeight: 0.3 }),
 	vorpVariant("rel0.50", { reliefRateWeight: 0.5 }),
 	vorpVariant("rel0.70", { reliefRateWeight: 0.7 }),
+	seasonToDateStrategy,
+	hotHandStrategy
+]
+
+/**
+ * The Statcast veto, swept.
+ *
+ * Every earlier test scaled the projection. This one refuses the player outright,
+ * which is the only way a rate signal can change a roster decision that is
+ * otherwise settled by playing time and scarcity.
+ */
+export const MIRAGE_SWEEP: Strategy[] = [
+	vorpVariant("mir-off", { mirage: null }),
+	vorpVariant("mir0.150", { mirage: 0.15 }),
+	vorpVariant("mir0.100", { mirage: 0.1 }),
+	vorpVariant("mir0.060", { mirage: 0.06 }),
+	vorpVariant("mir0.035", { mirage: 0.035 }),
 	seasonToDateStrategy,
 	hotHandStrategy
 ]

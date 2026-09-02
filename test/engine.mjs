@@ -2,7 +2,7 @@
 // Each asserts against the real snapshot, not a fixture.
 import { readFileSync } from "node:fs"
 import { hydrate } from "../src/data/snapshot.ts"
-import { rateAll, withUndervaluation } from "../src/engine/bscore.ts"
+import { rateAll, withMarketEdge, withUndervaluation } from "../src/engine/bscore.ts"
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
 const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
@@ -108,6 +108,74 @@ t("Statcast adjustment is off by default", probe.qualityMultiplier === 1,
   String(probe.qualityMultiplier))
 t("and the drill-down says so rather than implying it was used",
   probe.modelled.some(m => /NOT applied/.test(m)), probe.modelled.join(" | "))
+
+
+
+const hyd = hydrate(snap)
+
+// --- market edge: the board's default ranking, so it gets its own regressions ---
+const ranked = withMarketEdge(
+	withUndervaluation(
+		rateAll({
+			league,
+			players: hyd.players,
+			underlying: hyd.underlying,
+			injuries: hyd.injuries,
+			teamGamesPlayed: hyd.teamGamesPlayed,
+			gamesByTeam: hyd.gamesByTeam,
+			opponentsByTeam: hyd.opponentsByTeam,
+			recentVolumeByWindow: hyd.recentVolumeByWindow,
+			recentStats: hyd.recentStats,
+			ownership: hyd.ownership,
+			teams: league.meta.max_teams
+		})
+	),
+	hyd.ownership
+)
+
+t("ownership was actually read", hyd.ownership.size > 200, `${hyd.ownership.size} priced`)
+
+const priced = ranked.filter(r => r.marketEdge !== null)
+t("market edge is computed for priced players", priced.length > 150, `${priced.length}`)
+
+// unknown is not unowned: a player Yahoo never listed must not be scored as a find
+// The invariant is one-directional: no price means no edge. The converse does not
+// hold, because a priced player who cannot be projected has no bscore to compare.
+t("unpriced players get no edge rather than a flattering one",
+  ranked.every(r => r.rosteredPct !== null || r.marketEdge === null),
+  String(ranked.filter(r => r.rosteredPct === null && r.marketEdge !== null).length))
+t("every edge is a real subtraction from a real bscore",
+  priced.every(r => r.rateable && Number.isFinite(r.marketEdge) && Number.isFinite(r.bscore)))
+
+// it must be a residual in points, not a percentile: two players with the same
+// bscore must rank by price, and the cheaper one must come out ahead
+const sameScore = priced
+  .filter(r => r.bscore > 0)
+  .sort((a, b) => a.bscore - b.bscore)
+  .reduce((acc, r) => {
+    const prev = acc[acc.length - 1]
+    if (prev && Math.abs(prev.bscore - r.bscore) < 0.4 && Math.abs(prev.rosteredPct - r.rosteredPct) > 25)
+      return [...acc.slice(0, -1), prev, r].slice(-2)
+    return [r]
+  }, [])
+if (sameScore.length === 2) {
+  const [a, b] = sameScore
+  const cheaper = a.rosteredPct < b.rosteredPct ? a : b
+  const dearer = cheaper === a ? b : a
+  t("at equal bscore the less-rostered player carries the larger edge",
+    cheaper.marketEdge > dearer.marketEdge,
+    `${cheaper.player.name} ${cheaper.rosteredPct}% edge ${cheaper.marketEdge} vs ${dearer.player.name} ${dearer.rosteredPct}% edge ${dearer.marketEdge}`)
+} else t("at equal bscore the less-rostered player carries the larger edge", true, "no comparable pair in this snapshot")
+
+// the horizons must be real, distinct schedules rather than one scaled number
+t("the week horizon is shorter than the fortnight",
+  hyd.gamesWeek.size > 0 &&
+    [...hyd.gamesWeek.values()].reduce((a, c) => a + c, 0) <
+      [...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0),
+  `${[...hyd.gamesWeek.values()].reduce((a, c) => a + c, 0)} vs ${[...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0)}`)
+t("the stash horizon is longer than the fortnight",
+  [...hyd.gamesRemaining.values()].reduce((a, c) => a + c, 0) >
+    [...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0))
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

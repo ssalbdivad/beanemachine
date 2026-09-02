@@ -925,10 +925,16 @@ points loses **80 of 111 weeks at z −4.65** and gives up 4,996 points; against
 season-to-date manager it wins 66/111 where bscore wins 76/111. Value over
 replacement is the difference between a ranking and a recommendation.
 
-**Selectivity matters more than activity.** At three waiver moves a week naive
-streak-chasing beats the model outright; at one move a week the model wins. More moves
-raise everyone's raw total, but they destroy the edge. Autonomous mode defaults to one
-move, which was originally a safety choice and turns out to be the optimal one.
+**How much churn is right, corrected.** An earlier measurement said one move a week
+was optimal and that selectivity beat activity. Across all five seasons and every
+opponent the simulator plays, two moves beats one on all four of them — 63/111 against
+a thoughtful human against 60, 73 against a scarcity-aware streak-chaser against 69, 75
+against hot-hand against 74, 80 against a season-to-date manager against 76. Three is
+worse than two. At zero the model loses to everyone, which is the same result
+draft-and-hold gives from the other direction: the in-season decisions carry the value.
+
+The simulator charges nothing for churn, and a real league charges waiver priority or
+FAAB. That caveat travels with the number.
 
 ### 9.1 The same harness sets the matchup weight
 
@@ -964,6 +970,7 @@ Each was implemented in full, measured, and then either shipped or left off.
 | recent-rate blend, hitters | **rejected** | 29/50 folds — a coin flip at a +0.0009 mean |
 | recency weight 0.75 | **rejected** for 0.5 | correlation preferred 0.75 by 0.003 rho; five played seasons prefer 0.5 at 73W-38L, z -3.32, +2,504 points |
 | Statcast xwOBA ratio, on the fold corpus | **VOID, retracted** | the corpus reads Savant through the leaderboard that ignores its dates, so the "prior" wOBA contained the future. A leak like that forces the residual toward zero and manufactures a confident null; it is not evidence in either direction |
+| Statcast as a VETO on the decision ("his streak is a mirage") | **rejected** | 111 weeks: −31.3, −60.2, −95.0 points a week at thresholds 0.100/0.060/0.035; monotone in how much it is used |
 | Statcast xwOBA multiplier, on CLEAN point-in-time data | **rejected** | 111 paired weeks, six formulations, all negative on points; least-bad ties 49 weeks; four different winners across five seasons |
 | Statcast xwOBA *gap* as a residual signal | **shipped**, as a ranking and discovery signal | partial ρ +0.0944 against next-week production controlling for wOBA, z 6.79, n 5,151 — real, and still not a lever that moves a roster |
 | xwOBA as a direct predictor | **shipped**, displayed | ρ 0.1019 against next-week production versus 0.0581 for actual wOBA, monotone in how much of it you use |
@@ -1052,7 +1059,7 @@ node src/refresh.ts                                   # capture a fresh snapshot
 node src/backtest/evaluate.ts                         # rebuild the corpus and re-score every variant
 node src/backtest/run.ts                              # the smaller single-season fold runner
 node src/backtest/tune.ts                             # sweep window length x blend weight x Statcast weight
-node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=1   # play the seasons out
+node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2   # play the seasons out
 node src/backtest/verdict.ts --statcast=point-in-time  # pool every stored measurement
 node src/backtest/xwoba.ts --real --prior-days=21 --seasons=2024 --min=30   # the xwOBA study
 npm test                                              # every suite (browser suites need Vite on :5173)

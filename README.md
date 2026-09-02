@@ -125,7 +125,7 @@ verified against a live authenticated page, and that is not a surface to automat
 an irreversible action on. Lineup-only automation is a first-class mode, not a
 degraded one.
 
-The rails hold in every mode: at most `--max-moves` per run (default 1), nobody at
+The rails hold in every mode: at most `--max-moves` per run (default 2, the measured optimum), nobody at
 or above `--keep-floor` (25) is offered up, a swap must clear `--min-gain` (5)
 projected points, and nobody MLB lists on the IL is ever added or started.
 `railViolations` re-audits the finished plan against all of them and the run
@@ -342,21 +342,29 @@ ledger whose result is significant on its own: **0.75 loses to the shipped 0.5 b
 38W-73L, z −3.32, −22.6 points a week, −2,504 over five seasons.** The ranking
 correlation preferred 0.75 by 0.003 ρ. The season did not.
 
-**But the edge is in selectivity, and it disappears if you churn** (2023-2025, 68
-weeks — a narrower run than the table above, which is why the totals are smaller):
+**How much churn is right — and a retraction.** An earlier version of this file said
+the edge was in selectivity, that one move a week was optimal, and that autonomous mode
+had stumbled onto the right default. Re-measured across all five seasons against every
+opponent the simulator plays, that was wrong:
 
-| waiver moves/week | bscore total | weeks won vs season-to-date |
-|---|---|---|
-| 0 (draft and hold) | 39,353 | 16/68 |
-| **1** | **47,590 (winner)** | **41/68** |
-| 2 | 48,030 | 34/68 |
-| 3 | 48,313 (hot-hand wins) | 33/68 |
+| moves/week | vs thoughtful-human | vs hot-hand+scarcity | vs hot-hand | vs season-to-date |
+|---|---|---|---|---|
+| 0 | 30/111 | 53/111 | 49/111 | 39/111 |
+| 1 | 60/111 | 69/111 | 74/111 | 76/111 |
+| **2** | **63/111** | **73/111** | **75/111** | **80/111** |
+| 3 | 58/111 | 70/111 | 69/111 | 77/111 |
 
-More moves raise everyone's raw total — you are simply picking up more hot players —
-but they destroy bscore's *relative* edge, and by three moves a week naive
-streak-chasing beats it outright. The model is worth using for **one high-conviction
-move a week**, not for constant churn. Autonomous mode defaults to exactly that, which
-was originally a safety choice and turns out to be the optimal one too.
+Two moves beats one against **all four** opponents, and three is worse than two — so
+the curve does peak, just not where the earlier run said. The old table was 68 weeks of
+a different model; this is 111 weeks of the shipped one. Autonomous mode now defaults to
+two.
+
+At zero moves the model loses to every opponent. That is the same thing draft-and-hold
+shows from the other side: the in-season decisions are most of the value, not the draft.
+
+The caveat the simulator cannot see is that it charges nothing for churn, while a real
+league spends waiver priority or FAAB on every claim. `model.json` records that next to
+the number. If moves are expensive in your league, lower it.
 
 ### The approach, end to end
 
@@ -438,7 +446,7 @@ without provenance is a guess, and this project does not ship guesses.
 Change a number, then re-measure:
 
 ```sh
-node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=1  # the decisive test
+node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2  # the decisive test
 node src/backtest/compete.ts --quality --statcast-real --control=qw0.00    # the Statcast sweep
 node src/backtest/compete.ts --matchup --control=mu0.00                    # schedule strength
 node src/backtest/compete.ts --relief  --control=rel-off                   # reliever rate weight
@@ -554,6 +562,29 @@ A winner that changes every season is noise wearing a result's clothes. And this
 a test too blunt to see anything: over the same 111 weeks the same paired count has the
 shipped model beating hot-hand by 48.0 points a week (z −3.51) and a season-to-date
 manager by 65.3 (z −3.89), both significant. It detects real effects. There isn't one here.
+
+**And a veto does not work either, which is the one that should have.** Every test
+above scales a projection, and a smooth few-percent scale provably cannot reorder a
+board settled by playing time and scarcity — so the fair objection is that the
+mechanism, not the signal, was wrong. A veto can reorder it: refuse the player outright
+when his results have outrun his contact by more than a threshold. That is also exactly
+the heuristic every fantasy analyst repeats — *his hot fortnight is a mirage, don't pick
+him up*. Over the same 111 weeks:
+
+| veto threshold (wOBA overperformance) | points/wk vs no veto |
+|---|---|
+| 0.150 (vetoes almost nobody) | −0.2 |
+| 0.100 | −31.3 |
+| 0.060 | −60.2 |
+| 0.035 | −95.0 |
+
+It gets monotonically worse the more it is used. The reason is plain once measured: a
+hitter outrunning his xwOBA is usually a hitter producing a lot, and production is what
+scores. Refusing him gives up the best available player for a correction that does not
+arrive inside a one- or two-week horizon.
+
+Three independent mechanisms — scale the projection, reshape the adjustment, veto the
+decision — all lose. That is a far stronger claim than any one of them failing.
 
 **Both things are true, and the tension is the interesting part.** On the same clean
 data, xwOBA out-predicts actual wOBA for next-week production and its gap carries

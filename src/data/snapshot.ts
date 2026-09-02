@@ -134,14 +134,14 @@ export const buildSnapshot = async (
 				WINDOWS.hitting.map(async d => ({
 					d,
 					rows: await fetchWindowStats(season, "hitting", back(d), start),
-					games: await fetchGamesByTeam(back(d), start)
+					games: await fetchGamesByTeam(back(d), start, true)
 				}))
 			),
 			Promise.all(
 				WINDOWS.pitching.map(async d => ({
 					d,
 					rows: await fetchWindowStats(season, "pitching", back(d), start),
-					games: await fetchGamesByTeam(back(d), start)
+					games: await fetchGamesByTeam(back(d), start, true)
 				}))
 			)
 		])

@@ -40,7 +40,7 @@ const parsePage = (htmlText: string): PoolEntry[] => {
 	// link), so stopping at the second one cuts the block off ~50 characters in,
 	// before any of the stat cells — which is how the ownership column silently
 	// read as absent for every player.
-	const re = /data-ys-playerid="(\d+)"[^>]*title="([^"]+)"([\s\S]{0,6000}?)(?=<tr|$)/g
+	const re = /data-ys-playerid="(\d+)"[^>]*title="([^"]+)"([\s\S]{0,9000}?)(?=data-ys-playerid="\d+"[^>]*title=|$)/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(htmlText))) {
 		const [, yahooId, rawName, block] = m
@@ -48,7 +48,20 @@ const parsePage = (htmlText: string): PoolEntry[] => {
 		seen.add(yahooId)
 		// somewhere in the row: "MIN - 1B" or "SD - SP,RP"
 		const meta = /\b([A-Z]{2,3})\s*-\s*([A-Z0-9,]+)/.exec(cellText(block ?? ""))
-		const pct = /(\d{1,3})%/.exec(block ?? "")
+		/**
+		 * Yahoo nests a weather-forecast table inside each OUTDOOR game's tooltip, so
+		 * ending the row at the next `<tr>` cut the block off before the "% Ros"
+		 * cell — and only dome games survived. Reading to the next player instead
+		 * fixes the truncation but swallows the forecast, whose humidity is also
+		 * written as a percentage and appears FIRST. Strip the forecast's own
+		 * percentages before looking for ownership; a hitter's roster share and the
+		 * relative humidity in Anaheim are not interchangeable.
+		 */
+		const cleaned = (block ?? "").replace(
+			/(?:Humidity|Precipitation|Chance of (?:Rain|Precipitation))\s*:?\s*<?[^>]*>?\s*\d{1,3}\s*%/gi,
+			" "
+		)
+		const pct = /(\d{1,3})%/.exec(cleaned)
 		out.push({
 			yahooId,
 			name: cellText(rawName ?? ""),

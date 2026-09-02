@@ -102,7 +102,20 @@ export const fetchWindowStats = async (
  *  any "next N days" projection, instead of assuming a uniform slate. */
 export const fetchSchedule = async (
 	startDate: string,
-	endDate: string
+	endDate: string,
+	/**
+	 * Count only games that have actually finished.
+	 *
+	 * A recent-form window divides plate appearances by team games, and today's
+	 * game is scheduled but not yet played — so the denominator counted a game the
+	 * numerator could not contain. Measured on a real capture: 14 PA over 3 played
+	 * games became 3.5 per game instead of 4.67, a 25% understatement on the
+	 * 3-day window, which carries half the recent blend weight.
+	 *
+	 * A forward-looking horizon wants the opposite: every game on the schedule,
+	 * played or not. So this is a parameter rather than a policy.
+	 */
+	playedOnly = false
 ): Promise<{ counts: Map<number, number>; opponents: Map<number, number[]> }> => {
 	const data = await json(
 		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}`
@@ -118,6 +131,7 @@ export const fetchSchedule = async (
 			const home = game.teams?.home?.team?.id
 			const away = game.teams?.away?.team?.id
 			if (typeof home !== "number" || typeof away !== "number") continue
+			if (playedOnly && game.status?.abstractGameState !== "Final") continue
 			add(home, away)
 			add(away, home)
 		}
@@ -126,8 +140,10 @@ export const fetchSchedule = async (
 
 export const fetchGamesByTeam = async (
 	startDate: string,
-	endDate: string
-): Promise<Map<number, number>> => (await fetchSchedule(startDate, endDate)).counts
+	endDate: string,
+	playedOnly = false
+): Promise<Map<number, number>> =>
+	(await fetchSchedule(startDate, endDate, playedOnly)).counts
 
 /** Injury list status only.
  *

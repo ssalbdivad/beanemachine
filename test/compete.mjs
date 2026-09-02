@@ -42,7 +42,7 @@ console.log(
 t("bscore beats season-to-date over five seasons", bscore > std, `${bscore} vs ${std}`)
 t("bscore beats hot-hand over five seasons", bscore > hot, `${bscore} vs ${hot}`)
 
-// Totals are three samples; weeks are sixty-eight. A model that wins on aggregate
+// Totals are five samples; weeks are 111. A model that wins on aggregate
 // while losing most weeks has won a coin toss, and this league is head-to-head.
 const mine = weekly.get("bscore") ?? []
 const theirs = weekly.get("season-to-date") ?? []
@@ -57,7 +57,7 @@ const margin = mine.reduce((a, c, i) => a + (c - (theirs[i] ?? 0)), 0) / mine.le
 t("and by a large margin per week", margin > 40, `${margin.toFixed(1)}/wk`)
 
 // hot-hand is the harder opponent: ranking by raw projected points splits weeks
-// against it 36/68, and only the replacement adjustment turns that into a majority
+// against it 52/111, and only the replacement adjustment turns that into a majority
 const hotWeeks = weekly.get("hot-hand") ?? []
 const vsHot = mine.filter((v, i) => v > (hotWeeks[i] ?? Infinity)).length
 t("bscore wins a clear majority of weeks vs hot-hand too", vsHot / mine.length > 0.58, `${vsHot}/${mine.length}`)

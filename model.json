@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "about": [
+    "Every tunable weight in the projection, in one editable file.",
+    "The engine reads its defaults from here, so changing a number here changes",
+    "the recommendation — no code edit, no rebuild of anything but the bundle.",
+    "Each block carries a `why` recording what evidence set the number, because a",
+    "weight with no provenance is a guess, and this project does not ship guesses.",
+    "Re-measure any change with `nub run compete --seasons=2021,2022,2023,2024,2025 --moves=1`.",
+    "Season win/loss counts decide; ranking correlation is advisory only."
+  ],
+
+  "recentForm": {
+    "volumeWeight": 0.75,
+    "blend": { "hitting": 0.5, "pitching": 0.5 },
+    "rate": { "hitting": 0, "pitching": 0.15 },
+    "windows": {
+      "hitting": { "3": 2, "7": 1, "21": 1 },
+      "pitching": { "5": 2, "21": 1 }
+    },
+    "why": [
+      "volumeWeight 0.75: playing time is the single largest edge available, worth ~20% relative Spearman over a season-only estimate.",
+      "blend 0.5/0.5: chosen by playing seasons, not by correlation. A 14-day ranking mildly preferred 0.75; five played seasons prefer 0.5 by ~1,500 points and seven weekly wins.",
+      "rate: pitchers only, and lightly — 41 of 50 folds. The same blend for hitters won 29 of 50, a coin flip, so it is not applied.",
+      "windows: the last series is worth more than the fortnight before it. Pitchers work a five-day turn, so their short window is 5 days rather than 3."
+    ]
+  },
+
+  "statcast": {
+    "weight": 0,
+    "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 },
+    "scope": "wide",
+    "clamp": { "min": 0.75, "max": 1.35 },
+    "why": [
+      "weight 0 is a measured result, not an oversight. Every formulation tried so far loses over a played season; see docs/METHODOLOGY.md section 10 for the full ledger.",
+      "lambda.mode 'rising' trusts xwOBA MORE as batted-ball sample grows; 'falling' trusts it more in SMALL samples, which is what the stabilisation literature actually argues; 'fixed' ignores sample.",
+      "scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."
+    ]
+  },
+
+  "matchup": {
+    "weight": 0.5,
+    "clamp": { "min": 0.88, "max": 1.12 },
+    "why": [
+      "Who a player actually faces this week, from the real schedule: a hitter is scaled by the quality of the staffs he is booked against, a pitcher by the lineups.",
+      "Opponent strength is measured from the same leak-free prior window as everything else — never from what the opponent went on to do.",
+      "weight 0.5 is the conservative end of a real but unproven effect. Across 111 paired weeks the gain is monotone in the weight (+69 pts at 0.1 up to +548 at 1.0) and positive at every dose, but no dose is statistically significant on its own: head to head against weight 0, 0.5 goes 51W-44L-16T (+1.8/wk) and 1.0 goes 59W-49L-3T (+4.9/wk).",
+      "When a dose-response is monotone but no single dose clears significance, the smallest dose that shows the effect risks the least. Raise it to 1.0 if you want the measured maximum."
+    ]
+  },
+
+  "park": {
+    "weight": 0,
+    "clamp": { "min": 0.92, "max": 1.08 },
+    "why": [
+      "Savant park factors, applied over the venues on the horizon schedule rather than as a season-long team constant."
+    ]
+  },
+
+  "shrinkage": {
+    "default": 400,
+    "perStat": {
+      "homeRuns": 170, "baseOnBalls": 120, "strikeOuts": 60, "hits": 290,
+      "doubles": 700, "triples": 1200, "hitByPitch": 240, "stolenBases": 350,
+      "caughtStealing": 500, "runs": 300, "rbi": 300, "totalBases": 320,
+      "sacFlies": 600, "groundIntoDoublePlay": 500, "intentionalWalks": 600,
+      "atBats": 50, "sacBunts": 600,
+      "earnedRuns": 400, "wins": 500, "saves": 400, "holds": 400,
+      "blownSaves": 600, "losses": 500, "completeGames": 900, "shutouts": 900,
+      "wildPitches": 500, "balks": 900, "homeRunsAllowed": 300
+    },
+    "why": [
+      "Roughly the volume at which a stat is half signal, half noise, following the published stabilisation work (Carleton / Tango).",
+      "`default` is deliberately heavy: an unlisted stat is one we have no stabilisation evidence for, and heavy shrinkage is the honest response to that."
+    ]
+  }
+}

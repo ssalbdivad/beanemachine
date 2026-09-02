@@ -56,6 +56,7 @@ const rated = withUndervaluation(
 		injuries: h.injuries,
 		teamGamesPlayed: h.teamGamesPlayed,
 		gamesByTeam: h.gamesByTeam,
+			opponentsByTeam: h.opponentsByTeam,
 		recentVolumeByWindow: h.recentVolumeByWindow,
 		recentStats: h.recentStats,
 		teams: league.meta.max_teams!

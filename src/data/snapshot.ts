@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import {
 	fetchGamesByTeam,
+	fetchSchedule,
 	fetchWindowStats,
 	fetchInjuries,
 	fetchSeason,
@@ -30,6 +31,9 @@ export interface Snapshot {
 	injuries: Record<string, string>
 	teamGamesPlayed: Record<string, number>
 	gamesByTeam: Record<string, number>
+	/** Who each team plays over the horizon. Optional so a snapshot captured before
+	 *  matchups existed still loads — absent means the index is null, not neutral. */
+	opponentsByTeam?: Record<string, number[]>
 	/** Volume per team game over the recent window, keyed "id:group". The backtest
 	 *  showed recent playing time is the strongest predictor available. */
 	recentVolumeByWindow: Record<string, Record<number, number>>
@@ -58,14 +62,14 @@ export const buildSnapshot = async (
 	}
 	const back = (d: number) => iso(new Date(now.getTime() - d * 86400_000))
 	const [
-		hitting, pitching, xBat, xPit, gamesByTeam, teamGamesPlayed, injuries,
+		hitting, pitching, xBat, xPit, horizon, teamGamesPlayed, injuries,
 		hitWindows, pitWindows
 	] = await Promise.all([
 			fetchSeason(season, "hitting"),
 			fetchSeason(season, "pitching"),
 			fetchUnderlying(season, "batter"),
 			fetchUnderlying(season, "pitcher"),
-			fetchGamesByTeam(start, end),
+			fetchSchedule(start, end),
 			fetchTeamGamesPlayed(season),
 			fetchInjuries(),
 			Promise.all(
@@ -140,14 +144,17 @@ export const buildSnapshot = async (
 		teamGamesPlayed: Object.fromEntries(
 			[...teamGamesPlayed].map(([k, v]) => [String(k), v])
 		),
-		gamesByTeam: Object.fromEntries([...gamesByTeam].map(([k, v]) => [String(k), v])),
+		gamesByTeam: Object.fromEntries([...horizon.counts].map(([k, v]) => [String(k), v])),
+		opponentsByTeam: Object.fromEntries(
+			[...horizon.opponents].map(([k, v]) => [String(k), v])
+		),
 		recentVolumeByWindow,
 		recentStats,
 		recentWindow: { hitting: WINDOWS.hitting, pitching: WINDOWS.pitching },
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
-			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule", rows: gamesByTeam.size },
+			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule", rows: horizon.counts.size },
 			{ name: "MLB StatsAPI · roster status", url: "statsapi.mlb.com/api/v1/teams/{id}/roster", rows: injuries.size },
 			{ name: "Baseball Savant · expected stats (batters)", url: "baseballsavant.mlb.com/leaderboard/expected_statistics", rows: xBat.size },
 			{ name: "Baseball Savant · expected stats (pitchers)", url: "baseballsavant.mlb.com/leaderboard/expected_statistics", rows: xPit.size }
@@ -167,6 +174,9 @@ export const hydrate = (s: Snapshot) => ({
 		Object.entries(s.teamGamesPlayed).map(([k, v]) => [Number(k), v])
 	),
 	gamesByTeam: new Map(Object.entries(s.gamesByTeam).map(([k, v]) => [Number(k), v])),
+	opponentsByTeam: new Map(
+		Object.entries(s.opponentsByTeam ?? {}).map(([k, v]) => [Number(k), v])
+	),
 	recentVolumeByWindow: s.recentVolumeByWindow ?? {},
 	recentStats: s.recentStats ?? {}
 })

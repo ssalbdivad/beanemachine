@@ -733,7 +733,7 @@ is of judgement rather than draft position.
 
 | strategy | points | % of perfect | weeks bscore wins |
 |---|---|---|---|
-| **bscore** | **79,008** | **50.9%** | — |
+| **bscore** | **79,208** | **51.0%** | — |
 | hot-hand | 73,883 | 47.6% | **70/111** (+46.2/wk) |
 | projected points only | 73,336 | 47.2% | — |
 | season-to-date | 71,962 | 46.4% | **81/111** (+63.5/wk) |
@@ -749,6 +749,31 @@ points. Value over replacement is the difference between a ranking and a recomme
 streak-chasing beats the model outright; at one move a week the model wins. More moves
 raise everyone's raw total, but they destroy the edge. Autonomous mode defaults to one
 move, which was originally a safety choice and turns out to be the optimal one.
+
+## 10. The negative-results ledger
+
+Kept because a model is only as trustworthy as the things it declined to believe.
+Each was implemented in full, measured, and then either shipped or left off.
+
+| idea | verdict | evidence |
+|---|---|---|
+| playing-time blend of recent vs season | **shipped** | largest single gain, ~20% relative Spearman |
+| value over replacement | **shipped** | without it the model is a coin flip: 58/111 and 52/111 |
+| multi-window recency (last series counts double) | **shipped** | 40/50 hitting folds |
+| recent-rate blend, pitchers | **shipped** at 0.15 | 41/50 folds |
+| recent-rate blend, hitters | **rejected** | 29/50 folds — a coin flip at a +0.0009 mean |
+| recency weight 0.75 | **rejected** for 0.5 | correlation preferred 0.75; five played seasons preferred 0.5 |
+| Statcast xwOBA ratio | **rejected** | loses at every weight, five formulations, on clean data |
+| Statcast with λ falling in small samples | **rejected** | 45/68 — worse than leaving it out |
+| Statcast on batted-ball events only | **rejected** | 48/68 — matches the no-adjustment baseline, never beats it |
+| empirical-Bayes rate shrinkage | **rejected** | worse than the stat-specific constants |
+| opponent schedule strength | **shipped** at 0.5, flagged | positive and monotone at every dose; no dose significant |
+| park factors | **left off** | subsumed by the opponent index — same schedule, same information |
+
+Two of these are worth reading as a pair. The Statcast adjustment is the one everybody
+expects to work, and it does not; the matchup adjustment is the one that sounds like
+noise-chasing, and it is mildly positive. Neither result survived because it was
+plausible — they survived because a hundred-odd paired weeks said so.
 
 ## Reproducing any of this
 

@@ -1,5 +1,6 @@
 import type { StatLine, PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
+import { MODEL, type ModelWeights, windowsFor } from "./weights.ts"
 
 /**
  * Projection. Unlike everything upstream, this layer is MODELLED — it states what
@@ -12,13 +13,36 @@ import type { Underlying } from "../data/savant.ts"
  *  The sets differ by side: for a pitcher these are the events he ALLOWS, and
  *  earnedRuns is the category most leagues weight hardest, so it must be included. */
 const QUALITY_SCALED = {
-	hitting: new Set(["hits", "doubles", "triples", "homeRuns", "totalBases", "rbi", "runs"]),
-	pitching: new Set(["hits", "doubles", "triples", "homeRuns", "runs", "earnedRuns"])
+	wide: {
+		hitting: new Set(["hits", "doubles", "triples", "homeRuns", "totalBases", "rbi", "runs"]),
+		pitching: new Set(["hits", "doubles", "triples", "homeRuns", "runs", "earnedRuns"])
+	},
+	/** Run production dropped: a hitter's runs and RBI are mostly a fact about the
+	 *  eight men around him, so scaling them by HIS contact quality imports lineup
+	 *  noise into a batted-ball signal. A pitcher's earned runs stay — those are his. */
+	battedBall: {
+		hitting: new Set(["hits", "doubles", "triples", "homeRuns", "totalBases"]),
+		pitching: new Set(["hits", "doubles", "triples", "homeRuns", "earnedRuns"])
+	}
 } as const
 
-/** Weight on expected-vs-actual, rising with batted-ball sample. Capped at 0.7 so a
- *  projection is never purely the model. */
-const lambdaFor = (pa: number): number => Math.min(0.7, pa / (pa + 300))
+/**
+ * Weight on expected-vs-actual.
+ *
+ * The mode is a real modelling question, not a tuning detail:
+ *   `rising`  trusts xwOBA more as batted-ball sample grows;
+ *   `falling` trusts it more in SMALL samples — which is what the stabilisation
+ *             work actually argues, since xwOBA stabilises in a few dozen batted
+ *             balls while wOBA needs hundreds of plate appearances;
+ *   `fixed`   ignores sample entirely.
+ * Capped so a projection is never purely the model.
+ */
+const lambdaFor = (pa: number, cfg = MODEL.statcast.lambda): number => {
+	const { mode, prior, cap } = cfg
+	if (mode === "fixed") return cap
+	const raw = mode === "rising" ? pa / (pa + prior) : prior / (pa + prior)
+	return Math.min(cap, raw)
+}
 
 /**
  * Shrinkage constants: roughly the volume at which a stat is half signal, half
@@ -28,18 +52,8 @@ const lambdaFor = (pa: number): number => Math.min(0.7, pa / (pa + 300))
  * listed falls back to DEFAULT_K, which is deliberately heavy because an unlisted
  * stat is one we have no stabilisation evidence for.
  */
-const DEFAULT_K = 400
-const SHRINK_K: Record<string, number> = {
-	// hitting, in plate appearances
-	homeRuns: 170, baseOnBalls: 120, strikeOuts: 60, hits: 290, doubles: 700,
-	triples: 1200, hitByPitch: 240, stolenBases: 350, caughtStealing: 500,
-	runs: 300, rbi: 300, totalBases: 320, sacFlies: 600, groundIntoDoublePlay: 500,
-	intentionalWalks: 600, atBats: 50, sacBunts: 600,
-	// pitching, in batters faced
-	earnedRuns: 400, wins: 500, saves: 400, holds: 400, blownSaves: 600,
-	losses: 500, completeGames: 900, shutouts: 900, wildPitches: 500, balks: 900,
-	homeRunsAllowed: 300
-}
+const DEFAULT_K = MODEL.shrinkage.default
+const SHRINK_K: Record<string, number> = MODEL.shrinkage.perStat
 
 /** Population rate per volume unit, pooled across the players being compared. */
 export interface LeagueRates {
@@ -95,6 +109,20 @@ export interface ProjectOptions {
 	 * over-trusts it.
 	 */
 	recentRateWeight?: number
+	/** Overrides for the Statcast formulation, so a sweep can ask the season which
+	 *  shape of the adjustment works rather than only how much of one to apply. */
+	qualityLambda?: ModelWeights["statcast"]["lambda"]
+	qualityScope?: ModelWeights["statcast"]["scope"]
+	/**
+	 * Strength of the opponents on this player's actual schedule for the horizon,
+	 * as a ratio to league average, where >1 means an easier week. Null when the
+	 * schedule or the opponent lines were not available — never assumed to be 1.
+	 */
+	matchupIndex?: number | null
+	matchupWeight?: number
+	/** Park run index over the venues on the horizon schedule, 1 = neutral. */
+	parkIndex?: number | null
+	parkWeight?: number
 }
 
 /**
@@ -117,8 +145,8 @@ export const RECENT_WINDOW_DAYS = { hitting: 7, pitching: 21 } as const
  * is 5 days rather than 3.
  */
 export const RECENT_WINDOW_WEIGHTS: Record<"hitting" | "pitching", Record<number, number>> = {
-	hitting: { 3: 2, 7: 1, 21: 1 },
-	pitching: { 5: 2, 21: 1 }
+	hitting: windowsFor("hitting"),
+	pitching: windowsFor("pitching")
 }
 
 /**
@@ -131,7 +159,7 @@ export const RECENT_WINDOW_WEIGHTS: Record<"hitting" | "pitching", Record<number
  * 41/68 to 48/68. Heavy recency catches role changes, which a correlation
  * rewards; it also chases week-to-week noise, which a season punishes.
  */
-export const RECENT_BLEND_WEIGHT = { hitting: 0.5, pitching: 0.5 } as const
+export const RECENT_BLEND_WEIGHT = MODEL.recentForm.blend
 
 /** Combines several windows into one per-team-game estimate. */
 export const blendWindows = (
@@ -156,7 +184,7 @@ export const blendWindows = (
  * hitters won 29 of 50 — a coin flip — so it is not applied there. Ranking a mean
  * difference of 0.0009 as an improvement would have been fitting noise.
  */
-export const RECENT_RATE_WEIGHT = { hitting: 0, pitching: 0.15 } as const
+export const RECENT_RATE_WEIGHT = MODEL.recentForm.rate
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
@@ -169,6 +197,10 @@ export interface Projection {
 	projectedVolume: number | null
 	/** Modelled: ratio applied to batted-ball outcomes, 1 = no adjustment. */
 	qualityMultiplier: number
+	/** Modelled: schedule-strength ratio, 1 = a league-average week of opponents. */
+	matchupMultiplier: number
+	/** Modelled: park ratio over the venues on the horizon, 1 = neutral. */
+	parkMultiplier: number
 	stats: StatLine
 	modelled: string[]
 	missing: string[]
@@ -182,8 +214,18 @@ export const project = (
 	options: ProjectOptions = {}
 ): Projection => {
 	const {
-		rates, qualityWeight = 0, recentVolumePerGame = null, recentWeight = 0.75,
-		recentStats = null, recentRateWeight = 0
+		rates,
+		qualityWeight = MODEL.statcast.weight,
+		recentVolumePerGame = null,
+		recentWeight = MODEL.recentForm.volumeWeight,
+		recentStats = null,
+		recentRateWeight = 0,
+		qualityLambda = MODEL.statcast.lambda,
+		qualityScope = MODEL.statcast.scope,
+		matchupIndex = null,
+		matchupWeight = MODEL.matchup.weight,
+		parkIndex = null,
+		parkWeight = MODEL.park.weight
 	} = options
 	const modelled: string[] = []
 	const missing: string[] = []
@@ -221,7 +263,7 @@ export const project = (
 	let qualityMultiplier = 1
 	if (underlying?.xwoba != null && underlying.woba != null && underlying.woba > 0) {
 		const pa = underlying.pa ?? volume ?? 0
-		const lambda = lambdaFor(pa)
+		const lambda = lambdaFor(pa, qualityLambda)
 		const blended = underlying.woba + lambda * (underlying.xwoba - underlying.woba)
 		// The ratio applies directly for both sides: it scales the events the player
 		// produces (hitter) or allows (pitcher). A pitcher whose expected wOBA-against
@@ -229,7 +271,11 @@ export const project = (
 		// hits and earned runs come DOWN. (An earlier version inverted this and
 		// pushed unlucky pitchers' ER up — exactly backwards.)
 		const full = blended / underlying.woba
-		qualityMultiplier = clamp(1 + qualityWeight * (full - 1), 0.75, 1.35)
+		qualityMultiplier = clamp(
+			1 + qualityWeight * (full - 1),
+			MODEL.statcast.clamp.min,
+			MODEL.statcast.clamp.max
+		)
 		if (qualityWeight > 0)
 			modelled.push(
 				`quality: wOBA ${underlying.woba} → ${blended.toFixed(3)} (λ=${lambda.toFixed(2)} toward xwOBA ${underlying.xwoba}) ⇒ ×${qualityMultiplier.toFixed(3)}`
@@ -240,6 +286,41 @@ export const project = (
 					`baseline in backtest, so xwOBA ${underlying.xwoba} is shown but not used`
 			)
 	} else missing.push("underlying expected stats")
+
+	/**
+	 * Context multipliers. Both are OBSERVED inputs turned into a modelled scale —
+	 * the schedule and the park index are facts, how much they should move a
+	 * projection is not — so each is weighted, clamped, and named in `modelled`.
+	 * A null index means the fact was unavailable and nothing is applied, which is
+	 * different from an index of 1 meaning it was available and neutral.
+	 */
+	let matchupMultiplier = 1
+	if (matchupIndex === null) {
+		// only a gap if we would have used it — an unused input is not a hole
+		if (matchupWeight > 0) missing.push("opponent schedule strength")
+	} else if (matchupWeight > 0) {
+		matchupMultiplier = clamp(
+			1 + matchupWeight * (matchupIndex - 1),
+			MODEL.matchup.clamp.min,
+			MODEL.matchup.clamp.max
+		)
+		modelled.push(
+			`matchups: opponents this week rate ${matchupIndex.toFixed(3)} vs league ` +
+				`⇒ ×${matchupMultiplier.toFixed(3)}`
+		)
+	}
+
+	let parkMultiplier = 1
+	if (parkIndex === null) {
+		if (parkWeight > 0) missing.push("park factors for the horizon venues")
+	} else if (parkWeight > 0) {
+		parkMultiplier = clamp(
+			1 + parkWeight * (parkIndex - 1),
+			MODEL.park.clamp.min,
+			MODEL.park.clamp.max
+		)
+		modelled.push(`parks: ${parkIndex.toFixed(3)} over the booked venues ⇒ ×${parkMultiplier.toFixed(3)}`)
+	}
 
 	const stats: StatLine = {}
 	if (projectedVolume !== null && volume) {
@@ -263,7 +344,10 @@ export const project = (
 					perUnit = (1 - recentRateWeight) * perUnit + recentRateWeight * recentRate
 				}
 			}
-			const scaled = QUALITY_SCALED[player.group].has(key) ? qualityMultiplier : 1
+			const scaled =
+				QUALITY_SCALED[qualityScope][player.group].has(key) ?
+					qualityMultiplier * matchupMultiplier * parkMultiplier
+				:	1
 			stats[key] = Number((perUnit * projectedVolume * scaled).toFixed(3))
 		}
 		if (rates) modelled.push(`shrunk toward league rates by stat-specific sample weight`)
@@ -278,6 +362,8 @@ export const project = (
 		projectedVolume:
 			projectedVolume === null ? null : Number(projectedVolume.toFixed(1)),
 		qualityMultiplier: Number(qualityMultiplier.toFixed(3)),
+		matchupMultiplier: Number(matchupMultiplier.toFixed(3)),
+		parkMultiplier: Number(parkMultiplier.toFixed(3)),
 		stats,
 		modelled,
 		missing

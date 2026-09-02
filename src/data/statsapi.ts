@@ -100,22 +100,34 @@ export const fetchWindowStats = async (
 
 /** Games each team actually has scheduled in a window — the real denominator for
  *  any "next N days" projection, instead of assuming a uniform slate. */
-export const fetchGamesByTeam = async (
+export const fetchSchedule = async (
 	startDate: string,
 	endDate: string
-): Promise<Map<number, number>> => {
+): Promise<{ counts: Map<number, number>; opponents: Map<number, number[]> }> => {
 	const data = await json(
 		`${BASE}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}`
 	)
 	const counts = new Map<number, number>()
+	const opponents = new Map<number, number[]>()
+	const add = (team: number, opp: number) => {
+		counts.set(team, (counts.get(team) ?? 0) + 1)
+		opponents.set(team, [...(opponents.get(team) ?? []), opp])
+	}
 	for (const day of data.dates ?? [])
-		for (const game of day.games ?? [])
-			for (const side of ["home", "away"] as const) {
-				const id = game.teams?.[side]?.team?.id
-				if (typeof id === "number") counts.set(id, (counts.get(id) ?? 0) + 1)
-			}
-	return counts
+		for (const game of day.games ?? []) {
+			const home = game.teams?.home?.team?.id
+			const away = game.teams?.away?.team?.id
+			if (typeof home !== "number" || typeof away !== "number") continue
+			add(home, away)
+			add(away, home)
+		}
+	return { counts, opponents }
 }
+
+export const fetchGamesByTeam = async (
+	startDate: string,
+	endDate: string
+): Promise<Map<number, number>> => (await fetchSchedule(startDate, endDate)).counts
 
 /** Injury list status only.
  *

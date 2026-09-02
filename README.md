@@ -221,7 +221,7 @@ The opponents are the two strategies human managers actually run: **season-to-da
 
 | strategy | points | % of perfect | weeks bscore wins |
 |---|---|---|---|
-| **bscore** | **79,008** | **50.9%** | — |
+| **bscore** | **79,208** | **51.0%** | — |
 | hot-hand | 73,883 | 47.6% | **70/111** (+46.2/wk) |
 | projected points only | 73,336 | 47.2% | — |
 | season-to-date | 71,962 | 46.4% | **81/111** (+63.5/wk) |
@@ -253,6 +253,131 @@ but they destroy bscore's *relative* edge, and by three moves a week naive
 streak-chasing beats it outright. The model is worth using for **one high-conviction
 move a week**, not for constant churn. Autonomous mode defaults to exactly that, which
 was originally a safety choice and turns out to be the optimal one too.
+
+### The approach, end to end
+
+A bscore is built in four passes, and each pass is only allowed to add what a source
+actually says.
+
+**1. Observe.** Season lines, the last 3/5/7/14/21 days, real games scheduled in the
+horizon, IL status, and the Savant underlying record. Nothing here is modelled, and
+anything a source doesn't cover stays absent rather than becoming a default.
+
+**2. Project volume.** Playing time is the largest edge available and the part most
+managers get wrong: a season rate understates a player who took over an everyday job
+last week. The recent windows are blended (the last series counts double), then
+blended again against the season line. This one pass is worth roughly 20% relative
+Spearman over a season-only estimate.
+
+**3. Project rate.** Each stat's observed rate is shrunk toward the league rate in
+proportion to how little volume backs it, with a stat-specific constant — 60 batters
+faced for strikeouts, 1,200 plate appearances for triples. Without this a 90-PA hot
+streak projects forward at face value, which is the single largest source of bad
+recommendations. Optional context multipliers (Statcast contact quality, schedule
+strength, park) scale the batted-ball outcomes.
+
+**4. Value it.** Score the projection in *your* league's table, then subtract what a
+freely available player at the same slot would produce. That subtraction is the whole
+metric: it is why a scarce catcher outranks a better outfielder, and removing it
+collapses the model to a coin flip against a naive manager.
+
+### Tuning it — `model.json`
+
+Every weight lives in [`model.json`](model.json), not in code:
+
+```jsonc
+"recentForm": { "volumeWeight": 0.75, "blend": { "hitting": 0.5, "pitching": 0.5 }, ... }
+"statcast":   { "weight": 0, "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 }, ... }
+"matchup":    { "weight": 0, "clamp": { "min": 0.88, "max": 1.12 }, ... }
+"park":       { "weight": 0, ... }
+"shrinkage":  { "default": 400, "perStat": { "homeRuns": 170, ... } }
+```
+
+It is validated by ArkType at import (`src/engine/weights.ts`), so a typo fails loudly
+instead of silently producing a plausible recommendation built on a number nobody
+chose. Every block carries a `why` array recording the evidence that set it — a weight
+without provenance is a guess, and this project does not ship guesses.
+
+Change a number, then re-measure:
+
+```sh
+nub run compete --seasons=2021,2022,2023,2024,2025 --moves=1   # the decisive test
+nub run compete --quality      # sweep the Statcast weight and formulation
+nub run compete --matchup      # sweep the schedule-strength weight
+nub run backtest               # 100-fold ranking correlation (advisory)
+```
+
+**Paired weekly win counts decide. Ranking correlation is advisory.** They have
+already disagreed once — the recent-form blend — and the season was right.
+
+### What we tried with Savant, and what it actually earns
+
+Savant is the deepest source here and the most tempting to lean on, so it gets the
+harshest test. As a **multiplier on the projection** it has now failed five distinct
+formulations over three played seasons:
+
+| formulation | vs season-to-date | vs hot-hand |
+|---|---|---|
+| **no Statcast adjustment** | **48/68** | **40/68** |
+| xwOBA ratio, weight 0.25 | 48/68 | 39/68 |
+| xwOBA ratio, weight 1.0 | 46/68 | 39/68 |
+| λ falling with sample (trust xwOBA most when the sample is small) | 45/68 | 39/68 |
+| batted-ball scope only (runs and RBI left alone) | 48/68 | 39/68 |
+| batted-ball scope + falling λ | 48/68 | 39/68 |
+
+Not one beats leaving it out, and the margin per week falls monotonically as the
+weight rises. The reason is structural rather than statistical: a weekly roster
+decision is dominated by playing time and by slot scarcity, and a ±5% rate multiplier
+almost never changes which 27 players you hold.
+
+That is a finding about *this* use, not about the data. Savant still does three jobs
+in the app, and they are the jobs it is good at:
+
+- **finding undervalued players** — the expected-minus-actual gap is the luck column,
+  and it is the whole discovery surface;
+- **confidence** — a player with no Statcast row is explicitly less trusted;
+- **provenance** — xwOBA, barrel %, exit velocity and hard-hit % are shown on every
+  player, so a human can overrule the model with the underlying record in front of them.
+
+So the number is displayed prominently and does not silently move a recommendation on
+evidence it failed. `"statcast": { "weight": 0 }` in `model.json` is a measured
+result, and one flag flips it back on for anyone who wants to re-test it.
+
+One correction worth recording: until this pass the simulator merged the batter and
+pitcher Savant leaderboards with `new Map([...batters, ...pitchers])`. Savant keys both
+by bare MLBAM id, so every pitcher who had batted carried the xwOBA he *allowed* in
+place of the one he produced. The live snapshot had already been fixed; the simulator
+had not, which means every earlier Statcast verdict was measured on partly-polluted
+input. The table above is the re-run on clean data. The verdict did not change.
+
+### Matchups
+
+The engine knows who each team is actually booked against over the horizon, from the
+real schedule, and rates every team's offence and staff by linear-weights wOBA over
+the same leak-free prior window. A hitter facing generous staffs is scaled up; a
+pitcher facing strong lineups has his allowed hits and earned runs scaled up, which
+costs him points. Both directions come out of one multiplier because both mean the
+same thing — more events than a league-average week.
+
+**Shipped at weight 0.5, and the honest reading is "positive but unproven".** Paired
+directly against the same model with matchups off, over 111 weeks:
+
+| weight | direct record vs off | margin | five-season total |
+|---|---|---|---|
+| 0.25 | 25W-29L-57T | +1.1/wk | +125 |
+| **0.5 (shipped)** | **51W-44L-16T** | **+1.8/wk** | **+200** |
+| 0.75 | 52W-49L-10T | +2.4/wk | +264 |
+| 1.0 | 59W-49L-3T | +4.9/wk | +548 |
+
+The effect is positive at every dose and monotone in the weight, which is what a real
+mechanism looks like rather than a lucky draw — but 59W-49L on 108 decided weeks is
+not significant on its own, and neither is anything below it. When a dose-response is
+monotone and no single dose clears the bar, the smallest dose that shows the effect
+risks the least, so 0.5 ships. `"matchup": { "weight": 1 }` in `model.json` buys the
+measured maximum for anyone who wants it.
+
+Park factors are wired the same way and left at 0 — they are largely subsumed by the
+opponent index, since who you play and where you play it are the same schedule.
 
 ### Architecture
 

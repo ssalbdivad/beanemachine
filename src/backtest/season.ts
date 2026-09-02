@@ -1,7 +1,9 @@
 import { scoreStats } from "../engine/points.ts"
+import { matchupIndexFor, teamStrength, type TeamStrength } from "../engine/matchup.ts"
+import { MODEL } from "../engine/weights.ts"
 import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import type { League } from "../schema.ts"
-import type { PlayerSeason } from "../data/statsapi.ts"
+import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
 import { cachedFetch } from "./cache.ts"
 import { addDays, seasonRange } from "./seasons.ts"
@@ -97,6 +99,27 @@ const underlyingWindow = async (
 	return out
 }
 
+/**
+ * Who each team is actually booked against over a window, from the same cached
+ * schedule call the game counts come from.
+ */
+const opponentsOf = async (start: string, end: string): Promise<Map<number, number[]>> => {
+	const data = JSON.parse(
+		await cachedFetch(`${SAPI}/schedule?sportId=1&startDate=${start}&endDate=${end}&gameType=R`)
+	)
+	const out = new Map<number, number[]>()
+	const add = (team: number, opp: number) => out.set(team, [...(out.get(team) ?? []), opp])
+	for (const day of data.dates ?? [])
+		for (const g of day.games ?? []) {
+			const home = g.teams?.home?.team?.id
+			const away = g.teams?.away?.team?.id
+			if (typeof home !== "number" || typeof away !== "number") continue
+			add(home, away)
+			add(away, home)
+		}
+	return out
+}
+
 /* ---------- roster shape ---------- */
 
 const ACTIVE_SLOTS = (league: League): string[] =>
@@ -141,8 +164,19 @@ export interface Context {
 	priorGames: Map<number, number>
 	recent: Record<number, PlayerSeason[]>
 	recentGames: Record<number, Map<number, number>>
-	underlying: Map<number, Underlying>
+	/**
+	 * Kept PER SIDE, never merged. Savant keys both leaderboards by bare MLBAM id,
+	 * so `new Map([...batters, ...pitchers])` silently gives every pitcher who has
+	 * batted the xwOBA he ALLOWS in place of the one he produced — the ratio then
+	 * moves his projection the wrong way. The live snapshot learned this the hard
+	 * way; the simulator had the same bug, so every Savant result measured before
+	 * this fix was measured on polluted inputs.
+	 */
+	underlying: { hitting: Map<number, Underlying>; pitching: Map<number, Underlying> }
 	gamesAhead: Map<number, number>
+	/** Who each team plays during the horizon, and how good those teams have been. */
+	oppAhead: Map<number, number[]>
+	strength: TeamStrength
 }
 
 export type Strategy = {
@@ -155,7 +189,15 @@ const tableFor = (league: League, g: "hitting" | "pitching") =>
 
 export const makeBscoreStrategy = (
 	name: string,
-	opts: { recentWeight?: number; rateWeight?: number; vorp?: boolean } = {}
+	opts: {
+		recentWeight?: number
+		rateWeight?: number
+		vorp?: boolean
+		qualityWeight?: number
+		matchupWeight?: number
+		qualityLambda?: { mode: "rising" | "falling" | "fixed"; prior: number; cap: number }
+		qualityScope?: "wide" | "battedBall"
+	} = {}
 ): Strategy => ({
 	name,
 	rank: ctx =>
@@ -175,7 +217,14 @@ export const makeBscoreStrategy = (
 								? (rec?.stats.plateAppearances ?? 0)
 								: (rec?.stats.outs ?? 0)) / rg
 				}
-				const proj = project(p, ctx.underlying.get(p.id), gBehind, gAhead, {
+				const proj = project(p, ctx.underlying[p.group].get(p.id), gBehind, gAhead, {
+					// default to what model.json ships, so the regression test measures the
+					// model the app actually runs; a sweep overrides explicitly
+					qualityWeight: opts.qualityWeight ?? MODEL.statcast.weight,
+					qualityLambda: opts.qualityLambda,
+					qualityScope: opts.qualityScope,
+					matchupWeight: opts.matchupWeight ?? MODEL.matchup.weight,
+					matchupIndex: matchupIndexFor(p, ctx.oppAhead, ctx.strength),
 					recentVolumePerGame: blendWindows(perWindow, RECENT_WINDOW_WEIGHTS[p.group]),
 					recentWeight: opts.recentWeight ?? RECENT_BLEND_WEIGHT[p.group],
 					recentStats: ctx.recent[21]?.find(r => r.id === p.id)?.stats ?? null,
@@ -261,7 +310,9 @@ export const hotHandStrategy: Strategy = {
 
 export const STRATEGIES = [bscoreStrategy, projectedPointsStrategy, seasonToDateStrategy, hotHandStrategy]
 
-const vorpVariant = (name: string, opts: { recentWeight?: number; rateWeight?: number }): Strategy => ({
+type VariantOpts = Parameters<typeof makeBscoreStrategy>[1]
+
+const vorpVariant = (name: string, opts: VariantOpts): Strategy => ({
 	name,
 	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league)
 })
@@ -280,6 +331,45 @@ export const SWEEP: Strategy[] = [
 	makeBscoreStrategy("bscore_rw0.25", { recentWeight: 0.25 }),
 	makeBscoreStrategy("bscore_rw0", { recentWeight: 0 }),
 	makeBscoreStrategy("bscore_rw0_rate0", { recentWeight: 0, rateWeight: 0 })
+]
+
+/**
+ * The Statcast question, asked the way the season asks it.
+ *
+ * qualityWeight was ruled out on a 14-day ranking correlation, where playing time
+ * dominates and a rate adjustment can barely move the order. A season of roster
+ * decisions is a different test, and it already disagreed with the correlation once
+ * (see RECENT_BLEND_WEIGHT). It is also the first test run against un-polluted
+ * Savant input.
+ */
+export const QUALITY_SWEEP: Strategy[] = [
+	vorpVariant("qw0.00", { qualityWeight: 0 }),
+	vorpVariant("qw0.25", { qualityWeight: 0.25 }),
+	vorpVariant("qw0.50", { qualityWeight: 0.5 }),
+	vorpVariant("qw0.75", { qualityWeight: 0.75 }),
+	vorpVariant("qw1.00", { qualityWeight: 1 }),
+	// the shape of the adjustment, not just its size
+	vorpVariant("fall.5", { qualityWeight: 0.5, qualityLambda: { mode: "falling", prior: 300, cap: 0.7 } }),
+	vorpVariant("fall1.0", { qualityWeight: 1, qualityLambda: { mode: "falling", prior: 300, cap: 0.7 } }),
+	vorpVariant("bb0.5", { qualityWeight: 0.5, qualityScope: "battedBall" }),
+	vorpVariant("bb1.0", { qualityWeight: 1, qualityScope: "battedBall" }),
+	vorpVariant("bbfall1.0", {
+		qualityWeight: 1, qualityScope: "battedBall",
+		qualityLambda: { mode: "falling", prior: 300, cap: 0.7 }
+	}),
+	seasonToDateStrategy,
+	hotHandStrategy
+]
+
+/** Does knowing who they play this week help? */
+export const MATCHUP_SWEEP: Strategy[] = [
+	vorpVariant("mu0.00", { matchupWeight: 0 }),
+	vorpVariant("mu0.25", { matchupWeight: 0.25 }),
+	vorpVariant("mu0.50", { matchupWeight: 0.5 }),
+	vorpVariant("mu0.75", { matchupWeight: 0.75 }),
+	vorpVariant("mu1.00", { matchupWeight: 1 }),
+	seasonToDateStrategy,
+	hotHandStrategy
 ]
 
 /* ---------- the season ---------- */
@@ -351,7 +441,8 @@ export const playSeason = async (
 			...hitPrior.filter(p => p.position !== "P" && (p.stats.plateAppearances ?? 0) > 0),
 			...pitPrior.filter(p => p.position === "P" && (p.stats.battersFaced ?? 0) > 0)
 		]
-		const underlying = new Map([...xBat, ...xPit])
+		const underlying = { hitting: xBat, pitching: xPit }
+		const [oppAhead, strength] = [await opponentsOf(week.start, week.end), teamStrength(prior)]
 
 		// what actually happened this week
 		const [hitActual, pitActual] = await Promise.all([
@@ -365,7 +456,9 @@ export const playSeason = async (
 				scoreStats(p.stats, tableFor(league, p.group), p.group).points
 			)
 
-		const ctx: Context = { league, prior, priorGames, recent, recentGames, underlying, gamesAhead }
+		const ctx: Context = {
+			league, prior, priorGames, recent, recentGames, underlying, gamesAhead, oppAhead, strength
+		}
 
 		for (const strategy of strategies) {
 			const ranked = strategy.rank(ctx)

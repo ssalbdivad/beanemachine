@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import type { League } from "../schema.ts"
-import { playSeason, STRATEGIES, SWEEP } from "./season.ts"
+import { MATCHUP_SWEEP, playSeason, QUALITY_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
  * Season-long head-to-head: `nub run compete`
@@ -28,7 +28,11 @@ let grandOracle = 0
 let grandWeeks = 0
 
 for (const season of seasons) {
-	const strategies = process.argv.includes("--sweep") ? SWEEP : STRATEGIES
+	const strategies =
+		process.argv.includes("--quality") ? QUALITY_SWEEP
+		: process.argv.includes("--matchup") ? MATCHUP_SWEEP
+		: process.argv.includes("--sweep") ? SWEEP
+		: STRATEGIES
 	const { results, oracle, weeks } = await playSeason(season, league, strategies, {
 		movesPerWeek,
 		warmupDays: 28,
@@ -42,7 +46,7 @@ for (const season of seasons) {
 		const share = ((r.total / oracle) * 100).toFixed(1)
 		const gap = r.total === best ? "" : ` (${(r.total - best).toFixed(1)})`
 		console.log(
-			`  ${r.strategy === best.toString() ? "" : ""}${r.strategy.padEnd(16)} ` +
+			`  ${r.strategy.padEnd(16)} ` +
 				`${r.total.toFixed(0).padStart(7)} pts  ${share.padStart(5)}% of perfect  ` +
 				`${String(r.moves).padStart(3)} moves${gap}`
 		)
@@ -66,11 +70,35 @@ if (seasons.length > 1) {
 }
 
 /**
- * Season totals are three samples; weeks are sixty-eight. A model that wins on
+ * Season totals are a handful of samples; weeks are over a hundred. A model that wins on
  * aggregate but loses most individual weeks has won a coin toss, so the paired
  * week-by-week count is the number that decides anything.
  */
 const BASELINES = ["season-to-date", "hot-hand"]
+
+/**
+ * Comparing two variants by how each does against a THIRD strategy is the wrong
+ * test — it can call a change good because it lost fewer weeks to a manager it
+ * already beats 73% of the time. `--control=<name>` pairs every variant directly
+ * against one of its own kind, week by week, which is the question actually being
+ * asked: does this knob make the model better than the model without it?
+ */
+const control = process.argv.find(a => a.startsWith("--control="))?.slice(10)
+if (control && weekly.has(control)) {
+	const base = weekly.get(control)!
+	console.log(`\nDIRECT vs ${control} (${base.length} weeks)`)
+	for (const [name, mine] of weekly) {
+		if (name === control || BASELINES.includes(name)) continue
+		const wins = mine.filter((v, i) => v > (base[i] ?? Infinity)).length
+		const ties = mine.filter((v, i) => v === base[i]).length
+		const mean = mine.reduce((a, c, i) => a + (c - (base[i] ?? 0)), 0) / Math.max(mine.length, 1)
+		console.log(
+			`  ${name.padEnd(12)} ${String(wins).padStart(3)}W ` +
+				`${String(mine.length - wins - ties).padStart(3)}L ${String(ties).padStart(3)}T  ` +
+				`(${mean >= 0 ? "+" : ""}${mean.toFixed(1)}/wk)`
+		)
+	}
+}
 const contenders = [...weekly.keys()].filter(k => !BASELINES.includes(k))
 console.log(`\nPAIRED WEEKLY HEAD-TO-HEAD (${weekly.get(contenders[0]!)?.length ?? 0} weeks)`)
 for (const name of contenders) {

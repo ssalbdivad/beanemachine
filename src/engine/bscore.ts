@@ -1,6 +1,7 @@
 import type { League } from "../schema.ts"
 import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
+import { matchupIndexFor, teamStrength } from "./matchup.ts"
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
 import {
 	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
@@ -57,6 +58,9 @@ export interface RateOptions {
 	injuries: Map<number, string>
 	teamGamesPlayed: Map<number, number>
 	gamesByTeam: Map<number, number>
+	/** Who each team plays over the horizon. Absent means no matchup adjustment is
+	 *  applied — the index stays null rather than being assumed neutral. */
+	opponentsByTeam?: Map<number, number[]>
 	/** keyed "id:group" */
 	/** keyed "id:group" then window length */
 	recentVolumeByWindow?: Record<string, Record<number, number>>
@@ -71,11 +75,16 @@ export interface RateOptions {
 
 export const rateAll = (o: RateOptions): Rated[] => {
 	const slotCounts = o.league.roster.slots
+	// Opponent quality is derived from the same pool being rated, so it moves with
+	// whatever the board is showing and never needs a separate capture.
+	const strength = teamStrength(o.players)
 
 	const rated: Rated[] = o.players.map(player => {
 		const underlying = o.underlying[player.group].get(player.id)
 		const injury = o.injuries.get(player.id)
 		const horizonGames = player.teamId ? (o.gamesByTeam.get(player.teamId) ?? 0) : 0
+		const matchupIndex =
+			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null
 		const projection = project(
 			player,
 			underlying,
@@ -88,7 +97,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				),
 				recentWeight: RECENT_BLEND_WEIGHT[player.group],
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
-				recentRateWeight: RECENT_RATE_WEIGHT[player.group]
+				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
+				matchupIndex
 			}
 		)
 		const table = tableFor(o.league, player.group)

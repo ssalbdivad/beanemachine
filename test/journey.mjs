@@ -45,14 +45,46 @@ const errors = []
  * browser logs every 404 regardless of whether the caller expected it. Anything
  * else in the console is ours and is asserted on.
  */
-const NOT_OURS = /fonts\.(?:gstatic|googleapis)\.com|api\/health/
+const NOT_OURS = /fonts\.(?:gstatic|googleapis)\.com/
+
+/**
+ * The browser logs a 404 as a bare "Failed to load resource" with no URL in the
+ * text, so noise cannot be filtered by matching the message. It has to be
+ * correlated with the response that caused it.
+ *
+ * Exactly one 404 is expected: the app probes `api/health` at startup because a
+ * static host has no API and asking is how the client finds that out. Any OTHER
+ * failing request makes the generic line ours again, so this cannot quietly
+ * swallow a real broken asset.
+ */
+const EXPECTED_404 = /\/api\/health$/
+const unexpectedFailures = []
+const GENERIC_LOAD_FAILURE = /^Failed to load resource/
 const foreign = []
 const note = line => (NOT_OURS.test(line) ? foreign : errors).push(line)
 page.on("pageerror", e => note(`pageerror: ${e}`))
-page.on("console", m => { if (m.type() === "error") note(`console: ${m.text()}`) })
+page.on("response", r => {
+	if (r.status() >= 400 && !EXPECTED_404.test(new URL(r.url()).pathname))
+		unexpectedFailures.push(`${r.status()} ${r.url()}`)
+})
+page.on("console", m => {
+	if (m.type() !== "error") return
+	const text = m.text()
+	// generic and attributable to the expected probe alone — not the app's own error
+	if (GENERIC_LOAD_FAILURE.test(text) && !unexpectedFailures.length) {
+		foreign.push(`console: ${text}`)
+		return
+	}
+	note(`console: ${text}`)
+})
 /** Asserted at every stage rather than once at the end, so a failure names the
  *  step that caused it instead of the last one. */
-const clean = where => t(`no console or page errors ${where}`, errors.length === 0, errors.join(" | "))
+const clean = where =>
+	t(
+		`no console or page errors ${where}`,
+		errors.length === 0 && unexpectedFailures.length === 0,
+		[...errors, ...unexpectedFailures].join(" | ")
+	)
 
 /**
  * A stage that never arrives is a break too, and Playwright reports it as a bare

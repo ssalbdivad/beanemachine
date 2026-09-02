@@ -193,7 +193,15 @@ volumePerTeamGame = (1 − w) × seasonPerTeamGame + w × recentPerTeamGame
 projectedVolume   = volumePerTeamGame × horizonGames
 ```
 
-with `w` = **0.75 for hitters, 0.60 for pitchers** (`RECENT_BLEND_WEIGHT`).
+with `w` = **0.5 on both sides** (`RECENT_BLEND_WEIGHT`).
+
+That value was not chosen by the ranking correlation, which mildly preferred 0.75.
+It was chosen by playing five seasons out week by week: at 0.5 the model scores
+~1,500 more points across 2023-2025 and lifts its weekly win rate against a
+season-to-date manager from 41/68 to 48/68. The correlation cost is about 0.003 rho,
+inside the noise band. Heavy recency catches role changes, which a correlation
+rewards, and chases week-to-week noise, which a season punishes — and a season of
+real decisions is closer to how the tool is used. See section 9.
 
 The reason the windows differ is **structural, not statistical**. A hitter's role
 can change inside a week: he gets the everyday job, or he loses it, and a 7-day
@@ -247,7 +255,7 @@ Why, in §7.
 season:  619 PA / 138 games                       = 4.4855 PA per team game
 recent:  3d 2.5000, 7d 3.5714, 21d 4.3000
          (2×2.5 + 1×3.5714 + 1×4.3) / 4          = 3.2179 PA per team game
-blend:   0.25 × 4.4855 + 0.75 × 3.2179           = 3.535
+blend:   0.50 × 4.4855 + 0.50 × 3.2179           = 3.852
 volume:  3.535 × 14 games                        = 49.5 PA
 ```
 
@@ -262,7 +270,7 @@ days than over the season, and the model says so rather than smoothing it away.
 season:  451 outs / 138 games                    = 3.268 outs per team game
 recent:  5d 4.4000, 21d 3.7895
          (2×4.4 + 1×3.7895) / 3                  = 4.1965 outs per team game
-blend:   0.40 × 3.268 + 0.60 × 4.1965            = 3.825
+blend:   0.50 × 3.268 + 0.50 × 4.1965            = 3.732
 volume:  3.825 × 14 games                        = 53.6 outs  (17.9 innings)
 ```
 
@@ -713,6 +721,34 @@ A shorter horizon (a weekend, a two-day streaming decision) would need a differe
 capture, and the schedule denominator would change with it.
 
 ---
+
+## 9. Does it actually win? — five seasons played out
+
+`nub run compete` plays whole seasons. Each strategy drafts from the same pool, sets a
+legal roster every week, makes waiver moves on what it believed at the time, and is
+scored on what those players actually produced. Rosters may overlap, so the comparison
+is of judgement rather than draft position.
+
+**2021-2025, 111 weeks, one waiver move per week:**
+
+| strategy | points | % of perfect | weeks bscore wins |
+|---|---|---|---|
+| **bscore** | **79,008** | **50.9%** | — |
+| hot-hand | 73,883 | 47.6% | **70/111** (+46.2/wk) |
+| projected points only | 73,336 | 47.2% | — |
+| season-to-date | 71,962 | 46.4% | **81/111** (+63.5/wk) |
+| perfect hindsight | 155,213 | 100% | ceiling |
+
+Two things this shows that a correlation cannot:
+
+**The replacement adjustment is doing most of the work.** Ranking waiver decisions by
+raw projected points collapses to 58/111 and 52/111 — coin flips — and gives up 5,672
+points. Value over replacement is the difference between a ranking and a recommendation.
+
+**Selectivity matters more than activity.** At three waiver moves a week naive
+streak-chasing beats the model outright; at one move a week the model wins. More moves
+raise everyone's raw total, but they destroy the edge. Autonomous mode defaults to one
+move, which was originally a safety choice and turns out to be the optimal one.
 
 ## Reproducing any of this
 

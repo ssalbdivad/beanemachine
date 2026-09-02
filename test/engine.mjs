@@ -223,6 +223,36 @@ t("a known starter actually moves the index", (() => {
 t("a pitcher is never given a hitter's opposing-starter blend",
   starterBlendedIndex(snap.players.find(p => p.group === "pitching"), 0.9, new Map(), q) === 0.9)
 
+// A name published for one game of a fortnight speaks for that game, not the
+// fortnight. This is the same partial-observation error that read 46 of 222
+// probables as a complete count and dropped a top-five starter 350 places.
+const far = [...q.entries()].find(([, v]) => Math.abs(v - 1) > 0.15)
+const facingOne = new Map([[hitter.teamId, [far?.[0] ?? 999999999]]])
+t("the starter share is scaled by how much of the window is published", (() => {
+  if (!far) return true
+  const full = starterBlendedIndex(hitter, 1, facingOne, q, 1)
+  const partial = starterBlendedIndex(hitter, 1, facingOne, q, 14)
+  return Math.sign(full - 1) === Math.sign(partial - 1) &&
+    Math.abs(partial - 1) < Math.abs(full - 1) &&
+    Math.abs(Math.abs(partial - 1) - Math.abs(full - 1) / 14) < 1e-9
+})(), far ? `${far[1].toFixed(3)} quality over 14 games` : "no far-from-average pitcher")
+t("omitting the window count keeps the caller's assertion of full coverage",
+  starterBlendedIndex(hitter, 1, facingOne, q) === starterBlendedIndex(hitter, 1, facingOne, q, 1))
+t("more published names than games never over-weights the starter term", (() => {
+  if (!far) return true
+  const many = new Map([[hitter.teamId, [far[0], far[0], far[0]]]])
+  return Math.abs(
+    starterBlendedIndex(hitter, 1, many, q, 2) - starterBlendedIndex(hitter, 1, facingOne, q, 1)
+  ) < 1e-9
+})())
+t("an unrated published name does not count toward coverage", (() => {
+  if (!far) return true
+  const mixed = new Map([[hitter.teamId, [far[0], 999999999]]])
+  return Math.abs(
+    starterBlendedIndex(hitter, 1, mixed, q, 4) - starterBlendedIndex(hitter, 1, facingOne, q, 4)
+  ) < 1e-9
+})())
+
 // --- the injured must not be ranked as though they can play ---
 const base = {
   league, players: hyd.players, underlying: hyd.underlying, injuries: hyd.injuries,

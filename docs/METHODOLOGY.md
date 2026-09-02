@@ -301,6 +301,22 @@ the team-games estimate rather than projecting at zero — but the asymmetry bet
 the two populations is real and is the reason the two-start filter is most useful
 on the Streaming tab.
 
+The same coverage arithmetic governs the other side of the probables feed, the
+*opposing* starter a hitter is booked against. A starter throws about 58% of a
+game's innings, so his own quality carries that share of the matchup index and the
+opponent's staff carries the rest. That 58% is the share of **one game**, and in
+the reference capture the published names cover **44 of 402 games** on the 14-day
+board (10.9%) and 44 of 222 over the week (19.8%) — one rated name per team,
+typically. Weighting that name at 58% of a fortnight let a single announced ace
+speak for thirteen games he will not pitch: the identical mistake as reading a
+partial probable *count* as a complete one, in the term next to it. The starter
+share is therefore scaled by coverage — 58% × rated-names ÷ games, so about 6% of
+the 14-day index and 11% of the week's — with unrated names (a call-up under 100
+batters faced) counting as uncovered rather than as average. Correcting it moved
+**596 of 646** hitters and **206 by ten places or more**, at up to 6.46 points over
+the horizon, and reshuffled the top ten. Like the term it corrects, it cannot be
+backtested; the argument is that one man's game is one game.
+
 ### 3.6 The Statcast quality multiplier — present, off
 
 The mechanism exists: blend observed wOBA toward expected wOBA with

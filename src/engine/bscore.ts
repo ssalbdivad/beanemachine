@@ -169,7 +169,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			player,
 			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null,
 			o.opposingStarters,
-			quality
+			quality,
+			horizonGames
 		)
 		const projection = project(
 			player,

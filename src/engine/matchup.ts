@@ -97,6 +97,14 @@ export const matchupIndexFor = (
  * bullpen innings behind him. Where no probable is published the blend collapses
  * to the team index, which is what the model did before.
  *
+ * That 58% is the share of ONE game, and it only applies to the games actually
+ * published. MLB fills today and tomorrow and then thins out fast, so over a
+ * fortnight two names are typical — letting those two speak for fourteen games is
+ * the same error that read a partial probable count as a complete one and dropped
+ * a top-five starter 350 places. The share is therefore scaled by how much of the
+ * window is covered, and the published list is its own coverage count: one entry
+ * per game whose opposing starter is known.
+ *
  * This cannot be backtested — probables are announced and then overwritten, and
  * nothing archives what was announced at the time. It ships because it replaces
  * an average with an observation, which is the same reason scheduled starts ship,
@@ -123,7 +131,10 @@ export const starterBlendedIndex = (
 	player: PlayerSeason,
 	teamIndex: number | null,
 	opposingStarters: Map<number, number[]> | undefined,
-	quality: Map<number, number>
+	quality: Map<number, number>,
+	/** Games in the same window `opposingStarters` was read over. Omitted means the
+	 *  caller asserts the published list covers that window. */
+	horizonGames?: number
 ): number | null => {
 	if (player.group !== "hitting" || !player.teamId) return teamIndex
 	const facing = opposingStarters?.get(player.teamId)
@@ -133,5 +144,11 @@ export const starterBlendedIndex = (
 	const starters = known.reduce((a, c) => a + c, 0) / known.length
 	// with no team index there is no bullpen estimate, so the starter carries it all
 	if (teamIndex === null) return starters
-	return STARTER_INNINGS_SHARE * starters + (1 - STARTER_INNINGS_SHARE) * teamIndex
+	// Unrated names do not count as covered: a call-up with 40 batters faced is a
+	// published starter the model has nothing to say about, so his game belongs to
+	// the team index like an unpublished one.
+	const covered =
+		horizonGames && horizonGames > 0 ? Math.min(1, known.length / horizonGames) : 1
+	const share = STARTER_INNINGS_SHARE * covered
+	return share * starters + (1 - share) * teamIndex
 }

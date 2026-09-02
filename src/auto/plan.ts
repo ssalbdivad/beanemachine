@@ -389,6 +389,11 @@ export const planLineup = (input: PlanInput): LineupPlan => {
 			:	[{ name: c.spot.name, from: c.spot.slot, to }]
 	})
 
+	// Paired by index, which makes each swap a line in a NET accounting — N men come
+	// in, N go out — and not an exchange of one seat. The man at `sits[i]` may have
+	// been sitting in a different slot from the one `starts[i]` takes, with shifts
+	// rearranging the rest, so the reasons below say what came in and what went out
+	// and never claim that this man vacated that seat.
 	const swaps: LineupSwap[] = starts.map((start, i) => {
 		const out = sits[i]
 		const startSlot = seatedBy.get(normalizeName(start.spot.name))!
@@ -401,14 +406,17 @@ export const planLineup = (input: PlanInput): LineupPlan => {
 			gain: r2(start.points - (out?.points ?? 0)),
 			reason:
 				!out ?
-					`${startSlot} is empty and ${start.spot.name} is eligible there, so ${r2(start.points)} ` +
-					`projected points are currently being left on the bench.`
+					`${start.spot.name} is eligible at ${startSlot} and nobody has to come out to ` +
+					`seat him, so ${r2(start.points)} projected points are currently sitting on ` +
+					`your bench.`
 				: out.points === null ?
-					`${startSlot} is being vacated by ${out.name} (${out.why}), whose own projection ` +
-					`assumes he plays and so is not credited against ${start.spot.name}'s ${r2(start.points)}.`
+					`${out.name} comes out of the lineup (${out.why}) and ${start.spot.name} goes ` +
+					`in at ${startSlot}. ${out.name}'s own projection assumes he plays, so it is ` +
+					`not credited against ${start.spot.name}'s ${r2(start.points)}.`
 				:	`${start.spot.name} projects ${r2(start.points)} points over the horizon at ` +
-					`${startSlot} against ${out.name}'s ${out.points}, and both are ` +
-					`already yours — the swap costs nothing and is undone in one click.`
+					`${startSlot} and ${out.name} projects ${out.points}, so this run seats the ` +
+					`first and sits the second — both are already yours, so it costs nothing and ` +
+					`is undone in one click.`
 		}
 	})
 

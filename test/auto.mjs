@@ -410,6 +410,35 @@ t("name matching is case-insensitive, since Yahoo's casing is not ours",
 t("add/drop is described for a human rather than clicked",
   describeMoves([{ add: "A", drop: "B", gain: 9 }]).every(s => /by hand/.test(s)))
 
+/* ---------------- a swap reason must not invent a seat ---------------- */
+
+// starts and sits are paired by index — a net accounting of N in and N out — so the
+// man coming out need not have been sitting in the seat the man coming in takes.
+// The reasons used to assert exactly that, and the shifts that rearrange everyone
+// else are what make it false.
+const crossSlot = planLineup({
+	roster: [
+		spot("C", "Andy Mask", ["C"]), spot("1B", "Deb Bag", ["1B"]),
+		spot("OF", "Ed Green", ["OF"]), spot("OF", "Fay Weak", ["OF"]),
+		spot("Util", "Gil Ok", ["1B"]), spot("BN", "Hal Hot", ["OF"])
+	],
+	rated: [
+		rated("Andy Mask", { points: 30, slots: ["C"] }), rated("Deb Bag", { points: 40, slots: ["1B"] }),
+		rated("Ed Green", { points: 45, slots: ["OF"] }), rated("Fay Weak", { points: 12, slots: ["OF"] }),
+		rated("Gil Ok", { points: 35, slots: ["1B"] }), rated("Hal Hot", { points: 55, slots: ["OF"] })
+	],
+	availableNames: new Set(),
+	shape: SHAPE
+})
+t("a swap reason never claims the man coming out vacated the seat being taken",
+	crossSlot.swaps.every(w => !w.reason.includes("is being vacated by")),
+	JSON.stringify(crossSlot.swaps.map(w => w.reason)))
+t("and it still names both men, both numbers and the seat", (() => {
+	const w = crossSlot.swaps[0]
+	return !!w && w.reason.includes(w.start) && w.reason.includes(w.sit) &&
+		w.reason.includes(String(w.startPoints)) && w.reason.includes(w.startSlot)
+})(), JSON.stringify(crossSlot.swaps))
+
 /* ---------------- the two halves of a plan must agree ---------------- */
 
 // planLineup ranks on projected points and planMoves on bscore, so the only legal

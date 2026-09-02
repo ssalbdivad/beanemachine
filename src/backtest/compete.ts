@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { League } from "../schema.ts"
 import { MATCHUP_SWEEP, playSeason, QUALITY_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
@@ -114,3 +114,37 @@ for (const name of contenders) {
 	}).join("   ")
 	console.log(`  ${name.padEnd(17)} ${line}`)
 }
+
+/**
+ * Every run is written to data/results/ as machine-readable JSON.
+ *
+ * Measurements here cost real time — a season with point-in-time Statcast is about
+ * half an hour of pitch-level fetching — and the conclusions they support get
+ * revised as more seasons land. Keeping only the console output means the evidence
+ * for a shipped weight lives in a terminal scrollback that no longer exists. These
+ * files are the audit trail: `nub run verdict` pools them.
+ */
+const stamp = process.env.RESULT_STAMP ?? new Date().toISOString().replace(/[:.]/g, "-")
+const label = seasons.join("-")
+mkdirSync("data/results", { recursive: true })
+const path = `data/results/${stamp}_${label}_moves${movesPerWeek}.json`
+writeFileSync(
+	path,
+	JSON.stringify(
+		{
+			ranAt: new Date().toISOString(),
+			seasons,
+			movesPerWeek,
+			weeks: grandWeeks,
+			// exactly what produced these numbers, so a stale result is identifiable
+			statcast: process.argv.includes("--statcast-real") ? "point-in-time" : "none",
+			argv: process.argv.slice(2),
+			oracle: Number(grandOracle.toFixed(1)),
+			totals: Object.fromEntries([...grand].map(([k, v]) => [k, Number(v.toFixed(1))])),
+			byWeek: Object.fromEntries([...weekly].map(([k, v]) => [k, v]))
+		},
+		null,
+		"\t"
+	)
+)
+console.log(`\nwritten to ${path}`)

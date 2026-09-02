@@ -54,7 +54,8 @@ forty more points than the next man up, in your league's own currency.
 ```sh
 nub run dev      # Hono API on :8000 + Vite client on :5173 (proxied) — open 5173
 nub run refresh  # capture a fresh snapshot of MLB + Savant data
-nub run test     # browser suites, both config editor and board
+nub run test         # engine + browser suites
+nub run test:compete # season-long competition (needs a warm backtest cache)
 nub run check    # tsc --noEmit
 nub run build    # static bundle into dist/
 ```

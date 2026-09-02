@@ -92,6 +92,89 @@ t("every horizon still produces a full board", stashTop.length >= 5, String(stas
 await page.click(".modes .mode:has-text('This fortnight')")
 await page.waitForTimeout(250)
 
+// Keyboard and screen-reader access to the same board. These are not cosmetic:
+// the horizon strip is the primary control on the page, and the rows are the
+// answer — both were reachable by mouse and useless without one.
+const tablist = await page.$eval(".modes", l => ({
+  role: l.getAttribute("role"),
+  children: [...l.children].map(c => c.getAttribute("role")),
+  stops: [...l.children].filter(c => c.tabIndex === 0).length,
+  selected: [...l.children].filter(c => c.getAttribute("aria-selected") === "true").length
+}))
+t("the horizon strip is a tablist of nothing but tabs",
+  tablist.role === "tablist" && tablist.children.every(r => r === "tab"),
+  JSON.stringify(tablist.children))
+t("exactly one horizon is selected, and it is the only tab stop",
+  tablist.selected === 1 && tablist.stops === 1, JSON.stringify(tablist))
+
+// A tab strip is one stop with arrows inside it. Focus moves without selecting,
+// because selecting re-rates every player.
+await page.focus('[role="tab"][aria-selected="true"].mode')
+await page.keyboard.press("ArrowRight")
+const roved = await page.evaluate(() => ({
+  focused: document.activeElement.id,
+  selected: document.querySelector(".modes [aria-selected=true]").id
+}))
+t("arrow keys move focus along the horizons without re-ranking",
+  roved.focused !== roved.selected && roved.focused.startsWith("horizon-"), JSON.stringify(roved))
+
+// The one tab stop has to sit where the keyboard actually is. Pinned to the
+// SELECTED tab instead, tabbing out of the strip and back landed you on the
+// horizon you had arrowed away from, and Enter then re-picked that one.
+const stop = await page.evaluate(() => ({
+  focused: document.activeElement.id,
+  stop: [...document.querySelectorAll(".modes .mode")].find(e => e.tabIndex === 0)?.id ?? null
+}))
+t("the strip's single tab stop follows the arrows", stop.stop === stop.focused, JSON.stringify(stop))
+
+// Keyboard focus that draws nothing is not keyboard access. app.css's
+// `.modes .mode` used to outrank the shared focus rule and win with box-shadow:none.
+await page.waitForTimeout(400)
+const ring = await page.evaluate(() => {
+  const c = getComputedStyle(document.activeElement)
+  return { shadow: c.boxShadow, outline: c.outlineStyle }
+})
+t("a focused horizon tab is visibly focused",
+  (ring.shadow !== "none" && ring.shadow !== "") || ring.outline !== "none", JSON.stringify(ring))
+
+const horizonPanel = await page.evaluate(() => {
+  const tab = document.querySelector(".modes [aria-selected=true]")
+  const panel = document.getElementById(tab.getAttribute("aria-controls"))
+  return { role: panel?.getAttribute("role"), labelledby: panel?.getAttribute("aria-labelledby"), tab: tab.id }
+})
+t("the ranking is the panel the horizons control",
+  horizonPanel.role === "tabpanel" && horizonPanel.labelledby === horizonPanel.tab,
+  JSON.stringify(horizonPanel))
+
+// The row's markup reads out as nine unlabelled numbers run together, so the
+// name it announces has to carry the labels the columns carry visually.
+const rowA11y = await page.$eval(".board-row", r => ({
+  label: r.getAttribute("aria-label"),
+  expanded: r.getAttribute("aria-expanded"),
+  controls: r.getAttribute("aria-controls")
+}))
+t("a board row announces what its numbers are, not just the digits",
+  /bscore/.test(rowA11y.label) && /projected points/.test(rowA11y.label) &&
+    /confidence/.test(rowA11y.label), String(rowA11y.label))
+t("a board row says it can be expanded", rowA11y.expanded === "false" && !!rowA11y.controls,
+  JSON.stringify(rowA11y))
+await page.click(".board-row")
+await page.waitForSelector(".detail")
+t("opening a row says so, and points at what opened",
+  (await page.$eval(".board-row", r => r.getAttribute("aria-expanded"))) === "true" &&
+    (await page.$eval(".detail", d => d.id)) === rowA11y.controls)
+await page.click(".board-row")
+await page.waitForTimeout(150)
+
+// The sort arrow is the only visual cue for which column the board is sorted by,
+// and "\u25be" says nothing out loud.
+const sortLabels = await page.$$eval(".board-head .sort-head", n =>
+  n.map(e => [e.textContent.replace(/[\u25be\u25b4]/g, "").trim(), e.getAttribute("aria-label")]))
+t("the active column header announces the direction it is sorted",
+  sortLabels.some(([, l]) => /sorted (descending|ascending)/.test(l ?? "")),
+  JSON.stringify(sortLabels))
+
+
 // bscore must be value OVER REPLACEMENT, so proj − repl should equal it
 const row = await page.$eval(".board-row", r => ({
   bscore: Number(r.querySelector(".bscore").textContent),

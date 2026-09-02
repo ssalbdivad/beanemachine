@@ -97,6 +97,13 @@ export const Board = ({
 	const [open, setOpen] = useState<number | null>(null)
 	const [pool, setPool] = useState<AvailablePool | null>(null)
 	const [poolError, setPoolError] = useState<string | null>(null)
+	// Which horizon the keyboard is on, which is not the same as which one is
+	// selected — arrowing moves focus without activating. The single tab stop has
+	// to follow focus: bound to selection alone, arrowing to Stash and then tabbing
+	// out and back put you on the SELECTED tab instead, so Enter re-picked the
+	// horizon you had already left. Null until a tab is focused, so the strip opens
+	// with its stop on the selected one.
+	const [focusedMode, setFocusedMode] = useState<Filters["mode"] | null>(null)
 	const leagueId = league?.meta.league_id ?? null
 
 	// the league's actual free agents — a ranking of all of MLB is only half a
@@ -183,7 +190,7 @@ export const Board = ({
 		<>
 			<section className="card full board-controls">
 				<h2>What are you deciding?</h2>
-				<style>{MODE_FOCUS_CSS}</style>
+				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
 				{/* The tabs are the tablist's only children, because a tablist that
 				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
@@ -195,8 +202,10 @@ export const Board = ({
 							role="tab"
 							aria-selected={filters.mode === id}
 							aria-controls={PANEL_ID}
-							// roving tabindex: the strip is one stop and the arrows move within it
-							tabIndex={filters.mode === id ? 0 : -1}
+							// roving tabindex: the strip is one stop and the arrows move within it,
+							// and that stop sits wherever the keyboard last was
+							tabIndex={(focusedMode ?? filters.mode) === id ? 0 : -1}
+							onFocus={() => setFocusedMode(id)}
 							onKeyDown={onTabKey}
 							className={`mode${filters.mode === id ? " on" : ""}`}
 							onClick={() => setFilters(f => ({ ...f, mode: id }))}

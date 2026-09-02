@@ -17,7 +17,8 @@ import {
 	leagueReady,
 	RosterPanel,
 	Setup,
-	StatTable
+	StatTable,
+	TeamCountInput
 } from "./panels.tsx"
 import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
@@ -25,6 +26,10 @@ import { useToast } from "./useToast.tsx"
 const TEMPLATES = ["custom", "yahoo", "espn", "sleeper"]
 
 type View = "board" | "league" | "trade" | "draft"
+
+/** What is known about the leagues in this browser. Three states, because an
+ *  unreadable store and an empty one call for opposite advice. */
+type StoreState = "reading" | "read" | "unreadable"
 
 /**
  * The four tabs, in DOM order — which is deliberately not the order a season is
@@ -123,9 +128,11 @@ export const App = () => {
 	}, [run, adopt])
 
 	const league = key && config ? config.leagues[key] : undefined
-	// Nothing is known until the store has been read, so "no league" and "not
-	// looked yet" must not render as the same screen.
-	const loading = !config && !loadError
+	// Nothing is known until the store has been read, and "no leagues", "not looked
+	// yet" and "the store is unreadable" are three different screens. One value
+	// decides which, so no two controls can disagree about it.
+	const store: StoreState = loadError ? "unreadable" : config ? "read" : "reading"
+	const loading = store === "reading"
 	// The board, the draft and a trade are all priced in the same three inputs.
 	// Until they exist, the guided panel is what the page leads with.
 	const ready = leagueReady(league)
@@ -180,6 +187,7 @@ export const App = () => {
 
 			<Toolbar
 				config={config}
+				store={store}
 				view={view}
 				activeKey={key}
 				onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
@@ -219,9 +227,9 @@ export const App = () => {
 
 			<Status
 				league={league ?? null}
+				store={store}
 				snapshot={snapshot}
 				snapshotError={snapshotError}
-				loading={loading}
 			/>
 
 			{/* A store that can't be read is not an empty store, and every tab's own
@@ -246,7 +254,7 @@ export const App = () => {
 					leagueKey={key}
 					league={league ?? null}
 					canImport={getMode() !== "static"}
-					onOpenSetup={() => setView("league")}
+					onOpenSetup={view === "league" ? undefined : () => setView("league")}
 				/>
 			)}
 
@@ -306,6 +314,7 @@ export const App = () => {
 
 const Toolbar = ({
 	config,
+	store,
 	view,
 	activeKey,
 	onSelect,
@@ -317,6 +326,7 @@ const Toolbar = ({
 	onReject
 }: {
 	config: Config | null
+	store: StoreState
 	view: View
 	activeKey: string | null
 	onSelect: (key: string) => void
@@ -344,10 +354,14 @@ const Toolbar = ({
 						aria-label={label}
 						onChange={e => onSelect(e.currentTarget.value)}
 					>
-						{/* an empty disabled box reads as broken; this says which of the two
+						{/* an empty disabled box reads as broken; this says which of the three
 						    reasons it is empty for */}
 						{!keys.length && (
-							<option value="">{config ? "No leagues in this browser" : "Loading…"}</option>
+							<option value="">
+								{store === "reading" ? "Reading this browser…"
+								: store === "unreadable" ? "Couldn't be read"
+								: "No leagues in this browser"}
+							</option>
 						)}
 						{keys.map(k => (
 							<option key={k} value={k}>
@@ -460,14 +474,14 @@ const Toolbar = ({
  */
 const Status = ({
 	league,
+	store,
 	snapshot,
-	snapshotError,
-	loading
+	snapshotError
 }: {
 	league: League | null
+	store: StoreState
 	snapshot: Snapshot | null
 	snapshotError: string | null
-	loading: boolean
 }) => {
 	const age = freshness(snapshot?.capturedAt, Date.now())
 	const data =
@@ -478,8 +492,10 @@ const Status = ({
 		<div className="chips">
 			{league ?
 				<Chips league={league} />
-			: loading ?
+			: store === "reading" ?
 				<span className="chip">reading this browser&rsquo;s leagues…</span>
+			: store === "unreadable" ?
+				<span className="chip warn">leagues unreadable</span>
 			:	<span className="chip warn">no league yet</span>}
 			<span className={data.className} title="Age of the MLB and Statcast capture the ranking is computed from">
 				player data <b>{data.value}</b>
@@ -551,6 +567,33 @@ const LeagueEditor = ({
 
 	return (
 		<>
+			{/* Its own grid, above the scoring one: the team count is the only league
+			    value that is neither a stat nor a slot, and until this card existed
+			    the board, the draft and the trade page all told you to "open League
+			    setup and set the team count" against a page that had no field for it.
+			    Kept out of the grid below because that grid's first two cards are
+			    batting and pitching, which is what the suites read them as. */}
+			<div className="grid">
+				<section className="card full">
+					<h2>This league</h2>
+					<p className="sub">
+						Replacement level is teams × slots — what a player is worth is what he beats
+						the next man up by, and the team count is what decides who that is. The board,
+						the draft and every trade verdict wait on it.
+					</p>
+					<TeamCountInput
+						value={draft.meta.max_teams}
+						onReject={onError}
+						onChange={max_teams => form.setFieldValue("meta", { ...draft.meta, max_teams })}
+					/>
+					{draft.meta.max_teams == null && (
+						<p className="empty" style={{ marginTop: "var(--sp-2)" }}>
+							Not set. Nothing is assumed in its place, so nothing is ranked.
+						</p>
+					)}
+				</section>
+			</div>
+
 			<div className="grid">
 				<section className="card">
 					<h2>Batting</h2>

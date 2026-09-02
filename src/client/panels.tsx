@@ -1,9 +1,30 @@
+import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
 
 type Num = (value: number) => void
 
-/** A stat's point value. Blank or non-numeric restores — `Number("")` is 0, which
- *  silently turned a cleared field into a real zero before. */
+/**
+ * A stat's point value. Blank or non-numeric restores — `Number("")` is 0, which
+ * silently turned a cleared field into a real zero before.
+ *
+ * The element owns its own text and the number is committed behind it, because
+ * the two are not the same thing while someone is still typing. Two ways that
+ * went wrong, both of which made a value impossible to *type* — and the manual
+ * path is the whole point of this page for a league nobody can import:
+ *
+ * - keyed on the committed value (`key={value}`), every keystroke committed, the
+ *   key changed, React replaced the element and the field lost focus with one
+ *   digit in it. Typing "123" left "1".
+ * - held as controlled React state, `-` could not survive a keystroke: a number
+ *   input reports "" for text it cannot parse yet, React restores a controlled
+ *   input whose onChange changed no state, and the minus was wiped before the
+ *   digits arrived. Typing "-3" over "8" left "83", so no pitching penalty could
+ *   be entered by hand at all.
+ *
+ * So the DOM keeps the text, and the only thing that ever overwrites it is a
+ * value arriving from outside — a Revert, or another league being selected.
+ * `fill()` sets a value in one shot, so no test saw either of these.
+ */
 export const ValueInput = ({
 	value,
 	label,
@@ -18,26 +39,148 @@ export const ValueInput = ({
 	onReject: (message: string) => void
 	className?: string
 	integer?: boolean
-}) => (
-	<input
-		className={`${className} ${value > 0 ? "pos" : value < 0 ? "neg" : ""}`}
-		type="number"
-		step={integer ? 1 : "any"}
-		title={label}
-		aria-label={label}
-		defaultValue={String(value)}
-		key={value}
-		onChange={e => {
-			const raw = e.currentTarget.value
-			const n = integer ? Math.round(Number(raw)) : Number(raw)
-			if (raw.trim() !== "" && Number.isFinite(n) && (!integer || n >= 0)) onCommit(n)
-			else {
-				e.currentTarget.value = String(value)
-				onReject(`Enter a ${integer ? "whole " : ""}number for ${label}.`)
-			}
-		}}
-	/>
-)
+}) => {
+	const el = useRef<HTMLInputElement>(null)
+	/** The number this field last handed up. It comes straight back as `value`, and
+	 *  rewriting the field on that echo would eat the "." halfway through "1.5". */
+	const sent = useRef<number | null>(null)
+	useEffect(() => {
+		if (value === sent.current) return
+		sent.current = null
+		if (el.current) el.current.value = String(value)
+	}, [value])
+	return (
+		<input
+			ref={el}
+			className={`${className} ${value > 0 ? "pos" : value < 0 ? "neg" : ""}`}
+			type="number"
+			step={integer ? 1 : "any"}
+			title={label}
+			aria-label={label}
+			defaultValue={String(value)}
+			onChange={e => {
+				const node = e.currentTarget
+				const raw = node.value
+				// `validity.badInput` is the browser distinguishing "there is something
+				// here, it just isn't a number yet" from "this is empty". A lone "-" is the
+				// first of those: neither a clear nor a mistake, so leave it and wait for
+				// the rest of the number.
+				if (raw === "" && node.validity.badInput) return
+				const n = integer ? Math.round(Number(raw)) : Number(raw)
+				if (raw.trim() !== "" && Number.isFinite(n) && (!integer || n >= 0)) {
+					sent.current = n
+					onCommit(n)
+				} else {
+					node.value = String(value)
+					onReject(`Enter a ${integer ? "whole " : ""}number for ${label}.`)
+				}
+			}}
+			onBlur={e => {
+				// a half-typed number that is left half-typed committed nothing, so the
+				// field must not go on showing a value no league holds
+				if (e.currentTarget.validity.badInput) {
+					e.currentTarget.value = String(value)
+					return onReject(`Enter a ${integer ? "whole " : ""}number for ${label}.`)
+				}
+				// and once the typing is over the field shows what was actually stored:
+				// "1.5" in a whole-number field is kept as 2, and a field still reading
+				// 1.5 would be the page disagreeing with the league about its own value
+				if (e.currentTarget.value !== String(value)) e.currentTarget.value = String(value)
+			}}
+		/>
+	)
+}
+
+/**
+ * How many teams the league drafts with — the one value three tabs refuse to rank
+ * without and the only one with nowhere else to live: it is neither a stat nor a
+ * slot. Empty is a real state, not an error. Clearing it puts the refusals back,
+ * which is correct — an unknown team count must not decay into a default of 10.
+ */
+export const TeamCountInput = ({
+	value,
+	onChange,
+	onReject
+}: {
+	value: number | null
+	onChange: (next: number | null) => void
+	onReject: (message: string) => void
+}) => {
+	/** Uncontrolled for the reason `ValueInput` above is: the element has to be
+	 *  allowed to hold text the number is not finished being. */
+	const el = useRef<HTMLInputElement>(null)
+	const sent = useRef<number | null | undefined>(undefined)
+	/** What was in the field before this edit began, so a rejected entry has
+	 *  somewhere to go back to. */
+	const before = useRef<number | null>(value)
+	const show = (to: number | null) => {
+		if (el.current) el.current.value = to == null ? "" : String(to)
+	}
+	useEffect(() => {
+		if (value === sent.current) return
+		sent.current = undefined
+		show(value)
+	}, [value])
+	return (
+		<span className="field">
+			<input
+				ref={el}
+				type="number"
+				min="2"
+				step="1"
+				placeholder="—"
+				aria-label="Teams in this league"
+				// a count, not a sentence — and it cannot take the `.val` class the other
+				// number fields wear, which is what the suites use to find the stat tables
+				style={{ width: "6em" }}
+				defaultValue={value == null ? "" : String(value)}
+				onFocus={() => {
+					before.current = value
+				}}
+				onChange={e => {
+					const node = e.currentTarget
+					const raw = node.value.trim()
+					// "" with badInput set is a keystroke the browser can't parse yet — a
+					// stray "-", say. It is not somebody clearing the field, and wiping a
+					// stored team count on it would be the silent change this app exists
+					// not to make.
+					if (raw === "" && node.validity.badInput) return
+					// empty is a real answer: it means nobody has said yet, which is what
+					// every refusal downstream is written against
+					if (raw === "") {
+						sent.current = null
+						return onChange(null)
+					}
+					const n = Math.round(Number(raw))
+					// "1" is not a league, but it IS the first keystroke of "12", so the
+					// minimum is checked when the field is done rather than per keystroke —
+					// enforcing it here is what made this field impossible to type into.
+					if (Number.isFinite(n) && n >= 1) {
+						sent.current = n
+						onChange(n)
+					} else {
+						show(value)
+						onReject("Enter a whole number of teams.")
+					}
+				}}
+				onBlur={e => {
+					// text the browser never parsed committed nothing, so the field must not
+					// be left showing it
+					if (e.currentTarget.validity.badInput) {
+						show(value)
+						return onReject("Enter a whole number of teams.")
+					}
+					if (value == null || value >= 2) return show(value)
+					sent.current = before.current
+					show(before.current)
+					onChange(before.current)
+					onReject("A league has at least two teams — the count is back to what it was.")
+				}}
+			/>
+			<span className="unit">teams</span>
+		</span>
+	)
+}
 
 export const StatTable = ({
 	table,
@@ -401,7 +544,9 @@ export const Setup = ({
 	league: League | null
 	/** False in the static build, where reading a league needs the local server. */
 	canImport: boolean
-	onOpenSetup: () => void
+	/** Absent when League setup is already the open tab — a button to where you
+	 *  are is furniture. */
+	onOpenSetup?: () => void
 }) => {
 	const gaps = league ? leagueGaps(league) : []
 	const missing = gaps.filter(g => g.have === null)
@@ -459,17 +604,19 @@ export const Setup = ({
 							values have to be typed in here. They are stored in this browser either way.{" "}
 						</>
 					}
-					{league ?
+					{league && onOpenSetup ?
 						<>
 							Or open <b>League setup</b> and enter them by hand.
 						</>
+					: league ?
+						<>Or enter them in the cards below &mdash; they are on this tab.</>
 					:	<>
 							Or press <b>New</b> above to start one from a blank template and fill it in.
 						</>
 					}
 				</p>
 
-				{league && (
+				{league && onOpenSetup && (
 					<p style={{ margin: "var(--sp-3) 0 0" }}>
 						<button className="primary" onClick={onOpenSetup}>
 							Open League setup
@@ -477,16 +624,19 @@ export const Setup = ({
 					</p>
 				)}
 
-				<div className="legend">
-					<p className="tiny-note">What each tab does once those exist, in the order a season uses them:</p>
-					<dl>
-						{TABS.map(([tab, does]) => (
-							<Fragment2 key={tab} term={tab}>
-								{does}
-							</Fragment2>
-						))}
-					</dl>
-				</div>
+				{/* Deliberately not `.legend`: its 110px term column breaks "Recommendations"
+				    mid-word, and a tab you are being told to find must be spelled the way
+				    the tab is spelled. */}
+				<p className="tiny-note" style={{ margin: "var(--sp-4) 0 var(--sp-2)" }}>
+					What each tab does once those exist, in the order a season uses them:
+				</p>
+				<dl>
+					{TABS.map(([tab, does]) => (
+						<Fragment2 key={tab} term={tab}>
+							{does}
+						</Fragment2>
+					))}
+				</dl>
 			</section>
 		</div>
 	)

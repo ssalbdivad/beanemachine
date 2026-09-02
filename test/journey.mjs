@@ -27,16 +27,56 @@ const KEYS = ["beanemachine:config", "beanemachine:roster", "beanemachine:draft"
 
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
 const errors = []
-page.on("pageerror", e => errors.push(`pageerror: ${e}`))
-page.on("console", m => { if (m.type() === "error") errors.push(`console: ${m.text()}`) })
+/**
+ * index.html asks Google for IBM Plex Mono, and a browser logs a failed download
+ * of it as a console error — Firefox loudly, with the URL in the text. That is a
+ * network hiccup at somebody else's CDN, not a defect in this app, and it made
+ * this suite fail two runs in nine on nothing else. It is also not a thing this
+ * suite tests: the font is progressive, `--mono` falls back to the system stack.
+ *
+ * So the trap SPLITS rather than filters. An error naming a host this app does
+ * not own is set aside and printed at the end, never silently dropped; only the
+ * app's own errors are asserted on.
+ */
+const NOT_OURS = /fonts\.(?:gstatic|googleapis)\.com/
+const foreign = []
+const note = line => (NOT_OURS.test(line) ? foreign : errors).push(line)
+page.on("pageerror", e => note(`pageerror: ${e}`))
+page.on("console", m => { if (m.type() === "error") note(`console: ${m.text()}`) })
 /** Asserted at every stage rather than once at the end, so a failure names the
  *  step that caused it instead of the last one. */
 const clean = where => t(`no console or page errors ${where}`, errors.length === 0, errors.join(" | "))
 
-await page.goto(BASE, { waitUntil: "networkidle" })
+/**
+ * A stage that never arrives is a break too, and Playwright reports it as a bare
+ * stack trace naming a selector. That is the wrong end of the story: every wait
+ * below stands in for a claim, so name the stage first and turn a timeout into a
+ * failure of THAT claim, reported and counted the way every other one is.
+ */
+let stage = "the page loads at all"
+const at = where => { stage = where }
+process.on("uncaughtException", async e => {
+	t(stage, false, String(e.message ?? e).split("\n")[0])
+	console.log(`\npassed ${pass}, failed ${fail}`)
+	await browser.close().catch(() => {})
+	process.exit(1)
+})
+
+/**
+ * Not `networkidle`. The page asks fonts.gstatic.com for a webfont, and where
+ * that host is slow or unreachable the request stays open until the navigation
+ * times out — a suite that fails on somebody else's CDN rather than on this app.
+ * A rendered board is the readiness signal this suite actually means, and it is
+ * already asserted below, so every navigation here waits for that instead.
+ */
+const arrive = async () => {
+	await page.waitForSelector(".board-row", { timeout: 30000 })
+}
+await page.goto(BASE, { waitUntil: "domcontentloaded" })
+await arrive()
 await page.evaluate(keys => keys.forEach(k => localStorage.removeItem(k)), KEYS)
-await page.reload({ waitUntil: "networkidle" })
-await page.waitForSelector(".board-row", { timeout: 30000 })
+await page.reload({ waitUntil: "domcontentloaded" })
+await arrive()
 
 const tab = name => page.locator(".views button", { hasText: name }).first().click()
 const rows = () => page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
@@ -156,6 +196,7 @@ t("every remaining row's own confidence clears the floor",
 
 // An empty board is a legitimate answer and has to say so — the failure mode is
 // a blank panel that reads as broken data rather than as no matches.
+at("a filter nobody matches empties the board and says why")
 await search.fill("zzqqxxnobodyisnamedthis")
 await settle()
 t("a filter nobody matches empties the board and says why",
@@ -176,11 +217,13 @@ clean("after filtering, searching, re-ranking and raising the floor")
 
 // --- 3. the draft, and whether it reaches the team the trade page prices -------
 
+at("the draft page opens with a recommendation on it")
 await tab("Draft")
 await page.waitForSelector(".draft-pick .pick-who b", { timeout: 30000 })
 const firstPick = (await page.textContent(".draft-pick .pick-who b")).trim()
 
 // "Gone" is somebody else's pick: off the board, and NOT onto your team.
+at("marking a player gone leaves a different recommendation behind")
 await page.click(".draft-pick .pick-acts button.ghost")
 await page.waitForFunction(
 	name => document.querySelector(".draft-pick .pick-who b")?.textContent.trim() !== name,
@@ -191,6 +234,7 @@ t("marking a player taken changes who you are told to take next",
 	secondPick !== firstPick, `${firstPick} → ${secondPick}`)
 
 // "I took him" is both: off the board AND mine.
+at("claiming a player is counted as yours as well as gone")
 await page.click(".draft-pick .pick-acts button.primary")
 await page.waitForFunction(() => /·\s*1 yours/.test(document.querySelector(".draft-gone h3")?.textContent ?? ""),
 	{ timeout: 15000 })
@@ -214,6 +258,7 @@ t("both marks are off the board, and only the claim is on the team",
 	JSON.stringify(stored))
 
 // back to the board, which must be unmoved by any of it
+at("the board comes back after the draft")
 await tab("Recommendations")
 await page.waitForSelector(".board-row", { timeout: 30000 })
 t("the board is still the board after a detour through the draft",
@@ -223,6 +268,7 @@ t("the board is still the board after a detour through the draft",
 // THE integration point: the draft wrote a roster, and this page is the one that
 // prices it. Nothing translates between them, so a drift in either key shows up
 // here as a team that is empty or as an id nobody can resolve.
+at("the trade page opens on the team the draft wrote")
 await tab(/trade/i)
 await page.waitForSelector(".trade-team", { timeout: 30000 })
 const team = await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()))
@@ -237,6 +283,7 @@ clean("after the draft-to-team hand-off")
 
 // --- 4. a trade, priced ------------------------------------------------------
 
+at("a second player can be added to the team and priced")
 await page.fill("[data-ctl=own-search]", "a")
 await page.waitForSelector('.trade-results .trade-line button:text-is("Add")', { timeout: 15000 })
 await page.locator('.trade-results .trade-line button:text-is("Add")').first().click()
@@ -244,6 +291,7 @@ await page.waitForFunction(() => document.querySelectorAll(".trade-own").length 
 const lineupTotal = num(await page.textContent(".lineup-total"))
 t("a two-man team produces a real lineup total", Number.isFinite(lineupTotal) && lineupTotal > 0, String(lineupTotal))
 
+at("offering a player produces a verdict")
 await page.locator(".deal-side .picks .chip-btn").first().click()
 await page.waitForSelector(".trade-verdict", { timeout: 15000 })
 await page.fill("[data-ctl=get-search]", "a")
@@ -270,11 +318,13 @@ clean("after pricing a trade")
 // would be one nobody made.
 
 const teamBefore = await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()).sort())
-await page.reload({ waitUntil: "networkidle" })
-await page.waitForSelector(".board-row", { timeout: 30000 })
+at("a reload lands back on a working board")
+await page.reload({ waitUntil: "domcontentloaded" })
+await arrive()
 t("a reload lands back on a working board", (await rows()).length > 50)
 t("and on the ranking it opened on", (await ranked()) === fortnightCount, `${await ranked()} vs ${fortnightCount}`)
 
+at("the trade page still opens after the reload")
 await tab(/trade/i)
 await page.waitForSelector(".trade-team", { timeout: 30000 })
 t("the team survived the reload",
@@ -282,6 +332,7 @@ t("the team survived the reload",
 	teamBefore.join(", "))
 t("the half-built offer did not", (await page.$$(".trade-verdict")).length === 0)
 
+at("the draft page still opens after the reload")
 await tab("Draft")
 await page.waitForSelector(".draft-gone h3", { timeout: 30000 })
 const tallyAfter = (await page.textContent(".draft-gone h3")).trim()
@@ -303,5 +354,8 @@ t("the journey leaves nothing behind for the next suite", left.length === 0, lef
 clean("over the whole journey")
 
 await browser.close()
+if (foreign.length)
+	console.log(`\nset aside, not asserted on — ${foreign.length} console error(s) about a resource this app does not host:` +
+		[...new Set(foreign)].map(l => `\n  ${l}`).join(""))
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

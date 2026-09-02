@@ -375,6 +375,31 @@ justified one. Re-deriving it with `nub run compete --statcast-real` is the next
 change to the model, and the engine already threads the weight, the lambda shape and
 the scope from `model.json` for exactly that purpose.
 
+### How Savant is actually used
+
+Three places, and the window matters in all of them.
+
+**The rolling window is the product decision.** Expected stats are aggregated from
+the pitch-level endpoint over the last 21 days, not read off the season leaderboard.
+Across a season, contact quality and results converge — gap-to-wOBA correlation
+−0.36 — and the gap collapses toward nothing. Over three weeks they diverge, −0.61,
+and that divergence is the entire signal. A season-long xwOBA has already regressed
+most of the way to the wOBA it exists to disagree with. Barrel rate, exit velocity,
+xBA and xSLG have no point-in-time equivalent, so they stay season-long and are
+labelled as such on every card rather than passed off as recent.
+
+**Buy low** is where the two independent signals meet: a player hitting the ball
+better than his line says *and* still rostered in under 70% of leagues. Either one
+alone is a trap — an unlucky player everyone owns is not an opportunity, and a free
+player making weak contact is free for a reason. Scored as a product so a candidate
+has to clear both bars.
+
+**Ranking and provenance.** "Best contact vs results" sorts the board on the raw
+21-day gap with the pitcher sign flipped, the luck column ranks it as a percentile
+within each side, a missing Statcast row explicitly lowers confidence, and the
+drill-down reads the gap back in a sentence so a human can overrule the model with
+the underlying record in front of them.
+
 ### Matchups
 
 The engine knows who each team is actually booked against over the horizon, from the

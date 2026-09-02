@@ -1063,6 +1063,39 @@ and that question is already settled for men you own. The add/drop is bounded by
 keep floor, the gain bar and the move cap, and `railViolations` re-audits the finished
 plan against every rail — a plan that breaks one is withheld rather than printed.
 
+## 12. A known defect, stated rather than fixed
+
+`startingLineup` in `src/engine/trade.ts` fills roster spots greedily, scarcest
+slot first. It used to carry a proof that greed could not be beaten: every player
+had one kind slot (C, OF, SP…) plus one catch-all (Util, P) whose eligible set was
+a superset of it, so the eligibility graph was two-level and the exchange argument
+closed.
+
+**Reading real multi-position eligibility off the platform made that proof false**,
+and the numbers on the Trade and Draft views rest on it. Every eligibility line
+the snapshot carries is multi-kind — 1B/2B/3B/SS, SP/RP — so the graph is no
+longer two-level. The smallest counterexample, with slots 2B/3B/Util:
+
+```
+A{2B,3B,Util}=100   B{2B,Util}=99   C{3B,Util}=1   D{Util}=98
+greedy:  2B=A 3B=C Util=B = 200   (and benches D)
+optimal: 2B=B 3B=A Util=D = 297
+```
+
+An augmenting-path assignment was written and then reverted, because it is only
+optimal for the wrong objective. The set of simultaneously seatable players is a
+transversal matroid, so descending-value greed with augmenting paths maximises the
+**weight of seated players** — but an unfilled spot is not worth zero here, it is
+worth that slot's replacement bar. The real objective is `Σ (points − bar)` over
+the assignment, whose edge weight depends on the spot, which is a weighted
+bipartite matching and not a matroid. The reverted version measured worse than the
+current one on a real roster (1401.12 against 1448.17) for exactly that reason.
+
+The correct fix is a max-weight bipartite matching on `max(0, points − bar)`. It is
+not written. Until it is, Trade and Draft totals are a lower bound on the best
+legal lineup, and the board itself is unaffected — a bscore takes the maximum over
+a player's eligible slots and never assigns a whole lineup.
+
 ## Reproducing any of this
 
 ```sh

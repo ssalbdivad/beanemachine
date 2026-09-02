@@ -76,7 +76,10 @@ t("every starter is eligible where he was put",
 
 // Scarcest slot first is the whole reason the fill is ordered at all: a catcher
 // spent on a Util spot leaves C empty, and C is the cheapest bar in the league.
-const catcher = byPoints.find(r => r.slots[0] === "C")
+// `slots[0]` used to be the primary position; with real multi-position
+// eligibility the array is a set of everywhere he qualifies, so eligibility has
+// to be asked for directly.
+const catcher = byPoints.find(r => r.slots.includes("C"))
 const dh = byPoints.find(r => r.slots.length === 1 && r.slots[0] === "Util")
 const twoBats = [catcher, dh]
 const naive = (roster, order) => {          // fill in the league's printed order

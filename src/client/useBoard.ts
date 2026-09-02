@@ -139,6 +139,7 @@ export const useBoard = (
 				recentVolumeByWindow: h.recentVolumeByWindow,
 				recentStats: h.recentStats,
 				ownership: h.ownership,
+				eligibility: h.eligibility,
 				probableStarts,
 				opposingStarters,
 				// over the rest of a season an injured man is a legitimate hold; over the

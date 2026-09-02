@@ -246,5 +246,37 @@ t("the rest-of-season view does rank them, because there he is a hold",
 t("a rateable player never carries an unrateable reason",
   shortHorizon.every(r => !r.rateable || r.unrateable === null))
 
+// --- multi-position eligibility, read from the platform rather than assumed ---
+const { slotsFor } = await import("../src/engine/bscore.ts")
+t("eligibility was actually captured", hyd.eligibility.size > 100, `${hyd.eligibility.size}`)
+t("and every captured line lists more than one position",
+  [...hyd.eligibility.values()].every(v => v.length > 1))
+
+const withEl = rateAll({ ...base, eligibility: hyd.eligibility })
+const withoutEl = rateAll(base)
+t("eligibility widens who can fill what",
+  withEl.filter(r => r.slots.length > 2).length > 50,
+  `${withEl.filter(r => r.slots.length > 2).length} players with 3+ slots`)
+t("and it moves the ranking, since a man is worth most at his scarcest slot",
+  withEl.some((r, i) => r.bscore !== withoutEl[i].bscore))
+
+// a player is only ever ranked at a slot he can actually fill
+t("nobody is seated where his eligibility does not allow",
+  withEl.every(r => !r.rateable || r.slots.includes(r.slot)))
+
+// the fallback must stay honest: no eligibility line means the primary position,
+// not a guess that he plays everywhere
+const noEl = slotsFor({ ...hyd.players[0], position: "C", group: "hitting" })
+t("no eligibility line falls back to the primary position",
+  noEl.includes("C") && noEl.includes("Util") && !noEl.includes("SS"), noEl.join("/"))
+const bogus = slotsFor({ ...hyd.players[0], position: "C", group: "hitting" }, ["ZZ"])
+t("an unrecognised eligibility line does not claim he plays nowhere",
+  bogus.length > 0 && bogus.includes("C"), bogus.join("/"))
+t("a real two-position line grants both slots",
+  (() => {
+    const s2 = slotsFor({ ...hyd.players[0], position: "C", group: "hitting" }, ["C", "1B"])
+    return s2.includes("C") && s2.includes("1B")
+  })())
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

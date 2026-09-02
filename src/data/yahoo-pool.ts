@@ -138,9 +138,25 @@ export const normalizeName = (n: string): string =>
 export const fetchOwnership = async (
 	leagueId: string,
 	options: { pages?: number; sport?: string } = {}
-): Promise<{ byName: Map<string, number>; read: number; note: string }> => {
+): Promise<{
+	byName: Map<string, number>
+	/**
+	 * Multi-position eligibility, as YOUR platform actually prints it.
+	 *
+	 * This is the largest known accuracy gap in the ranking. StatsAPI reports one
+	 * primary position, so a catcher who also qualifies at first base was scored
+	 * only as a catcher — which understates him, because he can fill two slots and
+	 * the scarcer one sets his value. Yahoo prints the real eligibility next to
+	 * every name ("MIN - 1B,3B"), and the same sweep that reads ownership already
+	 * has it in hand. It is an observation, not an inference.
+	 */
+	eligibility: Map<string, string[]>
+	read: number
+	note: string
+}> => {
 	const { pages = 8, sport = "baseball" } = options
 	const byName = new Map<string, number>()
+	const eligibility = new Map<string, string[]>()
 	const seen = new Set<string>()
 	let read = 0
 	for (const pos of POSITIONS)
@@ -178,7 +194,11 @@ export const fetchOwnership = async (
 					seen.add(r.yahooId)
 					fresh++
 					read++
-					if (r.rosteredPct !== null) byName.set(normalizeName(r.name), r.rosteredPct)
+					const key = normalizeName(r.name)
+					if (r.rosteredPct !== null) byName.set(key, r.rosteredPct)
+					// a single position from this source is no better than what StatsAPI
+					// already gives, so only a genuine multi-position line is recorded
+					if (r.positions.length > 1) eligibility.set(key, r.positions)
 				}
 				// the window stopped moving — Yahoo has run out of rows for this position
 				if (fresh === 0) break
@@ -191,10 +211,12 @@ export const fetchOwnership = async (
 		}
 	return {
 		byName,
+		eligibility,
 		read,
 		note:
 			`Yahoo "% Ros" for ${byName.size} of ${read} players read, swept ${pages} pages ` +
-			`per position. Players Yahoo did not list have no ownership figure — they are ` +
+			`per position, of whom ${eligibility.size} print more than one eligible ` +
+			`position. Players Yahoo did not list have no ownership figure — they are ` +
 			`reported as unknown rather than as unowned.`
 	}
 }

@@ -16,9 +16,38 @@ import {
  * the next man up".
  */
 
-/** StatsAPI reports one primary position; a league's real multi-position
- *  eligibility is not exposed by any source we read, so it is never assumed. */
-export const slotsFor = (player: PlayerSeason): string[] => {
+/**
+ * Which roster slots a player can fill.
+ *
+ * StatsAPI reports one primary position, which was the largest known accuracy
+ * gap here: a catcher who also qualifies at first base was scored only as a
+ * catcher, and since a player is worth the most at his scarcest slot, that
+ * understated him. `eligible` is your platform's own printed eligibility — read,
+ * not inferred — and where it exists it wins. Where it does not, the primary
+ * position is still all we honestly have.
+ */
+export const slotsFor = (player: PlayerSeason, eligible?: string[]): string[] => {
+	if (eligible?.length) {
+		const slots = new Set<string>()
+		for (const pos of eligible) {
+			if (["SP", "RP", "P"].includes(pos)) {
+				slots.add(pos)
+				slots.add("P")
+			} else if (["LF", "CF", "RF", "OF"].includes(pos)) {
+				slots.add("OF")
+				slots.add("Util")
+			} else if (["C", "1B", "2B", "3B", "SS"].includes(pos)) {
+				slots.add(pos)
+				slots.add("Util")
+			} else if (pos === "DH" || pos === "Util") slots.add("Util")
+		}
+		// an unrecognised eligibility line is not a reason to claim he plays nowhere
+		if (slots.size) return [...slots]
+	}
+	return primarySlotsFor(player)
+}
+
+const primarySlotsFor = (player: PlayerSeason): string[] => {
 	const p = player.position
 	if (player.group === "pitching")
 		return (player.stats.gamesStarted ?? 0) > 0 ? ["SP", "P"] : ["RP", "P"]
@@ -81,6 +110,8 @@ export interface RateOptions {
 	probableStarts?: Map<number, number>
 	/** For each team, the opposing starters its hitters face over the horizon. */
 	opposingStarters?: Map<number, number[]>
+	/** Multi-position eligibility as the platform prints it, by MLBAM id. */
+	eligibility?: Map<number, string[]>
 	/**
 	 * What to do with a player currently on the injured list.
 	 *
@@ -123,6 +154,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		const underlying = o.underlying[player.group].get(player.id)
 		const injury = o.injuries.get(player.id)
 		const horizonGames = player.teamId ? (o.gamesByTeam.get(player.teamId) ?? 0) : 0
+		const eligible = o.eligibility?.get(player.id)
 		const matchupIndex = starterBlendedIndex(
 			player,
 			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null,
@@ -151,7 +183,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			player,
 			underlying,
 			injury,
-			slots: slotsFor(player),
+			slots: slotsFor(player, eligible),
 			projection,
 			projected: scoreStats(projection.stats, table, player.group),
 			season: scoreStats(player.stats, table, player.group),

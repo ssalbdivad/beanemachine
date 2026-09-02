@@ -57,6 +57,9 @@ export interface Snapshot {
 	/** Yahoo "% Ros", keyed by MLBAM id. Absent for anyone Yahoo did not list;
 	 *  absent means unknown, never unowned. */
 	ownership?: Record<string, number>
+	/** Multi-position eligibility as the platform prints it, by MLBAM id. Absent
+	 *  means the platform did not list him, not that he plays one position. */
+	eligibility?: Record<string, string[]>
 	/** Volume per team game over the recent window, keyed "id:group". The backtest
 	 *  showed recent playing time is the strongest predictor available. */
 	recentVolumeByWindow: Record<string, Record<number, number>>
@@ -109,7 +112,12 @@ export const buildSnapshot = async (
 			fetchOpposingStarters(start, iso(new Date(now.getTime() + 7 * 86400_000))).catch(
 				() => new Map<number, number[]>()
 			),
-			fetchOwnership(leagueId).catch(() => ({ byName: new Map<string, number>(), read: 0, note: "" })),
+			fetchOwnership(leagueId).catch(() => ({
+				byName: new Map<string, number>(),
+				eligibility: new Map<string, string[]>(),
+				read: 0,
+				note: ""
+			})),
 			fetchTeamGamesPlayed(season),
 			fetchInjuries(),
 			Promise.all(
@@ -201,6 +209,12 @@ export const buildSnapshot = async (
 		opponentsWeek: Object.fromEntries([...week.opponents].map(([k, v]) => [String(k), v])),
 		// joined on normalised name, because Yahoo exposes its own player ids and
 		// never the MLBAM one. A player Yahoo did not list is simply absent.
+		eligibility: Object.fromEntries(
+			players.flatMap(pl => {
+				const e = owned.eligibility.get(normalizeName(pl.name))
+				return e === undefined ? [] : [[String(pl.id), e] as const]
+			})
+		),
 		ownership: Object.fromEntries(
 			players.flatMap(pl => {
 				const pct = owned.byName.get(normalizeName(pl.name))
@@ -215,6 +229,7 @@ export const buildSnapshot = async (
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
 			{ name: "MLB StatsAPI · schedule", url: "statsapi.mlb.com/api/v1/schedule", rows: horizon.counts.size },
 			{ name: "MLB StatsAPI · probable starters", url: "statsapi.mlb.com/api/v1/schedule?hydrate=probablePitcher", rows: probables.size },
+			{ name: "Yahoo · multi-position eligibility", url: "baseball.fantasysports.yahoo.com/b1/players", rows: owned.eligibility.size },
 			{ name: "Yahoo · % rostered", url: "baseball.fantasysports.yahoo.com/b1/players", rows: owned.byName.size },
 			{ name: "MLB StatsAPI · roster status", url: "statsapi.mlb.com/api/v1/teams/{id}/roster", rows: injuries.size },
 			{ name: `Baseball Savant · rolling ${MODEL.statcast.windowDays}d xwOBA (batters)`, url: "baseballsavant.mlb.com/statcast_search", rows: [...xBat.values()].filter(u => u.window === "rolling").length },
@@ -241,6 +256,9 @@ export const hydrate = (s: Snapshot) => ({
 		Object.entries(s.gamesRemaining ?? {}).map(([k, v]) => [Number(k), v])
 	),
 	ownership: new Map(Object.entries(s.ownership ?? {}).map(([k, v]) => [Number(k), v])),
+	eligibility: new Map(
+		Object.entries(s.eligibility ?? {}).map(([k, v]) => [Number(k), v])
+	),
 	gamesWeek: new Map(Object.entries(s.gamesWeek ?? {}).map(([k, v]) => [Number(k), v])),
 	probableStarts: new Map(
 		Object.entries(s.probableStarts ?? {}).map(([k, v]) => [Number(k), v])

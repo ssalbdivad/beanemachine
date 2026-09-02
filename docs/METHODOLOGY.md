@@ -1059,15 +1059,13 @@ contact.
 startingLineup(before)`, in projected points. Not "who has the higher bscore": bench
 depth is worth nothing until it starts. Spots you cannot fill are priced at the
 league's own replacement bar for that slot, and a spot *nothing* in the pool can fill
-is reported as a hole rather than credited at zero. Filling is greedy, scarcest slot
-first. That was provably optimal while every player had exactly one kind slot (C, OF,
-SP…) plus one catch-all whose eligible set is a superset of it: the catch-all is never
-the scarcer slot, so the exchange argument closes. **That precondition no longer
-holds.** The guarantee was a property of the eligibility, not of the greed, and now
-that Yahoo's printed eligibility reaches `slotsFor` a player can be eligible at 2B, OF
-and Util at once — the graph is no longer two-level, so scarcest-first is a heuristic
-here again, not a proof. Nothing has measured what it costs. The lineup planner in
-`src/auto/plan.ts` does run a real assignment; this one does not.
+is reported as a hole rather than credited at zero. The roster is seated by a
+maximum-gain bipartite matching over `points − the spot's replacement bar`, which
+also decides who sits: a man worth less than the body on the wire is benched and the
+spot is priced at the bar. Filling used to be greedy, scarcest slot first, which was
+provably optimal only while every player had one kind slot plus one catch-all whose
+eligible set is a superset of it; Yahoo's printed eligibility ended that, and §12
+records what it took to replace the proof.
 
 **Autonomous mode** (`src/auto/`) ranks the same board against your real roster and
 plans two things. The lineup is chosen as a set, not slot by slot: the startable sets
@@ -1079,18 +1077,18 @@ and that question is already settled for men you own. The add/drop is bounded by
 keep floor, the gain bar and the move cap, and `railViolations` re-audits the finished
 plan against every rail — a plan that breaks one is withheld rather than printed.
 
-## 12. A known defect, stated rather than fixed
+## 12. The lineup assignment, and the two wrong ways to fix it
 
-`startingLineup` in `src/engine/trade.ts` fills roster spots greedily, scarcest
-slot first. It used to carry a proof that greed could not be beaten: every player
-had one kind slot (C, OF, SP…) plus one catch-all (Util, P) whose eligible set was
-a superset of it, so the eligibility graph was two-level and the exchange argument
-closed.
+`startingLineup` in `src/engine/trade.ts` used to fill roster spots greedily,
+scarcest slot first, and carried a proof that greed could not be beaten: every
+player had one kind slot (C, OF, SP…) plus one catch-all (Util, P) whose eligible
+set was a superset of it, so the eligibility graph was two-level and the exchange
+argument closed.
 
-**Reading real multi-position eligibility off the platform made that proof false**,
-and the numbers on the Trade and Draft views rest on it. Every eligibility line
-the snapshot carries is multi-kind — 1B/2B/3B/SS, SP/RP — so the graph is no
-longer two-level. The smallest counterexample, with slots 2B/3B/Util:
+**Reading real multi-position eligibility off the platform made that proof false.**
+1B/2B/3B/SS lines are ordinary — 273 players in the reference pool are eligible at
+three or more slots — so the graph is no longer two-level. The smallest
+counterexample, with slots 2B/3B/Util:
 
 ```
 A{2B,3B,Util}=100   B{2B,Util}=99   C{3B,Util}=1   D{Util}=98
@@ -1098,25 +1096,49 @@ greedy:  2B=A 3B=C Util=B = 200   (and benches D)
 optimal: 2B=B 3B=A Util=D = 297
 ```
 
-An augmenting-path assignment was written and then reverted, because it is only
-optimal for the wrong objective. The set of simultaneously seatable players is a
-transversal matroid, so descending-value greed with augmenting paths maximises the
-**weight of seated players** — but an unfilled spot is not worth zero here, it is
-worth that slot's replacement bar. The real objective is `Σ (points − bar)` over
-the assignment, whose edge weight depends on the spot, which is a weighted
-bipartite matching and not a matroid. The reverted version measured worse than the
-current one on a real roster (1401.12 against 1448.17) for exactly that reason.
+Two fixes were written and reverted before the third worked, and both failures were
+about the objective rather than the algorithm.
 
-Hill-climbing on the real objective was tried next and also reverted: reaching the
-optimum in the case above needs a three-way rotation through an equal-value
-plateau (A moves 2B→3B, B moves Util→2B, D comes off the bench), and no sequence
-of strictly-improving single swaps or insertions gets there. A plateau-walking
-search would, at the cost of a cycling risk, for an unmeasured gain.
+The first was an augmenting-path assignment over the players. The set of
+simultaneously seatable players *is* a transversal matroid, so descending-value
+greed with augmenting paths maximises the **weight of seated players** — but that is
+the wrong quantity. An unfilled spot is not worth zero here; it is worth that slot's
+replacement bar, the body any manager can claim off waivers. It measured worse than
+the greed it replaced on a real roster, 1401.12 against 1448.17, for exactly that
+reason. (The same matroid argument *is* sound in `src/auto/plan.ts`, where no body
+can be added without a transaction and seated weight really is the objective.)
 
-The correct fix is a max-weight bipartite matching on `max(0, points − bar)`. It is
-not written. Until it is, Trade and Draft totals are a lower bound on the best
-legal lineup, and the board itself is unaffected — a bscore takes the maximum over
-a player's eligible slots and never assigns a whole lineup.
+The second was hill-climbing on the right objective. It cannot reach the optimum
+above: doing so needs a three-way rotation through an equal-value plateau — A moves
+2B→3B, B moves Util→2B, D comes off the bench — and no sequence of strictly
+improving single swaps or insertions gets there.
+
+What works is to price the spot rather than the player. Subtract each spot's bar, so
+seating a man there gains `points − bar` and leaving the spot alone gains exactly 0;
+then match by successive maximum-gain augmenting paths and stop when the best
+remaining path gains nothing. Starting from an empty lineup and always taking the
+best path keeps the invariant that the current lineup is the best of its size, which
+is what rules out positive cycles and lets one Bellman-Ford relaxation find each
+path. Both sides are tiny — tens of players over tens of spots — so exactness costs
+nothing measurable. The same run decides the bench, since a man below the bar is a
+negative edge no maximum ever takes.
+
+`test/trade.mjs` checks it against exhaustive enumeration on **300 random instances**
+— awkward shapes rather than typical ones, mixed bars, negative-value players — and
+every one matches the true maximum. On the reference league the gain is real but
+narrow: a best-available roster is seated identically by both, because there every
+spot gets its own best man anyway, and across 200 rosters carrying bench depth the
+matching wins on 28, by 4.28 points on average and 77.51 at most. That is the
+honest size of it. What changed is not mainly the number but the claim: Trade and
+Draft totals were a lower bound on the best legal lineup and are now the best legal
+lineup.
+
+The board itself was never affected — a bscore takes the maximum over a player's
+eligible slots and never assigns a whole lineup — and neither is the backtest, which
+fills its weekly roster with its own greedy pass. Changing that one would invalidate
+every stored measurement in `data/results`, so it stays as it was measured; the
+gap between the two is the same 4-point order as above, and is stated here rather
+than quietly closed.
 
 ## Reproducing any of this
 

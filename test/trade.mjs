@@ -201,5 +201,97 @@ t("with bars in hand the same empty roster is priced off the wire",
 	startingLineup(league, [], bars).points ===
 		Number(spots.reduce((a, s) => a + bars.get(s), 0).toFixed(2)))
 
+
+// --- the lineup is optimal, not merely greedy ---
+// Real multi-position eligibility broke the exchange argument that used to justify
+// filling scarcest-slot-first. These pin the replacement: a max-gain matching over
+// (points - the spot's replacement bar), which is what METHODOLOGY §12 asked for.
+const mini = (slots) => ({ roster: { slots, slot_order: Object.keys(slots) } })
+const man = (id, points, ...slotList) =>
+	({ player: { id, group: "hitting" }, rateable: true, points, slots: slotList })
+
+// the counterexample §12 states, worth 97 points on three spots
+const cxLeague = mini({ "2B": 1, "3B": 1, Util: 1 })
+const cx = [
+	man(1, 100, "2B", "3B", "Util"), man(2, 99, "2B", "Util"),
+	man(3, 1, "3B", "Util"), man(4, 98, "Util")
+]
+const cxLine = startingLineup(cxLeague, cx, null)
+t("the documented counterexample now seats optimally", cxLine.points === 297,
+	`${cxLine.points}: ` + cxLine.starters.map(s => `${s.slot}=${s.player?.player.id ?? "-"}`).join(" "))
+
+// a man below the bar is worth benching: the spot is worth its replacement body
+const barLine = startingLineup(mini({ "2B": 1 }), [man(1, 3, "2B")], new Map([["2B", 40]]))
+t("a starter worth less than the waiver wire does not take the spot",
+	barLine.points === 40 && barLine.starters[0].source === "replacement" &&
+		barLine.bench.length === 1)
+
+// exhaustive check against brute force — a matching is only worth writing if it
+// actually returns the maximum, on shapes chosen to be awkward rather than typical
+const brute = (league, roster, bars) => {
+	const spotList = activeSlots(league)
+	let best = -Infinity
+	const walk = (i, used, total) => {
+		if (i === spotList.length) { best = Math.max(best, total); return }
+		walk(i + 1, used, total + (bars?.get(spotList[i]) ?? 0))
+		for (let p = 0; p < roster.length; p++)
+			if (!used.has(p) && roster[p].slots.includes(spotList[i]))
+				walk(i + 1, new Set([...used, p]), total + roster[p].points)
+	}
+	walk(0, new Set(), 0)
+	return Number(best.toFixed(2))
+}
+let rngState = 20260902
+const rand = (n) => ((rngState = (rngState * 1103515245 + 12345) & 0x7fffffff) % n)
+let checked = 0, matchedBrute = 0, beatGreedy = 0
+const KINDS = ["C", "1B", "2B", "3B", "SS", "OF", "Util"]
+for (let trial = 0; trial < 300; trial++) {
+	const slots = {}
+	for (let i = 0; i < 3 + rand(3); i++) {
+		const k = KINDS[rand(KINDS.length)]
+		slots[k] = (slots[k] ?? 0) + 1
+	}
+	const lg = mini(slots)
+	const names = Object.keys(slots)
+	const roster = Array.from({ length: 2 + rand(6) }, (_, i) => {
+		const own = new Set()
+		for (let j = 0; j <= rand(3); j++) own.add(names[rand(names.length)])
+		return man(i + 1, rand(200) - 20, ...own)
+	})
+	const bars = rand(2) ? new Map(names.map(n => [n, rand(60)])) : null
+	const got = startingLineup(lg, roster, bars)
+	checked++
+	if (got.points === brute(lg, roster, bars)) matchedBrute++
+}
+t("the matching returns the true maximum on every random instance",
+	matchedBrute === checked, `${matchedBrute}/${checked} matched brute force`)
+
+// and on the real roster it can only help — the old greed is the lower bound
+const greedy = (league, roster, bars) => {
+	const spotList = activeSlots(league)
+	const startable = [...roster].filter(r => r.rateable)
+		.sort((a, b) => b.points - a.points || a.player.id - b.player.id)
+	const eligibleFor = slot => startable.filter(r => r.slots.includes(slot)).length
+	const order = spotList.map((slot, index) => ({ slot, index }))
+		.sort((a, b) => eligibleFor(a.slot) - eligibleFor(b.slot))
+	const taken = new Set(), filled = spotList.map(() => null)
+	for (const { slot, index } of order) {
+		const pick = startable.find(r => !taken.has(key(r)) && r.slots.includes(slot))
+		if (!pick) continue
+		taken.add(key(pick))
+		filled[index] = pick
+	}
+	return Number(spotList.reduce((sum, slot, i) =>
+		sum + (filled[i]?.points ?? bars?.get(slot) ?? 0), 0).toFixed(2))
+}
+const realGreedy = greedy(league, full, bars)
+t("the real roster is seated at least as well as the greed it replaces",
+	lineup.points >= realGreedy, `${lineup.points} vs ${realGreedy}`)
+for (let trial = 0; trial < 40; trial++) {
+	const roster = draft(spots).filter(() => rand(3) > 0)
+	if (startingLineup(league, roster, bars).points >= greedy(league, roster, bars)) beatGreedy++
+}
+t("and so is every thinned version of it", beatGreedy === 40, `${beatGreedy}/40`)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

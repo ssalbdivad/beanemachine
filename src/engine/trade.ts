@@ -104,21 +104,126 @@ export interface Lineup {
 }
 
 /**
- * Fills the league's startable spots from a roster, scarcest slot first.
+ * Maximum-gain augmenting path, or null when no path gains anything.
  *
- * Scarcest-first is what stops a catcher being spent on a Util spot and leaving C
- * empty — the same greedy order `src/backtest/season.ts` fills a weekly roster
- * with. On the eligibility `slotsFor` gives us it is not merely good enough, it
- * cannot be beaten: every player has one kind slot (C, OF, SP…) plus one catch-all
- * (Util, P) whose eligible set is a superset of it, so the catch-all is never the
- * scarcer slot and seating the best man at his kind slot first can never cost a
- * point — the exchange argument closes.
+ * Nodes are players and spots; a path alternates unseated player → spot, spot →
+ * the player it currently seats, and ends at a spot nobody holds. Starting from an
+ * empty lineup and always augmenting along the best path keeps the invariant that
+ * the current lineup is the best of its size, and that invariant is exactly what
+ * rules out positive cycles — so a Bellman-Ford relaxation over |V| rounds finds
+ * the longest path rather than looping on one.
  *
- * That guarantee is a property of the eligibility, not of the greed. If a league's
- * real multi-position eligibility ever reaches this engine — no source we read
- * exposes it, which is the standing gap in METHODOLOGY §8 — the graph stops being
- * two-level and this would need a real assignment, of the kind `src/auto/plan.ts`
- * runs against the league's own `slot_accepts`.
+ * Relaxation is strict (`>`), and both loops run in the caller's fixed order, so a
+ * tie between two equally-good seatings always resolves the same way. That is what
+ * keeps the lineup a function of the roster and not of the order it arrived in.
+ */
+const bestAugmentation = (
+	gain: Float64Array,
+	spots: number,
+	seatedAt: Int32Array,
+	holder: Int32Array
+): [number, number][] | null => {
+	const P = seatedAt.length
+	// best[p] is the gain of the best path reaching player p with him still to seat
+	const best = new Float64Array(P).fill(-Infinity)
+	const from = new Int32Array(P).fill(-1)
+	// the spot each player leaves on his best path, so the walk back can be replayed
+	const via = new Int32Array(P).fill(-1)
+	for (let p = 0; p < P; p++) if (seatedAt[p]! < 0) best[p] = 0
+	let endPlayer = -1, endSpot = -1, endGain = 0
+	for (let round = 0; round <= P; round++) {
+		let moved = false
+		for (let p = 0; p < P; p++) {
+			if (best[p]! === -Infinity) continue
+			for (let s = 0; s < spots; s++) {
+				const w = gain[p * spots + s]!
+				if (Number.isNaN(w) || s === seatedAt[p]) continue
+				const total = best[p]! + w
+				const held = holder[s]!
+				if (held < 0) {
+					// a free spot ends the path
+					if (total > endGain) {
+						endGain = total
+						endPlayer = p
+						endSpot = s
+					}
+					continue
+				}
+				// continuing costs whatever the man already there was earning
+				const displaced = total - gain[held * spots + s]!
+				if (displaced > best[held]!) {
+					best[held] = displaced
+					from[held] = p
+					via[held] = s
+					moved = true
+				}
+			}
+		}
+		if (!moved) break
+	}
+	if (endPlayer < 0) return null
+	const path: [number, number][] = []
+	for (let p = endPlayer, s = endSpot; p >= 0; s = via[p]!, p = from[p]!) path.push([p, s])
+	return path
+}
+
+/**
+ * Which player sits in each spot, or -1 where the spot is better left to a
+ * replacement body. `bar[i]` is what spot `i` is worth unfilled, so the gain of
+ * seating a man there is his points less that bar, and an ineligible pairing is
+ * NaN rather than a large negative — an edge that does not exist.
+ */
+const seat = (startable: Rated[], bar: number[], spots: string[]): Int32Array => {
+	const S = spots.length
+	const gain = new Float64Array(startable.length * S)
+	startable.forEach((r, p) =>
+		spots.forEach((slot, i) => {
+			gain[p * S + i] = r.slots.includes(slot) ? r.points - (bar[i] ?? 0) : NaN
+		})
+	)
+	const seatedAt = new Int32Array(startable.length).fill(-1)
+	const holder = new Int32Array(S).fill(-1)
+	for (;;) {
+		const path = bestAugmentation(gain, S, seatedAt, holder)
+		if (!path) break
+		for (const [p, s] of path) {
+			seatedAt[p] = s
+			holder[s] = p
+		}
+	}
+	return holder
+}
+
+/**
+ * Seats a roster in the league's startable spots, optimally.
+ *
+ * This used to fill greedily, scarcest slot first, and carried a proof that greed
+ * could not be beaten: every player had one kind slot (C, OF, SP…) plus one
+ * catch-all (Util, P) whose eligible set was a superset of it, so the graph was
+ * two-level and the exchange argument closed. Reading real multi-position
+ * eligibility off the platform made that proof false — 1B/2B/3B/SS lines are
+ * ordinary — and the smallest counterexample costs 97 points on three spots:
+ *
+ * ```
+ * A{2B,3B,Util}=100   B{2B,Util}=99   C{3B,Util}=1   D{Util}=98
+ * greedy:  2B=A 3B=C Util=B = 200      optimal: 2B=B 3B=A Util=D = 297
+ * ```
+ *
+ * The objective is not the weight of the players seated. An empty spot is not
+ * worth zero, it is worth that slot's replacement bar — the body any manager can
+ * claim off waivers — so seating a man is only worth `points − bar` at that spot,
+ * and a man below the bar is worth benching. Since the gain depends on the spot,
+ * this is a weighted bipartite matching. It is NOT a matroid, which is why an
+ * earlier augmenting-path version was optimal for the wrong objective and measured
+ * worse than the greed it replaced; and the optimum can need a rotation through an
+ * equal-value plateau, which is why hill-climbing could not reach it either. Both
+ * attempts are recorded in METHODOLOGY §12.
+ *
+ * So: subtract each spot's bar, match by successive maximum-gain augmenting paths,
+ * and stop when the best remaining path gains nothing. Leaving a spot unmatched is
+ * always available and worth exactly 0 after the subtraction, so the same run
+ * decides who sits as well as who plays. Both sides are tiny — tens of players
+ * across tens of spots — so the cost of exactness is nothing worth measuring.
  *
  * `replacement` is required rather than optional so the caller states which
  * question is being asked: pass the bars to model a manager who would cover an
@@ -142,19 +247,13 @@ export const startingLineup = (
 		)
 
 	const spots = activeSlots(league)
-	const eligibleFor = (slot: string) => startable.filter(r => r.slots.includes(slot)).length
-	const order = spots
-		.map((slot, index) => ({ slot, index }))
-		.sort((a, b) => eligibleFor(a.slot) - eligibleFor(b.slot))
-
-	const taken = new Set<string>()
-	const filled: (Rated | null)[] = spots.map(() => null)
-	for (const { slot, index } of order) {
-		const pick = startable.find(r => !taken.has(keyOf(r)) && r.slots.includes(slot))
-		if (!pick) continue
-		taken.add(keyOf(pick))
-		filled[index] = pick
-	}
+	const holder = seat(
+		startable,
+		spots.map(slot => replacement?.get(slot) ?? 0),
+		spots
+	)
+	const filled = spots.map((_, i) => startable[holder[i]!] ?? null)
+	const taken = new Set(filled.filter(r => r !== null).map(keyOf))
 
 	const holes: string[] = []
 	const starters: Start[] = spots.map((slot, index) => {

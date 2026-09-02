@@ -4,9 +4,10 @@ import { defineConfig, type Plugin } from "vite"
 
 const API = "http://127.0.0.1:8000"
 
-/** The engine is pure, so ranking runs in the browser. The build just needs the
- *  observed-data snapshot as an asset — browsers can't call MLB or Savant directly
- *  (neither sends CORS headers), so the snapshot is how real data reaches the page. */
+/** The engine is pure, so ranking runs in the browser. The build needs two assets:
+ *  the observed-data snapshot, because browsers can't call MLB or Savant directly
+ *  (neither sends CORS headers), and scoring.json, which seeds a browser that has
+ *  no leagues stored yet so a first visit opens on a real league. */
 const publishSnapshot = (): Plugin => ({
 	name: "publish-snapshot",
 	buildStart: () => {

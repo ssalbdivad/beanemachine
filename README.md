@@ -86,8 +86,11 @@ deliberate decision — take the dry run for a few days first.
 
 They are not interchangeable:
 
-- **`:8000` — the Hono API only.** Serves `/api/*` (league import, save, templates)
-  and hot-reloads on server-side changes. Opening it in a browser shows no UI.
+- **`:8000` — the Hono API only.** Serves `/api/*` — reading a league from its URL
+  and its free-agent pool, the two things a browser can't do for itself — and
+  hot-reloads on server-side changes. Opening it in a browser shows no UI. Your
+  leagues are not kept here: they live in the browser's storage, so the hosted
+  static build behaves identically for everything except those two calls.
 - **`:5173` — the Vite client**, with HMR, proxying `/api` through to `:8000`.
   **This is the one to open.**
 
@@ -196,6 +199,43 @@ Honest limits: ρ ≈ 0.68 is a real ranking signal, not clairvoyance — fourte
 baseball is mostly variance, and the top-20 actual-points column barely separates the
 variants, meaning the gain is in ranking the broad pool (waiver decisions) rather than
 the very top (which is obvious anyway).
+
+### Does it actually win? — a season played out
+
+`nub run compete` plays whole seasons. Each strategy drafts from the same pool, sets a
+legal roster every week, makes waiver moves on what it believed *at the time*, and is
+scored on what those players actually produced. Rosters may overlap, so what is being
+compared is judgement, not draft position.
+
+The opponents are the two strategies human managers actually run: **season-to-date**
+("he'll keep doing what he's been doing") and **hot-hand** (chase the last fortnight).
+
+**2023–2025, 68 weeks, at one waiver move per week:**
+
+| strategy | points | % of perfect | weeks won vs bscore |
+|---|---|---|---|
+| **bscore** | **47,590** | **50.1%** | — |
+| hot-hand | 47,409 | 49.9% | 32/68 |
+| season-to-date | 45,906 | 48.3% | 27/68 |
+| perfect hindsight | 95,063 | 100% | ceiling |
+
+bscore wins outright, and wins **41 of 68 weeks** against season-to-date (+24.8 points
+per week) and 36 of 68 against hot-hand.
+
+**But the edge is in selectivity, and it disappears if you churn:**
+
+| waiver moves/week | bscore total | weeks won vs season-to-date |
+|---|---|---|
+| 0 (draft and hold) | 39,353 | 16/68 |
+| **1** | **47,590 (winner)** | **41/68** |
+| 2 | 48,030 | 34/68 |
+| 3 | 48,313 (hot-hand wins) | 33/68 |
+
+More moves raise everyone's raw total — you are simply picking up more hot players —
+but they destroy bscore's *relative* edge, and by three moves a week naive
+streak-chasing beats it outright. The model is worth using for **one high-conviction
+move a week**, not for constant churn. Autonomous mode defaults to exactly that, which
+was originally a safety choice and turns out to be the optimal one too.
 
 ### Architecture
 

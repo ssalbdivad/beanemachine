@@ -140,7 +140,7 @@ export const App = () => {
 						show("Removed")
 					})
 				}
-				onDownload={() => void run(async () => leagues.download(config!))}
+				onDownload={() => config && leagues.download(config)}
 				onLoadFile={file =>
 					void run(async () => {
 						const next = leagues.replace(await file.text())

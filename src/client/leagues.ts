@@ -13,7 +13,7 @@ import { ApiError } from "./api.ts"
  * config in exactly the same place, and the only thing still needing a server is
  * scraping a league the browser can't read itself.
  */
-export const STORE_KEY = "beanemachine:config"
+const STORE_KEY = "beanemachine:config"
 
 /** A stored config is as much a source as the API, so its failures surface the same way. */
 export class StoreError extends ApiError {}
@@ -51,6 +51,8 @@ const read = (): Config | null => {
 	}
 }
 
+/** Every write starts from what is in storage right now: another tab, or a file
+ *  loaded since this page rendered, may have moved it out from under us. */
 const current = (): Config => {
 	const config = read()
 	if (!config) throw new StoreError("No league config is stored in this browser yet.")
@@ -95,13 +97,13 @@ const create = (key: string, template: string): Config => {
 const remove = (key: string): Config => {
 	const config = current()
 	if (!(key in config.leagues)) throw new StoreError(`No league "${key}".`)
-	const { [key]: _, ...leagues } = config.leagues
+	const { [key]: _, ...kept } = config.leagues
 	return write({
 		...config,
-		leagues,
+		leagues: kept,
 		active_league:
 			config.active_league === key ?
-				Object.keys(leagues)[0] ?? null
+				Object.keys(kept)[0] ?? null
 			:	config.active_league
 	})
 }

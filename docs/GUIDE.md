@@ -108,9 +108,11 @@ Players with no projectable playing time never appear on the board at all. They 
 3. Fill in whatever landed in Needs review. In particular, **team count must be set** — replacement level is derived from teams × slots, and without a real number there is no honest bscore, so the board stays empty rather than assuming a league size.
 4. Check the **Batting** and **Pitching** tables against your league's settings page. Negative values are penalties. Add any missing stat with its code and point value.
 5. Check **Roster slots**. These drive replacement level directly. Getting the OF or SP count wrong moves every bscore at that position.
-6. **Save.** The board re-ranks immediately — the engine runs in your browser, so you can watch a scoring change reprice the league.
+6. **Save.** Your league is stored in this browser; **Download** takes it out as a file. The board re-ranks immediately — the engine runs in your browser, so you can watch a scoring change reprice the league.
 
-Two notes on the hosted site. Importing needs the local server (`nub run dev`), because Yahoo and ESPN send no CORS headers and a browser cannot read them directly. On the hosted static build, edits live in your browser and Save downloads a `scoring.json` you can keep. You can also start from a blank or platform template with **New** and enter the values by hand.
+Your leagues live in the browser you set them up in — **Save** writes them there, and they are still there next time you open the page. **Download** takes the lot out as a `scoring.json` you can keep or move to another browser, and **Load file** reads one back in, replacing what that browser holds. Nothing is stored on a server, and the first visit starts from a real league rather than an empty screen by seeding itself from the copy committed to the repo.
+
+One note on the hosted site: importing needs the local server (`nub run dev`), because Yahoo and ESPN send no CORS headers and a browser cannot read them directly. Editing, saving, downloading and loading all work on the hosted build exactly as they do locally. You can also start from a blank or platform template with **New** and enter the values by hand.
 
 ## What this tool does not know
 

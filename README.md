@@ -131,16 +131,21 @@ test:lineups` asserts batting-order capture against the live MLB StatsAPI rather
 fixture, deliberately, since the read is the thing under test — so it needs a network
 and an outage would abort the browser suites behind it rather than report a FAIL.
 
-`npm run test:static` checks the Pages build, and **it needs a preview served at the
-base the build was made for.** `vite.config.ts` applies `base: "/beanemachine/"` only
-when `command === "build"`, and preview runs as `serve`, so a bare `vite preview`
-mounts at `/` while the built `index.html` asks for `/beanemachine/assets/…`. Those
-requests fall through to the SPA handler and come back as `text/html`, the module
-never executes, and the board never renders. The `preview` script therefore passes
-`--base=/beanemachine/` itself: `npm run preview` in one shell and `npm run test:static`
-in another passes 15 of 15 — including the two assertions that used to fail, the
-disabled free-agents toggle and the `.static-note` banner (`getMode() === "static"` in
-`src/client/App.tsx`).
+`npm run test:static` checks the Pages build. `npm run preview` in one shell and
+`npm run test:static` in another passes 15 of 15 — including the two assertions that
+only hold on a real static build, the disabled free-agents toggle and the
+`.static-note` banner (`getMode() === "static"` in `src/client/App.tsx`).
+
+The build's base is **`./`**, not `/beanemachine/`. A repo-name base bakes the
+deployment path into every asset URL, so the same artifact 404s anywhere else — which
+is exactly what pointing `beanemachine.com` at it would have done, serving an
+index.html that asks for `beanemachine.com/beanemachine/assets/…`. A relative base
+resolves against the document, so one build works at the project-pages path and at a
+custom domain's apex with no rebuild and no window where either is broken. It is safe
+here specifically because the app has no client-side router — the tabs are state, not
+paths — so there is no nested URL for a relative reference to resolve wrongly against.
+`src/client/api.ts` resolves `/api/*` against `BASE_URL` for the same reason, which is
+why the static-mode probe correctly asks `<wherever-it-is>/api/health`.
 
 Node strips TypeScript types natively from 22.18 on, which is why every command
 here is a plain `node src/….ts`; on an older Node add `--experimental-strip-types`.

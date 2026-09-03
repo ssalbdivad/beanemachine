@@ -49,8 +49,23 @@ const prefetchSnapshot = (base: string): Plugin => ({
 })
 
 export default defineConfig(({ command }) => {
-	// GitHub Pages serves a project repo from /<repo>/; dev stays at the root
-	const base = command === "build" ? "/beanemachine/" : "/"
+	/**
+	 * Relative, so one build works wherever it is served from.
+	 *
+	 * This was `/beanemachine/`, the path a GitHub Pages project repo is served
+	 * under — which bakes the repo name into every asset URL and means the same
+	 * artifact 404s everywhere else. Pointing a custom domain at it would have
+	 * served `beanemachine.com` an index.html asking for
+	 * `beanemachine.com/beanemachine/assets/…`.
+	 *
+	 * `./` resolves against the document instead, so the identical build works at
+	 * `ssalbdivad.github.io/beanemachine/` AND at the apex of a custom domain, and
+	 * moving between them needs no rebuild and leaves no window where one of the
+	 * two is broken. The app has no client-side router — the tabs are state, not
+	 * paths — so there is no nested URL for a relative base to resolve wrongly
+	 * against, which is the one thing that would rule this out.
+	 */
+	const base = command === "build" ? "./" : "/"
 	return {
 		base,
 		plugins: [react(), publishSnapshot(), prefetchSnapshot(base)],

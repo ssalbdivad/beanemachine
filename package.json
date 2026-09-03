@@ -8,7 +8,7 @@
     "dev:api": "nub watch src/server.ts",
     "dev:web": "vite",
     "build": "vite build",
-    "preview": "vite preview --base=/beanemachine/",
+    "preview": "vite preview",
     "start": "nub src/server.ts",
     "import": "nub src/cli.ts",
     "test": "npm run test:node && node test/ui.mjs && node test/board.mjs && node test/trade-ui.mjs && node test/journey.mjs",

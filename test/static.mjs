@@ -2,9 +2,25 @@
 // asset into this browser's storage, editing and saving working exactly as they do
 // with a server behind them, and importing explaining why it alone still can't.
 import { chromium } from "playwright-core"
-const BASE = process.env.STATIC_BASE ?? "http://127.0.0.1:4173/beanemachine/"
+// The build's base is relative, so preview serves it at the root and the same
+// artifact would work just as well under /beanemachine/ or at a custom domain's
+// apex — which is the property this suite is checking on behalf of.
+const BASE = process.env.STATIC_BASE ?? "http://127.0.0.1:4173/"
 const b = await chromium.launch({ args: ["--no-sandbox"] })
 const p = await b.newPage({ viewport:{width:1280,height:1000} })
+/**
+ * A hosted static build has no API behind it, and that is the whole subject of this
+ * suite — so it is enforced here rather than assumed of the machine.
+ *
+ * It used to be assumed, and only held by accident: the build's base was
+ * `/beanemachine/`, so the mode probe asked for `/beanemachine/api/health`, which
+ * missed Vite's `/api` proxy prefix and fell through to the SPA handler. Once the
+ * base became relative the probe asked for `/api/health`, the proxy matched, and a
+ * dev API server that happened to be running on this machine answered 200 — so the
+ * page came up in SERVER mode and every static-only assertion below failed. The
+ * suite was measuring what else was running, not what it was built to test.
+ */
+await p.route("**/api/**", r => r.abort())
 const errs = []
 p.on("pageerror", e => errs.push(String(e)))
 await p.goto(BASE, { waitUntil:"networkidle" })

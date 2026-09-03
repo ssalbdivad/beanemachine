@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Config, League } from "./schema.ts"
+import { Config } from "./schema.ts"
 
 /**
  * scoring.json on disk. The app no longer reads or writes it — leagues live in
@@ -10,8 +10,8 @@ import { Config, League } from "./schema.ts"
  * the committed file, which is also what seeds a browser that has nothing stored.
  */
 
-export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
-export const CONFIG_PATH = join(ROOT, "scoring.json")
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
+const CONFIG_PATH = join(ROOT, "scoring.json")
 
 export class ConfigError extends Error {}
 
@@ -42,11 +42,5 @@ export const saveConfig = async (config: Config): Promise<Config> => {
 	const tmp = `${CONFIG_PATH}.tmp`
 	await writeFile(tmp, `${JSON.stringify(out, null, 2)}\n`)
 	await rename(tmp, CONFIG_PATH)
-	return out
-}
-
-export const validateLeague = (value: unknown): League => {
-	const out = League(value)
-	if (out instanceof type.errors) throw new ConfigError(`Invalid league:\n${out}`)
 	return out
 }

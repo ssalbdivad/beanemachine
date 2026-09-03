@@ -18,11 +18,26 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
 const errors = []
 page.on("pageerror", e => errors.push(String(e)))
 
+/** A 200 on this port is not proof it is this app: :5173 is a common default and
+ *  another project's dev server answers it just as happily — and here it would SKIP
+ *  with exit 0, since no other app mounts a trade tab. The wordmark is the cheapest
+ *  proof of identity, and openTrade navigates four times, so it is claimed once. */
+let identified = false
+const identify = async () => {
+	if (identified) return
+	identified = true
+	const wordmark = await page.waitForSelector("h1", { timeout: 15000 }).then(h => h.textContent(), () => null)
+	t("the page under test is beanemachine", wordmark === "beanemachine",
+		`BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
+	if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
+}
+
 /** The component is mounted by the app, so this suite must not assume where. It
  *  finds the trade view, or reports that nothing mounts it yet and stops — a
  *  wired-up UI is what is under test, not the existence of the file. */
 const openTrade = async () => {
 	await page.goto(BASE, { waitUntil: "networkidle" })
+	await identify()
 	if (await page.$(".trade-team")) return true
 	const tab = page.locator(".views button", { hasText: /trade/i }).first()
 	if (!(await tab.count())) return false

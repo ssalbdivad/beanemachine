@@ -6,6 +6,7 @@
 import {
 	activeSlots, DEFAULTS, plan, planLineup, planMoves, railViolations, resolveRoster
 } from "../src/auto/plan.ts"
+import { normalizeName } from "../src/data/yahoo-pool.ts"
 
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
@@ -509,6 +510,24 @@ t("protecting a starter does not block a move against anyone else", (() => {
 	return !started.has("Gil Ok") && p.moves.some(m => m.drop === "Gil Ok") &&
 		!p.moves.some(m => m.drop === "Solo Catcher")
 })())
+
+// normalizeName is the join key every add/drop decision runs through: plan.ts
+// looks a roster spot up by it, and looks the addable pool up by it. It used to
+// carry two straight apostrophes in its punctuation class where one of them was
+// meant to be the curly U+2019, so a Yahoo spelling of Ke\u2019Bryan Hayes kept the
+// character, matched nothing, and dropped him with no error. Both spellings must
+// collapse to one key.
+t("normalizeName strips the curly apostrophe as well as the straight one",
+	normalizeName("Ke\u2019Bryan Hayes") === "kebryan hayes" &&
+	normalizeName("Ke'Bryan Hayes") === "kebryan hayes",
+	`${normalizeName("Ke\u2019Bryan Hayes")} vs ${normalizeName("Ke'Bryan Hayes")}`)
+t("so the two spellings of a name are the same join key",
+	normalizeName("O\u2019Neill Cruz") === normalizeName("O'Neill Cruz"),
+	`${normalizeName("O\u2019Neill Cruz")} vs ${normalizeName("O'Neill Cruz")}`)
+t("and the rest of the key is unchanged: accents, suffix, case, spacing",
+	normalizeName("Ronald Acu\u00f1a Jr.") === "ronald acuna" &&
+	normalizeName("  Travis  d\u2019Arnaud  ") === "travis darnaud",
+	`${normalizeName("Ronald Acu\u00f1a Jr.")} | ${normalizeName("  Travis  d\u2019Arnaud  ")}`)
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

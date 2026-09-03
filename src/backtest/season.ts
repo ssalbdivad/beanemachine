@@ -3,7 +3,7 @@ import { matchupIndexFor, teamStrength, type TeamStrength } from "../engine/matc
 import { MODEL } from "../engine/weights.ts"
 import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import type { League } from "../schema.ts"
-import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
+import type { PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
 import { aggregateStatcast } from "../data/statcast-window.ts"
 import { cachedFetch } from "./cache.ts"

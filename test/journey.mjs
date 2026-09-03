@@ -112,6 +112,17 @@ const arrive = async () => {
 	await page.waitForSelector(".board-row", { timeout: 30000 })
 }
 await page.goto(BASE, { waitUntil: "domcontentloaded" })
+
+// A 200 on this port is not proof it is this app: :5173 is a common default and
+// another project's dev server answers it just as happily, after which every
+// assertion below fails as a selector timeout that reads like a UI defect. The
+// wordmark is the cheapest proof of identity, so it is checked before anything
+// else and stops the run rather than letting the next wait speak for it.
+const wordmark = await page.waitForSelector("h1", { timeout: 15000 }).then(h => h.textContent(), () => null)
+t("the page under test is beanemachine", wordmark === "beanemachine",
+  `BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
+if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
+
 await arrive()
 await page.evaluate(keys => keys.forEach(k => localStorage.removeItem(k)), KEYS)
 await page.reload({ waitUntil: "domcontentloaded" })
@@ -258,7 +269,9 @@ t("a filter nobody matches empties the board and says why",
 // and the whole thing unwinds back to where it started
 await search.fill("")
 await page.selectOption("[data-ctl=confidence]", "0")
-await page.selectOption("[data-ctl=sort]", "marketEdge")
+// bscore, because that is what the board now opens on: market edge divides by a
+// "% Ros" sweep that mostly returns the game's weather line (test/ownership.mjs).
+await page.selectOption("[data-ctl=sort]", "bscore")
 await page.click('.board-controls .chip-btn:text-is("All")')
 await settle()
 t("clearing every filter returns the board it opened on",

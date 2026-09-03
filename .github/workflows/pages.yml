@@ -36,6 +36,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # the pure-Node suites — no browser, no dev server, no live API — run
+      # before the capture so a defect fails the job without first spending a
+      # live MLB + Savant read. deploy needs: build, so a failure here is a
+      # deploy that does not happen. The four browser suites stay out: they
+      # drive a real page and need Vite up, which this job has no server for.
+      - run: pnpm test:node
       # capture live MLB + Savant data; the browser can't call them directly
       # (neither sends CORS headers), so the snapshot is how real data ships
       - run: pnpm refresh

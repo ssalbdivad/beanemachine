@@ -140,16 +140,6 @@ export interface ProjectOptions {
 }
 
 /**
- * The recent window that measured best per side, over 2016–2026.
- *
- * They differ, and the reason is structural rather than statistical: a hitter's
- * role can change in a week, so a 7-day window tracks it; a starter works every
- * fifth day, so a 7-day window is one or two starts of pure noise and 21 days is
- * needed before his workload is even visible.
- */
-export const RECENT_WINDOW_DAYS = { hitting: 7, pitching: 21 } as const
-
-/**
  * Playing-time windows and their relative weights, per side.
  *
  * A single flat window throws away the fact that the last series is worth more

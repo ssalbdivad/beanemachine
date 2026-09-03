@@ -126,13 +126,86 @@ export const fetchAvailable = async (
 	}
 }
 
-/** Normalised for joining to MLB names: accents, punctuation and suffixes vary. */
+/**
+ * Which "% Ros" values are the weather rather than a roster share.
+ *
+ * Yahoo nests a forecast table inside each OUTDOOR game's tooltip, and `parsePage`
+ * reads the first percentage left in a player's row block after stripping the
+ * forecast lines it knows the labels of. It did not know all of them. So a
+ * per-GAME number reached the field, and because it is per-game every player in
+ * both clubs of that matchup carries it: on the capture committed as
+ * data/snapshot.json, all 30 Yankees and all 28 Angels read 47%, Dodgers and
+ * Cardinals 54%, Orioles and Rockies 20%, and 225 players across four games 51%.
+ * Those are the day's matchups. 20 of 30 clubs sat on one value, most of them at
+ * 93-100% of the club.
+ *
+ * This is not a cosmetic column. Market edge — for a long time the board's DEFAULT
+ * ranking — is a player's bscore minus the median bscore at his ownership decile,
+ * so a wrong percentage does not degrade one cell, it reorders the whole board by
+ * a number drawn from the precipitation forecast.
+ *
+ * Rather than guess at Yahoo's markup a second time, the read is checked against
+ * something that must be true of the real quantity: roster share VARIES within a
+ * club. A star and his club's fifth starter are not owned in the same fraction of
+ * leagues, to the percent. When most of a club agrees exactly, the number being
+ * read belongs to the game and not to the player, and the honest thing is to have
+ * no ownership for those players — this project's whole rule is that absent is
+ * reported as absent rather than filled in.
+ *
+ * It flags a VALUE per club, not the club: the genuine singleton reads inside a
+ * poisoned club (Soto 99, Machado 97, Lindor 96) are real and survive.
+ */
+export const leakedByTeam = (
+	rows: readonly { team: string | null; rosteredPct?: number | null }[]
+): Map<string, number> => {
+	const byTeam = new Map<string, number[]>()
+	for (const r of rows) {
+		if (!r.team || r.rosteredPct === null || r.rosteredPct === undefined) continue
+		const list = byTeam.get(r.team)
+		if (list) list.push(r.rosteredPct)
+		else byTeam.set(r.team, [r.rosteredPct])
+	}
+	const leaked = new Map<string, number>()
+	for (const [team, vals] of byTeam) {
+		// Two players agreeing is a coincidence. A club Yahoo listed only a handful
+		// of players from cannot distinguish a leak from a small sample, so it is
+		// left alone rather than blanked on a guess.
+		if (vals.length < 10) continue
+		const counts = new Map<number, number>()
+		for (const v of vals) counts.set(v, (counts.get(v) ?? 0) + 1)
+		let best = 0
+		let bestVal = 0
+		for (const [v, n] of counts)
+			if (n > best) {
+				best = n
+				bestVal = v
+			}
+		if (best / vals.length > 0.5) leaked.set(team, bestVal)
+	}
+	return leaked
+}
+
+/**
+ * Normalised for joining to MLB names: accents, punctuation and suffixes vary.
+ *
+ * The punctuation class held two straight apostrophes for a while — they read as
+ * one straight and one curly — so U+2019 survived normalisation here while the
+ * browser's copy stripped it. Every read keyed on this function fails open when
+ * that happens: snapshot.ts joins eligibility and ownership by name, and
+ * auto/plan.ts decides who is addable by name, and a key that never matches drops
+ * the player with no error. MLB spells him Ke'Bryan Hayes with U+0027; if a Yahoo
+ * page ever spells him with U+2019 the two must still collapse to the same key.
+ * The escape is written out so the difference is visible in a diff.
+ *
+ * src/client/useBoard.ts carries a second copy for the browser bundle. It always
+ * had the U+2019 escape; this one is now the same function.
+ */
 export const normalizeName = (n: string): string =>
 	n
 		.normalize("NFD")
 		.replace(/[̀-ͯ]/g, "")
 		.toLowerCase()
-		.replace(/[.'']/g, "")
+		.replace(/[.'\u2019]/g, "")
 		.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "")
 		.replace(/\s+/g, " ")
 		.trim()
@@ -168,9 +241,12 @@ export const fetchOwnership = async (
 	note: string
 }> => {
 	const { pages = 8, sport = "baseball" } = options
-	const byName = new Map<string, number>()
 	const eligibility = new Map<string, string[]>()
 	const seen = new Set<string>()
+	// Held whole rather than folded into a map page by page, because whether a
+	// percentage is this player's roster share or his game's forecast can only be
+	// decided against his club-mates — see `leakedByTeam`.
+	const priced: PoolEntry[] = []
 	let read = 0
 	for (const pos of POSITIONS)
 		for (let page = 1; page <= pages; page++) {
@@ -208,7 +284,7 @@ export const fetchOwnership = async (
 					fresh++
 					read++
 					const key = normalizeName(r.name)
-					if (r.rosteredPct !== null) byName.set(key, r.rosteredPct)
+					if (r.rosteredPct !== null) priced.push(r)
 					// a single position from this source is no better than what StatsAPI
 					// already gives, so only a genuine multi-position line is recorded
 					if (r.positions.length > 1) eligibility.set(key, r.positions)
@@ -222,6 +298,20 @@ export const fetchOwnership = async (
 			// collapse the pool, which has happened here before
 			await new Promise(r => setTimeout(r, 120))
 		}
+	// The forecast check, applied to the whole sweep at once. A percentage most of a
+	// club shares to the point is the game's number, not the player's, and dropping
+	// it leaves that player with no ownership — which every consumer already handles,
+	// because Yahoo omits plenty of players outright.
+	const leaked = leakedByTeam(priced)
+	const byName = new Map<string, number>()
+	let discarded = 0
+	for (const r of priced) {
+		if (r.team && leaked.get(r.team) === r.rosteredPct) {
+			discarded++
+			continue
+		}
+		byName.set(normalizeName(r.name), r.rosteredPct!)
+	}
 	return {
 		byName,
 		eligibility,
@@ -230,6 +320,11 @@ export const fetchOwnership = async (
 			`Yahoo "% Ros" for ${byName.size} of ${read} players read, swept ${pages} pages ` +
 			`per position, of whom ${eligibility.size} print more than one eligible ` +
 			`position. Players Yahoo did not list have no ownership figure — they are ` +
-			`reported as unknown rather than as unowned.`
+			`reported as unknown rather than as unowned.` +
+			(discarded ?
+				` ${discarded} more were discarded: ${leaked.size} club${leaked.size === 1 ? "" : "s"} ` +
+				`came back with most of the roster on one percentage, which is the game's ` +
+				`weather line rather than anybody's roster share.`
+			:	"")
 	}
 }

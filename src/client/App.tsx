@@ -19,53 +19,18 @@ import {
 	RosterPanel,
 	Setup,
 	StatTable,
-	TeamCountInput
+	TeamCountInput,
+	type View,
+	VIEWS
 } from "./panels.tsx"
 import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
 
 const TEMPLATES = ["custom", "yahoo", "espn", "sleeper"]
 
-type View = "board" | "league" | "trade" | "draft"
-
 /** What is known about the leagues in this browser. Three states, because an
  *  unreadable store and an empty one call for opposite advice. */
 type StoreState = "reading" | "read" | "unreadable"
-
-/**
- * The four tabs, in DOM order — which is deliberately not the order a season is
- * run in.
- *
- * A season goes: set the league up, draft it, manage the team, then read the
- * board every week. But the board is the tab someone opens fifty times and the
- * setup is the tab they open once, so the board lands first and stays first.
- * The sequence is stated instead of implied by position: the setup panel lists
- * the tabs in season order, and every button says what it is for on hover.
- */
-const VIEWS: { id: View; label: string; purpose: string }[] = [
-	{
-		id: "board",
-		label: "Recommendations",
-		purpose:
-			"The wire ranked in this league's scoring, over the next week, the standing fortnight, or the rest of the season. The tab you come back to."
-	},
-	{
-		id: "league",
-		label: "League setup",
-		purpose:
-			"Scoring, roster slots and team count — read off the platform or entered by hand. Everything the other tabs say is priced in these."
-	},
-	{
-		id: "trade",
-		label: "My team & trades",
-		purpose: "Your roster and starting lineup in points, and what a proposed deal does to it."
-	},
-	{
-		id: "draft",
-		label: "Draft",
-		purpose: "Who to take next, what he gains over the next man up, and where each position's cliff is."
-	}
-]
 
 /** The league picker is one control doing four jobs, so it says which one. */
 const LEAGUE_LABEL: Record<View, string> = {
@@ -747,15 +712,15 @@ const ScoringPeriodPanel = ({
 		:	"Until the period is stated the board takes a rolling week and reads nothing else here."
 
 	/** What the board fills each null in with. Every line names a fallback that is in
-	 *  period.ts and would otherwise move a ranking without saying so — `days ?? 7`
-	 *  and `lineup_lock === "period"` are read whether or not the league stated them,
-	 *  and unlike the Monday fallback they leave no trace in the sentence above. */
+	 *  period.ts and would otherwise move a ranking without saying so. `basis` names
+	 *  the Monday and seven-day fallbacks itself; the unstated lineup lock leaves no
+	 *  trace there, because an unlocked period reads the same as a stated one. */
 	const assumptions: string[] = []
 	if ((stated?.kind ?? null) === null)
 		assumptions.push(
 			"This league has not said how its scoring period runs, so that window is an assumption rather than its own."
 		)
-	else if (resolved.assumed)
+	else if (stated?.kind === "matchup" && stated.starts_on === null && stated.anchor === null)
 		assumptions.push("Neither a start day nor an anchor is stated, so the board falls back to a Monday start.")
 	if (stated?.kind === "matchup" && stated.days === null)
 		assumptions.push("No length is stated, so the board reads the period as seven days long.")

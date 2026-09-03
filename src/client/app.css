@@ -185,7 +185,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{
 /* One uppercase-mono label, everywhere something is named rather than said. */
 .board-head,.ctl>span,h2,.tot span,.savebar .msg,summary,.views button,
 .detail h3,.bench h3,.slot-changes h3,.deal-side h3,.trade-verdict h3,
-.vn span,.card.pick .pick-score span,.views-link,.chip.age{
+.vn span,.card.pick .pick-score span,.views-link{
   font-family:var(--mono);letter-spacing:var(--caps);text-transform:uppercase;
 }
 
@@ -642,12 +642,6 @@ pre{
 .board-row .games{font-size:var(--fs-3);color:var(--muted)}
 .gap{font-size:var(--fs-3);color:var(--faint)}
 .gap.up{color:var(--flag);font-weight:600}
-/* Two-start marker. Small and adjacent to the number it doubles, because that is
-   literally what it is telling you about. */
-.board-row .starts{
-  font-style:normal;font-size:var(--fs-2);font-weight:700;letter-spacing:.02em;
-  color:var(--accent);margin-left:var(--sp-1);vertical-align:top;
-}
 /* confidence as a filling lens — the same motif Billy wears */
 .conf{position:relative;display:block;height:16px;border-radius:5px;
   background:var(--well);border:1px solid var(--well-line);overflow:hidden}
@@ -708,8 +702,6 @@ pre{
 .notes.warn li{border-left-color:var(--flag);color:var(--flag)}
 .tiny-note{margin:0 0 9px;font-size:var(--fs-2);line-height:var(--lh-snug);color:var(--faint);font-style:italic}
 
-.chip.age{margin-left:auto;font-size:var(--fs-1);letter-spacing:.08em;
-  text-transform:none;padding:3px 9px;font-variant-numeric:tabular-nums}
 .legend{margin-top:var(--sp-4)}
 .legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}
 .legend dt{color:var(--accent);font-weight:500;text-transform:none}

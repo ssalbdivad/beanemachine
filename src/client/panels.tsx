@@ -517,17 +517,48 @@ export const leagueGaps = (league: League): Gap[] => {
 export const leagueReady = (league: League | null | undefined): boolean =>
 	!!league && leagueGaps(league).every(g => g.have !== null)
 
-/** What each tab is for, in the order a season actually runs. The nav can't be
- *  reordered to match — the board is the tab people come back to, so it stays
- *  first — so the sequence is said here instead of implied by position. */
-const TABS: [string, string][] = [
-	[
-		"League setup",
-		"Scoring, roster slots and team count. Read off the platform, or typed in — every other tab prices what it ranks in these."
-	],
-	["Draft", "Who to take next, what it gains over the next man up, and where the cliff at each position is."],
-	["My team & trades", "Your starting lineup in points, and what a proposed deal does to it."],
-	["Recommendations", "The wire ranked in your scoring, over a week, a fortnight or the rest of the season. The weekly one."]
+export type View = "board" | "league" | "trade" | "draft"
+
+/**
+ * The four tabs, in DOM order — which is deliberately not the order a season is
+ * run in.
+ *
+ * A season goes: set the league up, draft it, manage the team, then read the
+ * board every week. But the board is the tab someone opens fifty times and the
+ * setup is the tab they open once, so the board lands first and stays first.
+ * The sequence is stated instead of implied by position: `season` is that order,
+ * the setup panel below prints the list in it, and every nav button says what it
+ * is for on hover. One list, because two of them drifted: the copy that lived
+ * here called the board "The weekly one", but the tab opens on the fortnight —
+ * `useBoard.ts` defaults `mode: "board"`, which is the 14-day horizon.
+ */
+export const VIEWS: { id: View; label: string; purpose: string; season: number }[] = [
+	{
+		id: "board",
+		label: "Recommendations",
+		season: 4,
+		purpose:
+			"The wire ranked in this league's scoring, over the next week, the standing fortnight, or the rest of the season. The tab you come back to."
+	},
+	{
+		id: "league",
+		label: "League setup",
+		season: 1,
+		purpose:
+			"Scoring, roster slots and team count — read off the platform or entered by hand. Everything the other tabs say is priced in these."
+	},
+	{
+		id: "trade",
+		label: "My team & trades",
+		season: 3,
+		purpose: "Your roster and starting lineup in points, and what a proposed deal does to it."
+	},
+	{
+		id: "draft",
+		label: "Draft",
+		season: 2,
+		purpose: "Who to take next, what he gains over the next man up, and where each position's cliff is."
+	}
 ]
 
 /**
@@ -564,10 +595,10 @@ export const Setup = ({
 							league&rsquo;s scoring</i>.
 						</>
 					:	<>
-							<b>{name}</b> was created from a blank template, so{" "}
-							{missing.length === 1 ? "one input is" : `${missing.length} inputs are`} still
-							missing. Nothing is assumed in their place: a value nobody read stays missing
-							and stays listed.
+							<b>{name}</b> is{" "}
+							{missing.length === 1 ? "one input" : `${missing.length} inputs`} short of
+							ranking anything. Nothing is assumed in their place: a value nobody read
+							stays missing and stays listed.
 						</>
 					}
 				</p>
@@ -631,11 +662,13 @@ export const Setup = ({
 					What each tab does once those exist, in the order a season uses them:
 				</p>
 				<dl>
-					{TABS.map(([tab, does]) => (
-						<Fragment2 key={tab} term={tab}>
-							{does}
-						</Fragment2>
-					))}
+					{[...VIEWS]
+						.sort((a, b) => a.season - b.season)
+						.map(v => (
+							<Fragment2 key={v.id} term={v.label}>
+								{v.purpose}
+							</Fragment2>
+						))}
 				</dl>
 			</section>
 		</div>

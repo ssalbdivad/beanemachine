@@ -81,17 +81,21 @@ npx vite                # Vite client on :5173, proxying /api — this is the on
 node src/refresh.ts     # capture a fresh snapshot of MLB + Savant into data/snapshot.json
 npm run check           # tsc --noEmit
 npm run build           # static bundle into dist/
-npm test                # every suite: engine, leagues, trade, draft, auto, ui, board, trade-ui, journey
+npm test                # every suite: engine, leagues, trade, draft, auto, period, ui, board, trade-ui, journey
+npm run test:node       # just the pure-Node six — no browser, no server. This is what CI runs.
 ```
 
 Two notes a new reader will otherwise hit. The `dev`, `start` and `import` entries
 in `package.json` shell out to `nub`, a TypeScript runner this repo does not
 install, so they fail; the lines above are what they were meant to do, and
-`node src/cli.ts` is the `import` one. And of the nine suites `npm test`
-runs, five are pure Node (`engine`, `leagues`, `trade`, `draft`, `auto`) while four
-(`ui`, `board`, `trade-ui`, `journey`) drive a real page at
-`http://127.0.0.1:5173`, so **the Vite server has to be running** or they fail on a
-connection rather than on a defect. Two of those four — `ui` and `board` — reach
+`node src/cli.ts` is the `import` one. And of the ten suites `npm test`
+runs, six are pure Node (`engine`, `leagues`, `trade`, `draft`, `auto`, `period` — the
+`test:node` script, which is also the CI gate) while four (`ui`, `board`, `trade-ui`,
+`journey`) drive a real page at `http://127.0.0.1:5173`, so **the Vite server has to be
+running** or they fail on a connection rather than on a defect. A live server on that
+port that is not this app is the same trap without the connection error, so each of the
+four reads the `<h1>` wordmark before its first assertion and stops there if `BASE` is
+serving somebody else. Two of those four — `ui` and `board` — reach
 `/api` as well, so **`node src/server.ts` has to be up beside it** or Vite proxies
 into nothing and the page logs a 502 that reads like a client bug. Both lines
 above, both running, is the state every suite expects. `BASE=` points them
@@ -109,19 +113,24 @@ comes back empty, `projectedVolume` is 0, `rateable` is false for every player, 
 the row filter drops all of them. Restart Vite after a refresh, or copy the file
 across by hand.
 
-Two more suites sit outside `npm test` because each needs something built first.
-`npm run test:compete` replays 2021-2025 from a warm backtest cache and passes.
+Three more suites sit outside `npm test`, each because it needs something the chain
+cannot assume. `npm run test:compete` replays 2021-2025 from a warm backtest cache and
+passes — the cache is `data/backtest-cache/`, which is gitignored, so a fresh clone has
+nothing to replay until `node src/backtest/compete.ts` has run once. `npm run
+test:lineups` asserts batting-order capture against the live MLB StatsAPI rather than a
+fixture, deliberately, since the read is the thing under test — so it needs a network
+and an outage would abort the browser suites behind it rather than report a FAIL.
 
-`npm run test:static` checks the Pages build, and **it needs a correctly-based
-preview or it cannot run at all.** `vite.config.ts` applies `base: "/beanemachine/"`
-only when `command === "build"`, and preview runs as `serve`, so `npm run preview`
+`npm run test:static` checks the Pages build, and **it needs a preview served at the
+base the build was made for.** `vite.config.ts` applies `base: "/beanemachine/"` only
+when `command === "build"`, and preview runs as `serve`, so a bare `vite preview`
 mounts at `/` while the built `index.html` asks for `/beanemachine/assets/…`. Those
 requests fall through to the SPA handler and come back as `text/html`, the module
-never executes, and the board never renders. `npx vite preview --base=/beanemachine/`
-serves it correctly, and against that the suite passes 15 of 15 — including the two
-assertions that used to fail, the disabled free-agents toggle and the `.static-note`
-banner (`getMode() === "static"` in `src/client/App.tsx`). The base mismatch in
-`preview` is still a live defect; the two static-build defects have been fixed.
+never executes, and the board never renders. The `preview` script therefore passes
+`--base=/beanemachine/` itself: `npm run preview` in one shell and `npm run test:static`
+in another passes 15 of 15 — including the two assertions that used to fail, the
+disabled free-agents toggle and the `.static-note` banner (`getMode() === "static"` in
+`src/client/App.tsx`).
 
 Node strips TypeScript types natively from 22.18 on, which is why every command
 here is a plain `node src/….ts`; on an older Node add `--experimental-strip-types`.
@@ -454,26 +463,23 @@ collapses the model to a coin flip against a naive manager.
 
 ### What the board opens on
 
-The default ranking is **market edge**, not bscore. A bare bscore ranking answers
-"who is best", which on a waiver wire is half a question — the best players are
-already rostered. Market edge answers "who is the field wrong about": it compares
-each player's bscore against the *median bscore of the players the field prices the
-same way he is priced*, using Yahoo's "% Ros" as the price.
+The default ranking is **bscore**. It opened on market edge for a long time, on the
+reasoning that a bare bscore ranking answers "who is best" when the best players are
+already rostered, while edge answers "who is the field wrong about" — comparing a
+player's bscore against the median bscore of players *priced the same way he is
+priced*, using Yahoo's "% Ros" as the price. An edge of +18 means eighteen points more
+than the typical player rostered in about as many leagues.
 
-It is a residual, so it stays denominated in league points — an edge of +18 means
-eighteen points more than the typical player rostered in about as many leagues. A
-percentile difference would have crowned every unrostered replacement-level body.
-
-Ownership is read from Yahoo's own player pages. They cap an anonymous reader at 24
-rows and ignore the paging offset, but `count=` shifts the window — `count=50`
-returns the next two dozen — so sweeping it per position exposes the whole priced
-universe without an account. How much comes back depends on who is asking: a local
-sweep reads about 845 players, while the CI runner that builds the published
-snapshot is throttled down — the shipped capture read 300 rows, of which 228 are
-pooled players. Below 35% coverage the board falls back to ranking by bscore and
-says so on screen, because ranking by edge drops everyone unpriced. Anyone Yahoo
-does not list has **no** market edge and shows a dash: unknown is not the same as
-unowned, and the board will not rank a player on a price it never read.
+The reasoning survived; the price did not. Most of what the "% Ros" sweep returns is
+the per-game weather line out of Yahoo's forecast tooltip rather than anybody's roster
+share: on the committed capture twenty of thirty clubs have 93–100% of their players
+on one identical percentage, paired exactly by that day's matchups. Since edge is
+bscore minus the median at the same ownership decile, that reordered the entire board
+by the precipitation forecast. Captures now discard any percentage most of a club
+shares to the point (`leakedByTeam`), `test/ownership.mjs` pins the shape, and the
+default is the honest column until a clean capture exists. Edge stays selectable and
+says plainly that it is unreliable. A player Yahoo does not list has **no** market
+edge and shows a dash: unknown is not the same as unowned.
 
 ### Tuning it — `model.json`
 

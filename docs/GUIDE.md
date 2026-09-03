@@ -29,16 +29,38 @@ measured claim about the Statcast numbers on each card. They have been measured 
 one-week horizon and rejected as a multiplier; nobody has measured what they are
 worth over a rest-of-season hold. Read them as a human, not as a number the model used.
 
-## The edge column
+## The edge column, and why it is no longer the default
 
-The default sort is **edge**, not bscore, because a bare bscore ranking opens on
-players who are already rostered in every league. Edge compares a player's bscore
-against the median bscore of the players the field prices the same way he is priced,
-using Yahoo's "% Ros". An edge of +18 means eighteen points more than the typical
-player rostered about as widely.
+Edge compares a player's bscore against the median bscore of the players the field
+prices the same way he is priced, using Yahoo's "% Ros". An edge of +18 means
+eighteen points more than the typical player rostered about as widely. A dash means
+Yahoo doesn't list the player, so there is no market price to compare against —
+unknown, which is not the same as unowned.
 
-A dash in that column means Yahoo doesn't list the player, so there is no market
-price to compare against — unknown, which is not the same as unowned.
+**The board used to open on edge and no longer does, because the price it divides by
+is mostly wrong.** Yahoo nests a weather forecast inside each outdoor game's tooltip,
+and the sweep that reads "% Ros" was taking the first percentage left in a player's
+row after stripping the three forecast lines it knew the labels of. It did not know
+all of them, so a per-*game* number reached the field — and being per-game, every
+player in both clubs carries it. On the committed capture all thirty Yankees and all
+twenty-eight Angels read 47%, Dodgers and Cardinals 54%, Orioles and Rockies 20%, and
+225 players across four games read 51%. Those are the day's matchups, not roster
+shares: twenty of thirty clubs sat on a single value, most of them at 93–100% of the
+club. Fewer than a hundred of the 848 values look like genuine per-player reads.
+
+That is not a cosmetic column when it is the default sort. Market edge is bscore
+minus the median at the same ownership decile, so a wrong percentage does not degrade
+one cell — it reorders the whole board by the precipitation forecast.
+
+Captures taken from now on discard those values (`leakedByTeam` in
+`src/data/yahoo-pool.ts` drops any percentage most of a club shares to the point, on
+the ground that real roster share varies within a club), and `test/ownership.mjs`
+pins the shape so it cannot ship again. The committed snapshot predates the check.
+Until a capture passes it, treat edge as unreliable: it is still selectable, it now
+warns you rather than silently handing back a different ranking, and **bscore** is the
+honest column. The original reasoning for the edge default — that a bare bscore
+ranking opens on players already rostered everywhere — is still right, and **Free
+agents only** is the control that answers it in the meantime.
 
 ## What am I looking at?
 
@@ -87,7 +109,7 @@ If a player is eligible at more than one slot, he is scored at whichever slot ma
 
 ### Draft day
 
-Switch **Rank by** to bscore — the board opens on market edge, which is a waiver-day question, not a draft-day one — leave the filters wide, and read down. The board is already telling you when to take the scarce position, so you do not need a separate "positional tier" exercise, because scarcity is priced into the number. **Where it hurts to wait**, under the board, is the same information as a shape: long bars are the slots you pay for early.
+Leave **Rank by** on bscore — which is what the board opens on — leave the filters wide, and read down. The board is already telling you when to take the scarce position, so you do not need a separate "positional tier" exercise, because scarcity is priced into the number. **Where it hurts to wait**, under the board, is the same information as a shape: long bars are the slots you pay for early.
 
 Better still, use the **Draft** tab, which is built for exactly this. It knows what you
 have already taken, so it ranks by how much a pick improves *your* projected starting
@@ -95,9 +117,10 @@ lineup rather than by raw value — once you hold three outfielders and no catch
 outfielder is worth very little to you and the recommendation says so. Mark players as
 they go and the remaining pool, and the per-slot cliff, update as you draft.
 
-One thing to watch: the projection horizon is 14 days from the last data capture, so
-early in a season the sample behind every row is thin and confidence will be low across
-the board.
+One thing to watch: the Draft tab prices every pick over the rest of the season, and
+the board's default tab over fourteen days from the last data capture — either way,
+early in a season the sample behind every row is thin and confidence will be low
+across the board.
 
 ### Weekly waivers
 
@@ -125,7 +148,7 @@ The scarcity card shows, per slot, how far the best player you can still get sit
 
 The second view, **My team & trades**, is the one place the app knows what you hold. Add the players you own by name; they are stored in this browser under *this league's* key, so switching leagues switches teams and a roster never travels between them. Only ids are stored, so your team stays correct as the snapshot behind it is recaptured — and an id the current capture has no row for is named on screen rather than quietly dropped.
 
-From that it fills your league's real startable spots, best legal lineup first, and shows every spot accounted for out loud: filled by one of yours, covered at the waiver bar because nobody you own is eligible there, or a hole nothing in the pool can fill. A hole is reported as a hole, not priced at zero.
+From that it fills your league's real startable spots, best legal lineup first, and shows every spot accounted for out loud: filled by one of yours, covered at the waiver bar because nobody you own is worth it there — either nobody left unseated is eligible, or the best one who is projects below the freely available body — or a hole nothing in the pool can fill. A hole is reported as a hole, not priced at zero.
 
 Then the deal. Pick who leaves and who arrives, and the verdict is **what your starting lineup projects afterwards, minus what it projects now**. That is deliberately not "who has the higher bscore": bench depth is worth nothing until it starts, so a player who arrives and doesn't crack your lineup adds nothing to the number, and a player you give up who wasn't starting costs nothing. Both cases are stated on screen rather than left as an unexplained zero, alongside the spot-by-spot changes and anything the engine could not read.
 
@@ -148,7 +171,7 @@ perfectly good hold. Same player, same data, different question.
 |---|---|---|
 | **#** | Rank under the current sort | Changes with the filters — it is a position in this list, not a global rating |
 | **Player** | Name, then his best slot, his team, and an injury tag if he has one | The slot code is the one the bscore was computed against |
-| **edge** | bscore minus what a player rostered about as widely typically produces | The default sort. A dash means Yahoo doesn't list him: unknown, not unowned |
+| **edge** | bscore minus what a player rostered about as widely typically produces | Currently unreliable and not the default — the "% Ros" sweep mostly returns the game's weather line. A dash means Yahoo doesn't list him: unknown, not unowned |
 | **bscore** | Projected points minus the replacement at that slot | Points you gain over a free pickup. An `×N` badge here means N starts are scheduled for him in this window; it only appears at two or more |
 | **proj pts** | Projected points over the horizon | Raw production. Not comparable across positions |
 | **waiver pts** | What a freely available player at that slot projects | Your baseline. Higher at deep positions, lower at scarce ones |
@@ -212,7 +235,7 @@ Be clear-eyed about the edges. It:
 - **Does not model keeper or dynasty value, and does not know your budget.** The **Stash** tab ranks over the rest of the season, which is the longest horizon here; nothing looks past this season at all.
 - **Knows multi-position eligibility for the players your platform prints it for.** This was the largest known accuracy gap and is now mostly closed: Yahoo prints real eligibility beside every name ("MIN - 1B,3B"), the same sweep that reads ownership captures it, and a player is valued at his *scarcest* eligible slot — so a catcher who also qualifies at first is finally worth what he is worth. Roughly 430 players come back with a genuine multi-position line. For anyone the platform did not list, the board still has only the one primary position StatsAPI reports, and it does not guess.
 - **Does not use park factors, weather, or lineup slot.** There was a park fetcher; Savant's park-factor endpoint returns HTML and ignores `csv=true`, so it produced rows of nulls that nothing consumed. It and the park term have been removed rather than left looking like a feature. No readable source has been found, so this is "not modelled", not "modelled quietly".
-- **Ranks all of MLB, not just who is available to you.** The names at the top are usually rostered — which is exactly why the board opens on market edge instead. The **Free agents only** toggle narrows it properly by reading your league's actual free agent list, but it works only for Yahoo leagues that are publicly viewable, and only when you are running locally, because the hosted build has no server to fetch the pool through.
+- **Ranks all of MLB, not just who is available to you.** The names at the top are usually rostered. The **Free agents only** toggle narrows it properly by reading your league's actual free agent list, but it works only for Yahoo leagues that are publicly viewable, and only when you are running locally, because the hosted build has no server to fetch the pool through.
 - **Does not move a recommendation on Statcast.** xwOBA and barrel rate are shown, ranked and used to find buy-low candidates, because they genuinely inform a human. They are not multiplied into any projection: as a multiplier they were measured over 111 weeks and lost at every setting. The drill-down says so on every player.
 
 ## How the model was validated

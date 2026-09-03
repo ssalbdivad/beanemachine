@@ -11,6 +11,17 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
 const errors = []
 page.on("pageerror", e => errors.push(String(e)))
 await page.goto(BASE, { waitUntil: "networkidle" })
+
+// A 200 on this port is not proof it is this app: :5173 is a common default and
+// another project's dev server answers it just as happily, after which every
+// assertion below fails as a selector timeout that reads like a UI defect. The
+// wordmark is the cheapest proof of identity, so it is checked before anything
+// else and stops the run rather than letting the next wait speak for it.
+const wordmark = await page.waitForSelector("h1", { timeout: 15000 }).then(h => h.textContent(), () => null)
+t("the page under test is beanemachine", wordmark === "beanemachine",
+  `BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
+if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
+
 await page.waitForSelector(".board-row", { timeout: 30000 })
 
 t("no page errors", errors.length === 0, errors.join(" | "))
@@ -18,36 +29,47 @@ t("board renders ranked rows", (await page.$$eval(".board-row", n => n.length)) 
 
 const scores = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("bscores are finite numbers", scores.every(Number.isFinite), String(scores.slice(0, 3)))
-// The board opens on market edge, not bscore: the best players are already
-// rostered, so a bare bscore ranking opens on names the reader cannot add.
-const edges = await page.$$eval(".board-row .edge", n =>
-  n.map(e => Number(String(e.textContent).replace("+", "")))
-)
-// Ownership is optional data and how much arrives depends on who Yahoo is
-// throttling, so the DEFAULT ranking has to survive it being thin. Either the
-// board is ranked by edge, or it fell back to bscore and said so — never a board
-// that silently shrank to the handful of players it could price.
-const fellBack = await page.$$eval(".warn-note", n => n.length > 0)
+/**
+ * The board opens on bscore.
+ *
+ * It opened on market edge for a long time, on the reasoning that the best players
+ * are already rostered so a bare bscore ranking names people you cannot add. The
+ * reasoning survives; the input did not. "% Ros" is swept off Yahoo's player pages
+ * and most of what comes back is the per-game weather line from the forecast
+ * tooltip — on the committed capture, 20 of 30 clubs have almost every player on
+ * one identical percentage, paired exactly by that day's matchups (see
+ * test/ownership.mjs, which pins the shape). Market edge divides by that number,
+ * so it was reordering the whole board by the precipitation forecast.
+ */
 const bscores = await page.$$eval(".board-row .bscore", n =>
   n.map(e => Number(String(e.textContent).replace(/[^0-9.\-]/g, "")))
 )
-t("board opens sorted by whichever ranking is usable",
-  fellBack
-    ? bscores.every((v, i) => i === 0 || bscores[i - 1] >= v)
-    : edges.every((v, i) => i === 0 || edges[i - 1] >= v),
-  `${fellBack ? "bscore fallback" : "market edge"}: ${String((fellBack ? bscores : edges).slice(0, 5))}`)
-t("a thin ownership capture says so instead of emptying the board",
-  fellBack ? bscores.length > 50 : edges.slice(0, 20).every(v => v > 0),
-  `fellBack=${fellBack}, rows=${bscores.length}`)
+t("board opens sorted by bscore, descending",
+  bscores.length > 50 && bscores.every((v, i) => i === 0 || bscores[i - 1] >= v),
+  `${bscores.length} rows: ${String(bscores.slice(0, 5))}`)
+// The whole rateable pool, not the handful edge could price. Market edge dropped
+// everyone unpriced, and on a thin capture that silently shrank the board to a
+// short list that looked like a working one.
+t("the default ranking places the whole pool rather than the priced subset",
+  bscores.length >= 120, `${bscores.length} rows`)
 
-// and bscore still sorts when asked for
+// Edge is still selectable, and picking it explicitly still orders by edge — a
+// reader who asks for it has asked for exactly the subset it can price.
+await page.click(".board-head .sort-head:has-text('edge')")
+await page.waitForTimeout(200)
+const edges = await page.$$eval(".board-row .edge", n =>
+  n.map(e => Number(String(e.textContent).replace("+", "")))
+)
+t("choosing market edge still orders by edge",
+  edges.length > 0 && edges.every((v, i) => i === 0 || edges[i - 1] >= v), String(edges.slice(0, 5)))
+// and says so, rather than handing back a different ranking under the same label
+t("market edge warns that the number it divides by is unreliable",
+  (await page.$$eval(".warn-note", n => n.length)) > 0)
 await page.click(".board-head .sort-head:has-text('bscore')")
-await page.waitForTimeout(150)
+await page.waitForTimeout(200)
 const byB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("sorting by bscore still orders by bscore",
   byB.every((v, i) => i === 0 || byB[i - 1] >= v), String(byB.slice(0, 5)))
-await page.click(".board-head .sort-head:has-text('edge')")
-await page.waitForTimeout(150)
 
 // Scarcity must reflect the league's real slots and rank by the actual cliff.
 const scars = await page.$$eval(".scar", n => n.map(e => ({

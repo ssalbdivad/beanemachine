@@ -52,8 +52,6 @@ export interface Filters {
 	slot: string
 	group: "all" | "hitting" | "pitching"
 	hideInjured: boolean
-	/** Only pitchers with two or more scheduled starts in the horizon. */
-	twoStartOnly: boolean
 	availableOnly: boolean
 	minConfidence: number
 	/**
@@ -80,14 +78,28 @@ export const DEFAULT_FILTERS: Filters = {
 	slot: "",
 	group: "all",
 	hideInjured: false,
-	twoStartOnly: false,
 	availableOnly: false,
 	minConfidence: 0,
-	// The default answers "who is the field wrong about", not "who is best" — the
-	// best players are already rostered, so a bare bscore ranking opens on names
-	// nobody reading this can actually add.
 	mode: "board",
-	sort: "marketEdge",
+	/**
+	 * bscore, because the field's price is not currently readable.
+	 *
+	 * This opened on market edge for a long time, on the reasoning that the best
+	 * players are already rostered so a bare bscore ranking names people you cannot
+	 * add. That reasoning is still right. The input is not: "% Ros" is swept off
+	 * Yahoo's player pages, and most of what comes back is the per-game weather
+	 * line out of the forecast tooltip rather than anybody's roster share — on the
+	 * committed capture 20 of 30 clubs have 93-100% of their players on one
+	 * identical percentage, paired exactly by that day's matchups. `leakedByTeam`
+	 * in data/yahoo-pool.ts now discards those at capture time, so a future sweep
+	 * is clean; the shipped snapshot predates it.
+	 *
+	 * Ranking by a number drawn from the precipitation forecast is worse than
+	 * ranking by one that is merely incomplete, so the default is the honest
+	 * column. Market edge stays selectable — a reader who picks it has asked for
+	 * exactly what it can price.
+	 */
+	sort: "bscore",
 	desc: true
 }
 
@@ -199,7 +211,29 @@ export const useBoard = (
 		if (!rateable.length) return 0
 		return rateable.filter(r => r.marketEdge !== null).length / rateable.length
 	}, [rated])
-	const edgeUsable = edgeCoverage >= 0.35
+
+	/**
+	 * How many players the RANKING itself can place, before the reader's filters.
+	 *
+	 * Market edge can only rank someone the field has priced, and only recommends
+	 * someone worth rostering — so the board opens on 67 of 1,433 and a bare count
+	 * reads as a broken capture. The board says what did the cutting, and to say it
+	 * truthfully it needs the ranking's cut separated from the reader's own: with
+	 * a position chip on, "market edge dropped the rest" would be a lie about why
+	 * the list is short.
+	 */
+	const rankable = useMemo(
+		() =>
+			rated.filter(r => {
+				if (!r.rateable) return false
+				if (filters.sort === "undervaluation" && r.bscore <= 0) return false
+				if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
+					return false
+				if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
+				return true
+			}).length,
+		[rated, filters.sort]
+	)
 
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()
@@ -212,7 +246,11 @@ export const useBoard = (
 			if (filters.sort === "undervaluation" && r.bscore <= 0) return false
 			// Same guard for market edge: a replacement-level body nobody rosters beats
 			// the par for his ownership by definition, and recommending him is noise.
-			if (filters.sort === "marketEdge" && edgeUsable && (r.marketEdge === null || r.bscore <= 0))
+			// No longer gated on coverage: edge is no longer the default, so picking it
+			// is an explicit request for the subset it can price, and quietly handing
+			// back a bscore ranking under the "market edge" label is now the confusing
+			// behaviour rather than the safe one.
+			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 				return false
 			// Contact quality only means something for someone worth rostering, and only
 			// where a rolling Statcast window actually exists for him.
@@ -221,14 +259,6 @@ export const useBoard = (
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
 			if (filters.hideInjured && r.injury) return false
-			// Scoped to the horizons that HAVE probable starters, which is exactly the
-			// condition Board.tsx renders the checkbox under. Left unscoped it kept
-			// filtering on the Stash view, where `scheduledStarts` is null for everyone
-			// by construction: the board emptied completely, the message blamed the slot
-			// and confidence filters, and the control that would undo it was no longer on
-			// screen. A filter you cannot see must not be one you cannot escape.
-			if (filters.mode !== "stash" && filters.twoStartOnly && (r.scheduledStarts ?? 0) < 2)
-				return false
 			if (filters.availableOnly && availableNames && !availableNames.has(normalizeName(r.player.name)))
 				return false
 			if (r.confidence.value < filters.minConfidence) return false
@@ -240,8 +270,7 @@ export const useBoard = (
 				case "replacement": return r.replacement
 				case "confidence": return r.confidence.value
 				case "undervaluation": return r.undervaluation ?? -1
-				case "marketEdge":
-					return edgeUsable ? (r.marketEdge ?? -Infinity) : r.bscore
+				case "marketEdge": return r.marketEdge ?? -Infinity
 				case "contact":
 					// a pitcher benefits when his expected is BELOW his actual, so it flips
 					return (
@@ -257,7 +286,7 @@ export const useBoard = (
 			return filters.desc ? -cmp : cmp
 		})
 		return out
-	}, [rated, filters, availableNames, edgeUsable])
+	}, [rated, filters, availableNames])
 
-	return { rated, rows, scored, edgeUsable, edgeCoverage, period }
+	return { rated, rows, rankable, scored, edgeCoverage, period }
 }

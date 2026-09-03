@@ -41,8 +41,6 @@ export const unread = (
 	failure: detail === undefined ? { step, what, fix } : { step, what, fix, detail }
 })
 
-export const hasSession = (): boolean => existsSync(STATE)
-
 /** Only the part of Playwright's storage state we are willing to assert about. */
 interface StoredState {
 	cookies?: { name?: string; domain?: string; expires?: number }[]

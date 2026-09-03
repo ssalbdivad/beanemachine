@@ -23,6 +23,16 @@ page.on("pageerror", e => errors.push(String(e)))
 page.on("console", m => { if (m.type() === "error") errors.push(m.text()) })
 
 await page.goto(BASE, { waitUntil: "networkidle" })
+
+// A 200 on this port is not proof it is this app: :5173 is a common default and
+// another project's dev server answers it just as happily, after which every
+// assertion below fails as a selector timeout that reads like a UI defect. The
+// wordmark is the cheapest proof of identity, so it is checked before anything
+// else and stops the run rather than letting the next wait speak for it.
+const wordmark = await page.waitForSelector("h1", { timeout: 15000 }).then(h => h.textContent(), () => null)
+t("the page under test is beanemachine", wordmark === "beanemachine",
+  `BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
+if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
 // the recommendation board is the default view; the config editor is a tab
 const toLeagueSetup = async pg => {
   await pg.waitForSelector(".views button")

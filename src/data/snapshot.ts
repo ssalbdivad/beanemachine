@@ -1,9 +1,6 @@
 import { type } from "arktype"
 import {
 	fetchGamesByTeam,
-	fetchOpposingStarters,
-	fetchProbableCoverage,
-	fetchProbableStarts,
 	fetchSlate,
 	type SlateGame,
 	fetchWindowStats,

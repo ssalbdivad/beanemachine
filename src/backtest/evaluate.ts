@@ -78,7 +78,6 @@ export const scoreVariants = (
 
 				const truth = actualById.get(p.id)
 				const actualPoints = truth ? scoreStats(truth.stats, table, group).points : 0
-				const seasonPerGame = vol(p) / gBehind
 				const u = fold.underlying.get(p.id)
 
 				naivePairs.push([

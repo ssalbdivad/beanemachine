@@ -287,25 +287,38 @@ export const withUndervaluation = (
 	// Percentile WITHIN a side. For a batter a positive est_woba − woba means his
 	// results trail his contact; for a pitcher it means the opposite. Ranking both
 	// in one pool, as an earlier version did, produced a number with no meaning.
+	// The sign flip happens on the way into the pool, which is what lets one sort
+	// serve both sides — the old per-row negation reversed the order it just built.
+	const signed = (r: Rated) =>
+		r.player.group === "hitting" ? r.regressionGap! : -r.regressionGap!
 	const gapsBySide = {
 		hitting: [] as number[],
 		pitching: [] as number[]
 	}
 	for (const r of rated)
-		if (r.regressionGap !== null && r.rateable) gapsBySide[r.player.group].push(r.regressionGap)
+		if (r.regressionGap !== null && r.rateable) gapsBySide[r.player.group].push(signed(r))
 	for (const key of ["hitting", "pitching"] as const) gapsBySide[key].sort((a, b) => a - b)
+
+	// strictly below, so ties share a percentile exactly as the filter did
+	const below = (arr: number[], x: number) => {
+		let lo = 0,
+			hi = arr.length
+		while (lo < hi) {
+			const m = (lo + hi) >> 1
+			if (arr[m]! < x) lo = m + 1
+			else hi = m
+		}
+		return lo
+	}
 
 	return rated.map(r => {
 		if (r.regressionGap === null || !r.rateable) return { ...r, undervaluation: null }
-		// a pitcher benefits when his expected is BELOW his actual, so the sign flips
-		const gap = r.player.group === "hitting" ? r.regressionGap : -r.regressionGap
-		const pool = gapsBySide[r.player.group].map(g =>
-			r.player.group === "hitting" ? g : -g
-		)
-		const below = pool.filter(g => g < gap).length
+		const pool = gapsBySide[r.player.group]
 		return {
 			...r,
-			undervaluation: Number(((below / Math.max(pool.length, 1)) * 100).toFixed(1))
+			undervaluation: Number(
+				((below(pool, signed(r)) / Math.max(pool.length, 1)) * 100).toFixed(1)
+			)
 		}
 	})
 }

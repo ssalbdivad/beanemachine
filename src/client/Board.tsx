@@ -7,6 +7,7 @@ import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } f
 import { api, ApiError, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
 import type { ResolvedPeriod } from "../engine/period.ts"
+import { replacementBySlot } from "../engine/trade.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -32,7 +33,7 @@ const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
 /** The three horizons, as a tablist: three questions, not three filters. */
 const MODES = [
-	["stream", "Streaming", "the next 7 days — who wins you this week"],
+	["stream", "Streaming", "the period you can still act on — who wins you this week"],
 	["board", "This fortnight", "the standing board, 14 days out"],
 	["stash", "Stash", "rest of season — who to hold, not who to start"]
 ] as const
@@ -114,17 +115,6 @@ const horizonSpan = (
 	return { range: `${start} → ${end}`, phrase: `the next ${days} days` }
 }
 
-/** How old the capture is. A projection built on last week's numbers is wrong in a
- *  way nothing else in the UI would reveal, so the age is always stated. */
-const freshness = (capturedAt: string, now: number) => {
-	const hours = (now - Date.parse(capturedAt)) / 3_600_000
-	if (!Number.isFinite(hours)) return { label: "unknown age", stale: true }
-	if (hours < 1) return { label: "just now", stale: false }
-	if (hours < 36) return { label: `${Math.round(hours)}h ago`, stale: false }
-	const days = Math.round(hours / 24)
-	return { label: `${days}d ago`, stale: true }
-}
-
 export const Board = ({
 	snapshot,
 	league,
@@ -166,8 +156,8 @@ export const Board = ({
 		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
 		[pool]
 	)
-	const { rows, scored, edgeUsable, edgeCoverage, period } = useBoard(snapshot, league, filters, availableNames)
-	const age = snapshot ? freshness(snapshot.capturedAt, Date.now()) : null
+	const { rated, rows, rankable, scored, edgeCoverage, period } =
+		useBoard(snapshot, league, filters, availableNames)
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
 
@@ -230,6 +220,20 @@ export const Board = ({
 	// Not a hook, so it belongs after the refusals above rather than among them —
 	// and it needs the snapshot they have just established exists.
 	const span = horizonSpan(snapshot, filters.mode, period)
+	// Why the board is shorter than the pool. The FILTERS are the reader's own doing
+	// and are named on the controls that set them; this names the cut the RANKING
+	// makes on its own, which nothing else on the page would reveal.
+	const rateable = rated.filter(r => r.rateable).length
+	// Only the RANKING's cut. What the reader's own filters removed is already
+	// visible on the controls that set them, and blaming market edge for a position
+	// chip would be a sentence that is simply false.
+	const cut = rateable - rankable
+	const cutReason =
+		filters.sort === "marketEdge" ?
+			"market edge ranks only players the field has priced, and only above replacement"
+		: filters.sort === "undervaluation" ? "only players above replacement can be undervalued"
+		: filters.sort === "contact" ? "only players above replacement with a Statcast window"
+		: "filtered"
 	const narrowed = [
 		filters.group === "hitting" ? "batters only"
 		: filters.group === "pitching" ? "pitchers only"
@@ -324,26 +328,13 @@ export const Board = ({
 							{!pool && !poolError && <em className="pool-count"> …</em>}
 						</span>
 					</label>
-					{/* Only meaningful where probables exist — about a week out. Offering it
-					    on the rest-of-season view would be a control that silently does
-					    nothing. */}
-					{filters.mode !== "stash" && (
-						<label className="toggle" title="MLB publishes probable starters about a week ahead. Two starts in a scoring period is roughly double the innings.">
-							<input
-								type="checkbox"
-								checked={filters.twoStartOnly}
-								onChange={e => set("twoStartOnly", e.currentTarget.checked)}
-							/>
-							<span>Two-start SP only</span>
-						</label>
-					)}
 				</div>
 				{/* The four controls above are the ones reached for constantly. These three
 				    are not, and permanently on screen they were part of what pushed the
 				    first ranked row to y=1187 — below the fold on a 1200px screen.
 				    The summary names any of them that is ON, because the page has already
 				    learned once that a filter you cannot see must not be one you cannot
-				    escape: twoStartOnly kept filtering the Stash view after its checkbox
+				    escape: a mode-scoped filter went on filtering a view whose checkbox had
 				    stopped rendering, and the board emptied with nothing on screen to undo. */}
 				<details className="more" open={narrowed.length > 0}>
 					<summary>
@@ -393,21 +384,22 @@ export const Board = ({
 			    cards below re-rank with it too, but this is the ranking itself, and
 			    the sibling cards can't be wrapped without breaking the page grid. */}
 			<section className="card full" id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(filters.mode)}>
-				<h2>
-					Recommendations
-					{age && (
-						<span className={`chip ${age.stale ? "warn" : "ok"} age`}>
-							data {age.label}
-						</span>
-					)}
-				</h2>
-				{!edgeUsable && filters.sort === "marketEdge" && (
+				<h2>Recommendations</h2>
+				{/* Edge is no longer the default and no longer silently falls back, so this
+				    is a warning about the column you asked for rather than an announcement
+				    that you were given a different one. The reason it stopped being the
+				    default is the first sentence, because it is much the worse problem:
+				    thin coverage makes the column incomplete, the forecast leak makes it
+				    wrong. */}
+				{filters.sort === "marketEdge" && (
 					<p className="sub warn-note">
-						Market edge needs how many leagues each player is rostered in, and this
-						capture only priced {Math.round(edgeCoverage * 100)}% of them — Yahoo
-						throttles whoever is asking, and the published snapshot is built by a CI
-						runner it throttles hard. Ranking by bscore instead. Pick
-						&ldquo;market edge&rdquo; explicitly to rank just the players it could price.
+						Market edge divides by Yahoo&rsquo;s &ldquo;% Ros&rdquo;, and on this capture
+						most of that number is the game&rsquo;s weather line rather than a roster
+						share — whole clubs come back on one identical percentage, paired by the
+						day&rsquo;s matchups. Captures taken from now on discard those, but this one
+						predates the check, and only {Math.round(edgeCoverage * 100)}% of the board
+						carries any figure at all. Treat this ranking as unreliable; bscore is the
+						honest column.
 					</p>
 				)}
 				{/* One line, because it is read on every visit: how many, over what window.
@@ -416,7 +408,20 @@ export const Board = ({
 				    it is available on the rare occasion anyone wants it and costs no height
 				    on the many occasions nobody does. */}
 				<p className="sub">
-					<b className="count">{rows.length}</b> players · {span.range}
+					<b className="count">{rows.length}</b>
+					{/* The board opens on market edge, which can only rank a player the field
+					    has priced and only recommends one worth rostering — so it shows 67 of
+					    1,233 and a bare count reads as a broken capture. Say what did the
+					    cutting. The ranking's own cut and the reader's filters are separate
+					    sentences, because blaming market edge for a position chip would
+					    simply be false. */}
+					{cut > 0 ?
+						rows.length < rankable ?
+							<> shown, of {rankable.toLocaleString()} this ranking can place from{" "}
+								{rateable.toLocaleString()} — {cutReason}</>
+						:	<> of {rateable.toLocaleString()} — {cutReason}</>
+					:	<> players</>}{" "}
+					· {span.range}
 					{filters.mode === "stream" && period?.clipped &&
 						", cut short by the end of the captured slate"}
 				</p>
@@ -444,7 +449,7 @@ export const Board = ({
 						{filters.mode === "stash" ?
 							"Ranked over every game left in the regular season, so playing time and role matter more than the last fortnight. This is the view for who to hold — the underlying contact numbers on each player are here because a long horizon is where they would matter, though this project has not yet measured that honestly (see the README)."
 						: filters.mode === "stream" ?
-							`Ranked over ${period ? period.basis : "the next seven days"} — the week that is actually about to happen, using its real slate rather than half of a fortnight.`
+							`Ranked over ${period ? period.basis : "a window this capture cannot state"} — using its real slate rather than half of a fortnight.`
 						:	"Ranked over the next fortnight — long enough that one cold week doesn't decide it, short enough that today's role still holds."}
 						{" "}Playing time leans on recent form: the last{" "}
 						{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
@@ -480,7 +485,7 @@ export const Board = ({
 			    "where should I spend attention", which is a second question — putting
 			    them above the board pushed the actual recommendations below the fold. */}
 			<BuyLow rows={rows} />
-			<Scarcity rows={rows} league={league} />
+			<Scarcity pool={rated} league={league} />
 		</>
 	)
 }
@@ -494,9 +499,17 @@ export const Board = ({
  * starter and the waiver-wire body are close is one you can punt; a slot where the
  * cliff is steep is one you pay for early.
  */
-const Scarcity = ({ rows, league }: { rows: Ranked[]; league: League }) => {
+const Scarcity = ({ pool, league }: { pool: Ranked[]; league: League }) => {
+	// The whole rated pool, not the board's filtered rows. A waiver bar is the
+	// (teams × slots)-th best man eligible there, so handing this the 67 rows the
+	// default market-edge sort leaves would clamp that depth to the size of the
+	// filtered set and report its worst row as the bar. Scarcity is a fact about
+	// the league's pool; it does not move when you type in the search box.
+	const teams = league.meta.max_teams
+	if (teams == null) return null
 	// slot_order lists every roster SPOT, so a 3-outfielder league names OF three
 	// times. Scarcity is a property of the slot, not of each seat in it.
+	const accepts = league.roster.slot_accepts
 	const active = [
 		...new Set(
 			(league.roster.slot_order ?? Object.keys(league.roster.slots)).filter(
@@ -504,17 +517,38 @@ const Scarcity = ({ rows, league }: { rows: Ranked[]; league: League }) => {
 			)
 		)
 	]
+		// Catch-all spots are filled by whoever is spare, so their card was always a
+		// duplicate of a real slot's: on the fortnight Util printed C's number under C's
+		// name (+36 Drake Baldwin) and P printed RP's (+21 Ian Seymour). Util is also
+		// the least scarce spot in the league by construction — its bar is 111.06
+		// against OF's 91.69, because every hitter is eligible there — so it is the one
+		// slot nothing is ever waiting on. Leagues that never stated slot_accepts keep
+		// every slot rather than lose the panel.
+		.filter(s => !Array.isArray(accepts?.[s]) || accepts[s].length === 1)
+	// The bar at each card's OWN slot. `Rated.replacement` cannot answer this: it
+	// reports the bar where a player was worth MOST, so `best.points - best.replacement`
+	// is literally `best.bscore` — the old number — and a slot that is nobody's best
+	// is missing from it entirely. SP is that slot here, which is why the card
+	// labelled SP was showing a P-priced figure. `replacementBySlot` is the same
+	// arithmetic rateAll uses, and test/trade.mjs pins the two against each other.
+	const bars = replacementBySlot(league, pool, teams)
 	const cards = active
 		.map(slot => {
-			const pool = rows.filter(r => r.slots.includes(slot) && r.rateable)
-			if (pool.length < 3) return null
-			// The best available, against what the next man up at the same slot gives you.
-			// Chosen by bscore rather than taken as `pool[0]`, which was whichever row the
-			// board's CURRENT sort happened to put first: sorting by name turned this card
-			// into "+-29 · A.J. Minter" — the alphabetically first reliever, his negative
-			// bscore printed with a plus in front of it — and every slot's ranking with it.
-			const best = pool.reduce((a, b) => (b.bscore > a.bscore ? b : a))
-			return { slot, cliff: best.bscore, replacement: best.replacement, best }
+			// An unknown bar is not a bar of zero: a slot nobody in the pool is eligible
+			// for is left out of the map, and a cliff cannot be measured against nothing.
+			const bar = bars.get(slot)
+			if (bar === undefined) return null
+			const eligible = pool.filter(r => r.rateable && r.slots.includes(slot))
+			if (eligible.length < 3) return null
+			// By POINTS, not bscore, now that the bar is per-slot: max points is max
+			// cliff, and picking by bscore names the man who is best somewhere ELSE —
+			// on Streaming the 1B card read "Jake Bauers", an outfielder, over Rafael
+			// Devers. A reduce rather than `pool[0]`, which was whichever row the
+			// board's CURRENT sort happened to put first: sorting by name turned this
+			// card into "+-29 · A.J. Minter", the alphabetically first reliever, his
+			// negative bscore printed with a plus in front of it.
+			const best = eligible.reduce((a, b) => (b.points > a.points ? b : a))
+			return { slot, cliff: best.points - bar, best }
 		})
 		.filter((x): x is NonNullable<typeof x> => x !== null)
 		.sort((a, b) => b.cliff - a.cliff)
@@ -537,7 +571,7 @@ const Scarcity = ({ rows, league }: { rows: Ranked[]; league: League }) => {
 							<i style={{ width: `${Math.max(3, (c.cliff / widest) * 100)}%` }} />
 						</div>
 						<span className="val">+{c.cliff.toFixed(0)}</span>
-						<span className="who" title={`${c.best.player.name} is the best ${c.slot} on this board`}>
+						<span className="who" title={`${c.best.player.name} is the best ${c.slot} in the player pool by projected points`}>
 							{c.best.player.name}
 						</span>
 					</div>
@@ -782,14 +816,7 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 			>
 				{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}
 			</span>
-			<span className="r bscore">
-				{r.bscore}
-				{(r.scheduledStarts ?? 0) >= 2 && (
-					<em className="starts" title={`${r.scheduledStarts} starts scheduled in this window — roughly double the innings of a one-start turn.`}>
-						×{r.scheduledStarts}
-					</em>
-				)}
-			</span>
+			<span className="r bscore">{r.bscore}</span>
 			<span className="r dim">{r.points}</span>
 			<span className="r dim">{r.replacement}</span>
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
@@ -894,7 +921,7 @@ const Detail = ({ r }: { r: Ranked }) => {
 							:	`He has been getting ${Math.abs(r.regressionGap)} more wOBA than his contact earned.`
 						: r.regressionGap > 0 ?
 							`He has allowed ${r.regressionGap} more expected wOBA than his line shows — the results flatter him.`
-						:	`He has been hit harder on paper than in reality by ${Math.abs(r.regressionGap)} wOBA.`}
+						:	`He has been hit ${Math.abs(r.regressionGap)} wOBA softer on paper than in reality — the results have punished him.`}
 					</p>
 				)}
 			</div>

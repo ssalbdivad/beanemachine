@@ -753,10 +753,10 @@ const BillysPick = ({
 				<p className="pick-name">{r.player.name}</p>
 				<p className="pick-avail">
 					{basis === "pool" ?
-						"The best player on this board who is a free agent in your league right now."
+						"Best on this board who is a free agent in your league right now."
 					: basis === "ownership" ?
-						`The best player on this board still rostered in under ${WIDELY_ROSTERED}% of leagues — your own league\u2019s free-agent list isn\u2019t readable here, so this is how widely he is owned rather than whether he is free to you.`
-					:	"The top of this board. Nothing here could say whether he is available, so this is not a claim that he is."}
+						`Best on this board rostered in under ${WIDELY_ROSTERED}% of leagues \u2014 how widely he is owned, not whether he is free in yours.`
+					:	"Top of this board \u2014 nothing here could say whether he is available."}
 				</p>
 				<p className="pick-why">
 					{clauses.join(" · ")}.

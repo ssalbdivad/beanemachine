@@ -129,12 +129,21 @@ export const App = () => {
 					</h1>
 				</div>
 				<p className="tag tagline">How can you not be robotic about baseball?</p>
+				{/* The hosted build's first impression used to be four lines of instructions
+				    for running a dev server — read by everyone, relevant to the few who are
+				    about to import. The reassurance a visitor needs is one line; the caveat
+				    belongs where importing is attempted, and it is on that form already. */}
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
-						Static build — your leagues are stored in this browser, so editing and saving
-						work here. Importing one from its URL needs the local server (
-						<code>node src/server.ts</code> alongside <code>npx vite</code>), since browsers
-						can&rsquo;t read Yahoo or ESPN directly.
+						Your leagues are stored in this browser — editing and saving work here.{" "}
+						<a
+							href="https://github.com/ssalbdivad/beanemachine#running-it"
+							target="_blank"
+							rel="noreferrer"
+						>
+							Importing one from its URL needs the local server
+						</a>
+						, since browsers can&rsquo;t read Yahoo or ESPN directly.
 					</p>
 				)}
 			</header>

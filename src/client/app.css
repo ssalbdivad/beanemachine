@@ -190,7 +190,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{
 }
 
 /* ---------- header ---------- */
-header{padding:var(--sp-7) 0 var(--sp-5);position:relative}
+header{padding:var(--sp-5) 0 var(--sp-4);position:relative}
 header::after{
   content:"";display:block;margin-top:var(--sp-5);height:1px;background:var(--rule);
   /* panel seam with assembly ticks */

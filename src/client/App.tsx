@@ -137,6 +137,22 @@ export const App = () => {
 	// The board, the draft and a trade are all priced in the same three inputs.
 	// Until they exist, the guided panel is what the page leads with.
 	const ready = leagueReady(league)
+	/**
+	 * League MANAGEMENT — create, remove, import, download, load a file — is chrome
+	 * for a thing you do once, and it was sitting above the recommendations on every
+	 * view. Measured in the browser: it pushed the first ranked row to y=1187, so on
+	 * a 1200px screen the board this page exists to show was entirely below the fold.
+	 *
+	 * It shows where it belongs: on League setup, or when there is no league at all
+	 * and importing one is the only thing left to do. Elsewhere all that survives is
+	 * the switcher, and only when there is more than one league to switch between.
+	 */
+	const manage =
+		view === "league" ||
+		// nothing to work with yet: importing or creating one is the only move left
+		(store === "read" && !Object.keys(config?.leagues ?? {}).length) ||
+		// and the unreadable-store card below points at Load file as the way out
+		store === "unreadable"
 
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
@@ -148,7 +164,6 @@ export const App = () => {
 					</h1>
 				</div>
 				<p className="tag tagline">How can you not be robotic about baseball?</p>
-				<p className="tag">Optimized picks, ranked in your league&rsquo;s own scoring.</p>
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
 						Static build — your leagues are stored in this browser, so editing and saving
@@ -191,6 +206,7 @@ export const App = () => {
 				config={config}
 				store={store}
 				view={view}
+				manage={manage}
 				activeKey={key}
 				onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
 				onImport={url =>
@@ -230,6 +246,7 @@ export const App = () => {
 			<Status
 				league={league ?? null}
 				store={store}
+				detail={view === "league"}
 				snapshot={snapshot}
 				snapshotError={snapshotError}
 			/>
@@ -319,6 +336,7 @@ const Toolbar = ({
 	config,
 	store,
 	view,
+	manage,
 	activeKey,
 	onSelect,
 	onImport,
@@ -331,6 +349,8 @@ const Toolbar = ({
 	config: Config | null
 	store: StoreState
 	view: View
+	/** Whether the create/remove/import/file controls are on screen at all. */
+	manage: boolean
 	activeKey: string | null
 	onSelect: (key: string) => void
 	onImport: (url: string) => void
@@ -346,9 +366,10 @@ const Toolbar = ({
 	const keys = Object.keys(config?.leagues ?? {})
 	// the same control means different things per view, so it says which
 	const label = LEAGUE_LABEL[view]
-	return (
-		<>
-			<div className="bar">
+	// One league is the normal case, and a select with one option is a control that
+	// cannot do anything — the chips below already name the league it would name.
+	if (!manage && keys.length < 2) return null
+	const selector = (
 				<label className="ctl">
 					<span>{label}</span>
 					<select
@@ -374,6 +395,13 @@ const Toolbar = ({
 						))}
 					</select>
 				</label>
+	)
+	// Nothing to manage from here — just say which league the page is denominated in.
+	if (!manage) return <div className="bar">{selector}</div>
+	return (
+		<>
+			<div className="bar">
+				{selector}
 				<label className="ctl">
 					<span>Start a league from</span>
 					<select
@@ -478,11 +506,16 @@ const Toolbar = ({
 const Status = ({
 	league,
 	store,
+	detail,
 	snapshot,
 	snapshotError
 }: {
 	league: League | null
 	store: StoreState
+	/** Provenance — platform, scoring type, whether it was read or typed, when —
+	 *  is what you check while setting a league up and never again. It rides along
+	 *  on the setup view; on the board it is four chips of noise above the ranking. */
+	detail: boolean
 	snapshot: Snapshot | null
 	snapshotError: string | null
 }) => {
@@ -494,7 +527,7 @@ const Status = ({
 	return (
 		<div className="chips">
 			{league ?
-				<Chips league={league} />
+				<Chips league={league} detail={detail} />
 			: store === "reading" ?
 				<span className="chip">reading this browser&rsquo;s leagues…</span>
 			: store === "unreadable" ?
@@ -507,11 +540,11 @@ const Status = ({
 	)
 }
 
-const Chips = ({ league }: { league: League }) => {
+const Chips = ({ league, detail }: { league: League; detail: boolean }) => {
 	const { meta, provenance } = league
 	return (
 		<>
-			{[meta.platform, meta.team_name].filter(Boolean).map(v => (
+			{[detail ? meta.platform : null, meta.team_name].filter(Boolean).map(v => (
 				<span className="chip" key={String(v)}>
 					<b>{String(v)}</b>
 				</span>
@@ -521,11 +554,17 @@ const Chips = ({ league }: { league: League }) => {
 					<b>{meta.max_teams}</b> teams
 				</span>
 			)}
-			{meta.scoring_type && <span className="chip">{meta.scoring_type}</span>}
-			<span className={`chip ${provenance.verified ? "ok" : "warn"}`}>
-				{provenance.verified ? "read from source" : "unverified"}
-			</span>
-			{provenance.fetched_at && <span className="chip">fetched {provenance.fetched_at}</span>}
+			{detail && meta.scoring_type && <span className="chip">{meta.scoring_type}</span>}
+			{/* "unverified" means the values were typed rather than read off the platform,
+			    and that changes how much to trust every number below — so it shows
+			    everywhere. Its opposite is the uninteresting case and rides with the
+			    rest of the provenance. */}
+			{(detail || !provenance.verified) && (
+				<span className={`chip ${provenance.verified ? "ok" : "warn"}`}>
+					{provenance.verified ? "read from source" : "unverified"}
+				</span>
+			)}
+			{detail && provenance.fetched_at && <span className="chip">fetched {provenance.fetched_at}</span>}
 		</>
 	)
 }

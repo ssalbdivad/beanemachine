@@ -255,11 +255,22 @@ await page.selectOption("[data-ctl=sort]", "bscore")
 await page.waitForTimeout(400)
 
 // filters actually filter
+// Side, min-confidence and hide-injured now sit behind "More filters" — they are
+// reached for rarely and permanently on screen they pushed the ranking below the
+// fold. The disclosure has to be opened before they can be driven, which is the
+// same thing a reader does.
+await page.click(".board-controls details.more > summary")
+await page.waitForSelector("[data-ctl=group]", { state: "visible" })
 const before = await page.$$eval(".board-row", n => n.length)
 await page.selectOption("[data-ctl=group]", "hitting")
 await page.waitForTimeout(400)
 const after = await page.$$eval(".board-row", n => n.length)
 t("side filter changes the board", after > 0 && after <= before, `${before} → ${after}`)
+// A filter you cannot see must not be one you cannot escape: with the disclosure
+// closed, its summary has to say what is still narrowing the board.
+const summary = await page.$eval(".board-controls details.more > summary", e => e.textContent)
+t("hidden filters are named on the summary that hides them",
+  /batters only/i.test(summary), summary)
 
 await page.click(".chip-btn:text-is(\"C\")")
 await page.waitForTimeout(400)

@@ -123,12 +123,11 @@ const codes = () => page.$$eval(".board-row .who .code", n => n.map(e => e.textC
 const confs = () => page.$$eval(".board-row .conf-num", n => n.map(e => Number(String(e.textContent).replace("%", ""))))
 const bscores = () => page.$$eval(".board-row .bscore", n => n.map(e => parseFloat(e.textContent)))
 /** The board renders only its top 120, so the rendered count is not the ranking's
- *  size. This is the real one, read off the sentence that states it. */
-const ranked = async () => {
-	const subs = await page.$$eval(".sub", n => n.map(e => e.textContent))
-	const line = subs.find(s => /players ranked in/.test(s))
-	return line ? Number(line.match(/(\d[\d,]*) players ranked/)?.[1]?.replace(/,/g, "")) : null
-}
+ *  size. This is the real one, read off the element that states it — it used to be
+ *  scraped out of the surrounding sentence, which meant rewording the sentence
+ *  silently turned this into `null` and every comparison against it into a lie. */
+const ranked = () =>
+	page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
 
 // --- 1. landing, and the three horizons ---------------------------------------
 
@@ -226,6 +225,10 @@ t("clearing the search restores a full board rather than the searched subset",
 // every catcher cleared it would make both claims below vacuously true.
 t("the whole filtered ranking is on screen, so the two sets are comparable",
 	floorless.length <= 120, `${floorless.length} rendered`)
+// The confidence floor lives behind "More filters" now — reached for rarely, and
+// on screen permanently it was part of what pushed the ranking below the fold.
+await page.click(".board-controls details.more > summary")
+await page.waitForSelector("[data-ctl=confidence]", { state: "visible" })
 await page.selectOption("[data-ctl=confidence]", "0.7")
 await settle()
 const kept = new Set(await rows())

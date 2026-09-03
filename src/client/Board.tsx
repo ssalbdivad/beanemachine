@@ -230,6 +230,13 @@ export const Board = ({
 	// Not a hook, so it belongs after the refusals above rather than among them —
 	// and it needs the snapshot they have just established exists.
 	const span = horizonSpan(snapshot, filters.mode, period)
+	const narrowed = [
+		filters.group === "hitting" ? "batters only"
+		: filters.group === "pitching" ? "pitchers only"
+		: "",
+		filters.minConfidence > 0 ? `confidence ${pct(filters.minConfidence)}+` : "",
+		filters.hideInjured ? "injured hidden" : ""
+	].filter(Boolean)
 
 	return (
 		<>
@@ -286,18 +293,6 @@ export const Board = ({
 						/>
 					</label>
 					<label className="ctl">
-						<span>Side</span>
-						<select
-							data-ctl="group"
-							value={filters.group}
-							onChange={e => set("group", e.currentTarget.value as Filters["group"])}
-						>
-							<option value="all">batters + pitchers</option>
-							<option value="hitting">batters</option>
-							<option value="pitching">pitchers</option>
-						</select>
-					</label>
-					<label className="ctl">
 						<span>Rank by</span>
 						<select
 							data-ctl="sort"
@@ -309,18 +304,6 @@ export const Board = ({
 							<option value="marketEdge">market edge (what the field is wrong about)</option>
 							<option value="undervaluation">most undervalued (above replacement)</option>
 							<option value="contact">best contact vs results (last 21 days)</option>
-						</select>
-					</label>
-					<label className="ctl">
-						<span>Min confidence</span>
-						<select
-							data-ctl="confidence"
-							value={String(filters.minConfidence)}
-							onChange={e => set("minConfidence", Number(e.currentTarget.value))}
-						>
-							<option value="0">any</option>
-							<option value="0.4">40%+</option>
-							<option value="0.7">70%+</option>
 						</select>
 					</label>
 					<label className="toggle" title={pool?.note ?? poolError ?? "Reading your league's free agents…"}>
@@ -354,15 +337,54 @@ export const Board = ({
 							<span>Two-start SP only</span>
 						</label>
 					)}
-					<label className="toggle">
-						<input
-							type="checkbox"
-							checked={filters.hideInjured}
-							onChange={e => set("hideInjured", e.currentTarget.checked)}
-						/>
-						<span>Hide injured</span>
-					</label>
 				</div>
+				{/* The four controls above are the ones reached for constantly. These three
+				    are not, and permanently on screen they were part of what pushed the
+				    first ranked row to y=1187 — below the fold on a 1200px screen.
+				    The summary names any of them that is ON, because the page has already
+				    learned once that a filter you cannot see must not be one you cannot
+				    escape: twoStartOnly kept filtering the Stash view after its checkbox
+				    stopped rendering, and the board emptied with nothing on screen to undo. */}
+				<details className="more" open={narrowed.length > 0}>
+					<summary>
+						More filters
+						{narrowed.length > 0 && <em> · {narrowed.join(", ")}</em>}
+					</summary>
+					<div className="filters">
+						<label className="ctl">
+							<span>Side</span>
+							<select
+								data-ctl="group"
+								value={filters.group}
+								onChange={e => set("group", e.currentTarget.value as Filters["group"])}
+							>
+								<option value="all">batters + pitchers</option>
+								<option value="hitting">batters</option>
+								<option value="pitching">pitchers</option>
+							</select>
+						</label>
+						<label className="ctl">
+							<span>Min confidence</span>
+							<select
+								data-ctl="confidence"
+								value={String(filters.minConfidence)}
+								onChange={e => set("minConfidence", Number(e.currentTarget.value))}
+							>
+								<option value="0">any</option>
+								<option value="0.4">40%+</option>
+								<option value="0.7">70%+</option>
+							</select>
+						</label>
+						<label className="toggle">
+							<input
+								type="checkbox"
+								checked={filters.hideInjured}
+								onChange={e => set("hideInjured", e.currentTarget.checked)}
+							/>
+							<span>Hide injured</span>
+						</label>
+					</div>
+				</details>
 			</section>
 
 			{rows[0] && <BillysPick r={rows[0]} horizon={span.phrase} />}
@@ -379,13 +401,6 @@ export const Board = ({
 						</span>
 					)}
 				</h2>
-				<p className="sub">
-					{filters.mode === "stash" ?
-						"Ranked over every game left in the regular season, so playing time and role matter more than the last fortnight. This is the view for who to hold — the underlying contact numbers on each player are here because a long horizon is where they would matter, though this project has not yet measured that honestly (see the README)."
-					: filters.mode === "stream" ?
-						"Ranked over the next seven days only — the week that is actually about to happen, using its real slate rather than half of a fortnight."
-					:	null}
-				</p>
 				{!edgeUsable && filters.sort === "marketEdge" && (
 					<p className="sub warn-note">
 						Market edge needs how many leagues each player is rostered in, and this
@@ -395,17 +410,15 @@ export const Board = ({
 						&ldquo;market edge&rdquo; explicitly to rank just the players it could price.
 					</p>
 				)}
+				{/* One line, because it is read on every visit: how many, over what window.
+				    Everything about HOW the ranking was built — which horizon this is, what
+				    playing time leans on, what each column means — is a click below, where
+				    it is available on the rare occasion anyone wants it and costs no height
+				    on the many occasions nobody does. */}
 				<p className="sub">
-					{rows.length} players ranked in {league.meta.league_name ?? "this league"}&rsquo;s scoring ·
-					projected over {span.range}
-					{filters.mode === "stream" && period && ` — ${period.basis}`}
+					<b className="count">{rows.length}</b> players · {span.range}
 					{filters.mode === "stream" && period?.clipped &&
 						", cut short by the end of the captured slate"}
-					 ·
-					playing time leans on recent form: the last{" "}
-					{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
-					and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,
-					weighting the most recent window double
 				</p>
 				<div className="board">
 					<div className="board-head">
@@ -426,7 +439,19 @@ export const Board = ({
 					{!rows.length && <p className="empty">No players match these filters. Try clearing the slot filter or lowering the confidence minimum.</p>}
 				</div>
 				<details className="legend">
-					<summary>What these columns mean</summary>
+					<summary>How this ranking was built</summary>
+					<p className="sub">
+						{filters.mode === "stash" ?
+							"Ranked over every game left in the regular season, so playing time and role matter more than the last fortnight. This is the view for who to hold — the underlying contact numbers on each player are here because a long horizon is where they would matter, though this project has not yet measured that honestly (see the README)."
+						: filters.mode === "stream" ?
+							`Ranked over ${period ? period.basis : "the next seven days"} — the week that is actually about to happen, using its real slate rather than half of a fortnight.`
+						:	"Ranked over the next fortnight — long enough that one cold week doesn't decide it, short enough that today's role still holds."}
+						{" "}Playing time leans on recent form: the last{" "}
+						{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
+						and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,
+						weighting the most recent window double. Every number is denominated in{" "}
+						{league.meta.league_name ?? "this league"}&rsquo;s own scoring.
+					</p>
 					<dl>
 						{(
 							[

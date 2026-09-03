@@ -335,6 +335,67 @@ Counting the committed `data/snapshot.json` from its own horizon start,
 `start … start + 6` holds 192 team-games and `start … start + 7` holds 222 — which is
 the off-by-one in §11.1, visible in a number this document printed for months.
 
+### 3.5.1 …but only where his outs *are* start-outs
+
+`outs / gamesStarted` is a per-start rate for a pitcher whose appearances are
+starts. For anyone else it is a numerator and a denominator drawn from different
+populations: season outs count every relief inning, `gamesStarted` counts none of
+them, so a swingman's ratio is inflated by exactly the work it does not divide by.
+
+Measured on the reference capture, this was not a rounding error. A reliever with
+**63 appearances and one start** recorded 192 outs, so his "per start" rate was 192
+— and with one scheduled start he was projected for **192 outs, 64 innings, in a
+single game**. He ranked **first** on the streaming board at five times second
+place, and the drill-down printed the impossible number verbatim: *"starts: 1
+scheduled × 192.0 outs per start = 192.0 outs (from MLB's published probables, not
+from team games)"*. Eight pitchers were affected; four projected more than a
+complete game from one start. On a later day the same defect put Cal Quantrill
+(11 starts in 28 appearances) fourth on 8.2 projected innings.
+
+`model.json` now carries `probables.minStartShare = 0.8`. Below that share of
+appearances made as starts, the ratio is refused, the pitcher falls back to the
+team-games estimate — the honest answer for someone whose appearances are not
+starts — and `missing` states the reason rather than a number being invented. The
+strictest defensible version needs no constant at all (`gamesPitched ===
+gamesStarted`); 0.8 is the looser choice and is stated as such. It keeps 31 of the
+48 starts-based pitchers on the measured capture.
+
+This removes a fabricated multiplier rather than adding one, so it owes no
+backtest — but it inherits §3.5's caveat, and the same constant is now the single
+place both this and §3.5.2 ask "are his appearances starts".
+
+### 3.5.2 Inside a covered window, absence is an observation
+
+The engine already establishes the only condition under which not being listed
+means something: `startsUsable` is true when MLB has published a starter for
+**every** game of a club's window. It then threw that away — a pitcher not on the
+list got `null`, which means *unknown*, and `project` fell back to outs per team
+game.
+
+So a starter provably not pitching was ranked as though he might. In the reference
+capture, over the resolved scoring period 2026-09-03 → 2026-09-06, 11 of 30 clubs
+have complete coverage. Jesús Luzardo (28 starts in 28 appearances) plays for one
+of them; his club's three games in that window list Cristopher Sánchez, Zack
+Wheeler and Aaron Nola. He was still on the board. **23** predominantly-starting
+pitchers were in that position; 2 carried a positive bscore.
+
+A covered window with no start for him now yields `projectedStarts: 0`, which makes
+`projectedVolume` zero and `rateable` false, with the reason stated:
+
+> MLB has published a starter for every game of this window and he is not one of
+> them, so he is not scheduled to pitch in it.
+
+Only for pitchers at or above `minStartShare`. A covered window says nothing about
+when a **reliever** appears, so relievers and swingmen keep the fallback —
+excluding them would be inventing an observation, which is the same error in the
+opposite direction. Injury still wins the reason where both apply, because it is
+the more informative one and the Stash view's copy answers it.
+
+Like §3.5 this cannot be backtested: nothing archives what was announced when. It
+ships because it converts a published fact into the projection instead of averaging
+over it, and it materially changes the streaming ranking — 1,226 rateable players
+become 1,203.
+
 ### 3.6 The Statcast quality multiplier — present, off
 
 The mechanism exists: blend observed wOBA toward expected wOBA with

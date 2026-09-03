@@ -9,14 +9,26 @@
     "Re-measure any change with `node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2`.",
     "Season win/loss counts decide; ranking correlation is advisory only."
   ],
-
   "recentForm": {
     "volumeWeight": 0.75,
-    "blend": { "hitting": 0.5, "pitching": 0.5 },
-    "rate": { "hitting": 0, "pitching": 0.15 },
+    "blend": {
+      "hitting": 0.5,
+      "pitching": 0.5
+    },
+    "rate": {
+      "hitting": 0,
+      "pitching": 0.15
+    },
     "windows": {
-      "hitting": { "3": 2, "7": 1, "21": 1 },
-      "pitching": { "5": 2, "21": 1 }
+      "hitting": {
+        "3": 2,
+        "7": 1,
+        "21": 1
+      },
+      "pitching": {
+        "5": 2,
+        "21": 1
+      }
     },
     "why": [
       "volumeWeight 0.75: playing time is the single largest edge available, worth ~20% relative Spearman over a season-only estimate.",
@@ -26,13 +38,19 @@
       "windows: the last series is worth more than the fortnight before it. Pitchers work a five-day turn, so their short window is 5 days rather than 3."
     ]
   },
-
   "statcast": {
     "weight": 0,
     "windowDays": 21,
-    "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 },
+    "lambda": {
+      "mode": "rising",
+      "prior": 300,
+      "cap": 0.7
+    },
     "scope": "wide",
-    "clamp": { "min": 0.75, "max": 1.35 },
+    "clamp": {
+      "min": 0.75,
+      "max": 1.35
+    },
     "why": [
       "weight 0 is now JUSTIFIED on clean data, which is not where this started. The original zero was set by a measurement that ran on leaked input — Savant's custom leaderboard ignores its own date parameters and returns the finished season — so it was void, and was retracted.",
       "Re-measured with true point-in-time Statcast over 2021-2025, 111 paired weeks — every season for which pitch-level data was fetched: every formulation is negative on points per week, and the least-bad one (weight 0.25) is -0.7 points a week while tying 49 of 111 weeks, because it changes almost no roster. The per-season winner also moves around — the batted-ball/falling-lambda config leads 2024 (+3.0/wk) and 2025 (+4.9/wk) and then finishes last in 2023 (-27.8/wk). A winner that changes every season is noise. For scale, over the same 111 weeks the model beats hot-hand by 48.0 points a week (z -3.51) and a season-to-date manager by 65.3 (z -3.89), both significant — so the test is perfectly capable of detecting a real effect. It does not detect one here.",
@@ -46,17 +64,17 @@
       "scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."
     ]
   },
-
   "probables": {
     "use": true,
+    "minStartShare": 0.8,
     "why": [
       "MLB publishes probable starters for the next day or two and then thins out fast. A sample week in mid-season filled 212 of 212 slots; a fortnight horizon measured live filled 46 of 222, and 0 of 30 teams had a complete window. The count is therefore only an observation where it COVERS the window, and the snapshot records published-versus-scheduled per team so the engine can tell.",
       "Read as complete when it was partial, this actively harmed the ranking: a starter who happened to pitch today carried one start over a fortnight while everyone else was projected off team games at two or three, and he fell about 350 places. That is the never-infer rule inverted — a fragment of an observation treated as the whole of one.",
       "A starter projected from outs per TEAM game averages a two-start week and a one-start week into one number, and in a points league those weeks are worth roughly double one another. This is the largest documented hole in the projection.",
-      "It cannot be backtested. Probables are announced and then overwritten, and no archive of what was announced at the time exists, so there is no leak-free way to replay them. Set to true because it replaces an average with an observation, not because a fold count said so — and that distinction is stated rather than hidden."
+      "It cannot be backtested. Probables are announced and then overwritten, and no archive of what was announced at the time exists, so there is no leak-free way to replay them. Set to true because it replaces an average with an observation, not because a fold count said so — and that distinction is stated rather than hidden.",
+      "outs ÷ starts is a per-start rate only for a pitcher whose appearances ARE starts. Season outs count every relief inning; gamesStarted counts none of them, so a swingman's ratio is inflated by every out he recorded in relief. A reliever with 63 appearances and one spot start read this way projected 192 outs — 64 innings — for a single start and ranked first on the streaming board, beating second place fivefold. Below this share of appearances made as starts the ratio is refused and the team-games estimate is used instead, with the reason reported in `missing` rather than a number invented. 0.8 keeps 31 of the 48 starts-based pitchers on the measured capture; the strictest version needs no constant at all (gamesPitched === gamesStarted) and this is the looser, stated one."
     ]
   },
-
   "waivers": {
     "movesPerWeek": 2,
     "why": [
@@ -66,10 +84,12 @@
       "Caveat the simulator cannot see: it charges nothing for churn, while a real league spends waiver priority or FAAB on every claim. If moves are expensive in your league, lower this."
     ]
   },
-
   "matchup": {
     "weight": 0.5,
-    "clamp": { "min": 0.88, "max": 1.12 },
+    "clamp": {
+      "min": 0.88,
+      "max": 1.12
+    },
     "why": [
       "Who a player actually faces this week, from the real schedule: a hitter is scaled by the quality of the staffs he is booked against, a pitcher by the lineups.",
       "Opponent strength is measured from the same leak-free prior window as everything else — never from what the opponent went on to do.",
@@ -77,18 +97,37 @@
       "When a dose-response is monotone but no single dose clears significance, the smallest dose that shows the effect risks the least. Raise it to 1.0 if you want the measured maximum."
     ]
   },
-
   "shrinkage": {
     "default": 400,
     "perStat": {
-      "homeRuns": 170, "baseOnBalls": 120, "strikeOuts": 60, "hits": 290,
-      "doubles": 700, "triples": 1200, "hitByPitch": 240, "stolenBases": 350,
-      "caughtStealing": 500, "runs": 300, "rbi": 300, "totalBases": 320,
-      "sacFlies": 600, "groundIntoDoublePlay": 500, "intentionalWalks": 600,
-      "atBats": 50, "sacBunts": 600,
-      "earnedRuns": 400, "wins": 500, "saves": 400, "holds": 400,
-      "blownSaves": 600, "losses": 500, "completeGames": 900, "shutouts": 900,
-      "wildPitches": 500, "balks": 900, "homeRunsAllowed": 300
+      "homeRuns": 170,
+      "baseOnBalls": 120,
+      "strikeOuts": 60,
+      "hits": 290,
+      "doubles": 700,
+      "triples": 1200,
+      "hitByPitch": 240,
+      "stolenBases": 350,
+      "caughtStealing": 500,
+      "runs": 300,
+      "rbi": 300,
+      "totalBases": 320,
+      "sacFlies": 600,
+      "groundIntoDoublePlay": 500,
+      "intentionalWalks": 600,
+      "atBats": 50,
+      "sacBunts": 600,
+      "earnedRuns": 400,
+      "wins": 500,
+      "saves": 400,
+      "holds": 400,
+      "blownSaves": 600,
+      "losses": 500,
+      "completeGames": 900,
+      "shutouts": 900,
+      "wildPitches": 500,
+      "balks": 900,
+      "homeRunsAllowed": 300
     },
     "why": [
       "Roughly the volume at which a stat is half signal, half noise, following the published stabilisation work (Carleton / Tango).",

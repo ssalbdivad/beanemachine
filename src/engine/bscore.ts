@@ -7,6 +7,7 @@ import {
 	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
 	RECENT_WINDOW_WEIGHTS, type Projection
 } from "./project.ts"
+import { MODEL } from "./weights.ts"
 
 
 /**
@@ -174,7 +175,31 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		const eligible = o.eligibility?.get(player.id)
 		// only trust the count where MLB has published every game of this team's window
 		const cov = player.teamId ? o.probableCoverage?.get(player.teamId) : undefined
-		const startsUsable = cov !== undefined && cov.games > 0 && cov.published >= cov.games
+		const startsUsable =
+			o.probableStarts !== undefined && cov !== undefined && cov.games > 0 && cov.published >= cov.games
+		/**
+		 * Inside a COVERED window, absence is an observation rather than a gap.
+		 *
+		 * `startsUsable` already establishes the only condition under which that is
+		 * true — every game of this team's window has a named starter — and the
+		 * count was then thrown away for anyone not on the list, because `null`
+		 * means "unknown" and `project` falls back to outs per team game. So a
+		 * 28-start pitcher whose club has published all four of its starters, none
+		 * of them him, was ranked on the streaming board for a period he provably
+		 * does not pitch in.
+		 *
+		 * Only for a pitcher who is predominantly a starter: a covered window says
+		 * nothing about when a reliever appears, so relievers and swingmen keep the
+		 * fallback. The share bar is the same constant project.ts uses, so the two
+		 * places that ask "are this man's appearances starts" cannot drift apart.
+		 */
+		const gp = player.stats.gamesPitched ?? 0
+		const mostlyStarts =
+			player.group === "pitching" &&
+			gp > 0 &&
+			(player.stats.gamesStarted ?? 0) / gp >= MODEL.probables.minStartShare
+		const scheduled =
+			startsUsable ? (o.probableStarts?.get(player.id) ?? (mostlyStarts ? 0 : null)) : null
 		const matchupIndex = starterBlendedIndex(
 			player,
 			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null,
@@ -196,7 +221,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
 				matchupIndex,
-				projectedStarts: startsUsable ? (o.probableStarts?.get(player.id) ?? null) : null
+				projectedStarts: scheduled
 			}
 		)
 		const table = tableFor(o.league, player.group)
@@ -228,12 +253,17 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				projection.projectedVolume > 0 &&
 				!(injury !== undefined && (o.injuryPolicy ?? "exclude") === "exclude"),
 			unrateable:
+				// injury wins: it is the more informative reason, and it is the one the
+				// Stash view's own copy answers
 				injury !== undefined && (o.injuryPolicy ?? "exclude") === "exclude" ?
 					`${injury} — no source states a return date, so there is no honest ` +
 						`projection over this horizon. The Stash view ranks him anyway.`
+				: scheduled === 0 ?
+					`MLB has published a starter for every game of this window and he is not ` +
+						`one of them, so he is not scheduled to pitch in it.`
 				:	null,
 			regressionGap: underlying?.xwobaGap ?? null,
-			scheduledStarts: startsUsable ? (o.probableStarts?.get(player.id) ?? null) : null
+			scheduledStarts: scheduled
 		}
 	})
 

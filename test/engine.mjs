@@ -372,5 +372,78 @@ t("and the coverage denominator is the same set of games as the schedule count",
   [...hyd.probableCoverage].every(([team, c]) => c.games === (hyd.gamesByTeam.get(team) ?? c.games)),
   [...hyd.probableCoverage].filter(([t2, c]) => c.games !== hyd.gamesByTeam.get(t2)).length + " disagree")
 
+// --- probables: two ways the starts-based projection lied ---------------------
+//
+// Both are about the same question — are this pitcher's outs START outs — asked in
+// two places, so they share one constant (`MODEL.probables.minStartShare`).
+// A window short enough that MLB has actually published it. Probables thin out
+// fast — measured on this capture, 29 clubs are fully covered one day out, 11 at
+// four days, and ZERO at seven, which is why the engine asks about coverage per
+// club rather than assuming a horizon is knowable. `weekWin` above is seven days
+// and therefore covers nobody, so these assertions would be vacuous against it.
+const coveredWin = windowFrom(hyd.slate, snap.horizon.start,
+  new Date(Date.parse(snap.horizon.start) + 4 * 86400000).toISOString().slice(0, 10))
+t("the short window really is covered for some clubs, or the rest is vacuous",
+  [...coveredWin.coverage.values()].filter(c => c.games > 0 && c.published >= c.games).length > 5,
+  `${[...coveredWin.coverage.values()].filter(c => c.games > 0 && c.published >= c.games).length} clubs`)
+const covered = rateAll({
+  ...base,
+  gamesByTeam: coveredWin.games,
+  opponentsByTeam: coveredWin.opponents,
+  probableStarts: coveredWin.probableStarts,
+  probableCoverage: coveredWin.coverage,
+  opposingStarters: coveredWin.opposingStarters,
+  injuryPolicy: "exclude"
+})
+const line = new Map(hyd.players.map(p2 => [p2.id, p2.stats]))
+const share = r => {
+  const st = line.get(r.player.id) ?? {}
+  return st.gamesPitched ? (st.gamesStarted ?? 0) / st.gamesPitched : 0
+}
+
+/**
+ * `s.outs` counts every out a pitcher recorded, relief included; `s.gamesStarted`
+ * counts starts only. For a swingman that ratio is a numerator and denominator over
+ * different populations, inflated by exactly the relief work it does not divide by.
+ * Measured on this capture: a reliever with 63 appearances and one spot start
+ * projected 192 outs — 64 innings — for one scheduled start and ranked FIRST on the
+ * streaming board at five times second place, with the drill-down printing the
+ * impossible number verbatim.
+ */
+const oneStart = covered.filter(r => r.player.group === "pitching" && r.scheduledStarts === 1)
+t("some pitchers do have exactly one published start, so this is not vacuous",
+  oneStart.length > 5, `${oneStart.length}`)
+t("no single scheduled start projects more than a complete game",
+  oneStart.every(r => (r.projection.projectedVolume ?? 0) <= 27),
+  oneStart.filter(r => (r.projection.projectedVolume ?? 0) > 27)
+    .map(r => `${r.player.name} ${r.projection.projectedVolume?.toFixed(0)} outs`).join(", "))
+t("a pitcher who also relieves is not projected off outs-per-start at all",
+  covered.filter(r => share(r) > 0 && share(r) < 0.8)
+    .every(r => !r.projection.modelled.some(m => /^starts:/.test(m))))
+t("and he is told why, rather than a number being invented for him",
+  covered.filter(r => share(r) > 0 && share(r) < 0.8 && r.scheduledStarts !== null)
+    .every(r => r.projection.missing.some(m => /he relieves too/.test(m))))
+
+/**
+ * Where MLB has published a starter for every game of a club's window, a starter who
+ * is not among them provably does not pitch in it. That absence used to read as
+ * "unknown" and fall back to outs-per-team-game, so a 28-start pitcher whose club had
+ * named all of its starters — none of them him — was ranked on the streaming board.
+ */
+const absent = covered.filter(r => /published a starter for every game/.test(r.unrateable ?? ""))
+t("a covered window with no start for him is treated as an observation",
+  absent.length > 0, `${absent.length}`)
+t("and none of them is ranked anyway", absent.every(r => !r.rateable))
+t("every excluded man is a pitcher who is predominantly a starter",
+  absent.every(r => r.player.group === "pitching" && share(r) >= 0.8),
+  absent.filter(r => share(r) < 0.8).map(r => r.player.name).join(", "))
+// relievers must keep the fallback: a covered window says nothing about when a
+// reliever appears, so excluding them would be inventing an observation
+t("relievers are not excluded by a covered window",
+  covered.filter(r => r.player.group === "pitching" && share(r) > 0 && share(r) < 0.8)
+    .every(r => !/published a starter for every game/.test(r.unrateable ?? "")))
+t("injury still wins the reason, because it is the more informative one",
+  covered.filter(r => r.injury && !r.rateable).every(r => /return date/.test(r.unrateable ?? "")))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

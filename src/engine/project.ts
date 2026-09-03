@@ -254,14 +254,45 @@ export const project = (
 	 * and a one-start week into the same projection, and those weeks are worth about
 	 * double one another.
 	 */
+	/**
+	 * ...but only where his outs ARE start-outs.
+	 *
+	 * `s.outs` counts every out he recorded, relief appearances included;
+	 * `s.gamesStarted` counts starts only. For a swingman the ratio is a
+	 * numerator and a denominator over different populations, and it is inflated
+	 * by exactly the relief work it does not divide by. Measured: a reliever with
+	 * 63 appearances and one spot start projected 192 outs — 64 innings — for a
+	 * single scheduled start, and ranked first on the streaming board at five
+	 * times second place. The drill-down printed the impossible number verbatim.
+	 *
+	 * Below the share bar he falls back to the team-games estimate, which is the
+	 * honest answer for a pitcher whose appearances are not starts, and `missing`
+	 * says why rather than a number being invented.
+	 */
+	const startShare = s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 0
 	const startsBased =
 		!isHitter &&
 		projectedStarts !== null &&
 		MODEL.probables.use &&
 		(s.gamesStarted ?? 0) > 0 &&
-		s.outs !== undefined ?
+		s.outs !== undefined &&
+		startShare >= MODEL.probables.minStartShare ?
 			(s.outs / s.gamesStarted!) * projectedStarts
 		:	null
+	// every other precondition passed and only the share bar refused it
+	if (
+		startsBased === null &&
+		!isHitter &&
+		projectedStarts !== null &&
+		MODEL.probables.use &&
+		(s.gamesStarted ?? 0) > 0 &&
+		s.outs !== undefined
+	)
+		missing.push(
+			`outs recorded in starts — he relieves too (${s.gamesStarted} of ${s.gamesPitched} ` +
+				`appearances were starts), so his season outs divided by his starts is not a ` +
+				`per-start rate`
+		)
 	const projectedVolume =
 		startsBased !== null ? startsBased
 		: volumePerTeamGame === null ? null

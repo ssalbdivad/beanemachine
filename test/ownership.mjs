@@ -172,5 +172,39 @@ const constant = [...byTeam.values()].filter(vals => {
 t("the committed capture is the known-bad one this check was written for",
   constant.length >= 15, `${constant.length} of ${byTeam.size} clubs sit on one value`)
 
+
+// --- reading a roster off a team's own Yahoo page -----------------------------
+//
+// "My team" is the gate to the starting lineup and to every trade verdict, and it
+// used to open on an empty search box asking for twenty-seven players by hand. The
+// page it now reads is the same one src/import.ts already downloads for the team
+// NAME, so nothing new has to be reachable — but the parse has to be pinned,
+// because a roster that quietly loses a player misprices every lineup under it.
+const { parseRoster } = await import("../src/data/yahoo-pool.ts")
+
+const rosterRow = (id, name) =>
+  `<a class="name F-link" data-ys-playerid="${id}" title="${name}">${name}</a>`
+
+const roster = parseRoster(`<div>${rosterRow(1, "Ben Rice")}${rosterRow(2, "Juan Soto")}</div>`)
+t("a roster page yields one entry per player",
+  roster.length === 2 && roster[0].name === "Ben Rice" && roster[1].name === "Juan Soto",
+  JSON.stringify(roster))
+t("and carries Yahoo's own id for each", roster.map(x => x.yahooId).join(",") === "1,2")
+
+// Yahoo repeats a player's id across the row (the note link, the icon), and a
+// roster listing him twice would double-count him in every slot he fills.
+const dupes = parseRoster(`<div>${rosterRow(7, "Byron Buxton")}${rosterRow(7, "Byron Buxton")}</div>`)
+t("a player repeated in the markup is stored once", dupes.length === 1, JSON.stringify(dupes))
+
+t("a page with no roster rows yields nothing rather than throwing",
+  parseRoster("<html><body>Please sign in</body></html>").length === 0)
+t("an entry without a readable name is skipped rather than stored blank",
+  parseRoster(`<a data-ys-playerid="9"></a>`).length === 0)
+
+// The join to MLBAM runs through normalizeName, the same join ownership uses.
+const { normalizeName } = await import("../src/data/yahoo-pool.ts")
+t("a roster name normalizes onto the same key ownership joins by",
+  normalizeName("José Soriano") === normalizeName("Jose Soriano"))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -5,7 +5,7 @@ import { type } from "arktype"
 import { Hono } from "hono"
 import { existsSync } from "node:fs"
 import { ImportError, importLeague } from "./import.ts"
-import { fetchAvailable } from "./data/yahoo-pool.ts"
+import { fetchAvailable, fetchRoster } from "./data/yahoo-pool.ts"
 
 /**
  * The API is now only what a browser genuinely cannot do for itself: read a
@@ -65,6 +65,27 @@ const api = new Hono()
 		poolCache.set(leagueId, { at: Date.now(), pool })
 		return c.json(pool)
 	})
+
+	/**
+	 * A team's own roster, off its own Yahoo page.
+	 *
+	 * Same footing as /available: browsers cannot read Yahoo directly, so the fetch
+	 * happens here and the names are handed back. Nothing is stored — the browser
+	 * owns the roster, exactly as it owns the league.
+	 */
+	.post(
+		"/roster",
+		arktypeValidator("json", type({ leagueId: "string > 0", teamId: "string > 0" })),
+		async c => {
+			const { leagueId, teamId } = c.req.valid("json")
+			if (!/^\d+$/.test(leagueId) || !/^\d+$/.test(teamId))
+				throw new ImportError("A numeric Yahoo league id and team id are required.")
+			// An unreadable roster is a state, not an error: the league may be private
+			// or Yahoo may be throttling, and the client offers the manual path either
+			// way rather than logging a failed request.
+			return c.json(await fetchRoster(leagueId, teamId))
+		}
+	)
 
 app.route("/api", api)
 

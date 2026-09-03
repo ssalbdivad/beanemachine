@@ -406,3 +406,81 @@ export const fetchOwnership = async (
 			:	"")
 	}
 }
+
+/** One man on a Yahoo team page, as that page prints him. */
+export interface RosterEntry {
+	yahooId: string
+	name: string
+	/** The slot Yahoo has him in — "C", "OF", "BN", "IL". Null where unreadable. */
+	slot: string | null
+}
+
+/**
+ * Read a team's roster off its own Yahoo page.
+ *
+ * The alternative was typing it. "My team" is the gate to the starting lineup and
+ * to every trade verdict, and it opened on an empty search box and the instruction
+ * to add the ones you own — twenty-seven times, by hand, before the page could say
+ * anything at all. The three cards under it each rendered their own "add your team
+ * first". That is the single largest barrier in the product.
+ *
+ * Nothing new has to be reachable for this: `src/import.ts` already downloads this
+ * exact page to read the team NAME out of its `<title>` and throws the rest away.
+ * The roster is in the markup it already has — 24 `data-ys-playerid` links on the
+ * reference team, publicly readable without signing in, the same footing the
+ * free-agent pool and the ownership sweep already stand on.
+ *
+ * Names are returned rather than ids because Yahoo's ids are its own; the join to
+ * MLBAM runs through `normalizeName`, which is the same join `ownership` and
+ * `eligibility` already use and which is pinned by tests.
+ */
+export const parseRoster = (htmlText: string): RosterEntry[] => {
+	const out: RosterEntry[] = []
+	const seen = new Set<string>()
+	// Each roster row carries the slot in its own cell before the player link, so
+	// the row is split on the link and the slot read from what precedes it.
+	const rows = htmlText.split(/data-ys-playerid="/).slice(1)
+	for (const row of rows) {
+		const yahooId = /^(\d+)/.exec(row)?.[1]
+		if (!yahooId || seen.has(yahooId)) continue
+		const head = row.slice(0, 400)
+		const name = cellText(/title="([^"]+)"/.exec(head)?.[1] ?? "").trim()
+		if (!name) continue
+		seen.add(yahooId)
+		out.push({ yahooId, name, slot: null })
+	}
+	return out
+}
+
+/**
+ * The roster of one team, by name. An empty array is a STATE — a private league,
+ * a wrong team number, or Yahoo rate-limiting — and never an exception, because
+ * the caller renders "couldn't read it, add them by hand" either way.
+ */
+export const fetchRoster = async (
+	leagueId: string,
+	teamId: string,
+	sport = "baseball"
+): Promise<{ players: RosterEntry[]; note: string }> => {
+	const url = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/${teamId}`
+	try {
+		const res = await fetch(url, { headers: { "user-agent": UA } })
+		if (!res.ok) return { players: [], note: `Yahoo returned HTTP ${res.status} for that team.` }
+		const text = await res.text()
+		if (/Please sign in/i.test(documentText(text).slice(0, 400)))
+			return {
+				players: [],
+				note: "That league isn't publicly viewable, so its rosters can't be read without signing in."
+			}
+		const players = parseRoster(text)
+		return {
+			players,
+			note:
+				players.length ?
+					`Read ${players.length} players off team ${teamId}'s own page.`
+				:	"Yahoo served the page but no roster rows were on it."
+		}
+	} catch (e) {
+		return { players: [], note: `Couldn't reach Yahoo (${(e as Error).message}).` }
+	}
+}

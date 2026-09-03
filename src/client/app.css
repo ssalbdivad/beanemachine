@@ -708,6 +708,10 @@ pre{
 /* A denominator carried in a column heading: present enough to be read, quiet
    enough not to compete with the label it qualifies. */
 .board-head .of{opacity:.55;font-size:.85em;letter-spacing:0}
+/* Reading the roster off Yahoo is the fast path into this page, so it sits above
+   the manual search rather than beside it, with its own outcome line. */
+.pull-roster{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 var(--sp-2)}
+.pull-roster .sub{margin:0;flex:1 1 260px;min-width:0}
 .legend{margin-top:var(--sp-4)}
 .legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}
 .legend dt{color:var(--accent);font-weight:500;text-transform:none}

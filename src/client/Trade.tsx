@@ -4,10 +4,10 @@ import {
 	evaluateTrade, replacementBySlot, startingLineup, type Lineup, type Start, type TradeVerdict
 } from "../engine/trade.ts"
 import type { League } from "../schema.ts"
-import { ApiError } from "./api.ts"
+import { api, ApiError } from "./api.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import "./trade.css"
-import { DEFAULT_FILTERS, useBoard, type Filters, type Ranked } from "./useBoard.ts"
+import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 
 /**
  * The trade analyzer, in front of a human.
@@ -109,6 +109,67 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		})
 	}, [league, mine, give, take, byKey, rated])
 
+	/**
+	 * Read the roster off the league's own Yahoo page instead of typing it.
+	 *
+	 * This card is the gate to the starting lineup and to every trade verdict, and
+	 * it used to open on an empty search box asking you to add the players you own
+	 * — twenty-seven of them, one at a time, before the page could say anything.
+	 * Yahoo already serves the roster publicly on the team page that `src/import.ts`
+	 * downloads anyway for the team NAME, so nothing new has to be reachable.
+	 *
+	 * Yahoo's ids are its own, so the join runs through `normalizeName` — the same
+	 * join `ownership` and `eligibility` already use. Anyone it cannot place is
+	 * NAMED rather than silently dropped: a roster that quietly lost two players
+	 * would misprice every lineup below it.
+	 */
+	const [pulling, setPulling] = useState(false)
+	const [pullNote, setPullNote] = useState<string | null>(null)
+	const leagueId = league?.meta.league_id ?? null
+	const teamId = league?.meta.team_id ?? null
+
+	const pullRoster = async () => {
+		if (!leagueId || !teamId || !leagueKey) return
+		setPulling(true)
+		setPullNote(null)
+		try {
+			const res = await api.roster(String(leagueId), String(teamId))
+			if (!res.players.length) {
+				setPullNote(res.note)
+				return
+			}
+			// one pass over the rated pool, keyed the way the join needs
+			const byName = new Map<string, Ranked[]>()
+			for (const r of rated) {
+				const k = normalizeName(r.player.name)
+				byName.set(k, [...(byName.get(k) ?? []), r])
+			}
+			const keys: string[] = []
+			const missed: string[] = []
+			for (const y of res.players) {
+				const hits = byName.get(normalizeName(y.name))
+				if (!hits?.length) {
+					missed.push(y.name)
+					continue
+				}
+				// a two-way player is two rated rows; Yahoo's page does not say which
+				// you hold, so both are added and you can drop the one you do not
+				for (const r of hits) keys.push(rosterKey(r.player))
+			}
+			persist(() => store.set(leagueKey, keys))
+			setPullNote(
+				`Read ${res.players.length} players off Yahoo.` +
+					(missed.length ?
+						` ${missed.length} not in this capture, add by hand: ${missed.join(", ")}.`
+					:	"")
+			)
+		} catch (e) {
+			setPullNote(e instanceof ApiError ? e.message : String(e))
+		} finally {
+			setPulling(false)
+		}
+	}
+
 	const persist = (next: () => string[]) => {
 		try {
 			setOwned(next())
@@ -192,9 +253,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				<h2>My team</h2>
 				<p className="sub">
 					Who you own in {league.meta.league_name ?? leagueKey}, with each man&rsquo;s bscore
-					and then his projected points. Kept in this browser under this league&rsquo;s own
-					key — the same players fill different slots against a different waiver wire
-					elsewhere, so a roster never travels between leagues.
+					and then his projected points. Saved in this browser, per league.
 				</p>
 				{storeError && (
 					<div className="trade-store-error">
@@ -222,9 +281,19 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						</button>
 					</div>
 				)}
+				{leagueId && teamId && (
+					<div className="pull-roster">
+						<button type="button" className="primary" disabled={pulling} onClick={() => void pullRoster()}>
+							{pulling ? "Reading…" : owned.length ? "Re-read my roster from Yahoo" : "Read my roster from Yahoo"}
+						</button>
+						<span className="sub">
+							{pullNote ?? "Only publicly-viewable Yahoo leagues can be read without signing in."}
+						</span>
+					</div>
+				)}
 				<div className="trade-search">
 					<label className="ctl grow">
-						<span>Add a player you own</span>
+						<span>Or add a player you own</span>
 						<input
 							type="text"
 							data-ctl="own-search"

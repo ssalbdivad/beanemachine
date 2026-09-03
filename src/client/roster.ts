@@ -99,6 +99,20 @@ const remove = (league: string, key: string): string[] => {
 	return write({ ...stored, [league]: kept })[league]!
 }
 
+/**
+ * Replace this league's roster outright — what reading it off Yahoo does.
+ *
+ * Adding twenty-four keys one at a time would write the store twenty-four times
+ * and, worse, would MERGE with whatever is already there: re-reading a roster
+ * after a trade would leave the players you no longer own still on the team. A
+ * read is the whole truth about that team, so it replaces rather than accumulates.
+ * Duplicates are dropped, and every other league's roster is left alone.
+ */
+const set = (league: string, keys: string[]): string[] => {
+	const stored = read()
+	return write({ ...stored, [league]: [...new Set(keys)] })[league] ?? []
+}
+
 /** Drops this league's roster and leaves every other league's alone. */
 const clear = (league: string): string[] => {
 	const { [league]: _, ...kept } = read()
@@ -122,4 +136,4 @@ const reset = (): void => {
 	}
 }
 
-export const roster = { of, add, remove, clear, reset }
+export const roster = { of, add, set, remove, clear, reset }

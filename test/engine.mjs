@@ -338,16 +338,54 @@ const withStarts = rateAll({
 })
 const noStarts = rateAll({ ...base, eligibility: hyd.eligibility })
 const complete = coverage.filter(c => c.published >= c.games).length
-t("a team whose window is only partly published contributes no scheduled starts",
-  complete > 0 ||
-    withStarts.every((r, i) => r.scheduledStarts === null && r.points === noStarts[i].points),
-  `${complete}/${coverage.length} teams complete`)
 
-// and where it IS complete the count must be used, or the guard is just an off switch
-t("the guard keys on coverage rather than disabling the feature outright",
-  withStarts.every(r => r.scheduledStarts === null || (
-    hyd.probableCoverage.get(r.player.teamId)?.published >=
-    hyd.probableCoverage.get(r.player.teamId)?.games)))
+/**
+ * A partial window is now SPLIT rather than refused.
+ *
+ * The old rule was all-or-nothing: unless MLB had named a starter for every game of
+ * a club's window, the count was discarded entirely. Measured on this capture from
+ * the snapshot's own horizon start, that gate opens for 26 of 30 clubs over three
+ * days, 8 over five, and NONE over seven — so on a normal weekly scoring period the
+ * starts basis never fired at all, and a pitcher confirmed for two starts was
+ * projected off the same team-games average as everyone else. Two starts is roughly
+ * double the innings and is the largest edge in streaming, so that was the wrong
+ * side to fail on.
+ *
+ * The count is now `published(him) + unnamed(his club) × (his GS / his club's GP)`:
+ * what MLB has said is used as the observation it is, and the games it has not yet
+ * named are credited at his own rate of starting — which is exactly what the
+ * team-games fallback was doing for the whole window anyway. The failure the old
+ * gate existed to prevent (a man named for today carrying ONE start across a
+ * fortnight, ~350 places of damage) cannot happen, because the unnamed tail is
+ * credited rather than zeroed.
+ */
+const startersOf = rs => rs.filter(r => {
+  const st = hyd.players.find(p => p.id === r.player.id)?.stats ?? {}
+  return r.player.group === "pitching" && (st.gamesPitched ?? 0) > 0 &&
+    (st.gamesStarted ?? 0) / st.gamesPitched >= 0.8
+})
+const rotation = startersOf(withStarts)
+t("rotation starters are rated at all, so the rest is not vacuous", rotation.length > 20, `${rotation.length}`)
+t("a partly published window still yields a starts count",
+  rotation.some(r => r.scheduledStarts !== null && r.scheduledStarts > 0),
+  `${complete}/${coverage.length} clubs complete`)
+// the observation is a floor: he cannot be credited with fewer starts than MLB named
+t("a published start is never discounted below what MLB published",
+  rotation.every(r => {
+    const pub = hyd.probableStarts.get(r.player.id) ?? 0
+    return r.scheduledStarts === null || r.scheduledStarts >= pub - 1e-9
+  }))
+// and a fully covered club keeps meaning what it meant: unnamed means he does not pitch
+t("on a fully covered club an unnamed starter still projects no starts",
+  rotation.every(r => {
+    const c = hyd.probableCoverage.get(r.player.teamId)
+    if (!c || c.published < c.games) return true
+    return (hyd.probableStarts.get(r.player.id) ?? 0) > 0 || r.scheduledStarts === 0
+  }))
+// nobody is credited with more turns than his club has games
+t("no pitcher is given more starts than his club has games",
+  rotation.every(r => r.scheduledStarts === null ||
+    r.scheduledStarts <= (hyd.probableCoverage.get(r.player.teamId)?.games ?? 0) + 1e-9))
 
 // --- the horizon counts only games a fantasy league plays ---
 // Every schedule read filters to gameType=R. Unfiltered, a rest-of-season window

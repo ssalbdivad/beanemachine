@@ -1,7 +1,9 @@
 import type { League } from "../schema.ts"
 import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
-import { matchupIndexFor, pitcherQuality, starterBlendedIndex, teamStrength } from "./matchup.ts"
+import {
+	matchupIndexFor, pitcherMatchupIndex, pitcherQuality, starterBlendedIndex, teamStrength
+} from "./matchup.ts"
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
 import {
 	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
@@ -146,6 +148,9 @@ export interface RateOptions {
 	probableStarts?: Map<number, number>
 	/** For each team, the opposing starters its hitters face over the horizon. */
 	opposingStarters?: Map<number, number[]>
+	/** Who each announced starter is booked against — a pitcher faces only the
+	 *  lineups his own turns fall on, not his club's whole week. */
+	startOpponents?: Map<number, number[]>
 	/** Multi-position eligibility as the platform prints it, by MLBAM id. */
 	eligibility?: Map<number, string[]>
 	/**
@@ -223,15 +228,58 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			player.group === "pitching" &&
 			gp > 0 &&
 			(player.stats.gamesStarted ?? 0) / gp >= MODEL.probables.minStartShare
+
+		/**
+		 * Two starts in a scoring period is roughly double the innings, and it is the
+		 * single largest edge in streaming — so the count has to survive a window MLB
+		 * has only partly published, which is every window longer than a few days.
+		 *
+		 * Measured on the reference capture, from the snapshot's own horizon start:
+		 * over 3 days 26 of 30 clubs have every game published, over 5 days 8, and
+		 * **over 7 days none at all** — 98 of 192 games carry a named starter. The
+		 * all-or-nothing gate above therefore never opened on a normal week, so the
+		 * starts basis never fired there and a confirmed two-start man was projected
+		 * off the same team-games average as everybody else.
+		 *
+		 * Opening the gate naively is what the gate was built to prevent, and that
+		 * failure is on the record (METHODOLOGY 3.5): read a partial window as
+		 * complete and a starter named for today carries ONE start across a fortnight
+		 * while the field is projected at two or three, and he falls about 350 places.
+		 *
+		 * So the count is split rather than gated. What MLB has published is an
+		 * observation and is used as one; the games it has not yet named are credited
+		 * at this pitcher's own rate of starting, which is what the team-games
+		 * fallback was silently doing for the whole window anyway:
+		 *
+		 *     starts = published(him) + unpublished(his club) × (his GS / his club's GP)
+		 *
+		 * The two ends behave correctly by construction. Fully published: the second
+		 * term is zero and this reduces to exactly the previous behaviour, including a
+		 * covered window meaning zero for a starter nobody named. Nothing published:
+		 * the first term is zero and the second reproduces the team-games estimate. In
+		 * between — the normal case — a man named twice gets at least two, and a man
+		 * named once gets one plus his share of what is still unnamed.
+		 */
+		const published = o.probableStarts?.get(player.id) ?? 0
+		const unnamed = cov ? Math.max(cov.games - cov.published, 0) : 0
+		// his club's games so far this season — the denominator that turns his starts
+		// into a per-team-game rate
+		const teamGP = player.teamId ? o.teamGamesPlayed.get(player.teamId) : undefined
+		const startRate =
+			mostlyStarts && teamGP ? Math.min((player.stats.gamesStarted ?? 0) / teamGP, 1) : 0
 		const scheduled =
-			startsUsable ? (o.probableStarts?.get(player.id) ?? (mostlyStarts ? 0 : null)) : null
-		const matchupIndex = starterBlendedIndex(
-			player,
-			o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null,
-			o.opposingStarters,
-			quality,
-			horizonGames
-		)
+			o.probableStarts === undefined || cov === undefined || cov.games === 0 ? null
+			: !mostlyStarts ?
+				// a published count says nothing about when a reliever next appears
+				startsUsable ? (o.probableStarts?.get(player.id) ?? null) : null
+			:	Number((published + unnamed * startRate).toFixed(2))
+		// The club's week, which is the right question for a hitter.
+		const teamIndex = o.opponentsByTeam ? matchupIndexFor(player, o.opponentsByTeam, strength) : null
+		const matchupIndex =
+			player.group === "pitching" ?
+				// ...but a starter faces only the lineups his own turns fall on
+				pitcherMatchupIndex(player, o.startOpponents, teamIndex, strength, scheduled)
+			:	starterBlendedIndex(player, teamIndex, o.opposingStarters, quality, horizonGames)
 		const projection = project(
 			player,
 			underlying,

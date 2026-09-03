@@ -485,7 +485,12 @@ export const Board = ({
 						<span className="r" title="How many leagues already roster him. Blank means Yahoo doesn't list him — unknown, not unowned.">owned</span>
 						<span className="r" title="Games his team actually has scheduled in the window. Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start.">GP</span>
 						<SortHead field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
-						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>luck</SortHead>
+						{/* The number is a percentile, and nothing said so: 88 read as a quantity of
+						    luck rather than as "unluckier than 88% of his side". The denominator
+						    belongs in the heading, read once, rather than on 1,235 rows. */}
+						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right unit="/100">
+							luck
+						</SortHead>
 					</div>
 					{rows.slice(0, limit).map((r, i) => (
 						<Row key={r.player.id} rank={i + 1} r={r} open={open === r.player.id}
@@ -819,12 +824,18 @@ const COLUMN_HELP: Record<Filters["sort"], string> = {
 
 
 const SortHead = ({
-	field, filters, setFilters, right, children
+	field, filters, setFilters, right, unit, children
 }: {
 	field: Filters["sort"]
 	filters: Filters
 	setFilters: (f: (p: Filters) => Filters) => void
 	right?: boolean
+	/**
+	 * A denominator shown quietly beside the label — "/100" on a percentile column.
+	 * Separate from `children` so the spoken name can say "out of 100" in words
+	 * while the heading stays two glyphs wide.
+	 */
+	unit?: string
 	/** A plain string, because the sort state is announced by interpolating it. */
 	children: string
 }) => {
@@ -847,12 +858,13 @@ const SortHead = ({
 			// the name instead. The title stays as the column's description.
 			aria-label={
 				active ?
-					`${children}, sorted ${filters.desc ? "descending" : "ascending"}, activate to reverse`
-				:	`Sort by ${children}`
+					`${children}${unit ? ` out of ${unit.replace("/", "")}` : ""}, sorted ${filters.desc ? "descending" : "ascending"}, activate to reverse`
+				:	`Sort by ${children}${unit ? ` out of ${unit.replace("/", "")}` : ""}`
 			}
 			title={COLUMN_HELP[field]}
 		>
 			{children}
+			{unit && <span className="of">{unit}</span>}
 			<span className="arrow">{active ? (filters.desc ? "▾" : "▴") : ""}</span>
 		</button>
 	)

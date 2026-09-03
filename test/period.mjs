@@ -114,5 +114,32 @@ t("played-only counts the finals and nothing else",
 t("a window that starts after it ends counts nothing rather than everything",
   windowFrom(slate, "2026-09-10", "2026-09-06").games.size === 0)
 
+// --- who each announced starter actually faces -------------------------------
+//
+// `opponents` is per CLUB, which is the right question for a hitter — he plays them
+// all. A starter takes one turn in five, and which lineup falls on his turn is most
+// of what a streaming decision is about, so the window records it separately.
+{
+  const slate = [
+    { date: "2026-09-03", home: 1, away: 2, homeProbable: 100, awayProbable: 200, final: false },
+    { date: "2026-09-04", home: 1, away: 2, homeProbable: 101, awayProbable: null, final: false },
+    { date: "2026-09-05", home: 3, away: 1, homeProbable: null, awayProbable: 100, final: false }
+  ]
+  const w = windowFrom(slate, "2026-09-03", "2026-09-05")
+  t("an announced starter's own opponents are recorded",
+    JSON.stringify(w.startOpponents.get(100)) === JSON.stringify([2, 3]),
+    JSON.stringify([...w.startOpponents]))
+  t("and they are his, not his club's whole week",
+    JSON.stringify(w.startOpponents.get(101)) === JSON.stringify([2]),
+    JSON.stringify(w.startOpponents.get(101)))
+  // club 1 plays 2 twice and 3 once; pitcher 101 faces only 2
+  t("the club-level list still carries every game, unchanged",
+    JSON.stringify(w.opponents.get(1)) === JSON.stringify([2, 2, 3]),
+    JSON.stringify(w.opponents.get(1)))
+  t("an unannounced game contributes no start opponent",
+    !w.startOpponents.has(999) && w.startOpponents.size === 3,
+    JSON.stringify([...w.startOpponents.keys()]))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

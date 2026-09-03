@@ -158,6 +158,16 @@ export interface Window {
 	opponents: Map<number, number[]>
 	/** Starts each pitcher is announced for. Absent means unannounced, not zero. */
 	probableStarts: Map<number, number>
+	/**
+	 * Who each announced starter is booked against, one entry per announced start.
+	 *
+	 * `opponents` is per CLUB, so a pitcher's schedule strength was the average of
+	 * every team his club faces that week — including the games he does not pitch.
+	 * A man announced against the weakest lineup in the league was being priced on
+	 * his club's whole week, which is the opposite of what a streaming decision
+	 * turns on. Where MLB has named him, the lineup he actually faces is known.
+	 */
+	startOpponents: Map<number, number[]>
 	/** The opposing starters each club is booked against, where they are announced. */
 	opposingStarters: Map<number, number[]>
 	/** How much of each club's window MLB has actually named starters for. */
@@ -175,6 +185,7 @@ export const windowFrom = (
 		games: new Map(),
 		opponents: new Map(),
 		probableStarts: new Map(),
+		startOpponents: new Map(),
 		opposingStarters: new Map(),
 		coverage: new Map()
 	}
@@ -195,7 +206,10 @@ export const windowFrom = (
 			cov.games++
 			if (mine !== null) cov.published++
 			w.coverage.set(team, cov)
-			if (mine !== null) w.probableStarts.set(mine, (w.probableStarts.get(mine) ?? 0) + 1)
+			if (mine !== null) {
+				w.probableStarts.set(mine, (w.probableStarts.get(mine) ?? 0) + 1)
+				w.startOpponents.set(mine, [...(w.startOpponents.get(mine) ?? []), opp])
+			}
 			if (theirs !== null)
 				w.opposingStarters.set(team, [...(w.opposingStarters.get(team) ?? []), theirs])
 		}

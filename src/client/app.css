@@ -705,6 +705,9 @@ pre{
    top of the board — right under the name, because the two are different
    recommendations and the card looks identical either way. */
 .pick-avail{margin:2px 0 var(--sp-2);font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
+/* A denominator carried in a column heading: present enough to be read, quiet
+   enough not to compete with the label it qualifies. */
+.board-head .of{opacity:.55;font-size:.85em;letter-spacing:0}
 .legend{margin-top:var(--sp-4)}
 .legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}
 .legend dt{color:var(--accent);font-weight:500;text-transform:none}

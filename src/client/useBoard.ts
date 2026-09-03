@@ -153,6 +153,10 @@ export const useBoard = (
 			usingWeek ? week!.coverage : usingRest ? undefined : h.probableCoverage
 		const opposingStarters =
 			usingWeek ? week!.opposingStarters : usingRest ? undefined : h.opposingStarters
+		// which lineup each announced starter actually faces — only meaningful where
+		// probables exist, so the rest-of-season view has none by construction
+		const startOpponents =
+			usingWeek ? week!.startOpponents : usingRest ? undefined : h.startOpponents
 		return withMarketEdge(
 			withUndervaluation(
 				rateAll({

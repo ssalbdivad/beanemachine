@@ -335,6 +335,59 @@ Counting the committed `data/snapshot.json` from its own horizon start,
 `start … start + 6` holds 192 team-games and `start … start + 7` holds 222 — which is
 the off-by-one in §11.1, visible in a number this document printed for months.
 
+### 3.5.0 A partly published window is split, not refused
+
+The count was originally all-or-nothing: unless MLB had named a starter for **every**
+game of a club's window, `startsUsable` was false and the count was discarded. That
+gate was built for a real failure — read a partial window as complete and a starter
+named for today carries one start across a fortnight while the field is projected at
+two or three, and he drops about 350 places (§3.5).
+
+But it fails on the wrong side. Measured on the reference capture, from the
+snapshot's own horizon start:
+
+| window | clubs with every game published | games published |
+|---|---|---|
+| 3 days | 26 of 30 | 73 / 80 |
+| 5 days | 8 of 30 | 98 / 132 |
+| **7 days** | **0 of 30** | 98 / 192 |
+| 14 days | 0 of 30 | 98 / 372 |
+
+So on a normal weekly scoring period the gate never opened, the starts basis never
+fired, and a pitcher **confirmed for two starts was projected off the same
+team-games average as everybody else.** Two starts is roughly double the innings and
+is the largest single edge in streaming, which is the thing the streaming view
+exists to find.
+
+The count is therefore split rather than gated. What MLB has published is an
+observation and is used as one; the games it has not yet named are credited at the
+pitcher's own rate of starting — which is precisely what the team-games fallback was
+already doing implicitly for the entire window:
+
+```
+starts = published(him) + unnamed(his club) × (his GS ÷ his club's GP)
+```
+
+Both ends are correct by construction. **Fully published:** the second term is zero,
+so this reduces exactly to the previous behaviour, including §3.5.2's rule that an
+unnamed starter on a covered club projects zero. **Nothing published:** the first
+term is zero and the second reproduces the team-games estimate, so it is never worse
+than the fallback it replaces. **In between,** which is the normal case, a man named
+twice gets at least two and a man named once gets one plus his share of what is
+still unnamed.
+
+Measured over a 7-day window on the reference capture: rotation starters projected
+off their own starts goes from **0 of 154 to 154 of 154**. Tarik Skubal, named for
+one start with four of his club's games still unnamed, projects **1.91 starts** and
+34.6 outs against a one-start median of 23.5. The observation is a floor — nobody is
+credited with fewer turns than MLB has named him for — and nobody is credited with
+more turns than his club has games.
+
+This inherits §3.5's caveat and cannot be backtested: nothing archives what was
+announced when. It ships because it uses a published fact instead of averaging over
+it, and because the alternative was measured to be inert on every window the
+streaming view actually uses.
+
 ### 3.5.1 …but only where his outs *are* start-outs
 
 `outs / gamesStarted` is a per-start rate for a pitcher whose appearances are

@@ -127,6 +127,43 @@ export const pitcherQuality = (players: PlayerSeason[]): Map<number, number> => 
 	return out
 }
 
+/**
+ * The lineups a PITCHER is actually booked against, rather than his club's week.
+ *
+ * `matchupIndexFor` averages every opponent the club faces in the window, because
+ * that is the right question for a hitter — he plays them all. A starter does not:
+ * he takes one turn in five, and which lineup falls on his turn is most of what a
+ * streaming decision is about. A man announced against the weakest offence in the
+ * league was being priced on his club's whole week, and a man announced against the
+ * best was getting the same discount.
+ *
+ * Where MLB has named him the opponent is known, so it is used. The starts it has
+ * not yet named fall back to the club average, weighted by how many of his expected
+ * turns are still unannounced — the same observed-plus-modelled split the start
+ * COUNT uses, applied to the opponent instead of the number.
+ */
+export const pitcherMatchupIndex = (
+	player: PlayerSeason,
+	startOpponents: Map<number, number[]> | undefined,
+	teamIndex: number | null,
+	strength: TeamStrength,
+	/** His total expected starts, announced and modelled together. */
+	expectedStarts: number | null
+): number | null => {
+	if (player.group !== "pitching") return teamIndex
+	const faced = startOpponents?.get(player.id)
+	if (!faced?.length) return teamIndex
+	// a pitcher is scored on what the opposing lineup produces against him
+	const vals = faced.map(o => strength.offense.get(o)).filter((v): v is number => v !== undefined)
+	if (!vals.length) return teamIndex
+	const named = vals.reduce((a, c) => a + c, 0) / vals.length
+	if (teamIndex === null) return named
+	// share of his expected turns MLB has actually named an opponent for
+	const share =
+		expectedStarts && expectedStarts > 0 ? Math.min(1, vals.length / expectedStarts) : 1
+	return share * named + (1 - share) * teamIndex
+}
+
 export const starterBlendedIndex = (
 	player: PlayerSeason,
 	teamIndex: number | null,

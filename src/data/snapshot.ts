@@ -238,6 +238,7 @@ export const hydrate = (s: Snapshot) => {
 	opponentsByTeam: horizon.opponents,
 	probableStarts: horizon.probableStarts,
 	opposingStarters: horizon.opposingStarters,
+	startOpponents: horizon.startOpponents,
 	probableCoverage: horizon.coverage,
 	gamesRemaining: rest.games,
 	// The rest-of-season opponent list, which no earlier capture carried at all: the

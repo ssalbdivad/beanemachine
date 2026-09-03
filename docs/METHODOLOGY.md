@@ -500,26 +500,28 @@ refuse.
 
 ### 4.2 The reference league, computed
 
-10 teams, roster `C 1 · 1B 1 · 2B 1 · 3B 1 · SS 1 · OF 3 · Util 2 · SP 2 · RP 2 · P 4`:
+10 teams, roster `C 1 · 1B 1 · 2B 1 · 3B 1 · SS 1 · OF 3 · Util 2 · SP 2 · RP 2 · P 4`,
+computed against the committed capture `data/snapshot.json` over the fortnight
+horizon, with Yahoo's eligibility read:
 
 | slot | slots × teams = depth | eligible players | replacement (proj. pts / 14d) | best at the slot |
 |---|---|---|---|---|
-| Util | 20 | 645 | **100.71** | 139.1 |
-| 1B | 10 | 52 | 92.66 | 113.2 |
-| SS | 10 | 57 | 83.40 | 100.7 |
-| OF | 30 | 231 | 80.77 | 139.1 |
-| 2B | 10 | 76 | 78.96 | 97.1 |
-| 3B | 10 | 64 | 77.79 | 118.8 |
-| C | 10 | 101 | **63.20** | 96.1 |
-| SP | 20 | 350 | 61.48 | 103.2 |
-| P | 40 | 786 | 52.85 | 103.2 |
-| RP | 20 | 436 | 35.29 | 70.6 |
+| Util | 20 | 574 | **111.06** | 151.5 |
+| 1B | 10 | 110 | 102.15 | 126.8 |
+| 3B | 10 | 134 | 98.00 | 130.3 |
+| SS | 10 | 104 | 94.55 | 109.8 |
+| 2B | 10 | 157 | 91.91 | 109.8 |
+| OF | 30 | 246 | 91.69 | 151.5 |
+| SP | 20 | 294 | 71.89 | 114.5 |
+| C | 10 | 96 | **69.52** | 105.4 |
+| P | 40 | 659 | 61.36 | 114.5 |
+| RP | 20 | 443 | 49.61 | 78.1 |
 
 Util's bar is the highest in the league, and correctly so: it draws from every
 batter in baseball, so the 20th-best option is very good. Catcher's is the lowest
 of the batting slots, because the 10th-best catcher is not.
 
-Note the SP/P pair. SP's bar (61.48) sits **above** P's (52.85), because P draws
+Note the SP/P pair. SP's bar (71.89) sits **above** P's (61.36), because P draws
 from every pitcher including relievers while SP draws only from starters — so every
 starting pitcher is worth more valued at P, and no player's reported slot is ever
 "SP". That is not a bug and `test/trade.mjs` pins it, because a reader who saw it
@@ -527,24 +529,90 @@ without explanation would reasonably assume one.
 
 ### 4.3 Why this makes catchers rank higher than their raw points
 
-In the reference capture, **Drake Baldwin projects for 96.06 points** over the
-horizon. That is **36th** among all rateable players by raw projected points — a
+In the committed capture, **Drake Baldwin projects for 105.40 points** over the
+horizon. That is **38th** among all rateable players by raw projected points — a
 useful bat, nothing more.
 
-His bscore is `96.06 − 63.20 = 32.86`, which is **11th on the board**.
+His bscore is `105.40 − 69.52 = 35.88`, which is **8th on the board**.
 
-The twenty-five players he passes are ones you can replace almost for free. If you
-drop the 36th-best outfielder you can pick up an 80.8-point outfielder off waivers;
-if you drop Baldwin you can pick up a 63.2-point catcher. Nearly thirty-three points
-of that gap belongs to him and not to the position, and points-above-replacement is
-what puts it there. Note also that the slot choice does real work: valued at Util
-instead, the same 96.06 points would be `96.06 − 100.71 = −4.65`, i.e. worthless.
-Catchers are worth having *because* they are catchers.
+The thirty players he passes are ones you can replace almost for free. If you drop
+the 38th-best outfielder you can pick up a 91.7-point outfielder off waivers; if you
+drop Baldwin you can pick up a 69.5-point catcher (Carson Kelly). Those twenty-two
+points are the position rather than the man, and points-above-replacement is what
+puts them in his column instead of the outfielder's. Note also that the slot choice
+does real work: valued at Util instead, the same 105.40 points would be
+`105.40 − 111.06 = −5.66`, i.e. worthless. Catchers are worth having *because* they
+are catchers.
 
-The same arithmetic explains the other direction. **121 of 1,431 rateable players
+The same arithmetic explains the other direction. **124 of 1,233 rateable players
 have a positive bscore** in a 10-team league. Most of MLB is below replacement,
-which is true and is the reason the board's numbers go deeply negative rather
-than bottoming out at zero.
+which is true, and is why the raw scale goes deeply negative rather than bottoming
+out at zero — §4.4 measures that scale and says what is printed instead.
+
+### 4.4 The scale is asymmetric, and what is printed against an add
+
+A bscore is one point total minus another. Projected points are bounded below by
+zero and the replacement bar is not, so the range is `[−bar, best − bar]` by
+construction — it cannot be symmetric, and it is not:
+
+| | p0 | p10 | p20 | p30 | p40 | p50 | p60 | p70 | p80 | p90 | p100 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| bscore | −111.1 | −79.0 | −61.4 | −50.8 | −47.2 | −41.3 | −31.5 | −24.8 | −13.9 | 0.0 | +59.8 |
+
+1,233 rateable players, committed capture, 10 teams, fortnight horizon. **1,101 of
+them (89.3%) are below zero**, and the minimum is −111.06, which is exactly minus
+the Util bar: Maverick Handley has one plate appearance, projects for 0.00 points,
+and 0 − 111.06 is the whole bar. The floor is not a defect in the metric, it is the
+metric — and the best player in baseball coming out at only +59.83 says something
+true about a 10-team league, which is that the upside of a waiver claim is small
+next to the cost of an empty seat.
+
+The extreme end is a *sample* artifact rather than a value claim. The 120 players
+below −80 have a median confidence of 0.069 — men about whom essentially nothing is
+known, projected near zero and therefore priced a full bar below replacement. The
+negative region as a whole is not noise, though: of the 507 players at confidence
+≥ 0.70, **381 are still negative**, the worst at −69.27 and the median at −16.49.
+Those are real, fully sampled major leaguers who simply are not startable in this
+league. That distinction decides everything below.
+
+**What ships: the raw bscore is unchanged, and `addValue` — the bscore floored at
+zero — is what a view prints against an add.** Below the bar every candidate is the
+same decision, because you take the free replacement instead, so the depth of the
+hole is not a quantity anyone can act on; −111 beside a best-available of +60 reads
+as a broken scale rather than as "no". The floor lives in `rateAll` rather than in
+each view, so the board and the trade panel cannot invent two different ones, and
+`test/engine.mjs` pins that it never reorders anyone it does not tie.
+
+**It invalidates nothing.** `addValue` is an added field: every bscore value, and
+the order `rateAll` returns them in, is identical to what the 20 stored runs in
+`data/results/` were measured against, and `src/auto/plan.ts`, `src/engine/trade.ts`
+and `src/engine/draft.ts` are untouched.
+
+Three alternatives were considered and rejected, each on a measurement:
+
+- **Clamp inside the engine.** Not order-preserving: it ties 1,101 of 1,233 players
+  at zero. `src/auto/plan.ts` picks which of *your own* players to drop by sorting
+  ascending on bscore, so that choice would become arbitrary among everyone below
+  the keep floor; `uscore` and `marketEdge` would lose their spread across 89% of
+  the pool; and every stored backtest is denominated in the raw scale. Comparing two
+  players you already own is exactly where the negative carries information.
+- **A monotone soft floor** — identity above zero, decaying to a bounded floor
+  below it. It preserves order, so it costs no stored result, and it would satisfy
+  the complaint. It is rejected for two other reasons: it needs a scale constant
+  nobody has measured, which `model.json` exists to refuse, and it makes the
+  planner's own copy false — `plan.ts` prints "projects N points higher over the
+  horizon" from a difference of two bscores, and a compressed difference is no
+  longer points.
+- **An allocation-based bar** — fill all ten rosters' starting seats greedily and
+  take the best man nobody could seat, instead of computing each slot's depth
+  independently. Defensible in principle: no team leaves a Util seat for the
+  21st-best hitter, so the 111.06 Util bar is deeper than any real league's.
+  Measured, it does not solve the problem and does cost the evidence. The floor
+  moves only from −111.06 to −86.27, 84.9% of the pool is still negative, and it
+  reorders the board — Spearman 0.977 over 1,233 players, 41 of the top 50 retained,
+  one player moving 414 places. Re-deriving it would also mean changing `applyVorp`
+  in `src/backtest/season.ts` and replaying all 111 weeks. A 22% shallower floor is
+  not worth invalidating 20 runs.
 
 ---
 

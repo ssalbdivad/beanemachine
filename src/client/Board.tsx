@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
@@ -35,6 +35,9 @@ const MISSING_LABEL: Record<string, string> = {
  * The same bar the Buy low card uses, so the two cards mean the same thing by
  * "still gettable" rather than each picking its own number.
  */
+/** Rows rendered per step as the reader scrolls. */
+const PAGE = 60
+
 const WIDELY_ROSTERED = 70
 
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
@@ -134,6 +137,17 @@ export const Board = ({
 }) => {
 	const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
 	const [open, setOpen] = useState<number | null>(null)
+	/**
+	 * How many rows are rendered. The board used to stop dead at 120 with a line
+	 * telling you to narrow the filters, which is the page asking the reader to work
+	 * around it — the ranking runs to 1,235 and the whole point is to read down it.
+	 *
+	 * Rendered in pages rather than all at once because a row is not cheap: 1,235 of
+	 * them mount ~9,000 nodes, and paying for the ones nobody scrolls to would show
+	 * up on the first paint, which is the one that matters.
+	 */
+	const [limit, setLimit] = useState(PAGE)
+	const sentinel = useRef<HTMLDivElement | null>(null)
 	const [pool, setPool] = useState<AvailablePool | null>(null)
 	const [poolError, setPoolError] = useState<string | null>(null)
 	// Which horizon the keyboard is on, which is not the same as which one is
@@ -168,6 +182,28 @@ export const Board = ({
 		useBoard(snapshot, league, filters, availableNames)
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
+
+	// A new ranking starts at the top. Without this, changing the sort while scrolled
+	// deep leaves 600 rows of a list nobody asked for still mounted.
+	useEffect(() => setLimit(PAGE), [filters, snapshot, league])
+
+	/**
+	 * Grow the window when the end of the list comes into view. An observer rather
+	 * than a scroll handler, so nothing runs on the frames between.
+	 */
+	useEffect(() => {
+		const node = sentinel.current
+		if (!node || typeof IntersectionObserver === "undefined") return
+		const io = new IntersectionObserver(
+			entries => {
+				if (entries.some(e => e.isIntersecting)) setLimit(n => n + PAGE)
+			},
+			// start fetching a screen early, so the list feels continuous
+			{ rootMargin: "600px" }
+		)
+		io.observe(node)
+		return () => io.disconnect()
+	}, [rows.length])
 
 	if (error)
 		return (
@@ -230,16 +266,41 @@ export const Board = ({
 	 *
 	 * Availability comes from your league's own free-agent list where that is
 	 * readable, and otherwise from how widely he is rostered, which is in the
-	 * snapshot and needs no server. Failing both it is simply the top row, and the
-	 * card says availability is unknown rather than implying one.
+	 * snapshot and needs no server. Failing both it is the best row on the board,
+	 * and the card says availability is unknown rather than implying one.
+	 *
+	 * The pick is REDUCED over the reader's filtered rows, never read off the front
+	 * of them. It used to `find` the first available row, which made the
+	 * recommendation a function of sort DIRECTION: clicking the bscore header into
+	 * ascending order put the worst players on top and Billy recommended one of
+	 * them — observed live as "Nick Solak, bscore -109.33, confidence 2% (10 of
+	 * 434)", a man projected 109 points BEHIND the body already on waivers.
+	 * Direction is a way of looking at the board, not a change of question, so the
+	 * pick must be the same name ascending and descending. The reader's FILTERS do
+	 * change the question and still apply — a catcher-only board still names the
+	 * best catcher you can get.
+	 *
+	 * The metric is bscore, not whichever "Rank by" is selected. Every clause this
+	 * card speaks is denominated in bscore ("N more points than the best {slot} you
+	 * could add off waivers") and the badge on its right prints bscore, so crowning
+	 * the uscore or luck leader would show a number that is not the largest one
+	 * beside a sentence that does not explain why he is there. The chosen lens still
+	 * reaches the pick through the rows it leaves standing — uscore, market edge,
+	 * luck and contact each drop everyone they cannot price — so the lens narrows
+	 * the candidates and bscore decides among them.
 	 */
 	const poolKnown = availableNames !== null && availableNames !== undefined
-	const picked =
-		poolKnown ? rows.find(r => availableNames!.has(normalizeName(r.player.name)))
+	// bscore <= 0 means the freely available body at his own slot outscores him, so
+	// adding him is a net loss of points. There is no honest way to recommend that.
+	const addable = rows.filter(r => r.bscore > 0)
+	const best = (c: Ranked[]) => c.reduce((a, b) => (b.bscore > a.bscore ? b : a))
+	const tier =
+		poolKnown ? addable.filter(r => availableNames!.has(normalizeName(r.player.name)))
 		: rows.some(r => r.rosteredPct !== null) ?
-			rows.find(r => r.rosteredPct !== null && r.rosteredPct < WIDELY_ROSTERED)
-		:	undefined
-	const pick = picked ?? rows[0] ?? null
+			addable.filter(r => r.rosteredPct !== null && r.rosteredPct < WIDELY_ROSTERED)
+		:	[]
+	const picked = tier.length ? best(tier) : undefined
+	const pick = picked ?? (addable.length ? best(addable) : null)
 	const basis: "pool" | "ownership" | "none" =
 		picked === undefined ? "none"
 		: poolKnown ? "pool"
@@ -315,7 +376,7 @@ export const Board = ({
 							onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
 						>
 							<option value="bscore">bscore (value over replacement)</option>
-							<option value="uscore">uscore (value per point of ownership)</option>
+							<option value="uscore">uscore (value you can actually get)</option>
 							<option value="points">projected points</option>
 							<option value="marketEdge">market edge (what the field is wrong about)</option>
 							<option value="undervaluation">most undervalued (above replacement)</option>
@@ -390,7 +451,7 @@ export const Board = ({
 				</details>
 			</section>
 
-			{pick && <BillysPick r={pick} horizon={span.phrase} basis={basis} />}
+			{pick ? <BillysPick r={pick} horizon={span.phrase} basis={basis} /> : <NoPick />}
 
 			{/* The panel the horizon tabs control. The pick, buy-low and scarcity
 			    cards below re-rank with it too, but this is the ranking itself, and
@@ -426,7 +487,7 @@ export const Board = ({
 						<SortHead field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
 						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>luck</SortHead>
 					</div>
-					{rows.slice(0, 120).map((r, i) => (
+					{rows.slice(0, limit).map((r, i) => (
 						<Row key={r.player.id} rank={i + 1} r={r} open={open === r.player.id}
 							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)} />
 					))}
@@ -463,9 +524,12 @@ export const Board = ({
 						))}
 					</dl>
 				</details>
-				{rows.length > 120 && (
+				{/* The end of the rendered window. Scrolling to it grows the list; when
+				    everything is on screen it is an empty div and says nothing. */}
+				<div ref={sentinel} aria-hidden />
+				{limit < rows.length && (
 					<p className="sub" style={{ marginTop: 12 }}>
-						Showing the top 120 of {rows.length} — narrow the filters to see further down.
+						{limit} of {rows.length} — keep scrolling.
 					</p>
 				)}
 			</section>
@@ -642,6 +706,32 @@ const BuyLow = ({ rows }: { rows: Ranked[] }) => {
 }
 
 /**
+ * What the card says when the filters leave nobody worth adding.
+ *
+ * bscore is projected points minus what the best freely available player at the
+ * same slot is projected for, so a board on which every bscore is <= 0 holds no
+ * recommendation at all — only players who would cost you points. The card stays
+ * on screen and says so: one that silently disappears reads as a bug, and one that
+ * names the least-bad option reads as advice.
+ */
+const NoPick = () => (
+	<section className="card full pick">
+		<span className="pick-bot" aria-hidden>
+			<Billy />
+		</span>
+		<div className="pick-body">
+			<h2>Billy&rsquo;s pick</h2>
+			<p className="pick-name">Nobody.</p>
+			<p className="pick-why">
+				Every player these filters leave projects at or below the best man you could
+				already add for free at his own slot, so each of them would cost you points.
+				Widen the filters and ask again.
+			</p>
+		</div>
+	</section>
+)
+
+/**
  * Billy's read on the top of the board. Every clause is assembled from a number
  * that is actually on the row — no adjectives the data doesn't support.
  */
@@ -694,7 +784,7 @@ const BillysPick = ({
 				<p className="pick-avail">
 					{basis === "pool" ? "Free agent in your league."
 					: basis === "ownership" ? `Rostered in ${r.rosteredPct}% of leagues.`
-					:	"Top of the board — availability unknown."}
+					:	"Best bscore on this board — availability unknown."}
 				</p>
 				<p className="pick-why">
 					{clauses.join(" · ")}.
@@ -712,7 +802,7 @@ const BillysPick = ({
 const COLUMN_HELP: Record<Filters["sort"], string> = {
 	name: "Sort by player name.",
 	uscore:
-		"uscore — underrated score. His bscore divided by the share of leagues that already roster him. bscore asks who is best; uscore asks who is best relative to how many people have noticed, which is the one you can act on.",
+		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. Blank means Yahoo lists no ownership for him — unknown, not unowned.",
 	bscore:
 		"bscore — beanescore. Projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
 	marketEdge:
@@ -815,7 +905,7 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 				title={
 					r.uscore === null ?
 						"Yahoo doesn't list him, so there is no ownership to divide by."
-					:	`${r.bscore} bscore against ${r.rosteredPct}% ownership.`
+					:	`${r.addValue} points, and ${100 - r.rosteredPct!}% of leagues still have him free.`
 				}
 			>
 				{r.uscore === null ? "—" : r.uscore}

@@ -445,5 +445,73 @@ t("relievers are not excluded by a covered window",
 t("injury still wins the reason, because it is the more informative one",
   covered.filter(r => r.injury && !r.rateable).every(r => /return date/.test(r.unrateable ?? "")))
 
+/**
+ * --- the shape of the bscore scale, and the floor that is printed instead ---
+ *
+ * A board row read -111 while the best player in baseball read +60, which looks
+ * broken. Measured on this capture it is arithmetic: points are bounded below by
+ * zero, the Util bar is 111.06, so a man projected for 0 points is exactly the whole
+ * bar below replacement. 89.3% of rateable players are below it. These pin both
+ * halves of the answer — the raw scale keeps its full negative range because
+ * `src/auto/plan.ts` sorts on it to choose which of your own players to drop, and
+ * `addValue` is the floored number a view prints against an ADD.
+ */
+const boardOpts = {
+  ...base,
+  eligibility: hyd.eligibility,
+  probableStarts: hyd.probableStarts,
+  probableCoverage: hyd.probableCoverage,
+  opposingStarters: hyd.opposingStarters,
+  injuryPolicy: "exclude"
+}
+const board = rateAll(boardOpts)
+const boardLive = board.filter(r => r.rateable)
+const boardNeg = boardLive.filter(r => r.bscore < 0)
+const deepest = boardLive[boardLive.length - 1]
+
+t("the deepest bscore is exactly minus the bar, because he projects for zero points",
+  deepest.points === 0 && Math.abs(deepest.bscore + deepest.replacement) < 0.02,
+  `${deepest.player.name}: ${deepest.points} − ${deepest.replacement} = ${deepest.bscore}`)
+t("most of the pool sits below replacement, which is the metric working",
+  boardNeg.length / boardLive.length > 0.8,
+  `${boardNeg.length} of ${boardLive.length} rateable below 0`)
+
+// A clamp inside the engine would tie the whole tail together and make the
+// drop-the-worst-man choice in src/auto/plan.ts arbitrary. The raw scale stays
+// strictly ordered on both sides of zero.
+t("the sub-replacement tail is still strictly ordered, not clamped",
+  new Set(boardNeg.map(r => r.bscore)).size > boardNeg.length * 0.9,
+  `${new Set(boardNeg.map(r => r.bscore)).size} distinct values over ${boardNeg.length} negatives`)
+t("rateAll still returns raw bscore order, negatives and all",
+  board.every((r, i) => i === 0 || board[i - 1].bscore >= r.bscore) && deepest.bscore < -50,
+  `last row ${deepest.bscore}`)
+
+// addValue is the display floor, defined once in the engine so the board and the
+// trade panel cannot invent two different ones.
+t("addValue is never negative", board.every(r => r.addValue >= 0))
+t("addValue is the bscore wherever adding him gains anything",
+  board.every(r => r.bscore <= 0 || r.addValue === r.bscore))
+t("addValue is zero for everyone at or below the bar",
+  board.every(r => r.bscore > 0 || r.addValue === 0),
+  `${board.filter(r => r.addValue === 0).length} rows floored`)
+t("addValue never reorders anyone it does not tie",
+  board.every((r, i) => i === 0 || board[i - 1].addValue >= r.addValue))
+t("and something survives the floor, so the board is not a column of zeros",
+  boardLive.filter(r => r.addValue > 0).length > 100,
+  `${boardLive.filter(r => r.addValue > 0).length} of ${boardLive.length} rateable are worth adding`)
+
+// The extreme end of the scale is a confidence artifact, not a value claim: below
+// -80 the median confidence is 0.07, i.e. these are men with almost no sample.
+const veryDeep = boardLive.filter(r => r.bscore < -80).map(r => r.confidence.value).sort((a, b) => a - b)
+t("the deepest rows are men with no sample rather than rated players",
+  veryDeep.length > 50 && veryDeep[Math.floor(veryDeep.length / 2)] < 0.15,
+  `${veryDeep.length} below −80, median confidence ${veryDeep[Math.floor(veryDeep.length / 2)].toFixed(3)}`)
+// ...while the negative region as a whole is populated by real, well-sampled
+// players, which is why flooring the RAW number would destroy information.
+const confident = boardLive.filter(r => r.confidence.value >= 0.7).map(r => r.bscore).sort((a, b) => a - b)
+t("players with full confidence are negative too, so negative is not noise",
+  confident.filter(x => x < 0).length > confident.length / 2,
+  `${confident.filter(x => x < 0).length} of ${confident.length} at confidence ≥ 0.70 are below 0, worst ${confident[0]}`)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

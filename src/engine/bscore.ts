@@ -78,8 +78,33 @@ export interface Rated {
 	season: PointsResult
 	/** Projected points over the horizon. */
 	points: number
-	/** Points above the replacement-level player at this slot. */
+	/** Points above the replacement-level player at this slot. Goes deeply negative,
+	 *  on purpose — see `addValue` and METHODOLOGY 4.4. */
 	bscore: number
+	/**
+	 * What ADDING this player is worth: the bscore, floored at zero.
+	 *
+	 * bscore is a difference of two point totals, and points are bounded below by
+	 * zero while the replacement bar is not, so the range is asymmetric by
+	 * construction: on the committed capture it runs [-111.06, +59.83], and the floor
+	 * is exactly minus the Util bar because a man projected for 0 points is the whole
+	 * bar below it. That is arithmetic, not a defect, and 89.3% of the 1,233 rateable
+	 * players sit below zero.
+	 *
+	 * It is still the wrong number to PRINT against an add. Below the bar every
+	 * candidate is the same decision — you take the free replacement instead — so the
+	 * depth of the hole is not a quantity anyone can act on, and -111 next to a best
+	 * available of +60 reads as a broken scale rather than as "no".
+	 *
+	 * Floored here rather than in each view so the board and the trade panel cannot
+	 * invent two different floors. `bscore` itself is untouched: it is what every
+	 * stored backtest in `data/results/` is denominated in, it is what
+	 * `src/auto/plan.ts` sorts by to pick which of YOUR OWN players to drop, and
+	 * flooring it there would tie 1,101 players at zero and make that choice
+	 * arbitrary. Comparing two players you already own is exactly where the negative
+	 * carries information.
+	 */
+	addValue: number
 	/** The slot where the player is most valuable. */
 	slot: string
 	replacement: number
@@ -235,6 +260,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			season: scoreStats(player.stats, table, player.group),
 			points: 0,
 			bscore: 0,
+			addValue: 0,
 			slot: "",
 			replacement: 0,
 			confidence: confidenceOf(player, underlying, injury),
@@ -296,6 +322,9 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		r.slot = best.slot
 		r.replacement = Number(best.replacement.toFixed(2))
 		r.bscore = Number((best.value === -Infinity ? 0 : best.value).toFixed(2))
+		// the display floor, derived from the rounded bscore so the two can never
+		// disagree in the last decimal place
+		r.addValue = Math.max(r.bscore, 0)
 	}
 
 	return rated.sort((a, b) => b.bscore - a.bscore)
@@ -307,11 +336,11 @@ export const rateAll = (o: RateOptions): Rated[] => {
  * A rated player plus the comparative numbers, which need the whole pool to compute
  * and so cannot live on Rated itself.
  *
- * `uscore` — "underrated score" — is bscore per point of ownership: what he is worth
- * divided by how much of the field has already noticed. bscore answers who is best,
- * uscore answers who is best *relative to how available he is*, which on a waiver
- * wire is the question you can act on. It is `null` wherever Yahoo lists no
- * ownership figure, because unknown is not the same as unowned.
+ * `uscore` — "underrated score" — is what he adds times the share of leagues where
+ * he is still free: value you can realistically capture, in the same points bscore
+ * is in. bscore answers who is best, uscore answers who is the best you can
+ * actually get. It is `null` wherever Yahoo lists no ownership figure, because
+ * unknown is not the same as unowned.
  */
 export type Ranked = Rated & {
 	undervaluation: number | null
@@ -378,17 +407,31 @@ export const withUndervaluation = (
  * would have made every unrostered replacement-level body look like a find.
  */
 /**
- * The smallest ownership a quotient can honestly divide by.
+ * uscore — what you can realistically ADD, in points.
  *
- * Yahoo reports "% Ros" as a whole number, so a player shown at 0% is not owned in
- * literally no league — he is somewhere in [0, 0.5). Nearly a quarter of the priced
- * pool sits in that bucket (117 of 501 on the current capture), and dividing by a
- * literal zero would give every one of them Infinity and collapse the column into a
- * meaningless tie. Taking the bucket's midpoint is the standard continuity
- * treatment of a rounded-down reading, not a number invented to avoid a divide.
+ * It was `bscore / owned%`, a literal quotient, and the shape was wrong in three
+ * ways at once. A ratio is scale-free, so it read 1.8 where bscore reads 21 and
+ * there was no way to compare the two columns. Dividing by a number in [0,100]
+ * explodes at the bottom and collapses at the top, so the ranking was decided by
+ * whoever happened to be barely owned rather than by who was worth having: a
+ * marginal 5%-owned arm at 1.7 outranked a 21-point player at 42% ownership. And
+ * three quarters of the board rounded to 0.0 or below.
+ *
+ * This is `addValue × (1 − owned)` instead: what he adds, times the share of
+ * leagues where he is still there to be added. Same units as bscore, so the two
+ * columns can be read against each other; monotone in both inputs, so being
+ * better and being freer both help and neither can be gamed by a small
+ * denominator; and bounded by bscore itself, so nothing can run away.
+ *
+ * `addValue` rather than raw bscore, because a player below the waiver bar is not
+ * a negative pickup — he is simply one you do not make (METHODOLOGY 4.4). Using
+ * bscore here would have produced a large NEGATIVE uscore for the least-owned
+ * players, i.e. the ranking upside down.
+ *
+ * Measured on the reference capture: the top of the column becomes Ryan Jeffers
+ * at 12.3 (21.2 points, rostered in 42%) ahead of Drew Anderson at 8.2 (8.6
+ * points, rostered in 5%) — the quotient had that pair the other way round.
  */
-const MIN_PCT = 0.5
-const floorPct = (pct: number) => Math.max(pct, MIN_PCT)
 
 const BUCKETS = 10
 
@@ -437,7 +480,9 @@ export const withMarketEdge = (
 			...r,
 			rosteredPct: pct,
 			marketEdge: par === null ? null : Number((r.bscore - par).toFixed(1)),
-			uscore: pct === null || !r.rateable ? null : Number((r.bscore / floorPct(pct)).toFixed(1))
+			uscore:
+				pct === null || !r.rateable ? null
+				:	Number((r.addValue * (1 - Math.min(pct, 100) / 100)).toFixed(1))
 		}
 	})
 }

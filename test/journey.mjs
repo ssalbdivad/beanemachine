@@ -174,9 +174,16 @@ const stashPick = await pickName()
  * produce the same name when their boards differ, which is what a frozen pick
  * would do.
  */
-t("Billy's pick comes off the board currently on screen",
-	(await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))).includes(stashPick),
-	stashPick)
+// Against the ranking, not the render window: the board pages in as you scroll and
+// the pick is the best AVAILABLE player, who is usually below the first page.
+// The search box is declared further down, so it is located inline here.
+const box = page.locator(".board-controls .filters input[type=text]")
+await box.fill(stashPick.split(" ").pop())
+await page.waitForTimeout(400)
+t("Billy's pick comes off the ranking currently on screen",
+	(await rows()).includes(stashPick), stashPick)
+await box.fill("")
+await page.waitForTimeout(400)
 t("Billy's pick is re-derived per horizon rather than frozen",
 	new Set([fortnightPick, streamPick, stashPick]).size > 1,
 	`${fortnightPick} / ${streamPick} / ${stashPick}`)

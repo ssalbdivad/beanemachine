@@ -49,9 +49,22 @@ t("board opens sorted by bscore, descending",
   `${bscores.length} rows: ${String(bscores.slice(0, 5))}`)
 // The whole rateable pool, not the handful edge could price. Market edge dropped
 // everyone unpriced, and on a thin capture that silently shrank the board to a
-// short list that looked like a working one.
+// short list that looked like a working one. Read off the count the board states,
+// not off the rendered rows — the board pages in as you scroll now, so the number
+// on screen is the size of the render window rather than of the ranking.
+const rankedCount = await page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
 t("the default ranking places the whole pool rather than the priced subset",
-  bscores.length >= 120, `${bscores.length} rows`)
+  rankedCount >= 1000, `${rankedCount} ranked`)
+// and the render window grows rather than stopping dead at a cap
+const firstPage = await page.$$eval(".board-row", n => n.length)
+await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+await page.waitForTimeout(600)
+await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+await page.waitForTimeout(600)
+const grown = await page.$$eval(".board-row", n => n.length)
+t("the board pages in more rows as you reach the end",
+  grown > firstPage, `${firstPage} then ${grown}`)
+await page.evaluate(() => window.scrollTo(0, 0))
 
 /**
  * uscore — bscore per point of ownership — is its own column and its own ranking.
@@ -281,9 +294,23 @@ t("the drill-down states whether the Statcast adjustment was applied",
  */
 await page.waitForSelector(".card.pick")
 const pickName = (await page.textContent(".pick-name")).trim()
-const boardNames = await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
+/**
+ * Checked against the RANKING, not against what is painted.
+ *
+ * The board renders in pages of 60 and grows as you scroll, and Billy's pick is the
+ * best AVAILABLE player, who is usually well down a bscore ranking — the whole
+ * reason the card exists is that you would otherwise have to scroll to find him. So
+ * asserting he is among the rendered rows tested the size of the render window.
+ * Searching for him proves he is in the ranking, which is the actual claim.
+ */
+const search = page.locator(".board-controls .filters input[type=text]")
+await search.fill(pickName.split(" ").pop())
+await page.waitForTimeout(400)
+const found = await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
 t("Billy's pick is a player the board actually ranked",
-  boardNames.includes(pickName), `${pickName} not among ${boardNames.length} rendered rows`)
+  found.includes(pickName), `${pickName} not found; search returned ${found.slice(0, 4).join(", ")}`)
+await search.fill("")
+await page.waitForTimeout(400)
 const why = await page.textContent(".pick-why")
 const pickScore = Number(await page.textContent(".pick-score b"))
 t("Billy's reasoning cites the actual bscore",
@@ -291,6 +318,90 @@ t("Billy's reasoning cites the actual bscore",
 t("Billy's reasoning cites real scheduled games", /plays \d+ games/.test(why), why)
 t("Billy uses the right volume unit for the side",
   /plate appearances per team game|outs recorded per team game/.test(why), why)
+
+/**
+ * Billy's pick must not follow the sort DIRECTION, and must never be below
+ * replacement.
+ *
+ * The card was built by `find`ing the first available row of `rows` — the board
+ * ALREADY SORTED — so one click on the bscore header flipped the question. Shipped
+ * live it read "Billy's pick — Nick Solak, bscore -109.33, Confidence is only 2%
+ * (limited sample, 10 of 434)": the worst man on the board, projected 109 points
+ * behind the body already sitting on waivers. Direction is a way of looking at the
+ * board, so the pick has to survive it unchanged; bscore <= 0 is a player who costs
+ * you points, so he can never be the pick in any order or any horizon.
+ */
+// $eval rather than textContent: when nothing clears replacement the card renders
+// its "Nobody." variant with no score badge, and a missing badge has to read as a
+// failed assertion rather than as a 30-second selector timeout that aborts the run.
+const pickOf = () => page.$eval(".pick-name", e => e.textContent.trim()).catch(() => "")
+const pickBscore = () =>
+  page.$eval(".pick-score b", e => Number(String(e.textContent).replace(/[^0-9.\-]/g, ""))).catch(() => NaN)
+const sortDir = () =>
+  page.$eval(".board-head .sort-head.active", e => /ascending/.test(e.getAttribute("aria-label") ?? "") ? "asc" : "desc")
+
+const descPick = await pickOf()
+const descScore = await pickBscore()
+t("the pick is above replacement descending", descScore > 0, `${descPick} bscore ${descScore}`)
+
+// one click on the active header reverses it — worst-first
+await page.click(".board-head .sort-head:has-text('bscore')")
+await page.waitForTimeout(350)
+const ascFirst = await page.$eval(".board-row .bscore", e => Number(e.textContent))
+t("clicking the active header really does flip the board to worst-first",
+  (await sortDir()) === "asc" && ascFirst < descScore, `top row ${ascFirst}, ${await sortDir()}`)
+const ascPick = await pickOf()
+const ascScore = await pickBscore()
+t("Billy's pick does not follow the sort direction", ascPick === descPick,
+  `descending ${descPick} (${descScore}) vs ascending ${ascPick} (${ascScore})`)
+t("Billy never recommends a player below replacement", ascScore > 0,
+  `${ascPick} bscore ${ascScore}`)
+// back to descending, and the pick still hasn't moved
+await page.click(".board-head .sort-head:has-text('bscore')")
+await page.waitForTimeout(350)
+t("and it comes back unchanged when the board is flipped again",
+  (await pickOf()) === descPick, `${await pickOf()} vs ${descPick}`)
+
+// Every horizon, both directions. The pick is re-derived per horizon (journey.mjs
+// pins that it changes), so the bar has to hold on each of the three.
+for (const mode of ["Streaming", "This fortnight", "Stash"]) {
+  await page.click(`.modes .mode:has-text('${mode}')`)
+  await page.waitForTimeout(350)
+  const a = { name: await pickOf(), score: await pickBscore() }
+  await page.click(".board-head .sort-head:has-text('bscore')")
+  await page.waitForTimeout(350)
+  const b = { name: await pickOf(), score: await pickBscore() }
+  await page.click(".board-head .sort-head:has-text('bscore')")
+  await page.waitForTimeout(350)
+  t(`${mode}: the pick is the same player in both sort directions`, a.name === b.name,
+    `${a.name} vs ${b.name}`)
+  t(`${mode}: the pick clears replacement in both sort directions`,
+    a.score > 0 && b.score > 0, `${a.score} / ${b.score}`)
+}
+await page.click(".modes .mode:has-text('This fortnight')")
+await page.waitForTimeout(350)
+
+// Ordering must be ignored; FILTERING must not be. A catcher-only board still has
+// to name the best catcher you can get, in either direction.
+await page.click('.chip-btn:text-is("C")')
+await page.waitForTimeout(400)
+const cPick = await pickOf()
+const cSlots = await page.$$eval(".board-row .who .code", n => n.map(e => e.textContent))
+// The card names the slot it priced him against — "the best C you could add off
+// waivers" — so that clause is the pick's own slot, not the board's.
+const cWhy = await page.textContent(".pick-why")
+t("filtering to catchers moves the pick to a catcher",
+  cSlots.length > 0 && cSlots.every(x => x === "C") && /best C you could add/.test(cWhy),
+  `${cPick}: ${cWhy.slice(0, 90)} (on ${cSlots.length} C rows)`)
+t("the filtered pick is still above replacement", (await pickBscore()) > 0, cPick)
+await page.click(".board-head .sort-head:has-text('bscore')")
+await page.waitForTimeout(350)
+t("and the filtered pick ignores direction too", (await pickOf()) === cPick,
+  `${await pickOf()} vs ${cPick}`)
+await page.click(".board-head .sort-head:has-text('bscore')")
+await page.waitForTimeout(350)
+await page.click('.chip-btn:text-is("All")')
+await page.waitForTimeout(400)
 
 /**
  * Billy picks the best ADDABLE player, not the best player.

@@ -230,7 +230,7 @@ export const useBoard = (
 				if (filters.sort === "undervaluation" && r.bscore <= 0) return false
 				if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 					return false
-				if (filters.sort === "uscore" && (r.uscore === null || r.bscore <= 0)) return false
+				if (filters.sort === "uscore" && r.uscore === null) return false
 				if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
 				return true
 			}).length,
@@ -254,10 +254,13 @@ export const useBoard = (
 			// behaviour rather than the safe one.
 			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 				return false
-			// Same guard as the other two comparative sorts: a replacement-level body
-			// nobody rosters divides a non-positive bscore by a tiny number, which sorts
-			// as a find. Only a player worth rostering can be underrated.
-			if (filters.sort === "uscore" && (r.uscore === null || r.bscore <= 0)) return false
+			// No bscore floor here, unlike the other comparative sorts. Those two can be
+			// gamed by a replacement-level body — a tiny denominator or a par he beats by
+			// definition — but uscore is `addValue × (1 − owned)`, which is bounded by
+			// bscore and floors at zero, so a player nobody should add simply sorts to the
+			// bottom instead of needing to be excluded. The old floor cut the board to 44
+			// rows, which read as a broken capture.
+			if (filters.sort === "uscore" && r.uscore === null) return false
 			// Contact quality only means something for someone worth rostering, and only
 			// where a rolling Statcast window actually exists for him.
 			if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false

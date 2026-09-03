@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import {
-	evaluateTrade, replacementBySlot, startingLineup, type Lineup, type Start, type TradeVerdict
+	evaluateTrade, replacementBySlot, replacementPlayerBySlot,
+	startingLineup, type Lineup, type Start, type TradeVerdict
 } from "../engine/trade.ts"
 import type { League } from "../schema.ts"
 import { api, ApiError } from "./api.ts"
@@ -85,6 +86,14 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		() =>
 			league && league.meta.max_teams !== null ?
 				replacementBySlot(league, rated, league.meta.max_teams)
+			:	null,
+		[league, rated]
+	)
+	// and WHO each of those bars is, so a spot the wire covers can name him
+	const barMen = useMemo(
+		() =>
+			league && league.meta.max_teams !== null ?
+				replacementPlayerBySlot(league, rated, league.meta.max_teams)
 			:	null,
 		[league, rated]
 	)
@@ -369,7 +378,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				)}
 			</section>
 
-			<LineupCard league={league} lineup={lineup} count={mine.length} />
+			<LineupCard league={league} lineup={lineup} count={mine.length} barMen={barMen} />
 
 			<section className="card full trade-deal">
 				<h2>The deal</h2>
@@ -521,11 +530,15 @@ const SOURCE_CLASS: Record<Start["source"], string> = {
 const LineupCard = ({
 	league,
 	lineup,
-	count
+	count,
+	barMen
 }: {
 	league: League
 	lineup: Lineup
 	count: number
+	/** Who each slot's replacement bar actually is, so a spot the wire covers can
+	 *  name him instead of leaving the reader to guess. */
+	barMen: Map<string, { player: { name: string } }> | null
 }) => (
 	<section className="card full trade-lineup">
 		<h2>Your starting lineup</h2>
@@ -553,8 +566,21 @@ const LineupCard = ({
 								{s.player ?
 									s.player.player.name
 								: s.source === "replacement" ?
-									<em title="Nobody you own is worth this spot — either nobody you own is eligible here, or the best one who is projects below the freely available player the spot is priced at.">
-										best free agent at {s.slot}
+									/* This said "best free agent at OF", which nothing had checked: the
+									   bar is the (teams x seats)-th best eligible player in the whole
+									   pool and he may well be on somebody's roster. It also raised the
+									   one question the card could not answer — WHICH free agent — so it
+									   names him and claims only what is true of him. */
+									<em
+										title={
+											`This spot is priced at replacement level for ${s.slot}: what the ` +
+											`${league.meta.max_teams}-team-deep best eligible ${s.slot} projects. ` +
+											`Nobody you own beats that here. He is not checked against your ` +
+											`league's wire, so he may already be rostered.`
+										}
+									>
+										replacement {s.slot}
+										{barMen?.get(s.slot) && ` · ${barMen.get(s.slot)!.player.name}`}
 									</em>
 								:	<em className="hole-name" title="No price is known for this spot — nobody in the whole pool is eligible here, so there is no freely available body to price it at.">
 										nothing can fill this

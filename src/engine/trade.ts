@@ -80,6 +80,40 @@ export const replacementBySlot = (
 	return bars
 }
 
+/**
+ * WHO each slot's bar is, not just what it costs.
+ *
+ * `replacementBySlot` returns the number, which is all the arithmetic needs. The
+ * lineup card needs the man: telling a reader that a freely available body beats
+ * the player he owns raises exactly one question, "which one", and the card could
+ * not answer it. Separate from `replacementBySlot` rather than folded into it
+ * because six call sites and four suites depend on that signature and only one
+ * of them wants a name.
+ *
+ * Note what this man IS: the (teams x seats)-th best eligible player in the whole
+ * rated pool, which is the definition of replacement level. He is not verified to
+ * be a free agent in your league — nothing here reads your league's wire — so the
+ * caller must not describe him as one.
+ */
+export const replacementPlayerBySlot = (
+	league: League,
+	pool: Rated[],
+	teams: number
+): Map<string, Rated> => {
+	const out = new Map<string, Rated>()
+	for (const [slot, count] of Object.entries(league.roster.slots)) {
+		if (UNSTARTABLE.has(slot)) continue
+		const eligible = pool
+			.filter(r => r.rateable && r.slots.includes(slot))
+			.sort((a, b) => b.points - a.points)
+		if (!eligible.length) continue
+		const depth = Math.min(teams * count, eligible.length - 1)
+		const man = eligible[depth]
+		if (man) out.set(slot, man)
+	}
+	return out
+}
+
 export interface Start {
 	slot: string
 	/** Null when no rostered player filled the spot. */

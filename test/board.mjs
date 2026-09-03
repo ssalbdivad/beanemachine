@@ -53,20 +53,42 @@ t("board opens sorted by bscore, descending",
 t("the default ranking places the whole pool rather than the priced subset",
   bscores.length >= 120, `${bscores.length} rows`)
 
-// Edge is still selectable, and picking it explicitly still orders by edge — a
-// reader who asks for it has asked for exactly the subset it can price.
-await page.click(".board-head .sort-head:has-text('edge')")
-await page.waitForTimeout(200)
-const edges = await page.$$eval(".board-row .edge", n =>
-  n.map(e => Number(String(e.textContent).replace("+", "")))
+/**
+ * uscore — bscore per point of ownership — is its own column and its own ranking.
+ *
+ * The board carries eight columns now. `proj pts` and `waiver pts` are gone from
+ * it: bscore is one minus the other, so the table was stating a single subtraction
+ * three times in the place where scanning matters most. Both are in the drill-down,
+ * which is asserted further down.
+ */
+const headers = await page.$$eval(".board-head > *", n => n.map(e => e.textContent.trim()))
+t("the board shows the eight decision columns",
+  ["uscore", "bscore", "owned", "GP"].every(h => headers.some(x => x.startsWith(h))),
+  headers.join(" | "))
+t("and no longer restates bscore's own arithmetic beside it",
+  !headers.some(h => /proj pts|waiver pts/.test(h)), headers.join(" | "))
+
+await page.click(".board-head .sort-head:has-text('uscore')")
+await page.waitForTimeout(300)
+const us = await page.$$eval(".board-row .uscore", n =>
+  n.map(e => Number(String(e.textContent).replace("—", "NaN")))
 )
-t("choosing market edge still orders by edge",
-  edges.length > 0 && edges.every((v, i) => i === 0 || edges[i - 1] >= v), String(edges.slice(0, 5)))
-// and says so, rather than handing back a different ranking under the same label
-t("market edge warns that the number it divides by is unreliable",
-  (await page.$$eval(".warn-note", n => n.length)) > 0)
-await page.click(".board-head .sort-head:has-text('bscore')")
-await page.waitForTimeout(200)
+t("choosing uscore orders by uscore",
+  us.length > 0 && us.every(v => Number.isFinite(v)) &&
+    us.every((v, i) => i === 0 || us[i - 1] >= v), String(us.slice(0, 5)))
+// a ratio against a tiny denominator is only meaningful for someone worth
+// rostering at all, so the same guard the other comparative sorts use applies
+const usB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
+t("uscore ranks only players above replacement", usB.every(v => v > 0), String(usB.slice(0, 5)))
+
+// Market edge keeps its ranking without keeping a column — same as `contact`.
+await page.selectOption("[data-ctl=sort]", "marketEdge")
+await page.waitForTimeout(300)
+t("market edge is still selectable and still ranks",
+  (await page.$$eval(".board-row", n => n.length)) > 0)
+
+await page.selectOption("[data-ctl=sort]", "bscore")
+await page.waitForTimeout(300)
 const byB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("sorting by bscore still orders by bscore",
   byB.every((v, i) => i === 0 || byB[i - 1] >= v), String(byB.slice(0, 5)))
@@ -197,14 +219,35 @@ t("the active column header announces the direction it is sorted",
   JSON.stringify(sortLabels))
 
 
-// bscore must be value OVER REPLACEMENT, so proj − repl should equal it
-const row = await page.$eval(".board-row", r => ({
-  bscore: Number(r.querySelector(".bscore").textContent),
-  cells: [...r.querySelectorAll(".dim")].map(e => Number(e.textContent))
-}))
+/**
+ * bscore must be value OVER REPLACEMENT, so proj − repl should equal it.
+ *
+ * Those two operands used to be columns on the row, which is why the row stated one
+ * subtraction three times. They are in the drill-down now, so the same arithmetic is
+ * checked where it actually lives — and this doubles as the assertion that moving
+ * them lost nothing.
+ */
+const rowBscore = await page.$eval(".board-row .bscore", e => Number(e.textContent))
+await page.click(".board-row")
+await page.waitForSelector(".detail")
+const value = await page.$$eval(".detail .pair", n =>
+  Object.fromEntries(n.map(e => [e.querySelector("dt").textContent.trim(), e.querySelector("dd").textContent.trim()]))
+)
+t("the drill-down carries the arithmetic the row no longer repeats",
+  ["projected points", "waiver points", "bscore", "rostered", "uscore", "market edge"]
+    .every(k => k in value), Object.keys(value).join(", "))
 t("bscore equals projected minus replacement",
-  Math.abs(row.bscore - (row.cells[0] - row.cells[1])) < 0.05,
-  `${row.bscore} vs ${row.cells[0]} − ${row.cells[1]}`)
+  Math.abs(rowBscore - (Number(value["projected points"]) - Number(value["waiver points"]))) < 0.05,
+  `${rowBscore} vs ${value["projected points"]} − ${value["waiver points"]}`)
+// and uscore really is that bscore over that ownership
+if (value["rostered"] !== "unlisted") {
+  const pctOwned = Math.max(Number(String(value["rostered"]).replace("%", "")), 0.5)
+  t("uscore equals bscore over ownership",
+    Math.abs(Number(value["uscore"]) - rowBscore / pctOwned) < 0.06,
+    `${value["uscore"]} vs ${rowBscore}/${pctOwned}`)
+}
+await page.click(".board-row")
+await page.waitForTimeout(200)
 
 // provenance: opening a player must separate observed from modelled
 await page.click(".board-row")
@@ -271,8 +314,8 @@ const availLine = (await page.textContent(".pick-avail")).trim()
 const poolRead = Number((await page.textContent(".pool-count")).trim()) > 50
 t("Billy's card says which claim it is making",
   poolRead
-    ? /free agent in your league right now/.test(availLine)
-    : /not a claim that he is available/.test(availLine),
+    ? /free agent in your league/i.test(availLine)
+    : /availability unknown|rostered in/i.test(availLine),
   `pool ${poolRead ? "read" : "unread"}: ${availLine}`)
 if (poolRead) {
   // the decisive one: the pick has to be somebody you can actually get

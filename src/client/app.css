@@ -575,7 +575,7 @@ pre{
 .board-head,.board-row{
   display:grid;
   grid-template-columns:
-    30px minmax(0,1fr) 62px 66px 74px 86px 34px 86px 46px;
+    30px minmax(0,1fr) 66px 66px 56px 34px 86px 46px;
   gap:10px;align-items:center;text-align:left;
 }
 /* every cell is on the one row; without that, placing a later child into an
@@ -586,13 +586,12 @@ pre{
 .board-head>*:nth-child(3),.board-row>*:nth-child(3){grid-column:3}
 .board-head>*:nth-child(4),.board-row>*:nth-child(4){grid-column:4}
 .board-head>*:nth-child(5),.board-row>*:nth-child(5){grid-column:5}
-.board-head>*:nth-child(6),.board-row>*:nth-child(6){grid-column:6}
+.board-head>*:nth-child(6){grid-column:6}
 .board-head>*:nth-child(7){grid-column:7}
-.board-head>*:nth-child(8){grid-column:8}
-.board-head>*:nth-child(9),.board-row>*:nth-child(9){grid-column:9}
+.board-head>*:nth-child(8),.board-row>*:nth-child(8){grid-column:8}
 /* the row carries them the other way round: confidence, then games */
-.board-row>*:nth-child(7){grid-column:8}
-.board-row>*:nth-child(8){grid-column:7}
+.board-row>*:nth-child(6){grid-column:7}
+.board-row>*:nth-child(7){grid-column:6}
 .board-head{
   position:sticky;top:0;z-index:2;
   font-size:var(--fs-1);color:var(--faint);
@@ -633,10 +632,10 @@ pre{
 .who .code{font-size:var(--fs-1);padding:2px 6px;min-width:auto;margin-right:6px}
 .hurt{font-style:normal;color:var(--neg);font-size:var(--fs-2)}
 /* every column of digits is tabular, because the column IS the comparison */
-.board-row .edge,.board-row .bscore,.board-row .dim,.board-row .games,.board-row .gap,
+.board-row .uscore,.board-row .bscore,.board-row .dim,.board-row .games,.board-row .gap,
 .board-row .conf-num{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.board-row .edge{font-size:var(--fs-4);color:var(--muted)}
-.board-row .edge.up{color:var(--accent);font-weight:600}
+.board-row .uscore{font-size:var(--fs-4);color:var(--muted)}
+.board-row .uscore.up{color:var(--accent);font-weight:600}
 .bscore{font-size:var(--fs-5);font-weight:600;color:var(--accent)}
 .board-row .dim{font-size:var(--fs-3);color:var(--muted)}
 .board-row .games{font-size:var(--fs-3);color:var(--muted)}
@@ -666,19 +665,19 @@ pre{
    body together — never one without the other — so what is left still lines up,
    and everything dropped is a tap away in the drill-down.
 
-   Under 900px: proj pts, waiver pts and GP go. Under 640px: confidence and luck
-   go too, leaving the ranking, the name, and the two numbers it is ranked on. */
+   Under 900px: owned and GP go. Under 640px: confidence and luck go too, leaving
+   the ranking, the name, and the two numbers it is ranked on. */
 @media(max-width:899px){
   .board-head,.board-row{grid-template-columns:26px minmax(0,1fr) 58px 62px 86px 46px;gap:var(--sp-2)}
-  .board-head>*:nth-child(5),.board-head>*:nth-child(6),.board-head>*:nth-child(7),
-  .board-row>*:nth-child(5),.board-row>*:nth-child(6),.board-row>*:nth-child(8){display:none}
-  .board-head>*:nth-child(8),.board-row>*:nth-child(7){grid-column:5}
-  .board-head>*:nth-child(9),.board-row>*:nth-child(9){grid-column:6}
+  .board-head>*:nth-child(5),.board-head>*:nth-child(6),
+  .board-row>*:nth-child(5),.board-row>*:nth-child(7){display:none}
+  .board-head>*:nth-child(7),.board-row>*:nth-child(6){grid-column:5}
+  .board-head>*:nth-child(8),.board-row>*:nth-child(8){grid-column:6}
 }
 @media(max-width:640px){
   .board-head,.board-row{grid-template-columns:24px minmax(0,1fr) 54px 58px}
-  .board-head>*:nth-child(8),.board-head>*:nth-child(9),
-  .board-row>*:nth-child(7),.board-row>*:nth-child(9){display:none}
+  .board-head>*:nth-child(7),.board-head>*:nth-child(8),
+  .board-row>*:nth-child(6),.board-row>*:nth-child(8){display:none}
 }
 
 /* ---------- drill-down ---------- */

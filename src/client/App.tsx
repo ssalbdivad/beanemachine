@@ -135,15 +135,14 @@ export const App = () => {
 				    belongs where importing is attempted, and it is on that form already. */}
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
-						Your leagues are stored in this browser — editing and saving work here.{" "}
+						Your leagues are saved in this browser.{" "}
 						<a
 							href="https://github.com/ssalbdivad/beanemachine#running-it"
 							target="_blank"
 							rel="noreferrer"
 						>
-							Importing one from its URL needs the local server
+							Importing one by URL needs the local server.
 						</a>
-						, since browsers can&rsquo;t read Yahoo or ESPN directly.
 					</p>
 				)}
 			</header>

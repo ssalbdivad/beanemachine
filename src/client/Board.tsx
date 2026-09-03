@@ -41,7 +41,7 @@ const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
 /** The three horizons, as a tablist: three questions, not three filters. */
 const MODES = [
-	["stream", "Streaming", "the period you can still act on — who wins you this week"],
+	["stream", "Streaming", "this week's matchup — who wins it for you"],
 	["board", "This fortnight", "the standing board, 14 days out"],
 	["stash", "Stash", "rest of season — who to hold, not who to start"]
 ] as const
@@ -164,7 +164,7 @@ export const Board = ({
 		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
 		[pool]
 	)
-	const { rated, rows, rankable, scored, edgeCoverage, period } =
+	const { rated, rows, scored, edgeCoverage, period } =
 		useBoard(snapshot, league, filters, availableNames)
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -188,9 +188,9 @@ export const Board = ({
 			<section className="card full">
 				<h2>Recommendations</h2>
 				<p className="empty">
-					This league doesn&rsquo;t say how many teams are in it, and how deep the waiver
-					wire runs depends on that — so there is no honest bscore yet. Open{" "}
-					<b>League setup</b> and set the team count, and the board fills in.
+					A player is worth what he beats the next man up by, and how deep the waiver
+					wire runs decides who that is. Set the team count in <b>League setup</b> and
+					the board fills in.
 				</p>
 			</section>
 		)
@@ -209,18 +209,12 @@ export const Board = ({
 			<section className="card full">
 				<h2>This league has no scoring yet</h2>
 				<p className="sub">
-					<b>{league.meta.league_name ?? "This template"}</b> gives you the roster shape —{" "}
-					{Object.entries(league.roster.slots)
-						.filter(([s]) => s !== "BN" && s !== "IL" && s !== "NA")
-						.map(([s, n]) => `${n}\u00d7${s}`)
-						.join(", ")}{" "}
-					— but not what each stat is worth, and every projection would score exactly
-					zero. Rather than rank a field of zeros, the board is waiting.
+					<b>{league.meta.league_name ?? "This template"}</b> has roster slots but no
+					points values, so every projection would come out at zero.
 				</p>
 				<p className="sub">
-					Paste your league URL above to read the real values off the platform, or open
-					<b> Scoring</b> and enter them. A bscore is denominated in your league&rsquo;s
-					own points, so it cannot mean anything until those exist.
+					Paste your league URL above to read the real values off the platform, or enter
+					them under <b>Scoring</b>.
 				</p>
 			</section>
 		)
@@ -228,53 +222,20 @@ export const Board = ({
 	// Not a hook, so it belongs after the refusals above rather than among them —
 	// and it needs the snapshot they have just established exists.
 	const span = horizonSpan(snapshot, filters.mode, period)
-	// Why the board is shorter than the pool. The FILTERS are the reader's own doing
-	// and are named on the controls that set them; this names the cut the RANKING
-	// makes on its own, which nothing else on the page would reveal.
-	const rateable = rated.filter(r => r.rateable).length
-	// Only the RANKING's cut. What the reader's own filters removed is already
-	// visible on the controls that set them, and blaming market edge for a position
-	// chip would be a sentence that is simply false.
-	const cut = rateable - rankable
-	const cutReason =
-		filters.sort === "marketEdge" ?
-			"market edge ranks only players the field has priced, and only above replacement"
-		: filters.sort === "undervaluation" ? "only players above replacement can be undervalued"
-		: filters.sort === "contact" ? "only players above replacement with a Statcast window"
-		: "filtered"
+
 	/**
-	 * Billy picks the best player you can ACTUALLY GET, not the best player.
+	 * Billy names the best player you can GET, not the best player. The top of a
+	 * bscore board is the best man in baseball, who is rostered everywhere — true,
+	 * and useless as a recommendation.
 	 *
-	 * The card used to read `rows[0]`, so on a bscore board it named Pete
-	 * Crow-Armstrong — the best outfielder in the league and rostered in all of
-	 * them. That is a true sentence and a useless recommendation: a pick nobody can
-	 * act on is not a pick.
-	 *
-	 * Availability is answered by whichever source this reader actually has, and the
-	 * card states WHICH, because the three are different claims:
-	 *
-	 * 1. The league's own free-agent list. Exact, and about YOUR league — but it
-	 *    needs a publicly viewable Yahoo league and a local server, so most readers
-	 *    of the hosted build never have it.
-	 * 2. How widely he is rostered across leagues. Weaker and global, but it comes
-	 *    off the snapshot with no server at all, which is the case this tool is in
-	 *    for everybody who is not running it locally. Only values that survived
-	 *    `leakedByTeam` are here — the "% Ros" sweep mostly returned the game's
-	 *    weather line, and anything a whole club shared has been discarded — so an
-	 *    absent figure is common and means unknown, never unowned.
-	 * 3. Neither, in which case it is the top of the board and says so rather than
-	 *    implying an availability nobody checked.
-	 *
-	 * The threshold is the same 70% the Buy low card uses, so the two cards mean the
-	 * same thing by "still gettable".
-	 *
-	 * It searches `rows`, not the whole pool, so a reader who has filtered to
-	 * catchers gets the best catcher he can get.
+	 * Availability comes from your league's own free-agent list where that is
+	 * readable, and otherwise from how widely he is rostered, which is in the
+	 * snapshot and needs no server. Failing both it is simply the top row, and the
+	 * card says availability is unknown rather than implying one.
 	 */
 	const poolKnown = availableNames !== null && availableNames !== undefined
-	const inPool = (r: Ranked) => availableNames!.has(normalizeName(r.player.name))
 	const picked =
-		poolKnown ? rows.find(inPool)
+		poolKnown ? rows.find(r => availableNames!.has(normalizeName(r.player.name)))
 		: rows.some(r => r.rosteredPct !== null) ?
 			rows.find(r => r.rosteredPct !== null && r.rosteredPct < WIDELY_ROSTERED)
 		:	undefined
@@ -283,6 +244,7 @@ export const Board = ({
 		picked === undefined ? "none"
 		: poolKnown ? "pool"
 		: "ownership"
+
 	const narrowed = [
 		filters.group === "hitting" ? "batters only"
 		: filters.group === "pitching" ? "pitchers only"
@@ -353,6 +315,7 @@ export const Board = ({
 							onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
 						>
 							<option value="bscore">bscore (value over replacement)</option>
+							<option value="uscore">uscore (value per point of ownership)</option>
 							<option value="points">projected points</option>
 							<option value="marketEdge">market edge (what the field is wrong about)</option>
 							<option value="undervaluation">most undervalued (above replacement)</option>
@@ -434,21 +397,10 @@ export const Board = ({
 			    the sibling cards can't be wrapped without breaking the page grid. */}
 			<section className="card full" id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(filters.mode)}>
 				<h2>Recommendations</h2>
-				{/* Edge is no longer the default and no longer silently falls back, so this
-				    is a warning about the column you asked for rather than an announcement
-				    that you were given a different one. The reason it stopped being the
-				    default is the first sentence, because it is much the worse problem:
-				    thin coverage makes the column incomplete, the forecast leak makes it
-				    wrong. */}
-				{filters.sort === "marketEdge" && (
+				{filters.sort === "marketEdge" && edgeCoverage < 0.35 && (
 					<p className="sub warn-note">
-						Market edge divides by Yahoo&rsquo;s &ldquo;% Ros&rdquo;, and on this capture
-						most of that number is the game&rsquo;s weather line rather than a roster
-						share — whole clubs come back on one identical percentage, paired by the
-						day&rsquo;s matchups. Captures taken from now on discard those, but this one
-						predates the check, and only {Math.round(edgeCoverage * 100)}% of the board
-						carries any figure at all. Treat this ranking as unreliable; bscore is the
-						honest column.
+						Yahoo listed ownership for only {Math.round(edgeCoverage * 100)}% of this
+						board, so edge can rank just that slice. bscore ranks everyone.
 					</p>
 				)}
 				{/* One line, because it is read on every visit: how many, over what window.
@@ -457,32 +409,20 @@ export const Board = ({
 				    it is available on the rare occasion anyone wants it and costs no height
 				    on the many occasions nobody does. */}
 				<p className="sub">
-					<b className="count">{rows.length}</b>
-					{/* The board opens on market edge, which can only rank a player the field
-					    has priced and only recommends one worth rostering — so it shows 67 of
-					    1,233 and a bare count reads as a broken capture. Say what did the
-					    cutting. The ranking's own cut and the reader's filters are separate
-					    sentences, because blaming market edge for a position chip would
-					    simply be false. */}
-					{cut > 0 ?
-						rows.length < rankable ?
-							<> shown, of {rankable.toLocaleString()} this ranking can place from{" "}
-								{rateable.toLocaleString()} — {cutReason}</>
-						:	<> of {rateable.toLocaleString()} — {cutReason}</>
-					:	<> players</>}{" "}
-					· {span.range}
-					{filters.mode === "stream" && period?.clipped &&
-						", cut short by the end of the captured slate"}
+					<b className="count">{rows.length}</b> players · {span.range}
 				</p>
 				<div className="board">
+					{/* Eight columns, each answering a different question. `proj pts` and
+					    `waiver pts` used to sit here too, but bscore is one minus the other,
+					    so the table stated the same fact three times; the arithmetic is in
+					    the drill-down where it belongs. */}
 					<div className="board-head">
 						<span>#</span>
 						<SortHead field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
-						<SortHead field="marketEdge" filters={filters} setFilters={setFilters} right>edge</SortHead>
+						<SortHead field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>
 						<SortHead field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
-						<SortHead field="points" filters={filters} setFilters={setFilters} right>proj pts</SortHead>
-						<SortHead field="replacement" filters={filters} setFilters={setFilters} right>waiver pts</SortHead>
-						<span className="r" title="Games this player's team actually has scheduled in the window. Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start.">GP</span>
+						<span className="r" title="How many leagues already roster him. Blank means Yahoo doesn't list him — unknown, not unowned.">owned</span>
+						<span className="r" title="Games his team actually has scheduled in the window. Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start.">GP</span>
 						<SortHead field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
 						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right>luck</SortHead>
 					</div>
@@ -496,10 +436,10 @@ export const Board = ({
 					<summary>How this ranking was built</summary>
 					<p className="sub">
 						{filters.mode === "stash" ?
-							"Ranked over every game left in the regular season, so playing time and role matter more than the last fortnight. This is the view for who to hold — the underlying contact numbers on each player are here because a long horizon is where they would matter, though this project has not yet measured that honestly (see the README)."
+							"Every game left in the regular season, so playing time and role matter more than a hot fortnight. This is the view for who to hold rather than who to start."
 						: filters.mode === "stream" ?
-							`Ranked over ${period ? period.basis : "a window this capture cannot state"} — using its real slate rather than half of a fortnight.`
-						:	"Ranked over the next fortnight — long enough that one cold week doesn't decide it, short enough that today's role still holds."}
+							`${period ? period.basis.charAt(0).toUpperCase() + period.basis.slice(1) : "A window this capture cannot state"}, counted off the real schedule.`
+						:	"The next fortnight — long enough that one cold week doesn't decide it, short enough that today's role still holds."}
 						{" "}Playing time leans on recent form: the last{" "}
 						{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
 						and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,
@@ -752,11 +692,9 @@ const BillysPick = ({
 				<h2>Billy&rsquo;s pick</h2>
 				<p className="pick-name">{r.player.name}</p>
 				<p className="pick-avail">
-					{basis === "pool" ?
-						"Best on this board who is a free agent in your league right now."
-					: basis === "ownership" ?
-						`Best on this board rostered in under ${WIDELY_ROSTERED}% of leagues \u2014 how widely he is owned, not whether he is free in yours.`
-					:	"Top of this board \u2014 nothing here could say whether he is available."}
+					{basis === "pool" ? "Free agent in your league."
+					: basis === "ownership" ? `Rostered in ${r.rosteredPct}% of leagues.`
+					:	"Top of the board — availability unknown."}
 				</p>
 				<p className="pick-why">
 					{clauses.join(" · ")}.
@@ -773,22 +711,23 @@ const BillysPick = ({
 
 const COLUMN_HELP: Record<Filters["sort"], string> = {
 	name: "Sort by player name.",
-	marketEdge:
-		"Edge — how many points this player beats the typical player rostered in about as many leagues as he is. The default view, because the best players are already taken: this ranks who the field is wrong about, not who is best. Blank means Yahoo doesn't list him, which is not the same as nobody owning him.",
+	uscore:
+		"uscore — underrated score. His bscore divided by the share of leagues that already roster him. bscore asks who is best; uscore asks who is best relative to how many people have noticed, which is the one you can act on.",
 	bscore:
-		"bscore — projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
-	points: "Projected points — what this player scores over the horizon in your league's own scoring.",
-	replacement:
-		"Waiver points — what the next man up at this slot is projected to score. bscore is this column subtracted from the one on its left.",
+		"bscore — beanescore. Projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
+	marketEdge:
+		"Edge — how many points he beats the typical player rostered about as widely as he is. Like uscore but a subtraction rather than a ratio, so it stays in league points and is less swayed by the barely-owned.",
+	points: "Projected points — what he scores over the horizon in your league's own scoring.",
+	replacement: "Waiver points — what the next man up at his slot is projected to score.",
 	confidence:
 		"How much real data stands behind the projection: playing time so far, whether Statcast has him, and whether he's healthy. Not the odds he plays well.",
 	undervaluation:
-		"Luck — how far his results trail the quality of his contact over the last three weeks, ranked against everyone else on his side of the ball. 90 means only 10% have been unluckier.",
+		"Luck — how far his results trail the quality of his contact over the last three weeks, ranked against everyone on his side of the ball. 90 means only 10% have been unluckier.",
 	contact:
-		"Contact vs results — the raw gap between expected and actual wOBA over the last three weeks. Measured over a rolling window rather than the whole season, because that is where contact and results actually diverge: gap-to-wOBA correlation is −0.61 over three weeks against −0.36 across a season."
+		"Contact vs results — the gap between expected and actual wOBA over the last three weeks, where contact and results actually diverge."
 }
 
-/** Column header that sorts. Clicking the active column flips direction. */
+
 const SortHead = ({
 	field, filters, setFilters, right, children
 }: {
@@ -830,20 +769,19 @@ const SortHead = ({
 }
 
 /**
- * What the row says out loud. Read as markup it is nine unlabelled numbers run
- * together — "1Pete Crow-ArmstrongOFChicago Cubs—52.74132.2579.51100%1427.8" —
- * which is the column headings doing all the work for sighted readers and none
- * for anyone else. Every clause here names a number that is already on the row;
- * nothing is added, and a value that is missing says it is missing.
+ * What the row says out loud. Read as markup it is a run of unlabelled numbers —
+ * "1Pete Crow-ArmstrongOFChicago Cubs—52.74100%1427.8" — which is the column
+ * headings doing all the work for sighted readers and none for anyone else. Every
+ * clause here names a number that is already on the row; nothing is added, and a
+ * value that is missing says it is missing.
  */
 const rowLabel = (rank: number, r: Ranked) =>
 	[
 		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
+		r.uscore === null ? "no uscore" : `uscore ${r.uscore}`,
 		`bscore ${r.bscore}`,
 		`${r.points} projected points against ${r.replacement} for a replacement`,
-		r.marketEdge === null ?
-			"no market price"
-		:	`market edge ${r.marketEdge > 0 ? "+" : ""}${r.marketEdge}`,
+		r.rosteredPct === null ? "ownership unlisted" : `rostered in ${r.rosteredPct} percent of leagues`,
 		`confidence ${pct(r.confidence.value)}`,
 		r.projection.horizonGames ?
 			`${r.projection.horizonGames} games scheduled`
@@ -873,18 +811,17 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 				</span>
 			</span>
 			<span
-				className={`r edge${(r.marketEdge ?? 0) > 0 ? " up" : ""}`}
+				className={`r uscore${(r.uscore ?? 0) >= 10 ? " up" : ""}`}
 				title={
-					r.marketEdge === null ?
-						"Yahoo doesn't list this player, so there is no market price to compare against. Unknown, not unowned."
-					:	`Rostered in ${r.rosteredPct}% of leagues. Projected for ${r.marketEdge > 0 ? "" : ""}${r.marketEdge} points versus the typical player owned about that widely.`
+					r.uscore === null ?
+						"Yahoo doesn't list him, so there is no ownership to divide by."
+					:	`${r.bscore} bscore against ${r.rosteredPct}% ownership.`
 				}
 			>
-				{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}
+				{r.uscore === null ? "—" : r.uscore}
 			</span>
 			<span className="r bscore">{r.bscore}</span>
-			<span className="r dim">{r.points}</span>
-			<span className="r dim">{r.replacement}</span>
+			<span className="r dim">{r.rosteredPct === null ? "—" : `${r.rosteredPct}%`}</span>
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
 			<span className="r games" title={`${r.projection.horizonGames} games scheduled in this window`}>
 				{r.projection.horizonGames || "—"}
@@ -921,6 +858,26 @@ const Detail = ({ r }: { r: Ranked }) => {
 				</dl>
 			</div>
 			<div className="detail-col">
+				<h3>What he is worth</h3>
+				{/* The arithmetic behind the two ranked columns. It used to be spread across
+				    four cells of every row — projected points, waiver points, bscore and
+				    edge — which stated one subtraction three times in the place where
+				    scanning matters most. */}
+				<dl>
+					<div className="pair"><dt>projected points</dt><dd>{r.points}</dd></div>
+					<div className="pair"><dt>waiver points</dt><dd>{r.replacement}</dd></div>
+					<div className="pair"><dt>bscore</dt><dd>{r.bscore}</dd></div>
+					<div className="pair">
+						<dt>rostered</dt>
+						<dd>{r.rosteredPct === null ? "unlisted" : `${r.rosteredPct}%`}</dd>
+					</div>
+					<div className="pair"><dt>uscore</dt><dd>{r.uscore ?? "—"}</dd></div>
+					<div className="pair">
+						<dt>market edge</dt>
+						<dd>{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}</dd>
+					</div>
+				</dl>
+
 				<h3>Measured</h3>
 				<dl>
 					<div className="pair"><dt>season points</dt><dd>{r.season.points}</dd></div>

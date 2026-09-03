@@ -62,6 +62,7 @@ export interface Filters {
 	 */
 	mode: "stream" | "board" | "stash"
 	sort:
+		| "uscore"
 		| "marketEdge"
 		| "bscore"
 		| "points"
@@ -229,6 +230,7 @@ export const useBoard = (
 				if (filters.sort === "undervaluation" && r.bscore <= 0) return false
 				if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 					return false
+				if (filters.sort === "uscore" && (r.uscore === null || r.bscore <= 0)) return false
 				if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
 				return true
 			}).length,
@@ -252,6 +254,10 @@ export const useBoard = (
 			// behaviour rather than the safe one.
 			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 				return false
+			// Same guard as the other two comparative sorts: a replacement-level body
+			// nobody rosters divides a non-positive bscore by a tiny number, which sorts
+			// as a find. Only a player worth rostering can be underrated.
+			if (filters.sort === "uscore" && (r.uscore === null || r.bscore <= 0)) return false
 			// Contact quality only means something for someone worth rostering, and only
 			// where a rolling Statcast window actually exists for him.
 			if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
@@ -270,6 +276,7 @@ export const useBoard = (
 				case "replacement": return r.replacement
 				case "confidence": return r.confidence.value
 				case "undervaluation": return r.undervaluation ?? -1
+				case "uscore": return r.uscore ?? -Infinity
 				case "marketEdge": return r.marketEdge ?? -Infinity
 				case "contact":
 					// a pitcher benefits when his expected is BELOW his actual, so it flips

@@ -39,8 +39,12 @@ await p.click(".views button:nth-child(2)")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
 t("static banner shown", await p.locator(".static-note").isVisible())
 const note = await p.locator(".static-note").textContent()
+// The claim, not the wording: the banner has to say that your leagues live in this
+// browser and that importing is the one thing the server is needed for. It matched
+// on the literal word "saving" before, so tightening the sentence to "saved" broke
+// an assertion whose meaning had not changed.
 t("banner names importing as the only thing needing the server",
-  /import/i.test(note) && /saving/i.test(note), note)
+  /import/i.test(note) && /server/i.test(note) && /browser/i.test(note), note)
 const codes = await p.$$eval(".grid section:nth-of-type(1) .code", n=>n.map(e=>e.textContent))
 const vals = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))
 t("scoring seeded from the committed asset", vals[codes.indexOf("HR")]==="10.4", vals.join(","))

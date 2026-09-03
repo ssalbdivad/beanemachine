@@ -303,12 +303,21 @@ export const rateAll = (o: RateOptions): Rated[] => {
 
 /** Percentile of the regression gap within the rated pool — the undervaluation
  *  signal, expressed relative to the players actually being compared. */
-/** A rated player plus the two comparative numbers, which need the whole pool to
- *  compute and so cannot live on Rated itself. */
+/**
+ * A rated player plus the comparative numbers, which need the whole pool to compute
+ * and so cannot live on Rated itself.
+ *
+ * `uscore` — "underrated score" — is bscore per point of ownership: what he is worth
+ * divided by how much of the field has already noticed. bscore answers who is best,
+ * uscore answers who is best *relative to how available he is*, which on a waiver
+ * wire is the question you can act on. It is `null` wherever Yahoo lists no
+ * ownership figure, because unknown is not the same as unowned.
+ */
 export type Ranked = Rated & {
 	undervaluation: number | null
 	rosteredPct: number | null
 	marketEdge: number | null
+	uscore: number | null
 }
 
 export const withUndervaluation = (
@@ -368,6 +377,19 @@ export const withUndervaluation = (
  * than the typical player rostered in about as many leagues. A percentile gap
  * would have made every unrostered replacement-level body look like a find.
  */
+/**
+ * The smallest ownership a quotient can honestly divide by.
+ *
+ * Yahoo reports "% Ros" as a whole number, so a player shown at 0% is not owned in
+ * literally no league — he is somewhere in [0, 0.5). Nearly a quarter of the priced
+ * pool sits in that bucket (117 of 501 on the current capture), and dividing by a
+ * literal zero would give every one of them Infinity and collapse the column into a
+ * meaningless tie. Taking the bucket's midpoint is the standard continuity
+ * treatment of a rounded-down reading, not a number invented to avoid a divide.
+ */
+const MIN_PCT = 0.5
+const floorPct = (pct: number) => Math.max(pct, MIN_PCT)
+
 const BUCKETS = 10
 
 export const withMarketEdge = (
@@ -414,7 +436,8 @@ export const withMarketEdge = (
 		return {
 			...r,
 			rosteredPct: pct,
-			marketEdge: par === null ? null : Number((r.bscore - par).toFixed(1))
+			marketEdge: par === null ? null : Number((r.bscore - par).toFixed(1)),
+			uscore: pct === null || !r.rateable ? null : Number((r.bscore / floorPct(pct)).toFixed(1))
 		}
 	})
 }

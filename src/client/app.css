@@ -702,6 +702,10 @@ pre{
 .notes.warn li{border-left-color:var(--flag);color:var(--flag)}
 .tiny-note{margin:0 0 9px;font-size:var(--fs-2);line-height:var(--lh-snug);color:var(--faint);font-style:italic}
 
+/* Billy's pick states what KIND of claim it is making — best available, or merely
+   top of the board — right under the name, because the two are different
+   recommendations and the card looks identical either way. */
+.pick-avail{margin:2px 0 var(--sp-2);font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
 .legend{margin-top:var(--sp-4)}
 .legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}
 .legend dt{color:var(--accent);font-weight:500;text-transform:none}

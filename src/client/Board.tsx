@@ -29,6 +29,14 @@ const MISSING_LABEL: Record<string, string> = {
 	"underlying expected stats": "Statcast has no expected-stats row for him"
 }
 
+/**
+ * Above this share of leagues, a player is not a recommendation — he is a fact.
+ *
+ * The same bar the Buy low card uses, so the two cards mean the same thing by
+ * "still gettable" rather than each picking its own number.
+ */
+const WIDELY_ROSTERED = 70
+
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
 /** The three horizons, as a tablist: three questions, not three filters. */
@@ -234,6 +242,47 @@ export const Board = ({
 		: filters.sort === "undervaluation" ? "only players above replacement can be undervalued"
 		: filters.sort === "contact" ? "only players above replacement with a Statcast window"
 		: "filtered"
+	/**
+	 * Billy picks the best player you can ACTUALLY GET, not the best player.
+	 *
+	 * The card used to read `rows[0]`, so on a bscore board it named Pete
+	 * Crow-Armstrong — the best outfielder in the league and rostered in all of
+	 * them. That is a true sentence and a useless recommendation: a pick nobody can
+	 * act on is not a pick.
+	 *
+	 * Availability is answered by whichever source this reader actually has, and the
+	 * card states WHICH, because the three are different claims:
+	 *
+	 * 1. The league's own free-agent list. Exact, and about YOUR league — but it
+	 *    needs a publicly viewable Yahoo league and a local server, so most readers
+	 *    of the hosted build never have it.
+	 * 2. How widely he is rostered across leagues. Weaker and global, but it comes
+	 *    off the snapshot with no server at all, which is the case this tool is in
+	 *    for everybody who is not running it locally. Only values that survived
+	 *    `leakedByTeam` are here — the "% Ros" sweep mostly returned the game's
+	 *    weather line, and anything a whole club shared has been discarded — so an
+	 *    absent figure is common and means unknown, never unowned.
+	 * 3. Neither, in which case it is the top of the board and says so rather than
+	 *    implying an availability nobody checked.
+	 *
+	 * The threshold is the same 70% the Buy low card uses, so the two cards mean the
+	 * same thing by "still gettable".
+	 *
+	 * It searches `rows`, not the whole pool, so a reader who has filtered to
+	 * catchers gets the best catcher he can get.
+	 */
+	const poolKnown = availableNames !== null && availableNames !== undefined
+	const inPool = (r: Ranked) => availableNames!.has(normalizeName(r.player.name))
+	const picked =
+		poolKnown ? rows.find(inPool)
+		: rows.some(r => r.rosteredPct !== null) ?
+			rows.find(r => r.rosteredPct !== null && r.rosteredPct < WIDELY_ROSTERED)
+		:	undefined
+	const pick = picked ?? rows[0] ?? null
+	const basis: "pool" | "ownership" | "none" =
+		picked === undefined ? "none"
+		: poolKnown ? "pool"
+		: "ownership"
 	const narrowed = [
 		filters.group === "hitting" ? "batters only"
 		: filters.group === "pitching" ? "pitchers only"
@@ -378,7 +427,7 @@ export const Board = ({
 				</details>
 			</section>
 
-			{rows[0] && <BillysPick r={rows[0]} horizon={span.phrase} />}
+			{pick && <BillysPick r={pick} horizon={span.phrase} basis={basis} />}
 
 			{/* The panel the horizon tabs control. The pick, buy-low and scarcity
 			    cards below re-rank with it too, but this is the ranking itself, and
@@ -656,15 +705,25 @@ const BuyLow = ({ rows }: { rows: Ranked[] }) => {
  * Billy's read on the top of the board. Every clause is assembled from a number
  * that is actually on the row — no adjectives the data doesn't support.
  */
-const BillysPick = ({ r, horizon }: { r: Ranked; horizon: string }) => {
+const BillysPick = ({
+	r,
+	horizon,
+	basis
+}: {
+	r: Ranked
+	horizon: string
+	/** Which availability source picked him, and therefore which claim the card is
+	 *  entitled to make. */
+	basis: "pool" | "ownership" | "none"
+}) => {
 	const clauses: string[] = []
 	clauses.push(
 		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over ${horizon}`
 	)
-	if (r.marketEdge !== null && r.rosteredPct !== null)
-		clauses.push(
-			`he's rostered in ${r.rosteredPct}% of leagues, and that's ${r.marketEdge > 0 ? `${r.marketEdge} points more` : `${Math.abs(r.marketEdge)} points less`} than players priced like him usually give you`
-		)
+	// The "rostered in N% of leagues" clause used to live here. It came off the
+	// "% Ros" sweep, most of which is the per-game weather line rather than a
+	// roster share, so it was stating a number that is usually wrong about a
+	// player it is usually wrong about. A missing clause beats a false one.
 	if (r.projection.volumePerTeamGame !== null)
 		clauses.push(
 			r.player.group === "hitting" ?
@@ -692,6 +751,13 @@ const BillysPick = ({ r, horizon }: { r: Ranked; horizon: string }) => {
 			<div className="pick-body">
 				<h2>Billy&rsquo;s pick</h2>
 				<p className="pick-name">{r.player.name}</p>
+				<p className="pick-avail">
+					{basis === "pool" ?
+						"The best player on this board who is a free agent in your league right now."
+					: basis === "ownership" ?
+						`The best player on this board still rostered in under ${WIDELY_ROSTERED}% of leagues — your own league\u2019s free-agent list isn\u2019t readable here, so this is how widely he is owned rather than whether he is free to you.`
+					:	"The top of this board. Nothing here could say whether he is available, so this is not a claim that he is."}
+				</p>
 				<p className="pick-why">
 					{clauses.join(" · ")}.
 					{worry && <em> {worry}</em>}

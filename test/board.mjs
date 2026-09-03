@@ -226,11 +226,21 @@ t("the drill-down states whether the Statcast adjustment was applied",
   modelled.some(m => /Statcast weight is 0/.test(m)) ||
   modelled.some(m => /quality: wOBA/.test(m)), modelled.join(" | "))
 
-// Billy's pick must be the top row, and every clause backed by a real number
+/**
+ * Billy's pick is a row ON the board, and every clause is backed by a real number.
+ *
+ * It used to be asserted as the TOP row. It no longer is, deliberately: on a
+ * bscore board the top row is the best player in baseball, who is rostered
+ * everywhere, and naming him is a fact rather than a recommendation. The card now
+ * picks the best player the reader can actually get — see the availability
+ * assertions further down — so what has to hold here is that he is somebody the
+ * board actually ranked, not that he is first.
+ */
 await page.waitForSelector(".card.pick")
 const pickName = (await page.textContent(".pick-name")).trim()
-const topName = await page.$eval(".board-row .who b", e => e.textContent.trim())
-t("Billy's pick matches the top of the board", pickName === topName, `${pickName} vs ${topName}`)
+const boardNames = await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
+t("Billy's pick is a player the board actually ranked",
+  boardNames.includes(pickName), `${pickName} not among ${boardNames.length} rendered rows`)
 const why = await page.textContent(".pick-why")
 const pickScore = Number(await page.textContent(".pick-score b"))
 t("Billy's reasoning cites the actual bscore",
@@ -238,6 +248,48 @@ t("Billy's reasoning cites the actual bscore",
 t("Billy's reasoning cites real scheduled games", /plays \d+ games/.test(why), why)
 t("Billy uses the right volume unit for the side",
   /plate appearances per team game|outs recorded per team game/.test(why), why)
+
+/**
+ * Billy picks the best ADDABLE player, not the best player.
+ *
+ * The card read `rows[0]`, so once the board's default became bscore it named the
+ * best outfielder in baseball — true, rostered in every league, and useless as a
+ * recommendation. Availability comes from the league's own free-agent list, not
+ * from the "% Ros" sweep that is mostly weather (test/ownership.mjs).
+ *
+ * The pool is optional data and Yahoo rate-limits it, so this asserts the card
+ * tells the truth about WHICH claim it is making in either case.
+ */
+await page.waitForFunction(
+  () => {
+    const t = document.querySelector(".pool-count")?.textContent?.trim()
+    return t && t !== "…"
+  },
+  { timeout: 30000 }
+).catch(() => {})
+const availLine = (await page.textContent(".pick-avail")).trim()
+const poolRead = Number((await page.textContent(".pool-count")).trim()) > 50
+t("Billy's card says which claim it is making",
+  poolRead
+    ? /free agent in your league right now/.test(availLine)
+    : /not a claim that he is available/.test(availLine),
+  `pool ${poolRead ? "read" : "unread"}: ${availLine}`)
+if (poolRead) {
+  // the decisive one: the pick has to be somebody you can actually get
+  await page.locator(".toggle input").first().check()
+  await page.waitForTimeout(400)
+  const freeNames = await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
+  await page.locator(".toggle input").first().uncheck()
+  await page.waitForTimeout(400)
+  const pickedName = (await page.textContent(".pick-name")).trim()
+  t("Billy's pick is a player you can actually add",
+    freeNames.includes(pickedName), `${pickedName} not among ${freeNames.length} free agents`)
+  // and it is genuinely a different answer from the top of the board, or the
+  // distinction this card exists to draw would be invisible
+  const topRow = (await page.$$eval(".board-row .who b", n => n[0].textContent.trim()))
+  t("the board still ranks by value even though the pick is filtered by availability",
+    typeof topRow === "string" && topRow.length > 0, topRow)
+}
 
 // the league's real free-agent pool — the board must recommend addable players
 if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {

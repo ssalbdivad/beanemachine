@@ -29,6 +29,25 @@ measured claim about the Statcast numbers on each card. They have been measured 
 one-week horizon and rejected as a multiplier; nobody has measured what they are
 worth over a rest-of-season hold. Read them as a human, not as a number the model used.
 
+## Billy's pick, and what "available" means
+
+The card answers availability from whichever source you actually have, and it says
+which, because they are three different claims:
+
+1. **Your league's own free-agent list.** Exact, and about your league specifically.
+   It needs a publicly viewable Yahoo league *and* the local server, so it is what you
+   get running `npm run dev`, and not what you get on the hosted build.
+2. **How widely he is rostered across leagues** — under 70%, the same bar the Buy low
+   card uses. Weaker and global, but it comes off the snapshot with no server at all,
+   which is the situation everybody reading the hosted build is in. Only figures that
+   survived the forecast check are used (see the edge column below), so a player with
+   no figure is skipped rather than assumed free.
+3. **Neither.** Then it is the top of the board and the card says so, rather than
+   implying an availability nothing checked.
+
+Whichever tier answered, the pick is drawn from the board *as you have filtered it* —
+narrow to catchers and Billy names the best catcher you can get.
+
 ## The edge column, and why it is no longer the default
 
 Edge compares a player's bscore against the median bscore of the players the field
@@ -64,7 +83,7 @@ agents only** is the control that answers it in the meantime.
 
 ## What am I looking at?
 
-The board is every MLB player, ranked by how much he would add to *your* team over the horizon you picked, in *your* league's scoring. The top card is Billy's pick — the number one row under the current sort, with the reasons spelled out as clauses assembled from numbers actually on the row. Under it, one row per player: how far he beats the field's price for him (**edge**), his value over replacement (**bscore**), his raw projected points, what a replacement at his slot projects, how confident the projection is, how many games his team actually plays in the window, and how unlucky he has been. Click any row to open the drill-down, which takes that projection apart into what was measured, what was modelled, and what is missing. The heading states how old the underlying data is and the exact date window being projected. Only the top 120 rows render; narrow the filters to see further down.
+The board is every MLB player, ranked by how much he would add to *your* team over the horizon you picked, in *your* league's scoring. The top card is Billy's pick, and it is deliberately **not** the number one row: the top of a bscore board is the best player in baseball, who is rostered in every league, and naming him is a fact rather than a recommendation. Billy names the best player on the board you can actually *get*, with the reasons spelled out as clauses assembled from numbers actually on the row. Under it, one row per player: how far he beats the field's price for him (**edge**), his value over replacement (**bscore**), his raw projected points, what a replacement at his slot projects, how confident the projection is, how many games his team actually plays in the window, and how unlucky he has been. Click any row to open the drill-down, which takes that projection apart into what was measured, what was modelled, and what is missing. The heading states how old the underlying data is and the exact date window being projected. Only the top 120 rows render; narrow the filters to see further down.
 
 Below the ranking sit two supporting reads, deliberately *below* it rather than above: **Buy low**, the handful of players hitting the ball better than their line says who are still cheap, and **Where it hurts to wait**, the drop-off at each slot. Both answer "where should I spend attention", which is a second question.
 

@@ -152,17 +152,34 @@ const horizon = async label => {
 	await page.waitForSelector(".board-row", { timeout: 30000 })
 	return (await rows()).slice(0, 10)
 }
+const pickName = async () => (await page.textContent(".pick-name")).trim()
+const fortnightPick = await pickName()
 const stream = await horizon("Streaming")
 t("switching to Streaming re-ranks against the next seven days",
 	stream.length === 10 && stream.join() !== fortnight.join(), `${stream.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
+const streamPick = await pickName()
 const stash = await horizon("Stash")
 t("switching to Stash re-ranks against the rest of the season",
 	stash.length === 10 && stash.join() !== stream.join(), `${stash.slice(0, 3)} vs ${stream.slice(0, 3)}`)
-// Billy's pick is drawn from rows[0], so it has to follow the horizon too — a
-// stale pick above a re-ranked board is the reader's headline disagreeing with
-// the table underneath it.
-t("Billy's pick follows the horizon rather than lagging it",
-	(await page.textContent(".pick-name")).trim() === stash[0], `${await page.textContent(".pick-name")} vs ${stash[0]}`)
+const stashPick = await pickName()
+
+/**
+ * Billy's pick has to follow the horizon. A stale pick above a re-ranked board is
+ * the reader's headline disagreeing with the table underneath it.
+ *
+ * This used to assert the pick equalled the top row, which is no longer true by
+ * design: the card names the best player you can actually GET, and the top row is
+ * usually rostered everywhere. So staleness is tested directly instead — the pick
+ * must come off the board currently on screen, and the three horizons must not all
+ * produce the same name when their boards differ, which is what a frozen pick
+ * would do.
+ */
+t("Billy's pick comes off the board currently on screen",
+	(await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))).includes(stashPick),
+	stashPick)
+t("Billy's pick is re-derived per horizon rather than frozen",
+	new Set([fortnightPick, streamPick, stashPick]).size > 1,
+	`${fortnightPick} / ${streamPick} / ${stashPick}`)
 const back = await horizon("This fortnight")
 t("coming back to a horizon gives the same ranking it gave before",
 	back.join() === fortnight.join(), `${back.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)

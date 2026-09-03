@@ -2,7 +2,17 @@
 
 > How can you not be robotic about baseball?
 
-Lineup optimizer for **Mrs. Met's Harem** (Yahoo H2H-points league 228947, team 8).
+A waiver-wire and lineup optimizer for fantasy baseball. Point it at any Yahoo, ESPN
+or Sleeper league and it reads that league's own scoring, roster slots, team count and
+scoring period off the platform, then ranks every player in MLB in *those* points —
+because the same player is genuinely worth different amounts in different leagues, and
+a ranking denominated in somebody else's scoring is a ranking of somebody else's team.
+
+Nothing is assumed on your behalf: a value it could not read stays missing and is
+listed as missing, and the board refuses to rank rather than fill a gap with a
+plausible number. It is developed against **Mrs. Met's Harem** (Yahoo H2H-points
+league 228947), which is why that league appears throughout the tests and the
+committed capture, but nothing in the engine is specific to it.
 
 ## Billy
 

@@ -267,11 +267,14 @@ Everything else — the scoring period, eligibility rules, slot compatibility �
 refinement on top of those four. How you supply them depends on your platform, and
 the difference is real:
 
-| Platform | On beanemachine.com | Running locally |
-| --- | --- | --- |
-| **ESPN** | Paste the league URL and it imports. | Same. |
-| **Yahoo** | **Not possible.** Import it once locally, then carry the file. | Run the importer. |
-| **Sleeper** | Refused with an explanation. | Same. |
+There are four reads, and only the first is needed to rank anything. The other three
+are what turn a ranking into advice about *your* team.
+
+| | scoring, slots, period | your roster | your free agents |
+| --- | --- | --- | --- |
+| **ESPN** | in the browser | in the browser | in the browser |
+| **Yahoo** | preset, or carry a file | carry a file | carry a file |
+| **Sleeper** | refused — Sleeper runs no fantasy baseball | — | — |
 
 ### If your league is on ESPN
 
@@ -279,12 +282,29 @@ the difference is real:
 2. Paste your league URL into "Import a league from its URL" and hit **Import**.
    Include `teamId=` if your URL has one — without it the app cannot know which of
    the teams is yours and asks for the number rather than assuming.
-3. ESPN identifies stats and lineup slots by numeric id, and this app does **not**
-   guess what each id means: they arrive raw under `scoring.unmapped` and
-   `roster.slots`, and are listed in **Needs review**. Map them against your league's
-   settings page before trusting a ranking. A mislabelled stat would silently
-   corrupt every number downstream, which is why it is left to you rather than
-   inferred.
+3. That is the whole setup. ESPN is the one platform where everything works from the
+   page: the league's scoring, its roster slots, its scoring period, **your roster**
+   and **your league's own free-agent list** are all read straight from ESPN, with no
+   server, nothing installed and no file to carry.
+
+ESPN states its stats and lineup slots as numeric ids and names them nowhere, so both
+tables were **derived** rather than assumed. The stat map comes from taking a public
+league's 212 roster rows, each carrying its season split keyed by those ids, and
+joining them to the real season from MLB StatsAPI: agreement per id ran 83–100%, and
+two independent checks agree — total bases satisfies its own identity inside the
+payload, and every sign in the resulting table comes out right, with hits allowed,
+earned runs, losses and batter strikeouts negative. The slot table was fixed the same
+way, against each league's own `lineupSlotCounts`.
+
+An id neither table names is **not** guessed at: it keeps its number, scores nothing,
+and is listed in **Needs review**. So is a stat carrying a per-position points
+override, which this engine has no way to express. Two things ESPN does not state at
+all — which weekday the period starts on, and whether lineups lock for the whole
+period — are left null, and the board says out loud that it is assuming a Monday
+start.
+
+Check the point values against your league's settings page before trusting a ranking
+built on them. The mapping is evidence-backed, not certified.
 
 ### If your league is on Yahoo — read this, it is the common case
 

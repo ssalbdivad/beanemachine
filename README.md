@@ -114,11 +114,21 @@ Nothing on any tab means anything until the app knows four things: your league's
 count**. Everything else is refinement. How you supply those depends on the platform,
 and the difference is real rather than cosmetic:
 
-| Platform | In the browser at beanemachine.com | Locally |
-| --- | --- | --- |
-| **ESPN** | Yes. Paste the league URL and it imports. | Yes, same path. |
-| **Yahoo** | **No, and never.** | Yes — run the importer once (below). |
-| **Sleeper** | Not supported: Sleeper runs no fantasy baseball. | Same. |
+There are four reads in total, and only the first is needed to rank anything. The
+other three are what turn a ranking into advice about *your* team: which seats you
+have filled, and who you can actually add.
+
+| | scoring, slots, period | your roster | your league's free agents |
+| --- | --- | --- | --- |
+| **ESPN** | in the browser | in the browser | **in the browser** |
+| **Yahoo** | preset, or carry a file | carry a file, or run locally | carry a file, or run locally |
+| **Sleeper** | not supported — Sleeper runs no fantasy baseball | — | — |
+
+So an **ESPN** league is entirely self-service on beanemachine.com: paste the league
+URL (with `&teamId=` for your own team) and nothing else is installed, configured or
+carried. A **Yahoo** league gets a working board immediately from the preset, and
+everything about *your* team by running the importer once and dropping the file it
+writes on the page.
 
 **Why Yahoo cannot work in a browser.** Measured 2026-09-04 with `Origin:
 https://beanemachine.com` on the exact pages `src/import.ts` reads: ESPN's
@@ -127,8 +137,14 @@ https://beanemachine.com` on the exact pages `src/import.ts` reads: ESPN's
 `*.fantasysports.yahoo.com` sends no access-control headers at all, so the browser
 never hands the response body to the script, whatever it contains. That is not a bug
 in this app and no amount of client code fixes it. Yahoo is also an HTML scrape rather
-than an API, which is why the free-agent pool (`/api/available`) is Yahoo-only and has
-no browser-direct counterpart either.
+than an API, which is why `/api/available` exists at all.
+
+ESPN's free-agent list **does** have a browser-direct counterpart, measured the same
+day. Its player endpoint needs the query as a custom `x-fantasy-filter` header, which
+forces a CORS preflight, and ESPN answers that preflight with
+`access-control-allow-headers: x-fantasy-filter`. So the one read Yahoo can never do
+from a page — who is actually available in *your* league — an ESPN user gets with no
+server at all.
 
 **Why Sleeper is refused rather than attempted.** Sleeper does not host fantasy
 baseball. Its support site lists the sports its leagues play and baseball is absent;

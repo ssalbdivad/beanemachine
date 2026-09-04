@@ -712,6 +712,9 @@ pre{
    the manual search rather than beside it, with its own outcome line. */
 .pull-roster{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 var(--sp-2)}
 .pull-roster .sub{margin:0;flex:1 1 260px;min-width:0}
+/* the team number is a short field, and it sits inline beside the button */
+.pull-roster .ctl{flex:0 0 auto}
+.pull-roster .ctl input[type=text]{width:7rem}
 /* The one card that proposes rather than prices: the gain leads, the swap reads as
    one line, and the planner's own reasoning sits under it rather than in a tooltip. */
 .advice-moves{list-style:none;margin:var(--sp-3) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-3)}

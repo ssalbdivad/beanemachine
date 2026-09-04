@@ -148,16 +148,39 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	const [pullNote, setPullNote] = useState<string | null>(null)
 	const leagueId = league?.meta.league_id ?? null
 	const teamId = league?.meta.team_id ?? null
+	const platform = league?.meta.platform ?? "yahoo"
+	const platformName =
+		platform === "espn" ? "ESPN"
+		: platform === "sleeper" ? "Sleeper"
+		: "Yahoo"
+	/**
+	 * Which team in the league is yours, when the league URL never said.
+	 *
+	 * Yahoo puts the team number in the URL you pasted and ESPN puts it in
+	 * `teamId=`, so for those `team_id` is usually already known. A Sleeper league
+	 * URL names the league and nothing else — Sleeper keys a team by `roster_id`,
+	 * the small 1..N it shows beside your team, and ownership by an 18-digit
+	 * account id that appears nowhere in any URL. So it cannot be derived and has
+	 * to be asked for. It used to be neither: this whole card was hidden unless
+	 * `team_id` existed, which on Sleeper meant the button could never appear at
+	 * all, and on an ESPN URL without `teamId=` meant the same.
+	 */
+	const [teamEntry, setTeamEntry] = useState("")
+	const readTeamId = teamId ?? (teamEntry.trim() || null)
+	const season = Number(league?.meta.season)
 
 	const pullRoster = async () => {
-		if (!leagueId || !teamId || !leagueKey) return
+		if (!leagueId || !readTeamId || !leagueKey) return
 		setPulling(true)
 		setPullNote(null)
 		try {
 			const res = await api.roster({
-				platform: league?.meta.platform ?? "yahoo",
+				platform,
 				leagueId: String(leagueId),
-				teamId: String(teamId)
+				teamId: String(readTeamId),
+				// ESPN 404s a season a league never played and the reader otherwise
+				// assumes the current one, so an imported league's own season is sent
+				...(platform === "espn" && Number.isFinite(season) ? { season } : {})
 			})
 			if (!res.players.length) {
 				setPullNote(res.note)
@@ -194,8 +217,10 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 					at
 				)
 			)
+			// the reader's own note, because it is the one that knows what happened:
+			// which platform, how many rows, and whether the seats came with them
 			setPullNote(
-				`Read ${res.players.length} players off Yahoo.` +
+				res.note +
 					(missed.length ?
 						` ${missed.length} not in this capture, add by hand: ${missed.join(", ")}.`
 					:	"")
@@ -383,14 +408,49 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						</button>
 					</div>
 				)}
-				{leagueId && teamId && (
+				{leagueId && (
 					<div className="pull-roster">
-						<button type="button" className="primary" disabled={pulling} onClick={() => void pullRoster()}>
-							{pulling ? "Reading…" : owned.length ? "Re-read my roster from Yahoo" : "Read my roster from Yahoo"}
+						{/* The league says which team is yours only when its URL carried one.
+						    Where it did not, ASK — hiding the button left Sleeper users with
+						    no way to reach this at all. */}
+						{!teamId && (
+							<label className="ctl">
+								<span>
+									{platform === "sleeper" ?
+										"Your roster number in this league"
+									:	"Your team number in this league"}
+								</span>
+								<input
+									type="text"
+									data-ctl="read-team-id"
+									value={teamEntry}
+									placeholder={platform === "sleeper" ? "1" : "8"}
+									onChange={e => setTeamEntry(e.currentTarget.value)}
+								/>
+							</label>
+						)}
+						<button
+							type="button"
+							className="primary"
+							disabled={pulling || !readTeamId}
+							onClick={() => void pullRoster()}
+						>
+							{pulling ?
+								"Reading…"
+							: owned.length ?
+								`Re-read my roster from ${platformName}`
+							:	`Read my roster from ${platformName}`}
 						</button>
 						<span className="sub">
 							{pullNote ??
-								"Only publicly-viewable leagues can be read without signing in."}
+								(!readTeamId ?
+									platform === "sleeper" ?
+										`Sleeper's league URL doesn't say which team is yours. Its roster number is the ` +
+										`small one beside your team. Sleeper runs no fantasy baseball, so a Sleeper ` +
+										`league will say what sport it is rather than hand back the wrong players.`
+									:	`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
+										`number to read it.`
+								:	"Only publicly-viewable leagues can be read without signing in.")}
 						</span>
 					</div>
 				)}

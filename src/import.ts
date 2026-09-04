@@ -518,6 +518,12 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 			verified: false
 		},
 		needs_review: [
+			...(t.teamId ? []
+			:	[
+					"The URL didn't carry `teamId=`, so which of these teams is yours is not " +
+						"known and team_id is null. Reading your roster asks for the number rather " +
+						"than assuming one."
+				]),
 			"The scoring period was not read. ESPN may state it under " +
 				"settings.scheduleSettings, but no fixture or test here has ever seen that " +
 				"shape, so scoring_period is null and the board ranks a rolling window.",
@@ -547,6 +553,7 @@ const importSleeper = async (t: Extract<Target, { platform: "sleeper" }>): Promi
 			league_id: t.leagueId,
 			league_name: data.name ?? null,
 			league_url: `https://sleeper.com/leagues/${t.leagueId}`,
+			// Sleeper's URL carries the league and nothing else — see needs_review.
 			team_id: null,
 			team_name: null,
 			season: data.season ?? null,
@@ -575,9 +582,30 @@ const importSleeper = async (t: Extract<Target, { platform: "sleeper" }>): Promi
 			verified: false
 		},
 		needs_review: [
-			"The scoring period was not read. Sleeper's period grid is NFL-shaped and " +
-				"nothing here has verified it against a baseball league, so scoring_period " +
-				"is null and the board ranks a rolling window.",
+			// Verified 2026-09-03 against Sleeper's own documented example league and its
+			// public state endpoints: Sleeper hosts football, basketball and soccer leagues
+			// and no baseball ones — /v1/state/mlb carries no `league_create_season`, the
+			// field every league-hosting sport has, so there is no season in which an MLB
+			// league can be created. /v1/players/mlb DOES return 6,379 real players, which
+			// makes it a trap rather than an absence: the ids are per-sport namespaces that
+			// collide, so a baseball read of a Sleeper league returns the wrong men.
+			...(data.sport && data.sport !== "mlb" ?
+				[
+					`This is a ${String(data.sport).toUpperCase()} league. Sleeper runs no fantasy ` +
+						"baseball at all, so its scoring and roster shape are that sport's, and its " +
+						"rosters cannot be read into a baseball lineup — a Sleeper player id means a " +
+						"different man in every sport."
+				]
+			:	[]),
+			// The league URL names the league and nothing else. Sleeper identifies a team by
+			// `roster_id`, the small 1..N it shows beside the team, or by an 18-digit account
+			// id; neither appears in any URL, so this cannot be derived and is asked for.
+			"Sleeper's league URL never says which team is yours, so team_id is null. " +
+				"Reading your roster asks for your roster number — the small one Sleeper " +
+				"shows beside your team — rather than guessing at it.",
+			"The scoring period was not read. Sleeper's period grid is NFL-shaped, and " +
+				"there is no Sleeper baseball league anywhere to verify it against, so " +
+				"scoring_period is null and the board ranks a rolling window.",
 			"Sleeper scoring keys are kept raw under scoring.unmapped; split them into " +
 				"batting/pitching against stat_keys before optimizing.",
 			"This endpoint doesn't expose position-eligibility rules; eligibility is null."

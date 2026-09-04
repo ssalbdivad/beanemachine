@@ -82,7 +82,7 @@ const yahoo = async (leagueId: string, teamId: string, sport: string): Promise<R
  * fixes their meaning. 18 and 20-22 were never observed anywhere and are
  * deliberately absent rather than guessed at.
  */
-const ESPN_MLB_SLOT: Record<number, string> = {
+export const ESPN_MLB_SLOT: Record<number, string> = {
 	0: "C",
 	1: "1B",
 	2: "2B",

@@ -639,5 +639,88 @@ t("and a config validated with a pool attached still has the pool afterwards",
   !(withPool instanceof type.errors) && withPool.pools?.["yahoo:228947"]?.players.length === 2,
   withPool instanceof type.errors ? String(withPool) : JSON.stringify(Object.keys(withPool)))
 
+
+// --- ESPN: a league that imports and then actually ranks --------------------
+//
+// An imported ESPN league used to land its whole scoring table in
+// `scoring.unmapped` and its roster slots as bare numbers, so the board refused it
+// with "this league has no scoring yet" and offered no way forward. The import
+// worked and the product did not.
+//
+// Both halves are now read off ESPN's own payload. The stat map was DERIVED, not
+// copied: 212 roster rows of public league 81134470 for 2021, each carrying its
+// season split keyed by these ids, joined by name to MLB StatsAPI's real 2021
+// season. Agreement per id ran 83–100%, the shortfall being players ESPN's split
+// covers differently from MLB's totals, and no id had a competing candidate.
+//
+// Offline, against the committed settings fixture — the network is the thing the
+// derivation needed, not the thing the assertion needs.
+const espnSettings = JSON.parse(
+  readFileSync(new URL("./fixtures/espn-81134470-settings.json", import.meta.url), "utf8")
+)
+const { mapEspnScoring, deriveEspnPeriod } = await import("../src/import.ts")
+
+const espnScoring = mapEspnScoring(espnSettings.settings.scoringSettings.scoringItems)
+t("every one of this ESPN league's scoring stats is named",
+  espnScoring.unmapped.length === 0 &&
+    Object.keys(espnScoring.batting).length + Object.keys(espnScoring.pitching).length === 14,
+  `${Object.keys(espnScoring.batting).length} batting + ${Object.keys(espnScoring.pitching).length} pitching, ` +
+  `${espnScoring.unmapped.length} unmapped`)
+
+/**
+ * The independent check on the mapping, and the reason it can be trusted at all:
+ * every sign comes out right for a points league. A wrong map would pay a hitter
+ * for striking out or a pitcher for allowing a run, and that is visible without
+ * knowing which stat is which.
+ */
+t("what a hitter is paid for is good and what he is docked for is bad",
+  espnScoring.batting.TB > 0 && espnScoring.batting.R > 0 && espnScoring.batting.RBI > 0 &&
+    espnScoring.batting.SB > 0 && espnScoring.batting.BB > 0 && espnScoring.batting.K < 0,
+  JSON.stringify(espnScoring.batting))
+t("and a pitcher is paid for outs, wins, saves and strikeouts, docked for the rest",
+  espnScoring.pitching.OUT > 0 && espnScoring.pitching.W > 0 && espnScoring.pitching.SV > 0 &&
+    espnScoring.pitching.K > 0 && espnScoring.pitching.H < 0 && espnScoring.pitching.BB < 0 &&
+    espnScoring.pitching.ER < 0 && espnScoring.pitching.L < 0,
+  JSON.stringify(espnScoring.pitching))
+
+// A stat this map cannot name is kept verbatim, never guessed at.
+const withUnknown = mapEspnScoring([{ statId: 99999, points: 3 }, { statId: 53, points: 5 }])
+t("a stat id the map does not know is kept rather than guessed",
+  withUnknown.unmapped.length === 1 && withUnknown.pitching.W === 5,
+  JSON.stringify(withUnknown))
+// ...and so is one carrying a per-position override the engine cannot express
+const overridden = mapEspnScoring([{ statId: 53, points: 5, pointsOverrides: { "1": 7 } }])
+t("a stat with a points override is not flattened to its base value",
+  overridden.unmapped.length === 1 && Object.keys(overridden.pitching).length === 0)
+
+/**
+ * The scoring period, which ESPN states properly where Yahoo only implies it.
+ * The unit `matchupPeriods` counts is settled by the payload itself: the top-level
+ * `scoringPeriodId` reads 187, a day index, so if those arrays counted days this
+ * league's season would be 25 days. They count weeks — 21 one-week matchups plus
+ * two two-week playoff rounds is 25, against a regular season of about 26.
+ */
+const espnPeriod = deriveEspnPeriod(espnSettings.settings)
+t("ESPN's own settings give a matchup period of seven days",
+  espnPeriod.period.kind === "matchup" && espnPeriod.period.days === 7,
+  JSON.stringify(espnPeriod.period))
+t("and the source records how that was arrived at, not just the answer",
+  /matchupPeriodLength 1/.test(espnPeriod.period.source ?? "") &&
+    /25 matchup-period units/.test(espnPeriod.period.source ?? ""),
+  espnPeriod.period.source ?? "")
+t("what ESPN does not state is left null and named",
+  espnPeriod.period.starts_on === null && espnPeriod.period.lineup_lock === null &&
+    espnPeriod.needsReview.some(x => /Monday/.test(x)) &&
+    espnPeriod.needsReview.some(x => /lineup_lock/.test(x)),
+  espnPeriod.needsReview.join(" | ").slice(0, 160))
+
+// a shape this has never seen is refused rather than read as a week
+const odd = deriveEspnPeriod({ scheduleSettings: { matchupPeriodLength: 1, matchupPeriods: { 1: [1] } } })
+t("a schedule this cannot read yields no period rather than a guess",
+  odd.period.kind === null && odd.needsReview.some(x => /rolling window/.test(x)),
+  odd.needsReview.join(" | "))
+t("and so does a payload with no scheduleSettings at all",
+  deriveEspnPeriod({}).period.kind === null)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

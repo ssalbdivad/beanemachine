@@ -172,15 +172,29 @@ t("what landed in this browser is the real league ESPN published",
   espn !== null && espn.meta.league_name === "Miami 8-Team H2H Points" &&
     espn.meta.season === 2021 && espn.meta.max_teams === 8 && espn.meta.team_id === "1",
   JSON.stringify(espn?.meta))
-// The scoring table is ESPN's numeric stat ids, kept raw under scoring.unmapped
-// exactly as importEspn says it does — 14 items and 12 seat types on this league
-// when measured. Asserted as "present and named", not as an exact count, because
-// this reads a live API and a changed count is ESPN's news, not a broken import.
-t("with ESPN's own scoring items and lineup slots read off its API, and kept raw",
-  (espn?.scoring.unmapped?.length ?? 0) > 0 && Object.keys(espn?.roster.slots ?? {}).length > 0 &&
-    espn.scoring.unmapped.every(i => typeof i.espn_stat_id === "number"),
-  `${espn?.scoring.unmapped?.length} scoring items (14 when measured), ` +
-    `${Object.keys(espn?.roster.slots ?? {}).length} slot types (12 when measured)`)
+/**
+ * This asserted the scoring table arrived "kept raw" under `scoring.unmapped`,
+ * which was true and was the defect: a league whose every stat is a bare number
+ * cannot be ranked, so the import succeeded and the board still said "this league
+ * has no scoring yet". Both halves are named now — the stats from a map derived by
+ * joining a public league's own season splits to MLB StatsAPI, the seats from the
+ * baseball slot table already derived for the roster reader.
+ *
+ * Asserted as "named and rankable" rather than by exact count: this reads a live
+ * API, and a league that changed its scoring is ESPN's news, not a broken import.
+ */
+const espnStats =
+  Object.keys(espn?.scoring.batting ?? {}).length + Object.keys(espn?.scoring.pitching ?? {}).length
+t("with ESPN's scoring read off its API and named, not left as bare stat ids",
+  espnStats > 0 && (espn?.scoring.unmapped?.length ?? 0) === 0,
+  `${espnStats} named stats (14 when measured), ${espn?.scoring.unmapped?.length ?? 0} unmapped`)
+t("and its seats named too, so a replacement level can be computed at all",
+  Object.keys(espn?.roster.slots ?? {}).every(k => !/^\d+$/.test(k)) &&
+    Object.keys(espn?.roster.slots ?? {}).length > 0,
+  Object.keys(espn?.roster.slots ?? {}).join(","))
+t("and the scoring period read from ESPN's own scheduleSettings",
+  espn?.scoring_period?.kind === "matchup" && espn?.scoring_period?.days === 7,
+  JSON.stringify(espn?.scoring_period))
 t("and the source it cites is ESPN's endpoint, so the provenance is not this origin",
   espn?.provenance.sources.every(u => u.startsWith("https://lm-api-reads.fantasy.espn.com/")),
   JSON.stringify(espn?.provenance.sources))

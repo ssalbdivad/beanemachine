@@ -305,7 +305,8 @@ const STREAM_CSS = `
 .stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
 .stream-strip .toggle input{flex:none;margin-top:3px}
 .stream-strip .moves input{width:56px}
-.stream-strip .ip-floor{flex-direction:column;align-items:flex-start;gap:2px}
+.league-rules{margin:var(--sp-2) 0 0}
+.league-rules b{color:var(--ink)}
 .stream-strip .moves .cap-note{font-size:11px;color:var(--soft);font-style:normal;max-width:15ch;line-height:1.25}
 .stream-note{margin-top:var(--sp-2)}
 /* The availability sentence is NOT a stream-note. That class names the coverage
@@ -917,25 +918,7 @@ export const Board = ({
 									set("moves", Math.max(0, Math.min(26, Math.floor(Number(e.currentTarget.value) || 0))))
 								}
 							/>
-							{moveCap !== null && (
-								<em className="cap-note">
-									your league allows {moveCap} a week — subtract any you have used
-								</em>
-							)}
 						</label>
-						{/* The other per-period rule the league states and the board used to
-						    ignore. It is why much streaming happens at all: a team short of
-						    the floor forfeits the pitching side of the matchup. How many
-						    innings his staff has already thrown is on his team page, which
-						    no reader here opens, so this states the rule and stops there. */}
-						{leagueRules.innings !== null && (
-							<span className="ctl ip-floor">
-								<span>Innings floor</span>
-								<em className="cap-note">
-									your league requires {leagueRules.innings} IP a week
-								</em>
-							</span>
-						)}
 					</div>
 				)}
 				{/* Position first and as chips, not a select: it is the filter people reach
@@ -1215,6 +1198,24 @@ export const Board = ({
 				  filter is: a marker that outlives the tab that set it is a claim about
 				  a window nobody is looking at.
 				*/}
+				{/* The two per-period rules the league states, in one line rather than as
+				    two more headed controls in the strip — on a phone that read as broken
+				    furniture. Both come off the settings rows the import harvested. The
+				    line states the rules and stops. How many adds he has spent and how
+				    many innings his staff has thrown are on his team page, which no reader
+				    here opens, so neither is claimed — and neither is the PENALTY for
+				    missing the floor, which the settings page does not state and which
+				    differs by league. */}
+				{(moveCap !== null || leagueRules.innings !== null) && (
+					<p className="sub league-rules">
+						<b>Your league:</b>{" "}
+						{moveCap !== null &&
+							`${moveCap} ${moveCap === 1 ? "add" : "adds"} a week (subtract any you have used)`}
+						{moveCap !== null && leagueRules.innings !== null && " · "}
+						{leagueRules.innings !== null &&
+							`${leagueRules.innings} innings pitched a week required`}
+					</p>
+				)}
 				{moves > 0 && rows.length > 0 && (
 					<p className="sub stream-note moves-answer">
 						<b>

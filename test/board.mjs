@@ -472,9 +472,9 @@ await page.click(".stream-strip .chip-btn:text-is('3 days')")
   await page.waitForSelector(".stream-strip", { timeout: 15000 })
   const seeded = await page.$eval(".stream-strip .moves input", e => e.value)
   t("the moves box opens on the league's own weekly cap", seeded === "6", seeded)
-  const note = await page.$eval(".stream-strip .moves .cap-note", e => e.textContent.trim())
+  const note = await page.$eval(".league-rules", e => e.textContent.trim())
   t("and says it is the league's allowance, not his remaining count",
-    /allows 6 a week/.test(note) && /used/.test(note), note)
+    /Your league: 6 adds a week/.test(note) && /subtract any you have used/.test(note), note)
   t("so the answer below it is already the league's question",
     /6 moves/.test(await page.$eval(".moves-answer", e => e.textContent)),
     await page.$eval(".moves-answer", e => e.textContent.slice(0, 80)))
@@ -486,9 +486,10 @@ await page.click(".stream-strip .chip-btn:text-is('3 days')")
     (await page.$eval(".stream-strip .moves input", e => e.value)) === "2")
 
   // the other per-period rule the league states, and the reason to stream at all
-  const floor = await page.$eval(".stream-strip .ip-floor", e => e.textContent)
-  t("the league's weekly innings floor is stated on the streaming tab",
-    /Innings floor/.test(floor) && /requires 20 IP a week/.test(floor), floor)
+  t("the league's weekly innings floor is stated beside it",
+    /20 innings pitched a week required/.test(note), note)
+  t("and no penalty is claimed for missing it, since the settings page states none",
+    !/forfeit|lose|zero/i.test(note), note)
 }
 await page.waitForTimeout(500)
 

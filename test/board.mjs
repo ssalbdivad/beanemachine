@@ -484,6 +484,11 @@ await page.click(".stream-strip .chip-btn:text-is('3 days')")
   await page.waitForTimeout(400)
   t("a number he types is not pushed back to the cap",
     (await page.$eval(".stream-strip .moves input", e => e.value)) === "2")
+
+  // the other per-period rule the league states, and the reason to stream at all
+  const floor = await page.$eval(".stream-strip .ip-floor", e => e.textContent)
+  t("the league's weekly innings floor is stated on the streaming tab",
+    /Innings floor/.test(floor) && /requires 20 IP a week/.test(floor), floor)
 }
 await page.waitForTimeout(500)
 

@@ -9,7 +9,7 @@ import {
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
 import { canReadPool, api, ApiError, getMode, type AvailablePool } from "./api.ts"
-import { deriveMoveLimit } from "../import.ts"
+import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
@@ -305,6 +305,7 @@ const STREAM_CSS = `
 .stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
 .stream-strip .toggle input{flex:none;margin-top:3px}
 .stream-strip .moves input{width:56px}
+.stream-strip .ip-floor{flex-direction:column;align-items:flex-start;gap:2px}
 .stream-strip .moves .cap-note{font-size:11px;color:var(--soft);font-style:normal;max-width:15ch;line-height:1.25}
 .stream-note{margin-top:var(--sp-2)}
 /* The availability sentence is NOT a stream-note. That class names the coverage
@@ -490,14 +491,16 @@ export const Board = ({
 	 * Read off the settings rows the import already harvested, so a league captured
 	 * before this existed still answers.
 	 */
-	const moveCap = useMemo(
-		() =>
-			deriveMoveLimit(
-				((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
-					?.raw_settings ?? {}) as Record<string, string>
-			).perPeriod,
-		[league]
-	)
+	const leagueRules = useMemo(() => {
+		const raw = ((league?.league_rules as
+			| { raw_settings?: Record<string, string> }
+			| undefined)?.raw_settings ?? {}) as Record<string, string>
+		return {
+			moveCap: deriveMoveLimit(raw).perPeriod,
+			innings: deriveInningsMinimum(raw).perPeriod
+		}
+	}, [league])
+	const moveCap = leagueRules.moveCap
 	/**
 	 * Seed the budget from the league once, and only into an untouched control.
 	 * `readView` returning a moves value means this reader has answered the question
@@ -920,6 +923,19 @@ export const Board = ({
 								</em>
 							)}
 						</label>
+						{/* The other per-period rule the league states and the board used to
+						    ignore. It is why much streaming happens at all: a team short of
+						    the floor forfeits the pitching side of the matchup. How many
+						    innings his staff has already thrown is on his team page, which
+						    no reader here opens, so this states the rule and stops there. */}
+						{leagueRules.innings !== null && (
+							<span className="ctl ip-floor">
+								<span>Innings floor</span>
+								<em className="cap-note">
+									your league requires {leagueRules.innings} IP a week
+								</em>
+							</span>
+						)}
 					</div>
 				)}
 				{/* Position first and as chips, not a select: it is the filter people reach

@@ -887,3 +887,28 @@ export const deriveMoveLimit = (
 	}
 	return { perPeriod: n, source: `Max Acquisitions per Week "${row}"` }
 }
+
+/**
+ * The innings a league requires of a team in one scoring period, where it sets one.
+ *
+ * Yahoo prints this as "Min innings pitched per team per week" and it is the reason
+ * a lot of streaming happens at all: fall short and the pitching side of the matchup
+ * is forfeited or zeroed depending on the league. It is a per-period league rule, so
+ * it belongs next to the per-period move budget, read the same way from the settings
+ * rows the import already harvested.
+ *
+ * Only the number is read. How many innings his staff has already thrown this week
+ * is on his team page, which no reader here opens, so nothing here says how far
+ * short he is — see `deriveMoveLimit` for the same boundary.
+ */
+export const deriveInningsMinimum = (
+	settings: Record<string, string>
+): { perPeriod: number | null; source: string | null } => {
+	const row = settings["Min innings pitched per team per week"]
+	if (row === undefined) return { perPeriod: null, source: null }
+	const n = Number(row.trim())
+	const quoted = `Min innings pitched per team per week "${row}"`
+	// a league that sets no floor prints "No minimum", and 0 is that same answer
+	if (!Number.isFinite(n) || n <= 0) return { perPeriod: null, source: quoted }
+	return { perPeriod: n, source: quoted }
+}

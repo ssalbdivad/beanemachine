@@ -14,6 +14,7 @@ import {
   detect,
   deriveScoringPeriod,
   deriveMoveLimit,
+  deriveInningsMinimum,
   importableInBrowser,
   importLeague,
   IN_BROWSER,
@@ -793,6 +794,29 @@ t("a platform with no reader is not asked", !canReadPool("sleeper") && !canReadP
 
   t("a settings map without the row says nothing",
     deriveMoveLimit({}).perPeriod === null, "")
+}
+
+/**
+ * The other per-period rule the league states: the weekly innings floor.
+ *
+ * "Min innings pitched per team per week" is why a lot of streaming happens —
+ * fall short and the pitching side of the matchup is lost. Read off the shipped
+ * league's real settings rows, same as the move cap.
+ */
+{
+  const shipped = deriveInningsMinimum(shippedRaw)
+  t("the shipped league's stated innings floor is read",
+    shipped.perPeriod === 20, JSON.stringify(shipped))
+  t("the floor quotes the row it came from",
+    shipped.source === 'Min innings pitched per team per week "20"', shipped.source)
+  t("a league that sets no floor yields null",
+    deriveInningsMinimum({ "Min innings pitched per team per week": "No minimum" })
+      .perPeriod === null)
+  t("and a floor of zero is that same answer, not a floor of zero",
+    deriveInningsMinimum({ "Min innings pitched per team per week": "0" })
+      .perPeriod === null)
+  t("a settings map without the row says nothing",
+    deriveInningsMinimum({}).perPeriod === null && deriveInningsMinimum({}).source === null)
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

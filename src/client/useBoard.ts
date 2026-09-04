@@ -228,11 +228,48 @@ export const normalizeName = (n: string): string =>
 		.replace(/[.'\u2019]/g, "").replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "")
 		.replace(/\s+/g, " ").trim()
 
+/**
+ * Whose eligibility rules the board seats a player by.
+ *
+ * The snapshot's map is swept off YAHOO's player pages, so it is that platform's
+ * ruling on who can fill what. For a Yahoo league that is the league's own truth.
+ * For an ESPN league it is a different platform's, and the two genuinely differ:
+ * ESPN grants 2B/SS and 1B/3B seats Yahoo has no equivalent for, and each site sets
+ * its own games-played threshold before a position is granted at all. Seating a man
+ * by the wrong site's rules puts him in a slot his league would refuse.
+ *
+ * `own` is eligibility in the LEAGUE's own terms, keyed by normalised name because
+ * platform ids are each platform's own. It OVERLAYS rather than replaces: it covers
+ * only the players that read returned, and everyone else keeps the snapshot's
+ * answer, which is better than none. An empty list never overwrites a real one —
+ * absent is not the same as "eligible nowhere".
+ */
+export const overlayEligibility = (
+	snapshotEligibility: Record<string, string[]> | undefined,
+	own: Map<string, string[]> | null | undefined,
+	players: { id: number; name: string }[] | undefined
+): Map<number, string[]> => {
+	// built straight off the record rather than through `hydrate`, which re-parses a
+	// 2.1 MB snapshot to hand back this one field
+	const out = new Map<number, string[]>(
+		Object.entries(snapshotEligibility ?? {}).map(([k, v]) => [Number(k), v])
+	)
+	if (!own?.size) return out
+	for (const p of players ?? []) {
+		const theirs = own.get(normalizeName(p.name))
+		if (theirs?.length) out.set(p.id, theirs)
+	}
+	return out
+}
+
 export const useBoard = (
 	snapshot: Snapshot | null,
 	league: League | null,
 	filters: Filters,
-	availableNames?: Set<string> | null
+	availableNames?: Set<string> | null,
+	/** Eligibility as the LEAGUE's own platform states it, by normalised name, where
+	 *  the free-agent read carried it. Overlays the snapshot's Yahoo-derived map. */
+	poolEligibility?: Map<string, string[]> | null
 ) => {
 	// The reader's today, not the capture's. A snapshot is a set of games; which of
 	// them are still ahead of you is a question only the clock can answer.
@@ -263,6 +300,32 @@ export const useBoard = (
 		if (!snapshot || !period) return null
 		return windowFrom(snapshot.slate ?? [], period.start, period.end)
 	}, [snapshot, period])
+
+	/**
+	 * Whose eligibility rules the board seats a player by.
+	 *
+	 * The snapshot's map is swept off YAHOO's player pages, so it is that platform's
+	 * ruling on who can fill what. For a Yahoo league that is the league's own truth.
+	 * For an ESPN league it is a different platform's, and the two genuinely differ —
+	 * ESPN grants 2B/SS and 1B/3B seats Yahoo has no equivalent for, and each site
+	 * sets its own games-played threshold before a position is granted at all. Seating
+	 * a man by the wrong site's rules puts him in a slot his league would not accept.
+	 *
+	 * The free-agent read carries eligibility in the LEAGUE's own terms, so where it
+	 * exists it wins, joined by name because platform ids are each platform's own. It
+	 * covers only the players that read returned, which is why it is an overlay rather
+	 * than a replacement: everyone else keeps the snapshot's answer, which is better
+	 * than none.
+	 */
+	const leagueEligibility = useMemo(
+		() =>
+			overlayEligibility(
+				snapshot?.eligibility,
+				league?.meta.platform === "espn" ? poolEligibility : null,
+				snapshot?.players
+			),
+		[snapshot, league?.meta.platform, poolEligibility]
+	)
 
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
@@ -304,7 +367,7 @@ export const useBoard = (
 				recentVolumeByWindow: h.recentVolumeByWindow,
 				recentStats: h.recentStats,
 				ownership: h.ownership,
-				eligibility: h.eligibility,
+				eligibility: leagueEligibility,
 				probableStarts,
 				probableCoverage,
 				opposingStarters,

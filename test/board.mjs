@@ -1136,6 +1136,48 @@ await phone.close()
 }
 
 /**
+ * An ESPN league is seated by ESPN's rules, not Yahoo's.
+ *
+ * The snapshot's eligibility map is swept off YAHOO's player pages, so it is that
+ * platform's ruling on who can fill what. For a Yahoo league that is the league's
+ * own truth; for an ESPN league it is a different site's, and the two genuinely
+ * differ — ESPN grants 2B/SS and 1B/3B seats Yahoo has no equivalent for, and each
+ * sets its own games-played threshold before granting a position at all. Seating a
+ * man by the wrong site's rules puts him in a slot his league would refuse.
+ *
+ * ESPN's free-agent read carries eligibility in the league's own terms, so it
+ * overlays the snapshot for the players it covers.
+ */
+{
+  const { overlayEligibility } = await import("../src/client/useBoard.ts")
+  const players = [
+    { id: 1, name: "Ketel Marte" },
+    { id: 2, name: "Nolan Gorman" }
+  ]
+  const snapshotSays = { 1: ["2B"], 2: ["2B"] }
+
+  const yahoo = overlayEligibility(snapshotSays, null, players)
+  t("a Yahoo league keeps the snapshot's own rules, which are Yahoo's",
+    JSON.stringify(yahoo.get(1)) === '["2B"]', JSON.stringify(yahoo.get(1)))
+
+  // ESPN grants Marte a shortstop seat here that Yahoo's map does not
+  const espn = overlayEligibility(
+    snapshotSays,
+    new Map([["ketel marte", ["2B", "SS"]]]),
+    players
+  )
+  t("an ESPN league seats a man where ESPN says he may play",
+    JSON.stringify(espn.get(1)) === '["2B","SS"]', JSON.stringify(espn.get(1)))
+  t("a player the ESPN read did not cover keeps the snapshot's answer",
+    JSON.stringify(espn.get(2)) === '["2B"]', JSON.stringify(espn.get(2)))
+
+  // absent is not the same as "eligible nowhere"
+  const empty = overlayEligibility(snapshotSays, new Map([["ketel marte", []]]), players)
+  t("an empty list never erases a real one",
+    JSON.stringify(empty.get(1)) === '["2B"]', JSON.stringify(empty.get(1)))
+}
+
+/**
  * How far down the page the answer starts, pinned.
  *
  * This has regressed three times: 1,187px, fixed to 895, back to 1,506 on the

@@ -526,12 +526,30 @@ export const Board = ({
 
 	// A fresh Set on every render would invalidate the filter-and-sort memo in
 	// useBoard on every render, including ones that changed nothing about it.
+	/**
+	 * Eligibility as the league's own platform states it, where the free-agent read
+	 * carried it. Keyed by normalised name because platform ids are each platform's
+	 * own; `useBoard` joins it onto the snapshot's players. See the note there for
+	 * why an ESPN league must not be seated by Yahoo's rules.
+	 */
+	const poolEligibility = useMemo(
+		() =>
+			pool?.players.length ?
+				new Map(
+					pool.players
+						.filter(p => p.positions.length)
+						.map(p => [normalizeName(p.name), p.positions] as const)
+				)
+			:	null,
+		[pool]
+	)
+
 	const availableNames = useMemo(
 		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
 		[pool]
 	)
 	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort } =
-		useBoard(snapshot, league, filters, availableNames)
+		useBoard(snapshot, league, filters, availableNames, poolEligibility)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]

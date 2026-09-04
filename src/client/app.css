@@ -607,7 +607,32 @@ pre{
    measured, the mode picker alone was 253px there. The label carries the choice; the
    description stays as the button's `title` and in the guide. This rule existed and
    was lost in a rewrite, which is why the phone regressed. */
-@media(max-width:700px){.modes{grid-template-columns:1fr}.modes .mode span{display:none}}
+/* Stacked, the three mode cards cost 151px above the answer on a 390px screen even
+   with their descriptions hidden. As one scrolling row they cost about a third of
+   that, and the roving-tabindex tablist keeps working — arrow keys walk a row as
+   readily as a column. The description stays as each button's `title`. */
+@media(max-width:700px){
+  .modes{
+    display:flex;grid-template-columns:none;flex-wrap:nowrap;
+    overflow-x:auto;scrollbar-width:none;
+  }
+  .modes::-webkit-scrollbar{display:none}
+  .modes .mode{flex:none}
+  .modes .mode span{display:none}
+}
+
+/* Phone-only trims above the answer, measured on a 390px screen where the first
+   ranked row sat 2,863px down. Neither removes information: Billy is the mark, not
+   a number, and the tab strip scrolls instead of stacking. */
+@media(max-width:700px){
+  /* 78px of mascot directly above the recommendation */
+  .card.pick .pick-bot{display:none}
+  /* four tabs wrapped to three lines: 125px. One row that scrolls sideways. */
+  .views{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .views::-webkit-scrollbar{display:none}
+  .views button{flex:none}
+  .views-link{flex:none;margin-left:var(--sp-2)}
+}
 
 /* ---------- filters ----------
    Position first and as chips, not a select: it is the filter people reach for

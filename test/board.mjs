@@ -1095,6 +1095,39 @@ t("and those headings still sit over the cells they name",
   `${smallStream.head.join(" ")} vs ${smallStream.row.join(" ")}`)
 await phone.close()
 
+/**
+ * How far down the page the answer starts, pinned.
+ *
+ * This has regressed three times: 1,187px, fixed to 895, back to 1,506 on the
+ * streaming tab as each pass added a paragraph — and 2,863 on a 390px phone, seven
+ * screens before a single recommendation. Every one of those paragraphs was
+ * defensible on its own, which is exactly why a number is needed rather than
+ * judgement: the cost is only visible in aggregate.
+ *
+ * The bars are set above where it sits now, not at it, so ordinary work has room
+ * and only a slide back toward the old shape trips them.
+ */
+{
+  await page.click(".modes .mode:has-text('Streaming')")
+  await page.waitForTimeout(900)
+  const deskTop = await page.$eval(".board-row", e => Math.round(e.getBoundingClientRect().top + scrollY))
+  t("the streaming answer starts within a screen and a half on a desktop",
+    deskTop < 1350, `first ranked row at y=${deskTop}`)
+
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  await phone.goto(BASE, { waitUntil: "domcontentloaded" })
+  await phone.waitForSelector(".board-row", { timeout: 30000 })
+  await phone.waitForTimeout(1200)
+  await phone.click(".modes .mode:has-text('Streaming')")
+  await phone.waitForTimeout(1200)
+  const phoneTop = await phone.$eval(".board-row", e => Math.round(e.getBoundingClientRect().top + scrollY))
+  t("and within two screens on a phone", phoneTop < 1900, `first ranked row at y=${phoneTop}`)
+  t("with nothing spilling sideways on a phone",
+    (await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0)
+  await phone.close()
+}
+
 await browser.close()
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

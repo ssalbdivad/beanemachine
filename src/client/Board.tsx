@@ -1044,11 +1044,26 @@ export const Board = ({
 							: availability.basis === "ownership" ? "Probably-free players."
 							:	"Every starter in the window."}
 						</b>{" "}
-						{/* The basis sentences are written to sit mid-sentence elsewhere, so the
-						    capital is applied here rather than baked into each of them —
-						    the same thing this panel already does with `period.basis`. */}
-						{availability.basisText.charAt(0).toUpperCase()}
-						{availability.basisText.slice(1)}.
+						{/*
+						  The OPERATIVE fact, with the derivation behind it rather than in front.
+						  The full sentence — "a 10-team league with 27 seats holds 270 players,
+						  and the 270th most widely rostered player in this capture is rostered
+						  in 35% of leagues, so above 35% is treated as taken" — is how the
+						  number was arrived at, and it measured 109px on a 390px screen sitting
+						  directly under a card that had already said "probably free, rostered in
+						  13% of leagues". The same estimate, twice, in front of the answer.
+						  It is the audit trail for a number the reader is asked to trust, so it
+						  is not deleted: it is the title of the line that summarises it.
+						*/}
+						<span title={availability.basisText}>
+							{availability.basis === "ownership" && availability.cut ?
+								<>Estimated: above {availability.cut.cut}% rostered is treated as taken.</>
+							:	<>
+									{availability.basisText.charAt(0).toUpperCase()}
+									{availability.basisText.slice(1)}.
+								</>
+							}
+						</span>
 						{availability.basis !== "pool" &&
 							" Untick “Only players I can add” to see the whole field."}
 						{/*

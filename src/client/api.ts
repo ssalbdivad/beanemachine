@@ -190,6 +190,17 @@ const fromCarried = (carried: StoredPool, why?: string): AvailablePool => ({
  * reroute the working one. Browser-direct is what a page with no backend does
  * instead of giving up.
  */
+/**
+ * Whether a free-agent list can be read for this platform at all, from here.
+ *
+ * Both callers used to test `platform !== "yahoo"` inline and return early, which
+ * was right while Yahoo was the only platform with a reader — and silently wrong
+ * the moment ESPN got one. The capability shipped and the door stayed shut. One
+ * predicate, so the next platform is one edit rather than a hunt.
+ */
+export const canReadPool = (platform: string | null | undefined): boolean =>
+	platform === "yahoo" || platform === "espn"
+
 export const api = {
 	/**
 	 * Yahoo's free-agent pool. No browser can read it — see `yahooNeedsServer` —

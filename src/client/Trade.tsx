@@ -5,7 +5,7 @@ import {
 	startingLineup, type Lineup, type Start, type TradeVerdict
 } from "../engine/trade.ts"
 import type { League } from "../schema.ts"
-import { api, ApiError } from "./api.ts"
+import { canReadPool, api, ApiError } from "./api.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
 import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
@@ -237,7 +237,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 
 	useEffect(() => {
 		const id = league?.meta.league_id
-		if (!id || league?.meta.platform !== "yahoo") return
+		if (!id || !canReadPool(league?.meta.platform)) return
 		let live = true
 		api.available(String(id), {
 			platform: league?.meta.platform,
@@ -249,7 +249,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		return () => {
 			live = false
 		}
-	}, [league?.meta.league_id, league?.meta.platform])
+	}, [league?.meta.league_id, league?.meta.platform, league?.meta.season])
 
 	/**
 	 * What to add and what to drop, from the same analysis the board runs on.

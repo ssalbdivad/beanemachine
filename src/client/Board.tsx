@@ -8,7 +8,7 @@ import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
-import { api, ApiError, getMode, type AvailablePool } from "./api.ts"
+import { canReadPool, api, ApiError, getMode, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
@@ -509,7 +509,7 @@ export const Board = ({
 	// the league's actual free agents — a ranking of all of MLB is only half a
 	// recommendation when its top names are already rostered
 	useEffect(() => {
-		if (!leagueId || league?.meta.platform !== "yahoo") return
+		if (!leagueId || !canReadPool(league?.meta.platform)) return
 		let live = true
 		// the platform and season let an ESPN league read its own wire with no server
 		api.available(leagueId, {
@@ -522,7 +522,7 @@ export const Board = ({
 		return () => {
 			live = false
 		}
-	}, [leagueId, league?.meta.platform])
+	}, [leagueId, league?.meta.platform, league?.meta.season])
 
 	// A fresh Set on every render would invalidate the filter-and-sort memo in
 	// useBoard on every render, including ones that changed nothing about it.

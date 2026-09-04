@@ -746,5 +746,20 @@ for (const carried of ["pools", "rosters", "lineups"])
     Object.keys(seed[carried] ?? {}).length === 0,
     `${carried}: ${Object.keys(seed[carried] ?? {}).join(",")}`)
 
+
+// --- which platforms can be asked for a free-agent list ----------------------
+//
+// The capability and the door are separate things, and they came apart once. ESPN
+// got a reader that works from the page with no server — measured, its preflight
+// names `x-fantasy-filter` — and both callers still tested `platform !== "yahoo"`
+// inline and returned early, so nothing ever asked. The board went on estimating
+// availability from ownership for a league whose exact wire was one fetch away.
+//
+// One predicate now, asserted here, so the next platform is one edit and not a hunt.
+const { canReadPool } = await import("../src/client/api.ts")
+t("Yahoo can be asked (through the local server it needs)", canReadPool("yahoo"))
+t("ESPN can be asked (straight from the page)", canReadPool("espn"))
+t("a platform with no reader is not asked", !canReadPool("sleeper") && !canReadPool(null))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

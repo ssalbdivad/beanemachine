@@ -8,6 +8,7 @@
 // them the hosted site's only honest answers were a stranger's demo league or
 // seventeen point values typed in by hand.
 import { chromium } from "playwright-core"
+import { readFileSync } from "node:fs"
 // The build's base is relative, so preview serves it at the root and the same
 // artifact would work just as well under /beanemachine/ or at a custom domain's
 // apex — which is the property this suite is checking on behalf of.
@@ -393,8 +394,18 @@ t("with no pool carried, the masthead says so and offers the way to get one",
  * nothing, they cannot reach the head, so the assertions below cannot pass by
  * accident.
  */
+// Read them off the UNFILTERED list. "Only players I can add" defaults on now and
+// narrows the streaming tab to the handful the ownership estimate calls gettable —
+// which is the feature working, and left eight rows where this needs twenty-two.
+// Unticking is also truer to the intent: these have to be men the filter would
+// exclude, or the assertions below could pass without it doing anything.
+const avail = p.locator(".toggle", { hasText: "Only players I can add" }).locator("input")
+await avail.uncheck()
+await p.waitForTimeout(500)
 const listed = await p.$$eval(".board-row .who b", els => els.map(e => e.textContent.trim()))
 const deep = listed.slice(14, 22)
+await avail.check()
+await p.waitForTimeout(500)
 t("the ranking runs deep enough to draw a pool from a part of it nobody would see",
   deep.length === 8 && !deep.some(n => estimated.includes(n)),
   `${listed.length} rows ranked; drew ${deep.join(", ")}`)
@@ -469,6 +480,8 @@ t("and it is still USED, because a stale exact list beats an estimate that is no
   (await p.$eval(".toggle", e => e.textContent)).replace(/\s+/g, " ").trim())
 
 t("no page errors after all of that", errs.length===0, errs.join(" | "))
+
+
 await b.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail?1:0)

@@ -189,16 +189,55 @@ export const App = () => {
 		(file: File) => {
 			if (!/\.json$/i.test(file.name) && file.type !== "application/json")
 				return show(`${file.name} isn't a .json league file.`, true)
-			const existing = Object.keys(config?.leagues ?? {}).length
-			if (
-				existing &&
-				!confirm(
-					`Replace the ${existing} league${existing === 1 ? "" : "s"} in this browser with ${file.name}?`
-				)
-			)
-				return
 			void run(async () => {
-				const loaded = leagues.replace(await file.text())
+				/**
+				 * Name what is ARRIVING, not only what is going.
+				 *
+				 * This asked "Replace the 1 league in this browser with scoring.json?" — a
+				 * warning about loss, raised at the exact moment a Yahoo user is doing the
+				 * one thing the app told him to do: read his league locally and drop the
+				 * file here. It fires for everybody, because the example league is always
+				 * there to be replaced, so it is the last thing between every Yahoo user
+				 * and a working board. Saying what he is about to GET is the difference
+				 * between a warning and a confirmation.
+				 *
+				 * The file is read before the prompt rather than after, which costs nothing
+				 * on a local file and is what makes the prompt able to describe it. A file
+				 * that will not parse says so instead of asking a question about it.
+				 */
+				const text = await file.text()
+				const existing = Object.keys(config?.leagues ?? {}).length
+				let incoming = ""
+				try {
+					const parsed = JSON.parse(text) as {
+						leagues?: Record<string, unknown>
+						pools?: Record<string, unknown>
+						rosters?: Record<string, unknown>
+					}
+					const names = Object.keys(parsed.leagues ?? {})
+					const extras = [
+						Object.keys(parsed.pools ?? {}).length ? "its free-agent list" : "",
+						Object.keys(parsed.rosters ?? {}).length ? "your roster" : ""
+					].filter(Boolean)
+					incoming =
+						names.length === 1 ?
+							`${names[0]}${extras.length ? ` (with ${extras.join(" and ")})` : ""}`
+						: names.length ? `${names.length} leagues`
+						: ""
+				} catch {
+					throw new ApiError(`${file.name} isn't valid JSON, so nothing was replaced.`)
+				}
+				if (
+					existing &&
+					!confirm(
+						incoming ?
+							`Load ${incoming} from ${file.name}?\n\nThis replaces the ` +
+								`${existing} league${existing === 1 ? "" : "s"} already in this browser.`
+						:	`Replace the ${existing} league${existing === 1 ? "" : "s"} in this browser with ${file.name}?`
+					)
+				)
+					return
+				const loaded = leagues.replace(text)
 				adopt(loaded.config)
 				// what actually arrived, counted from the file rather than assumed: a
 				// file with no roster in it must not be reported as having brought one

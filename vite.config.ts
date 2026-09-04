@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react"
-import { copyFileSync } from "node:fs"
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs"
 import { defineConfig, type Plugin } from "vite"
 
 const API = "http://127.0.0.1:8000"
@@ -12,7 +12,27 @@ const publishSnapshot = (): Plugin => ({
 	name: "publish-snapshot",
 	buildStart: () => {
 		copyFileSync("data/snapshot.json", "public/snapshot.json")
-		copyFileSync("scoring.json", "public/scoring.json")
+		/**
+		 * The seed carries SCORING, and nothing that belongs to whoever ran the
+		 * importer last.
+		 *
+		 * `src/cli.ts` writes the free-agent pool, the roster and the lineup into the
+		 * same scoring.json — that is the whole point of the file a Yahoo user carries
+		 * to the hosted site. But this file is ALSO the asset every first visit is
+		 * seeded from, so copying it wholesale shipped one person's roster and their
+		 * league's wire to every stranger who opened the page, presented as the demo.
+		 * Measured when it happened: 150 free agents and 24 rostered players, and the
+		 * masthead told visitors it had read a wire it had no business having.
+		 *
+		 * The three carried stores are stripped here rather than in the CLI, because
+		 * the CLI is right to write them and this is the only place that knows the
+		 * file is about to become public.
+		 */
+		const seed = JSON.parse(readFileSync("scoring.json", "utf8")) as Record<string, unknown>
+		delete seed.pools
+		delete seed.rosters
+		delete seed.lineups
+		writeFileSync("public/scoring.json", JSON.stringify(seed, null, 2) + "\n")
 	}
 })
 

@@ -10,7 +10,6 @@
     "Season win/loss counts decide; ranking correlation is advisory only."
   ],
   "recentForm": {
-    "volumeWeight": 0.75,
     "blend": {
       "hitting": 0.5,
       "pitching": 0.5
@@ -31,7 +30,7 @@
       }
     },
     "why": [
-      "volumeWeight 0.75: playing time is the single largest edge available, worth ~20% relative Spearman over a season-only estimate.",
+      "playing time is the single largest edge available, worth ~20% relative Spearman over a season-only estimate. `blend` below is the weight that captures it, and it is the ONLY one: this block used to carry a second knob, `volumeWeight: 0.75`, described in exactly those terms. It steered nothing. Every caller that supplies a recent volume also supplies its weight, so 0.75 was reachable only as a default no code path could take — and 0.75 is the value the `blend` note below RETRACTS, at 22.6 points a week over 111 paired weeks. A weights file whose whole premise is that editing a number here changes the recommendation cannot carry a number that does not, so it is deleted rather than left as documentation of a decision already reversed.",
       "blend 0.5/0.5: chosen by playing seasons, not by correlation. A 14-day ranking mildly preferred 0.75. Re-swept over the full 111 weeks the shipped value wins outright: 0.75 loses 22.6 points a week going 38W-73L, 0.25 loses 8.3, and 0 loses 15.8. For scale, dropping the replacement adjustment entirely costs 45 to 61 points a week — value over replacement is the dominant component and the recency blend is the refinement on top of it.",
       "rate: a reliever-specific weight was tried on the theory that his value is a ROLE that changes overnight while saves shrink toward the league rate with a heavy constant. Measured over 111 weeks it loses at every level (-1.2, -2.2, -5.9 points a week at 0.3/0.5/0.7). The heavy shrinkage is apparently correct: a reliever's recent save rate is mostly noise. The knob stays, set to null.",
       "rate: pitchers only, and lightly — 41 of 50 folds. The same blend for hitters won 29 of 50, a coin flip, so it is not applied.",

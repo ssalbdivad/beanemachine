@@ -13,6 +13,24 @@ const USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 	"(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
+/** True inside a page, false under node. `window` alone is not enough — a bare
+ *  `globalThis.window` shim would pass — so the document is checked too. */
+export const IN_BROWSER =
+	typeof globalThis.window !== "undefined" && typeof globalThis.document !== "undefined"
+
+/**
+ * `user-agent` on a cross-origin fetch, but only where sending one means anything.
+ *
+ * A page IS allowed to set it (it stopped being a forbidden header name), and both
+ * ESPN and Sleeper answer a preflight for it — measured 2026-09-04, each replying
+ * `access-control-allow-headers: … user-agent`. But setting it makes the request
+ * non-simple, so every read costs an extra OPTIONS round trip and depends on a
+ * second response staying the way it is. The plain GET is what was measured working
+ * and what ships; node, which has no browser UA of its own, keeps sending one.
+ */
+export const agentHeaders = (ua: string): Record<string, string> =>
+	IN_BROWSER ? {} : { "user-agent": ua }
+
 /** Thrown for conditions the user can act on; surfaced verbatim in the UI. */
 export class ImportError extends Error {}
 
@@ -87,8 +105,37 @@ export const detect = (url: string): Target => {
 	)
 }
 
+/**
+ * Which platforms a browser can read for itself, and which one genuinely needs a
+ * server in front of it. Measured 2026-09-04, each with `Origin:
+ * https://beanemachine.com` on the exact endpoints below:
+ *
+ *   ESPN     lm-api-reads.fantasy.espn.com  → `access-control-allow-origin:
+ *            https://beanemachine.com` (it reflects the origin back), on both the
+ *            mSettings read here and the mRoster read in data/rosters.ts.
+ *   Sleeper  api.sleeper.app               → `access-control-allow-origin: *`
+ *   Yahoo    *.fantasysports.yahoo.com      → NO access-control headers at all
+ *
+ * So the two JSON platforms import with nothing behind the page, and Yahoo — HTML
+ * scraped off pages that send no CORS headers — is the one that cannot. That is not
+ * something client code can fix: without an `access-control-allow-origin` the
+ * browser will not hand the response body to the script, whatever it contains.
+ */
+export const readableInBrowser = (platform: string): boolean =>
+	platform === "espn" || platform === "sleeper"
+
+/** `readableInBrowser` for a pasted URL, without the throw: an unrecognized URL is
+ *  not browser-readable either, and whoever asked gets to decide what that means. */
+export const importableInBrowser = (url: string): boolean => {
+	try {
+		return readableInBrowser(detect(url).platform)
+	} catch {
+		return false
+	}
+}
+
 const fetchText = async (url: string): Promise<string> => {
-	const res = await fetch(url, { headers: { "user-agent": USER_AGENT } })
+	const res = await fetch(url, { headers: agentHeaders(USER_AGENT) })
 	if (!res.ok) throw new ImportError(`${url} returned HTTP ${res.status}.`)
 	return res.text()
 }
@@ -463,7 +510,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${t.sport}` +
 		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings`
 
-	const res = await fetch(url, { headers: { "user-agent": USER_AGENT } })
+	const res = await fetch(url, { headers: agentHeaders(USER_AGENT) })
 	if (!res.ok) {
 		throw new ImportError(
 			`ESPN returned HTTP ${res.status} for league ${t.leagueId}. Private leagues ` +
@@ -537,7 +584,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 
 const importSleeper = async (t: Extract<Target, { platform: "sleeper" }>): Promise<League> => {
 	const url = `https://api.sleeper.app/v1/league/${t.leagueId}`
-	const res = await fetch(url, { headers: { "user-agent": USER_AGENT } })
+	const res = await fetch(url, { headers: agentHeaders(USER_AGENT) })
 	if (!res.ok) throw new ImportError(`Sleeper returned HTTP ${res.status}.`)
 	const data = (await res.json()) as Record<string, any> | null
 	if (!data) throw new ImportError(`Sleeper has no league ${t.leagueId}.`)

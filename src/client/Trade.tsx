@@ -58,12 +58,16 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	const [take, setTake] = useState<string[]>([])
 	const [ownQuery, setOwnQuery] = useState("")
 	const [takeQuery, setTakeQuery] = useState("")
+	/** Narrows the give-up side. Separate from `ownQuery`, which searches all of
+	 *  baseball to ADD to your team; this one only ever looks at players you hold. */
+	const [giveQuery, setGiveQuery] = useState("")
 
 	// A team belongs to one league, so changing leagues loads that league's team and
 	// abandons a half-built offer rather than re-pricing it against other slots.
 	useEffect(() => {
 		setGive([])
 		setTake([])
+		setGiveQuery("")
 		if (!leagueKey) {
 			setOwned([])
 			return
@@ -363,6 +367,48 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 
 	const held = new Set(owned)
 	const lineup = startingLineup(league, mine, bars)
+	/** Who your lineup actually starts. The Verdict already reduces over this to
+	 *  say a departing bench man cost nothing; the deal side says it beforehand,
+	 *  which is when it can change the offer you build. */
+	const starting = startingKeys(lineup)
+	const giveNeedle = giveQuery.trim().toLowerCase()
+	const giveable = mine
+		.slice()
+		.sort((a, b) => b.points - a.points)
+		.filter(r => !giveNeedle || r.player.name.toLowerCase().includes(giveNeedle))
+	/**
+	 * The give-up side, split by the one thing that decides who you can spare.
+	 *
+	 * A man who is not in your starting lineup costs the lineup nothing to trade —
+	 * the Verdict card already says exactly that, but only once you have picked him.
+	 * On the shipped team it is 12 of 24, so the split covers half the roster and the
+	 * wall's order answers "who can I lose" before you click anything.
+	 *
+	 * Three groups, not two, because an unrateable player is not a spare one. On the
+	 * shipped team Byron Buxton and Nick Kurtz have no projection in this capture, so
+	 * they are absent from the starting lineup for a reason the model never reached:
+	 * it did not weigh them and find them wanting, it could not weigh them. Filed
+	 * under "costs you nothing" they would have read as the cheapest men to trade.
+	 */
+	const giveGroups = [
+		{
+			key: "spare",
+			men: giveable.filter(r => r.rateable && !starting.has(rosterKey(r.player))),
+			label: (n: number) =>
+				`${n} not in your starting lineup — giving one up costs the lineup nothing`
+		},
+		{
+			key: "starting",
+			men: giveable.filter(r => r.rateable && starting.has(rosterKey(r.player))),
+			label: (n: number) => `${n} you are starting — trading one leaves a spot to refill`
+		},
+		{
+			key: "unrated",
+			men: giveable.filter(r => !r.rateable),
+			label: (n: number) =>
+				`${n} with no projection in this capture — what giving one up costs is unknown, not zero`
+		}
+	].filter(g => g.men.length > 0)
 	const found = (query: string, exclude: Set<string>) => {
 		const needle = query.trim().toLowerCase()
 		if (!needle) return []
@@ -535,6 +581,12 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			<LineupCard league={league} lineup={lineup} count={mine.length} barMen={barMen} />
 			<AdviceCard advice={advice} seats={seats} pool={pool} platform={league.meta.platform ?? null} />
 
+			{/* The two sides are symmetric now. The right has always been a search box;
+			    the left was every player you own rendered at once — 24 name-only chips
+			    in seven rows on the shipped league, ~280px of wall, with nothing on any
+			    of them to tell you which one you could stand to lose. Same set, still
+			    all reachable, but filterable and carrying the number the choice turns
+			    on. */}
 			<section className="card full trade-deal">
 				<h2>The deal</h2>
 				<p className="sub">
@@ -546,27 +598,63 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 					<div className="deal-side">
 						<h3>You give up</h3>
 						{mine.length ?
-							<div className="picks">
-								{mine
-									.slice()
-									.sort((a, b) => b.points - a.points)
-									.map(r => {
-										const k = rosterKey(r.player)
-										return (
-											<button
-												key={k}
-												type="button"
-												className={`chip-btn${give.includes(k) ? " on" : ""}`}
-												aria-pressed={give.includes(k)}
-												onClick={() =>
-													setGive(g => (g.includes(k) ? g.filter(x => x !== k) : [...g, k]))
-												}
-											>
-												{r.player.name}
-											</button>
-										)
-									})}
-							</div>
+							<>
+								{/* Mirrors "Search anyone" opposite. 24 chips is a wall to read and a
+								    trivial list to filter, and the reader building an offer already
+								    has a name in mind. */}
+								<label className="ctl grow">
+									<span>Filter your players</span>
+									<input
+										type="text"
+										data-ctl="give-search"
+										value={giveQuery}
+										placeholder="Player name…"
+										onChange={e => setGiveQuery(e.currentTarget.value)}
+									/>
+								</label>
+								{/* The chips stay bare names. Putting each man's bscore in the label made every
+								    chip about twice as wide and the card 694px tall against 395 — more
+								    information, more wall. The number rides his title, and "My team" two cards
+								    up already lists all 24 of them with bscore and projected points beside the
+								    name. What the wall gains here is ORDER: the ones you can spare, first. */}
+								{giveGroups.map((g, i) => (
+									// the gap between groups is what makes them read as groups, and
+									// trade.css is not this change's file
+									<div
+										key={g.key}
+										className={`give-group give-${g.key}`}
+										style={i ? { marginTop: 14 } : undefined}
+									>
+										<p className="tiny-note">{g.label(g.men.length)}</p>
+										<div className="picks">
+											{g.men.map(r => {
+												const k = rosterKey(r.player)
+												return (
+													<button
+														key={k}
+														type="button"
+														className={`chip-btn${give.includes(k) ? " on" : ""}`}
+														aria-pressed={give.includes(k)}
+														title={
+															g.key === "unrated" ?
+																"No projection was possible for him over this horizon, so he starts nowhere and counts in no total here. What giving him up costs cannot be read off a number nothing produced."
+															: g.key === "spare" ?
+																`${pts(r.points)} projected points, bscore ${r.bscore}. He is not in your starting lineup, so trading him changes nothing below unless somebody else moves.`
+															:	`${pts(r.points)} projected points, bscore ${r.bscore}. He is starting for you, so trading him leaves a spot to refill.`
+														}
+														onClick={() =>
+															setGive(cur => (cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k]))
+														}
+													>
+														{r.player.name}
+													</button>
+												)
+											})}
+										</div>
+									</div>
+								))}
+								{!giveable.length && <p className="empty">Nobody on your team matches that.</p>}
+							</>
 						:	<p className="empty">Add your team above first.</p>}
 					</div>
 					<div className="deal-side">

@@ -15,6 +15,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
 const Confidence = ({ value, reasons }: { value: number; reasons: string[] }) => (
 	<span
 		className="conf"
+		data-col="conf"
 		title={reasons.length ? `Confidence ${pct(value)} — ${reasons.join("; ")}` : `Confidence ${pct(value)}`}
 	>
 		<span className="conf-fill" style={{ width: pct(value) }} />
@@ -64,6 +65,100 @@ const PANEL_ID = "horizon-panel"
 const MODE_FOCUS_CSS = `.modes .mode:focus-visible{
 	outline:none;border-color:var(--accent);
 	box-shadow:inset 0 1px 0 var(--edge), var(--ring);
+}`
+
+/**
+ * The board's grid, now that it carries SEVEN columns rather than eight.
+ *
+ * `uscore` and `owned` used to be two of them, and they are one fact: uscore is
+ * `addValue x (1 - owned)`, so it is blank in exactly the rows ownership is blank
+ * in. Measured on the committed fixture, that is 500 of 1,233 rateable rows
+ * (40.6%) on the fortnight and 585 of 1,433 (40.8%) rest-of-season — and, because
+ * Yahoo lists the players it prices rather than the players who rank, 36 of the
+ * FIRST 60 rows (60%). The board opened on seven straight rows of two dashes side
+ * by side: one missing input, reported twice, in the place where scanning matters
+ * most. They are one cell now — the score with the ownership that produced it
+ * underneath, or the single word "unlisted".
+ *
+ * Every cell carries `data-col` and is placed by it. app.css places them by
+ * `nth-child`, which cannot survive a column being added to one row and not the
+ * other — that is on the record: auto-placement once put the confidence gauge
+ * under "GP" and the games count under "confidence". Naming the column in the
+ * markup makes that class of drift impossible, and it lets the head and the row
+ * hold their cells in the SAME order, so app.css's swap of children 6 and 7 is
+ * no longer needed by anything.
+ *
+ * This belongs in app.css and should move there, replacing the `nth-child` block
+ * and its two media queries; it is here because app.css is not this change's
+ * file. The selectors are deliberately one class deeper than app.css's so the
+ * cascade cannot depend on which stylesheet React inserts first.
+ */
+const BOARD_GRID_CSS = `
+.board .board-head,.board .board-row{
+	grid-template-columns:30px minmax(0,1fr) 84px 66px 62px 86px 46px;
+}
+/* Placed by NAME. app.css places the same cells by nth-child, which cannot
+   survive a column being added to one row and not the other — that is on the
+   record: auto-placement once put the confidence gauge under "GP" and the games
+   count under "confidence". Only grid-column is set here; a grid item is
+   blockified by the container, so nothing needs a display value until a media
+   query has to undo one of app.css's index-based hides. */
+.board .board-head>[data-col],.board .board-row>[data-col]{grid-row:1;min-width:0}
+.board .board-head>[data-col=rank],.board .board-row>[data-col=rank]{grid-column:1}
+.board .board-head>[data-col=who],.board .board-row>[data-col=who]{grid-column:2}
+.board .board-head>[data-col=uscore],.board .board-row>[data-col=uscore]{grid-column:3}
+.board .board-head>[data-col=bscore],.board .board-row>[data-col=bscore]{grid-column:4}
+.board .board-head>[data-col=games],.board .board-row>[data-col=games]{grid-column:5}
+.board .board-head>[data-col=conf],.board .board-row>[data-col=conf]{grid-column:6}
+.board .board-head>[data-col=luck],.board .board-row>[data-col=luck]{grid-column:7}
+/* the score, then the ownership it was divided by, on one column's width */
+.board .board-row .us-val{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.board .board-row .us-own,.board .board-row .us-none{
+	display:block;font-size:var(--fs-1);color:var(--faint);font-style:normal;line-height:1.3;
+}
+/* the unit rides the number, because the column holds two of them */
+.board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
+
+/* app.css spaces a drill-down heading after another heading and after a note list,
+   but not after a definition list — so "Statcast model" now sits flush against the
+   last row of "Measured", which reads as one table with a caption in the middle of
+   it. Belongs in app.css beside its siblings; here because app.css is not this
+   change's file. */
+.detail dl + h3{margin-top:var(--sp-3)}
+
+/* Under 900px luck goes: it is a percentile against everyone on the player's own
+   side, the softest of the seven, and the Buy low card below the board is where
+   that reading is actually acted on. The two un-hides undo app.css's nth-child
+   hides, which now land on the wrong cells. */
+@media(max-width:899px){
+	.board .board-head,.board .board-row{
+		grid-template-columns:26px minmax(0,1fr) 76px 62px 58px 86px;gap:var(--sp-2);
+	}
+	.board .board-head>[data-col=games],.board .board-row>[data-col=games]{display:block}
+	.board .board-head>.sort-head[data-col=conf]{display:flex}
+	.board .board-row>[data-col=conf]{display:block}
+	.board .board-head>.sort-head[data-col=luck],.board .board-row>[data-col=luck]{display:none}
+}
+/* Under 640px only two numbers fit beside the name — measured at 390px the board
+   is 300px wide. They used to be uscore and bscore, and uscore is the column that
+   is blank on 36 of the first 60 rows: on a phone the reader got a column of
+   dashes as one of his two numbers. The window count takes the slot instead. It
+   is never blank (0 of 1,233 rows), it is the only number on the row that is a
+   fact about the WINDOW rather than about the player, and for a starter it is now
+   his own starts. Confidence and luck are one tap away in the drill-down, which
+   prints both. uscore comes back only when the board is RANKED by it, because a
+   board must always show the number it is sorted by. */
+@media(max-width:640px){
+	.board .board-head,.board .board-row{
+		grid-template-columns:24px minmax(0,1fr) 56px 62px;gap:var(--sp-2);
+	}
+	.board .board-head>.sort-head[data-col=conf],.board .board-row>[data-col=conf]{display:none}
+	.board:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore],
+	.board:not([data-sort=uscore]) .board-row>[data-col=uscore]{display:none}
+	.board:not([data-sort=uscore]) .board-head>[data-col=games],
+	.board:not([data-sort=uscore]) .board-row>[data-col=games]{grid-column:3}
+	.board[data-sort=uscore] .board-head>[data-col=games],
+	.board[data-sort=uscore] .board-row>[data-col=games]{display:none}
 }`
 
 /** Arrow keys walk the tab strip, because a tablist is one tab stop rather than
@@ -319,6 +414,7 @@ export const Board = ({
 			<section className="card full board-controls">
 				<h2>What are you deciding?</h2>
 				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
+				<style href="board-grid" precedence="default">{BOARD_GRID_CSS}</style>
 				{/* The tabs are the tablist's only children, because a tablist that
 				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
@@ -472,23 +568,39 @@ export const Board = ({
 				<p className="sub">
 					<b className="count">{rows.length}</b> players · {span.range}
 				</p>
-				<div className="board">
-					{/* Eight columns, each answering a different question. `proj pts` and
+				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
+				    uscore column back on a phone when the board is ranked by it. */}
+				<div className="board" data-sort={filters.sort}>
+					{/* Seven columns, each answering a different question. `proj pts` and
 					    `waiver pts` used to sit here too, but bscore is one minus the other,
 					    so the table stated the same fact three times; the arithmetic is in
-					    the drill-down where it belongs. */}
+					    the drill-down where it belongs. `owned` was an eighth until it was
+					    folded into uscore, whose denominator it is — BOARD_GRID_CSS carries
+					    the count of rows on which the two went blank together. */}
 					<div className="board-head">
-						<span>#</span>
-						<SortHead field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
-						<SortHead field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>
-						<SortHead field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
-						<span className="r" title="How many leagues already roster him. Blank means Yahoo doesn't list him — unknown, not unowned.">owned</span>
-						<span className="r" title="Games his team actually has scheduled in the window. Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start.">GP</span>
-						<SortHead field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
+						<span data-col="rank">#</span>
+						<SortHead col="who" field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
+						<SortHead col="uscore" field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>
+						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
+						{/* Not "GP" any more. GP is the games a player's TEAM plays, which for a
+						    starting pitcher is the wrong number by about a factor of six: on the
+						    committed fixture the median starter with published turns has 3.0 of
+						    them against ~14 team games on the fortnight, and 1.0 against ~6 on the
+						    streaming week — the week where 12 of the top 20 rows ARE starters. The
+						    cell names its own unit, GS or GP, so the two can share a column
+						    without either claiming to be the other. */}
+						<span
+							className="r"
+							data-col="games"
+							title="What this player gets out of the window. For a starting pitcher whose turns MLB has published it is his own scheduled starts (GS); for everyone else it is the games his team plays (GP). Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start."
+						>
+							games
+						</span>
+						<SortHead col="conf" field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
 						{/* The number is a percentile, and nothing said so: 88 read as a quantity of
 						    luck rather than as "unluckier than 88% of his side". The denominator
 						    belongs in the heading, read once, rather than on 1,235 rows. */}
-						<SortHead field="undervaluation" filters={filters} setFilters={setFilters} right unit="/100">
+						<SortHead col="luck" field="undervaluation" filters={filters} setFilters={setFilters} right unit="/100">
 							luck
 						</SortHead>
 					</div>
@@ -518,6 +630,14 @@ export const Board = ({
 								["bscore", COLUMN_HELP.bscore],
 								["proj pts", COLUMN_HELP.points],
 								["waiver pts", COLUMN_HELP.replacement],
+								["uscore", COLUMN_HELP.uscore],
+								// The games column reads in two units and nothing else on the page
+								// explains why. It has no entry in COLUMN_HELP because that map is
+								// keyed by sort field and this column cannot be sorted on.
+								[
+									"games",
+									"GS is a starting pitcher's own scheduled starts, from MLB's published probables — the number his projection is actually built on. GP is the games his team plays, which is the right question for a hitter and the wrong one for a starter by roughly a factor of six. A pitcher shows GP when no probables reach this window."
+								],
 								["confidence", COLUMN_HELP.confidence],
 								["edge", COLUMN_HELP.marketEdge],
 								["luck", COLUMN_HELP.undervaluation]
@@ -771,7 +891,16 @@ const BillysPick = ({
 				`the schedule ahead of him is soft (×${r.projection.matchupMultiplier.toFixed(3)})`
 			:	`the schedule ahead of him is hard (×${r.projection.matchupMultiplier.toFixed(3)})`
 		)
-	if (r.projection.horizonGames)
+	// The same per-side choice the games column makes, in prose. "his team plays 14
+	// games in that stretch" is true of a starting pitcher and useless about him:
+	// on this fixture a starter's club plays a median 6.5 games for each turn he
+	// actually takes, so the clause was quoting the largest number on his row and
+	// the least relevant. Where MLB has published his turns, the card names those.
+	if (r.scheduledStarts != null)
+		clauses.push(
+			`MLB has him down for ${r.scheduledStarts.toFixed(1)} starts in that stretch`
+		)
+	else if (r.projection.horizonGames)
 		clauses.push(`his team plays ${r.projection.horizonGames} games in that stretch`)
 	const worry =
 		r.injury ? `He's listed ${r.injury.toLowerCase()}, so treat that number carefully.`
@@ -807,7 +936,7 @@ const BillysPick = ({
 const COLUMN_HELP: Record<Filters["sort"], string> = {
 	name: "Sort by player name.",
 	uscore:
-		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. Blank means Yahoo lists no ownership for him — unknown, not unowned.",
+		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. The ownership it divides by is printed under it; \u201cunlisted\u201d means Yahoo prices no ownership for him — unknown, not unowned, so there is no uscore either.",
 	bscore:
 		"bscore — beanescore. Projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
 	marketEdge:
@@ -824,8 +953,12 @@ const COLUMN_HELP: Record<Filters["sort"], string> = {
 
 
 const SortHead = ({
-	field, filters, setFilters, right, unit, children
+	col, field, filters, setFilters, right, unit, children
 }: {
+	/** Which board column this heading is, echoed onto the cell as `data-col`.
+	 *  The grid places by that name rather than by child index — see
+	 *  BOARD_GRID_CSS for why an index is not survivable here. */
+	col: string
 	field: Filters["sort"]
 	filters: Filters
 	setFilters: (f: (p: Filters) => Filters) => void
@@ -843,6 +976,7 @@ const SortHead = ({
 	return (
 		<button
 			type="button"
+			data-col={col}
 			className={`sort-head${right ? " r" : ""}${active ? " active" : ""}`}
 			onClick={() =>
 				setFilters(f =>
@@ -880,16 +1014,73 @@ const SortHead = ({
 const rowLabel = (rank: number, r: Ranked) =>
 	[
 		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
-		r.uscore === null ? "no uscore" : `uscore ${r.uscore}`,
+		// one clause for the merged column, because it is one fact. Spoken as two it
+		// said "ownership unlisted, so no uscore ... ownership unlisted" on the 500
+		// rows Yahoo does not price — the same absence read out twice.
+		r.uscore === null ?
+			"ownership unlisted, so no uscore"
+		:	`uscore ${r.uscore}, rostered in ${r.rosteredPct} percent of leagues`,
 		`bscore ${r.bscore}`,
 		`${r.points} projected points against ${r.replacement} for a replacement`,
-		r.rosteredPct === null ? "ownership unlisted" : `rostered in ${r.rosteredPct} percent of leagues`,
 		`confidence ${pct(r.confidence.value)}`,
-		r.projection.horizonGames ?
-			`${r.projection.horizonGames} games scheduled`
+		// the same choice the games column makes, spoken: his own starts where they
+		// exist, his team's games where they don't, and never one labelled the other
+		r.scheduledStarts != null ?
+			`${r.scheduledStarts.toFixed(1)} scheduled starts`
+		: r.projection.horizonGames ?
+			`${r.projection.horizonGames} team games scheduled`
 		:	"no scheduled games on record",
 		...(r.injury ? [`listed ${r.injury.toLowerCase()}`] : [])
 	].join(", ")
+
+/**
+ * How much of this window the player actually gets — the honest number per side.
+ *
+ * The column was "GP", the games his TEAM plays, and for a starting pitcher that
+ * is not the quantity anyone is deciding on. `scheduledStarts` is the engine's own
+ * count of his turns, built as `published(him) + unpublished(his club) x (his GS /
+ * his club's GP)`, and it is what the projection is already multiplied by — so the
+ * board was ranking on one number and displaying another.
+ *
+ * Measured on the committed fixture: 154 of 661 rateable pitchers have a start
+ * count on the fortnight, and for them the team's games run a median 6.5x their
+ * own starts (Skubal 14 team games, 2.8 starts). On the streaming week it is 6.0x,
+ * and that is the view where it bites — 12 of the top 20 rows there are starters.
+ *
+ * A null is NOT a zero and is not dressed as one: MLB publishes probables about a
+ * week out, so the rest-of-season view has none at all (0 of 361 starters), and a
+ * reliever never gets one because a published count says nothing about when he
+ * next appears. Those fall back to team games, and the unit on the cell says which
+ * of the two you are reading.
+ */
+const Window = ({ r }: { r: Ranked }) => {
+	const starts = r.scheduledStarts
+	if (starts != null)
+		return (
+			<span
+				className="r games"
+				data-col="games"
+				title={`MLB's published probables give him ${starts} starts in this window, against the ${r.projection.horizonGames} games his team plays. The projection is built on the starts, so that is what this column shows.`}
+			>
+				{starts.toFixed(1)}
+				<span className="g-unit">GS</span>
+			</span>
+		)
+	return (
+		<span
+			className="r games"
+			data-col="games"
+			title={
+				r.player.group === "pitching" ?
+					`${r.projection.horizonGames} games for his team in this window. MLB has not published turns that reach it, so there is no start count to show and his workload is projected off his own rate of appearing.`
+				:	`${r.projection.horizonGames} games scheduled for his team in this window.`
+			}
+		>
+			{r.projection.horizonGames || "—"}
+			<span className="g-unit">GP</span>
+		</span>
+	)
+}
 
 const detailId = (r: Ranked) => `player-detail-${r.player.id}`
 
@@ -903,8 +1094,8 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 			aria-controls={detailId(r)}
 			aria-label={rowLabel(rank, r)}
 		>
-			<span className="rank">{rank}</span>
-			<span className="who">
+			<span className="rank" data-col="rank">{rank}</span>
+			<span className="who" data-col="who">
 				<b>{r.player.name}</b>
 				<span className="meta">
 					<span className="code">{r.slot}</span>
@@ -912,24 +1103,34 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 					{r.injury && <em className="hurt">{r.injury}</em>}
 				</span>
 			</span>
+			{/* uscore and its own denominator, in one column. Ownership had a column of
+			    its own and went blank on precisely the rows uscore did, so the board
+			    printed one absence twice — 500 of 1,233 rows, and 36 of the first 60.
+			    Where Yahoo priced him the cell shows both numbers; where it didn't it
+			    says so once, in a word rather than a dash. */}
 			<span
 				className={`r uscore${(r.uscore ?? 0) >= 10 ? " up" : ""}`}
+				data-col="uscore"
 				title={
 					r.uscore === null ?
-						"Yahoo doesn't list him, so there is no ownership to divide by."
-					:	`${r.addValue} points, and ${100 - r.rosteredPct!}% of leagues still have him free.`
+						"Yahoo lists no ownership for him, so there is nothing to divide by — unknown, not unowned."
+					:	`${r.addValue} points above the next man up, and ${100 - r.rosteredPct!}% of leagues still have him free.`
 				}
 			>
-				{r.uscore === null ? "—" : r.uscore}
+				{r.uscore === null ?
+					<em className="us-none">unlisted</em>
+				:	<>
+						<b className="us-val">{r.uscore}</b>
+						<span className="us-own">{r.rosteredPct}% owned</span>
+					</>
+				}
 			</span>
-			<span className="r bscore">{r.bscore}</span>
-			<span className="r dim">{r.rosteredPct === null ? "—" : `${r.rosteredPct}%`}</span>
+			<span className="r bscore" data-col="bscore">{r.bscore}</span>
+			<Window r={r} />
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
-			<span className="r games" title={`${r.projection.horizonGames} games scheduled in this window`}>
-				{r.projection.horizonGames || "—"}
-			</span>
 			<span
 				className={`r gap${(r.undervaluation ?? 0) >= 70 ? " up" : ""}`}
+				data-col="luck"
 				title={
 					r.undervaluation === null ?
 						"No Statcast data, so no luck reading."
@@ -943,22 +1144,24 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 	</>
 )
 
-/** Every number's provenance: what was observed, what was modelled, what's missing. */
+/**
+ * Every number's provenance: what was observed, what was modelled, what's missing.
+ *
+ * Ordered by what the reader came for, which it was not. The first column used to
+ * be the per-stat points breakdown — eight lines of "K 75.58, OUT 54, W 14.94" —
+ * so the advanced reader who opened a row to ask WHY he is ranked here met a
+ * ledger before an answer, and on a phone, where the four columns stack, had to
+ * scroll past all of it to reach anything explanatory.
+ *
+ * The order now is: what the ranking is (the arithmetic and how far to trust it),
+ * how it was built and what could not be read, what was measured underneath, and
+ * the per-category ledger last. Nothing is dropped — the ledger is the same eight
+ * rows it always was, just no longer first.
+ */
 const Detail = ({ r }: { r: Ranked }) => {
 	const top = Object.entries(r.projected.breakdown).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
 	return (
 		<div className="detail" id={detailId(r)} role="region" aria-label={`Where ${r.player.name}'s numbers come from`}>
-			<div className="detail-col">
-				<h3>Projected points by category</h3>
-				<dl>
-					{top.map(([code, value]) => (
-						<div className="pair" key={code}>
-							<dt>{code}</dt>
-							<dd className={value < 0 ? "neg" : ""}>{value}</dd>
-						</div>
-					))}
-				</dl>
-			</div>
 			<div className="detail-col">
 				<h3>What he is worth</h3>
 				{/* The arithmetic behind the two ranked columns. It used to be spread across
@@ -969,6 +1172,12 @@ const Detail = ({ r }: { r: Ranked }) => {
 					<div className="pair"><dt>projected points</dt><dd>{r.points}</dd></div>
 					<div className="pair"><dt>waiver points</dt><dd>{r.replacement}</dd></div>
 					<div className="pair"><dt>bscore</dt><dd>{r.bscore}</dd></div>
+					{/* Confidence is the first thing dropped from the row below 640px, so the
+					    drill-down has to carry it or a phone reader loses it entirely. */}
+					<div className="pair">
+						<dt>confidence</dt>
+						<dd title={r.confidence.reasons.join("; ")}>{pct(r.confidence.value)}</dd>
+					</div>
 					<div className="pair">
 						<dt>rostered</dt>
 						<dd>{r.rosteredPct === null ? "unlisted" : `${r.rosteredPct}%`}</dd>
@@ -979,7 +1188,34 @@ const Detail = ({ r }: { r: Ranked }) => {
 						<dd>{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}</dd>
 					</div>
 				</dl>
-
+				{r.confidence.reasons.length > 0 && (
+					<ul className="notes">
+						{r.confidence.reasons.map(w => <li key={w}>{w}</li>)}
+					</ul>
+				)}
+			</div>
+			<div className="detail-col">
+				<h3>Our model</h3>
+				{r.projection.modelled.length ?
+					<ul className="notes">{r.projection.modelled.map(m => <li key={m}>{m}</li>)}</ul>
+				:	<p className="empty">Nothing modelled — no projection was possible.</p>}
+				{(r.projection.missing.length > 0 || r.projected.unscoreable.length > 0) && (
+					<>
+						{/* Promoted out of last place. What the model could not read is the
+						    product's own promise — absent is reported as absent — and it was
+						    sitting at the bottom of the rightmost column, below the Statcast
+						    tables, where a reader who scrolled no further would never see it. */}
+						<h3>Missing</h3>
+						<ul className="notes warn">
+							{r.projection.missing.map(m => <li key={m}>{MISSING_LABEL[m] ?? m}</li>)}
+							{r.projected.unscoreable.length > 0 && (
+								<li>league scores {r.projected.unscoreable.join(", ")} — not in any source we read</li>
+							)}
+						</ul>
+					</>
+				)}
+			</div>
+			<div className="detail-col">
 				<h3>Measured</h3>
 				<dl>
 					<div className="pair"><dt>season points</dt><dd>{r.season.points}</dd></div>
@@ -988,6 +1224,11 @@ const Detail = ({ r }: { r: Ranked }) => {
 						<dd>{r.projection.volumePerTeamGame ?? "—"}</dd>
 					</div>
 					<div className="pair"><dt>team games in window</dt><dd>{r.projection.horizonGames}</dd></div>
+					{/* The number the games column actually shows for a starter, named so the
+					    drill-down and the row cannot disagree about which of the two it is. */}
+					{r.scheduledStarts != null && (
+						<div className="pair"><dt>his starts in window</dt><dd>{r.scheduledStarts}</dd></div>
+					)}
 					{r.underlying?.woba != null && (
 						<div className="pair"><dt>wOBA</dt><dd>{r.underlying.woba}</dd></div>
 					)}
@@ -998,8 +1239,7 @@ const Detail = ({ r }: { r: Ranked }) => {
 						<div className="pair"><dt>exit velo</dt><dd>{r.underlying.avgExitVelocity}</dd></div>
 					)}
 				</dl>
-			</div>
-			<div className="detail-col">
+
 				<h3>Statcast model</h3>
 				<p className="tiny-note">
 					Expected stats are MLB&rsquo;s model of what this contact usually produces —
@@ -1051,21 +1291,18 @@ const Detail = ({ r }: { r: Ranked }) => {
 				)}
 			</div>
 			<div className="detail-col">
-				<h3>Our model</h3>
-				{r.projection.modelled.length ?
-					<ul className="notes">{r.projection.modelled.map(m => <li key={m}>{m}</li>)}</ul>
-				:	<p className="empty">Nothing modelled — no projection was possible.</p>}
-				{(r.projection.missing.length > 0 || r.projected.unscoreable.length > 0) && (
-					<>
-						<h3>Missing</h3>
-						<ul className="notes warn">
-							{r.projection.missing.map(m => <li key={m}>{MISSING_LABEL[m] ?? m}</li>)}
-							{r.projected.unscoreable.length > 0 && (
-								<li>league scores {r.projected.unscoreable.join(", ")} — not in any source we read</li>
-							)}
-						</ul>
-					</>
-				)}
+				<h3>Projected points by category</h3>
+				{/* Last, not first. It is the ledger behind "projected points", which the
+				    first column states in one line — useful to audit, not the answer to
+				    the question that opened the row. */}
+				<dl>
+					{top.map(([code, value]) => (
+						<div className="pair" key={code}>
+							<dt>{code}</dt>
+							<dd className={value < 0 ? "neg" : ""}>{value}</dd>
+						</div>
+					))}
+				</dl>
 			</div>
 		</div>
 	)

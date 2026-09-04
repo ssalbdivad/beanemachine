@@ -192,6 +192,33 @@ t("coming back to a horizon gives the same ranking it gave before",
 	back.join() === fortnight.join(), `${back.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
 t("every horizon left the ranking count intact", (await ranked()) === fortnightCount,
 	`${await ranked()} vs ${fortnightCount}`)
+
+/**
+ * The window column reads in two units, and which one is available is a property
+ * of the HORIZON — so it has to move when the horizon does, and never carry a
+ * stale one across.
+ *
+ * It used to be "GP" for everybody: the games a player's TEAM plays, which for a
+ * starting pitcher is the wrong quantity by roughly a factor of six. It now shows
+ * his own scheduled starts where MLB has published his turns. MLB publishes those
+ * about a week out, so on the committed fixture the fortnight has a count for 154
+ * pitchers and the rest of the season has one for none of its 361 — a GS still
+ * showing on Stash would be a fortnight number sitting under a season heading.
+ */
+const units = () =>
+	page.$$eval(".board-row [data-col=games] .g-unit", n => n.map(e => e.textContent.trim()))
+await horizon("This fortnight")
+const fortnightUnits = await units()
+t("the fortnight board reads a starter's own turns rather than his club's games",
+	fortnightUnits.includes("GS"), `${fortnightUnits.slice(0, 8).join(",")}`)
+await horizon("Stash")
+const stashUnits = await units()
+t("the rest of a season has no published turns, so every row falls back to team games",
+	stashUnits.length > 0 && stashUnits.every(u => u === "GP"),
+	`${stashUnits.filter(u => u === "GS").length} rows still claiming starts`)
+await horizon("This fortnight")
+t("and switching back brings the start counts back rather than leaving the fallback",
+	(await units()).includes("GS"))
 clean("across the three horizons")
 
 // --- 2. filtering, searching, re-ranking, raising the floor --------------------

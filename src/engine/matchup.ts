@@ -30,6 +30,18 @@ export interface TeamStrength {
 	defense: Map<number, number>
 }
 
+/**
+ * The only fields `wobaish` reads.
+ *
+ * `teamStrength` used to sum EVERY key of every player's line — about thirty per
+ * player, 1,433 players, on every horizon switch — and then read six of them. It
+ * also summed rate stats, so a club's `avg` was the sum of its hitters' batting
+ * averages: a number with no meaning, which nothing ever looked at. Six named adds
+ * replace an `Object.entries` allocation and a generic loop, and the six summed are
+ * exactly the six consumed, so every team index is unchanged to the last bit.
+ */
+const WOBA_FIELDS = ["homeRuns", "triples", "doubles", "hits", "baseOnBalls", "hitByPitch"] as const
+
 export const teamStrength = (prior: PlayerSeason[]): TeamStrength => {
 	const acc = {
 		hitting: new Map<number, { line: StatLine; v: number }>(),
@@ -41,7 +53,7 @@ export const teamStrength = (prior: PlayerSeason[]): TeamStrength => {
 		if (!v) continue
 		const bucket = acc[p.group]
 		const cur = bucket.get(p.teamId) ?? { line: {} as StatLine, v: 0 }
-		for (const [k, val] of Object.entries(p.stats)) cur.line[k] = (cur.line[k] ?? 0) + val
+		for (const f of WOBA_FIELDS) cur.line[f] = (cur.line[f] ?? 0) + (p.stats[f] ?? 0)
 		cur.v += v
 		bucket.set(p.teamId, cur)
 	}
@@ -91,11 +103,30 @@ export const matchupIndexFor = (
  * publishes probable starters about a week out, so for the streaming horizon the
  * specific pitcher is an observation rather than an estimate.
  *
- * A starter covers roughly 58% of a game's innings league-wide (about 5.2 of 9),
- * so the two indices are blended in that proportion rather than by a tuned
- * weight: the starter's own quality for his share, the opponent staff's for the
- * bullpen innings behind him. Where no probable is published the blend collapses
- * to the team index, which is what the model did before.
+ * A starter covers roughly 58% of a game's innings league-wide, so the two indices
+ * are blended in that proportion rather than by a tuned weight. Where no probable
+ * is published the blend collapses to the team index, which is what the model did
+ * before.
+ *
+ * Two things about that sentence were being overstated, and both are stated
+ * straight here instead.
+ *
+ * FIRST, the remaining share is NOT "the bullpen innings behind him", which is what
+ * this comment used to claim. `teamIndex` is the opponent's WHOLE staff, starters
+ * included, so the named starter is counted twice: once at 58% on his own, and
+ * again inside the 42%. On a fully covered window his effective weight is about
+ * 0.58 + 0.42 x 0.58 = 0.82, and the bullpen's about 0.18. Splitting the opponent's
+ * staff into rotation and bullpen would fix it, and would also reorder the board
+ * for every hitter, which probables cannot be backtested to justify (METHODOLOGY
+ * 3.5) — so the term is left alone and the arithmetic is written down.
+ *
+ * SECOND, 0.58 was justified as "about 5.2 of 9", and neither number reproduces on
+ * the committed capture. Pro-rating each swingman's outs by his share of starts,
+ * starters throw 55.7% of league innings (39.9% by pure starters, 27.4% by pure
+ * relievers, 32.7% by pitchers who do both); the median start by a pure starter is
+ * 16.6 outs, 5.53 innings, not 5.2. 0.58 sits just above the measured share and is
+ * kept — moving it moves every hitter's index and there is no leak-free way to
+ * replay probables and say whether that helped.
  *
  * That 58% is the share of ONE game, and it only applies to the games actually
  * published. MLB fills today and tomorrow and then thins out fast, so over a

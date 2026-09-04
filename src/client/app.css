@@ -515,6 +515,61 @@ pre{
 .views-link:hover{background:var(--accent-soft)}
 @media(max-width:700px){.views-link{margin-left:0}}
 
+/* ---------- the example league ----------
+   Deliberately not a `.card`: it is a caption on the whole page rather than one
+   more module competing with the board, and a card would read as content. Flag
+   colouring because it is a caveat, not an error and not a success. */
+.example-note{
+  display:flex;gap:var(--sp-4);align-items:center;flex-wrap:wrap;
+  margin:var(--sp-4) 0 0;padding:var(--sp-3) var(--sp-4);
+  border:1px solid var(--edge-line);border-left:2.5px solid var(--flag);
+  border-radius:0 var(--r-md) var(--r-md) 0;background:var(--flag-soft);
+  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+}
+.example-note p{margin:0;flex:1;min-width:min(280px,100%);font-size:var(--fs-4);line-height:var(--lh-snug);color:var(--muted)}
+.example-note b{color:var(--ink)}
+.example-note button{flex:none}
+
+/* ---------- board primer ----------
+   One line above the ranking, at the altitude the table cannot speak from: the
+   table can define a column, but not say what kind of thing the list is. Sized
+   to read as prose rather than as a control. */
+.primer{
+  margin:var(--sp-5) 0 0;
+  max-width:78ch;font-size:var(--fs-4);line-height:var(--lh-snug);color:var(--muted);
+}
+.primer b{color:var(--ink);font-weight:600}
+/* On a phone this and the example note are the only things between the masthead
+   and the first control, so they are held to the smaller step and tighter air —
+   orientation that buries the board it is orienting you to has failed. */
+@media(max-width:640px){
+  .primer{margin:var(--sp-4) 0 0;font-size:var(--fs-3)}
+  .example-note{padding:var(--sp-3);gap:var(--sp-3)}
+  .example-note p{font-size:var(--fs-3)}
+}
+
+/* ---------- colophon ----------
+   The advanced reader's landing: what is measured, what is not, and where the
+   working is. Below everything, because it is what you read once you have a
+   reason to doubt a number rather than before. */
+.colophon{margin:var(--sp-7) 0 var(--sp-6);padding-top:var(--sp-5);border-top:1px solid var(--rule)}
+.colophon .links{display:flex;gap:var(--sp-4);flex-wrap:wrap;margin:0 0 var(--sp-4)}
+.colophon .links a{
+  font-size:var(--fs-2);letter-spacing:.09em;text-transform:uppercase;
+  color:var(--accent);text-decoration:none;
+}
+.colophon .links a:hover{text-decoration:underline}
+/* The shared `dl` sizes its term column to the longest term, and these terms are
+   sentences-worth. Capped so the prose keeps the width. */
+.colophon dl{grid-template-columns:minmax(0,148px) minmax(0,1fr);gap:var(--sp-3) var(--sp-4)}
+.colophon dt{text-transform:none;letter-spacing:0;font-family:var(--sans)}
+.colophon dd{font-size:var(--fs-3);font-weight:400;line-height:var(--lh-snug);color:var(--faint);max-width:76ch}
+/* The shared `dl` already stacks below 560px, but the rule above is more specific
+   than the one in that media block and would keep a 148px term column against a
+   ~190px measure. Restated here so the phone gets the full width. */
+@media(max-width:560px){.colophon dl{grid-template-columns:minmax(0,1fr);gap:2px}.colophon dd{margin-bottom:var(--sp-3)}}
+.colophon dd b{color:var(--muted);font-weight:600}
+
 /* ---------- what are you deciding ----------
    Three questions, not three filters — so they read as a choice of what the
    board is FOR, with the reason under each label. */
@@ -541,7 +596,14 @@ pre{
 .modes .mode.on{border-color:var(--accent);background:var(--accent-soft)}
 .modes .mode.on b{color:var(--accent)}
 .modes .mode.on b::before{background:var(--accent);box-shadow:0 0 0 1.4px var(--accent),0 0 8px var(--accent)}
-@media(max-width:700px){.modes{grid-template-columns:1fr}.modes .mode span{display:none}}
+/* The stacked layout used to hide the explanation under each label, which is
+   backwards: "Streaming", "This fortnight" and "Stash" are three words that mean
+   nothing to a first-time visitor, and the sentence under them is the only place
+   on the page that says what each horizon is. Measured at 390px: the three cards
+   cost 96px more with the explanations in, which is a fifth of one scroll flick
+   and buys the difference between a labelled choice and three unexplained words.
+   One column already gives them the full width they need. */
+@media(max-width:700px){.modes{grid-template-columns:1fr}}
 
 /* ---------- filters ----------
    Position first and as chips, not a select: it is the filter people reach for

@@ -102,6 +102,74 @@ t("a hole is reported for every unfillable spot, and none is invented",
 t("the lineup states its holes either way",
   (await page.$$(".lineup-holes")).length === 1)
 
+/**
+ * The give-up side is no longer a wall.
+ *
+ * It rendered every player you own as a bare chip before you had chosen anything —
+ * 24 of them in seven rows on the shipped league, ~280px, with nothing on any chip
+ * to say which one you could stand to lose — while the side opposite was a search
+ * box. Same set, still all reachable, but filterable and grouped by the one fact
+ * that decides who you can spare.
+ *
+ * The grouping is a CLAIM, so it is checked as one: "giving one up costs the
+ * lineup nothing" may only be said about a man who is genuinely absent from the
+ * lineup the page is showing, and it may never be said about a man who has no
+ * projection at all. Two of the shipped roster's 24 are in that state — the model
+ * did not weigh them and find them wanting, it could not weigh them — and filed
+ * under "costs you nothing" they would have read as the cheapest men to trade.
+ */
+t("the give-up side offers the same filter the get side does",
+  (await page.$$("[data-ctl=give-search]")).length === 1)
+const groups = await page.$$eval(".deal-side .give-group", n =>
+  n.map(g => ({
+    key: [...g.classList].find(c => c.startsWith("give-") && c !== "give-group"),
+    label: g.querySelector(".tiny-note").textContent.trim(),
+    men: [...g.querySelectorAll(".chip-btn")].map(b => b.textContent.trim())
+  }))
+)
+t("every player you could give up is under a label that says what giving him up means",
+  groups.length > 0 && groups.every(g => g.men.length > 0 && g.label.length > 0),
+  JSON.stringify(groups.map(g => [g.key, g.men.length])))
+t("each label states its own count",
+  groups.every(g => Number(g.label.split(" ")[0]) === g.men.length),
+  JSON.stringify(groups.map(g => g.label)))
+// Grouping a roster is a chance to lose one. Every man you own is in exactly one
+// group, or the deal side is quietly offering you a smaller team than you have.
+const ownedNames = await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()))
+const grouped = groups.flatMap(g => g.men)
+t("every player you own appears exactly once across the groups",
+  grouped.length === ownedNames.length &&
+    new Set(grouped).size === grouped.length &&
+    ownedNames.every(n => grouped.includes(n)),
+  `${JSON.stringify(grouped)} against ${JSON.stringify(ownedNames)}`)
+const startingNames = await page.$$eval(".lineup-row.roster .lineup-who", n =>
+  n.map(e => e.textContent.trim())
+)
+const spareGroup = groups.find(g => g.key === "give-spare")
+const startGroup = groups.find(g => g.key === "give-starting")
+t("nobody in your lineup is filed under costing you nothing",
+  !spareGroup || spareGroup.men.every(m => !startingNames.includes(m)),
+  `${JSON.stringify(spareGroup?.men)} against ${JSON.stringify(startingNames)}`)
+// the same claim from the other end, which is the half a two-man team can prove
+t("everyone filed as starting really is in the lineup on screen",
+  !!startGroup && startGroup.men.every(m => startingNames.includes(m)),
+  `${JSON.stringify(startGroup?.men)} against ${JSON.stringify(startingNames)}`)
+const unrated = groups.find(g => g.key === "give-unrated")
+t("a player with no projection is called unknown rather than free",
+  !unrated || /unknown, not zero/.test(unrated.label), unrated?.label ?? "none on this team")
+// and the filter really filters
+const chipCount = () => page.$$eval(".deal-side .give-group .chip-btn", n => n.length)
+const allChips = await chipCount()
+await page.fill("[data-ctl=give-search]", "zzzznobody")
+await page.waitForTimeout(250)
+t("a filter that matches nobody says so rather than showing an empty column",
+  (await chipCount()) === 0 &&
+    /Nobody on your team matches/.test((await page.textContent(".deal-side .empty")) ?? ""))
+await page.fill("[data-ctl=give-search]", "")
+await page.waitForTimeout(250)
+t("clearing the filter brings your whole team back", (await chipCount()) === allChips,
+  `${await chipCount()} of ${allChips}`)
+
 // Giving a starter away for nothing cannot raise a lineup. It CAN cost nothing —
 // a bench body who never started — so the bound is one-sided on purpose.
 await page.locator(".deal-side .picks .chip-btn").first().click()

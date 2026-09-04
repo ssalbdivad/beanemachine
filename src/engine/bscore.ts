@@ -39,17 +39,22 @@ export const RESERVE_SLOTS = new Set(["BN", "IL", "NA", "IL+"])
  * not inferred — and where it exists it wins. Where it does not, the primary
  * position is still all we honestly have.
  */
+/** The eligibility groups, as sets rather than array literals rebuilt per player. */
+const PITCHER_POS = new Set(["SP", "RP", "P"])
+const OUTFIELD_POS = new Set(["LF", "CF", "RF", "OF"])
+const INFIELD_POS = new Set(["C", "1B", "2B", "3B", "SS"])
+
 export const slotsFor = (player: PlayerSeason, eligible?: string[]): string[] => {
 	if (eligible?.length) {
 		const slots = new Set<string>()
 		for (const pos of eligible) {
-			if (["SP", "RP", "P"].includes(pos)) {
+			if (PITCHER_POS.has(pos)) {
 				slots.add(pos)
 				slots.add("P")
-			} else if (["LF", "CF", "RF", "OF"].includes(pos)) {
+			} else if (OUTFIELD_POS.has(pos)) {
 				slots.add("OF")
 				slots.add("Util")
-			} else if (["C", "1B", "2B", "3B", "SS"].includes(pos)) {
+			} else if (INFIELD_POS.has(pos)) {
 				slots.add(pos)
 				slots.add("Util")
 			} else if (pos === "DH" || pos === "Util") slots.add("Util")
@@ -64,9 +69,9 @@ const primarySlotsFor = (player: PlayerSeason): string[] => {
 	const p = player.position
 	if (player.group === "pitching")
 		return (player.stats.gamesStarted ?? 0) > 0 ? ["SP", "P"] : ["RP", "P"]
-	if (["LF", "CF", "RF", "OF"].includes(p)) return ["OF", "Util"]
+	if (OUTFIELD_POS.has(p)) return ["OF", "Util"]
 	if (p === "DH") return ["Util"]
-	if (["C", "1B", "2B", "3B", "SS"].includes(p)) return [p, "Util"]
+	if (INFIELD_POS.has(p)) return [p, "Util"]
 	return ["Util"]
 }
 
@@ -262,11 +267,69 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 */
 		const published = o.probableStarts?.get(player.id) ?? 0
 		const unnamed = cov ? Math.max(cov.games - cov.published, 0) : 0
-		// his club's games so far this season — the denominator that turns his starts
-		// into a per-team-game rate
 		const teamGP = player.teamId ? o.teamGamesPlayed.get(player.teamId) : undefined
+		/**
+		 * The recency-blended playing time, hoisted because two things need it: the
+		 * projection itself, and the start count below.
+		 */
+		const recentVolumePerGame = blendWindows(
+			o.recentVolumeByWindow?.[`${player.id}:${player.group}`] ?? {},
+			RECENT_WINDOW_WEIGHTS[player.group]
+		)
+		/**
+		 * His own rate of starting, for the games MLB has NOT named yet.
+		 *
+		 * This was `gamesStarted ÷ his club's games played`, and that is a numerator
+		 * and a denominator drawn from different populations — the shape every bug
+		 * found in this codebase has had. His starts accrue only over the part of the
+		 * season he was actually in a rotation; his club's games count the whole of
+		 * it. So every pitcher who missed time reads as a man who rarely starts.
+		 *
+		 * Measured on the committed capture over the resolved scoring period, 44 of
+		 * 193 predominantly-starting pitchers carried a start rate below 0.10 despite
+		 * four or more starts — against the ~0.20 a five-man rotation actually runs
+		 * at. Blake Snell, a full-time starter who missed most of the season, was
+		 * credited with **0.11 starts and 1.7 outs** for a week in which his club had
+		 * three unnamed games: half an inning, for a man who takes a turn every fifth
+		 * day. Chris Bassitt read 0.40 starts across four unnamed games.
+		 *
+		 * The rate is therefore taken from the same recency-blended per-team-game
+		 * volume the fallback itself uses, divided by his own measured outs per start
+		 * — both already observed, both already trusted elsewhere in the model, and
+		 * no new constant introduced:
+		 *
+		 *     startRate = blended outs per team game ÷ outs per start
+		 *
+		 * This GENERALISES the old formula rather than replacing it. Where no recent
+		 * window exists the blend IS the season rate, and
+		 * (outs ÷ teamGP) ÷ (outs ÷ GS) = GS ÷ teamGP exactly — verified on the
+		 * capture: all 43 such pitchers reproduce the previous number to the last
+		 * digit. It is also what finally makes METHODOLOGY 3.5.0's "nothing published
+		 * reproduces the team-games estimate" true. The season-only version did not:
+		 * it reproduced only the season half of a fallback that is 50% recent, so a
+		 * starter's projection silently lost the recency blend §3.3 calls the single
+		 * largest source of accuracy in the model.
+		 *
+		 * Like everything else built on probables this cannot be backtested (§3.5).
+		 * It is reported as a correction to a wrong population, not as a measured
+		 * gain: 95 of 193 start counts move, median 0.00 and mean +0.08 starts.
+		 */
+		const outsPerStart =
+			mostlyStarts && player.stats.outs !== undefined && (player.stats.gamesStarted ?? 0) > 0 ?
+				player.stats.outs / player.stats.gamesStarted!
+			:	null
+		const seasonOutsPerTeamGame =
+			teamGP && player.stats.outs !== undefined ? player.stats.outs / teamGP : null
+		const blendedOutsPerTeamGame =
+			seasonOutsPerTeamGame === null ? null
+			: recentVolumePerGame === null ? seasonOutsPerTeamGame
+			: (1 - RECENT_BLEND_WEIGHT.pitching) * seasonOutsPerTeamGame +
+				RECENT_BLEND_WEIGHT.pitching * recentVolumePerGame
 		const startRate =
-			mostlyStarts && teamGP ? Math.min((player.stats.gamesStarted ?? 0) / teamGP, 1) : 0
+			outsPerStart !== null && outsPerStart > 0 && blendedOutsPerTeamGame !== null ?
+				// never more turns than his club has games
+				Math.min(blendedOutsPerTeamGame / outsPerStart, 1)
+			:	0
 		const scheduled =
 			o.probableStarts === undefined || cov === undefined || cov.games === 0 ? null
 			: !mostlyStarts ?
@@ -286,10 +349,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			player.teamId ? o.teamGamesPlayed.get(player.teamId) : undefined,
 			horizonGames,
 			{
-				recentVolumePerGame: blendWindows(
-					o.recentVolumeByWindow?.[`${player.id}:${player.group}`] ?? {},
-					RECENT_WINDOW_WEIGHTS[player.group]
-				),
+				recentVolumePerGame,
 				recentWeight: RECENT_BLEND_WEIGHT[player.group],
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
@@ -326,6 +386,19 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				projection.projectedVolume !== null &&
 				projection.projectedVolume > 0 &&
 				!(injury !== undefined && (o.injuryPolicy ?? "exclude") === "exclude"),
+			/**
+			 * Every unrateable player owes a reason, and three of the four ways to
+			 * become one gave none.
+			 *
+			 * The field's own contract says null means rateable. It did not hold: an
+			 * unconfigured league, a missing volume line and a volume that rounds to
+			 * nothing all produced `rateable: false` with `unrateable: null`, which is
+			 * the "absent reported as absent" rule broken in the one place whose whole
+			 * job is reporting absence. Measured on the committed capture over the
+			 * resolved scoring period, 7 of 221 unrateable players carried no reason
+			 * (1 of 200 over the fortnight) — men with a single plate appearance all
+			 * season, whose projected volume rounds to 0.0.
+			 */
 			unrateable:
 				// injury wins: it is the more informative reason, and it is the one the
 				// Stash view's own copy answers
@@ -335,6 +408,15 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				: scheduled === 0 ?
 					`MLB has published a starter for every game of this window and he is not ` +
 						`one of them, so he is not scheduled to pitch in it.`
+				: !scores[player.group] ?
+					`this league scores nothing on the ${player.group} side, so there is no ` +
+						`points total to rank him by — import your league's scoring, or enter it.`
+				: projection.projectedVolume === null ?
+					`no projection is possible: ${projection.missing.join("; ")}.`
+				: projection.projectedVolume === 0 ?
+					`his projected ${player.group === "hitting" ? "plate appearances" : "outs"} ` +
+						`over ${projection.horizonGames} games round to none, so there is no line ` +
+						`to score.`
 				:	null,
 			regressionGap: underlying?.xwobaGap ?? null,
 			scheduledStarts: scheduled

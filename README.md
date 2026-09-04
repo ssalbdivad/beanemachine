@@ -14,6 +14,14 @@ plausible number. It is developed against **Mrs. Met's Harem** (Yahoo H2H-points
 league 228947), which is why that league appears throughout the tests and the
 committed capture, but nothing in the engine is specific to it.
 
+That league is also what a first visit opens on. `src/client/leagues.ts` seeds
+`public/scoring.json` into a browser that has nothing stored, so the board has real
+scoring to rank in rather than showing an empty screen — and because a demo mistaken
+for your own team is worse than either, the page names it as an example, quotes one of
+its scoring values back to make the point concrete, and offers the button to League
+setup. The band is keyed on `EXAMPLE_LEAGUE_KEY` in `src/client/panels.tsx` and stops
+rendering the moment a different league is active.
+
 ## Billy
 
 The mascot robot is called **Billy** — after Billy Beane. He's the face of
@@ -55,10 +63,15 @@ Exploration rounds that got here live in `logo/round*.mjs` with contact sheets i
 
 - **[docs/GUIDE.md](docs/GUIDE.md)** — how to read the board and use it on draft day,
   waiver day and for daily streaming, including why a catcher outranks a better
-  hitter. The app links here from "How to read this →".
+  hitter. The app links here from "How to read this →" in the nav and from the
+  footer.
 - **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — how a bscore is computed, worked
   through with real numbers, plus the backtest design, what is built on top of a
-  bscore, and the negative-results ledger.
+  bscore, and the negative-results ledger. The app's footer (`Colophon` in
+  `src/client/App.tsx`) links here and states the four measured caveats a reader
+  needs before trusting a number: the fold counts the ranking won on, the human
+  comparison's `p 0.064`, the probables step that cannot be backtested at all, and
+  the leaked "% Ros" values that make market edge unreliable.
 
 ## The app
 

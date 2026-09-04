@@ -247,6 +247,16 @@ This is also the single largest source of accuracy in the whole model — worth
 roughly 20% relative Spearman over the naive baseline, more than every other idea
 combined.
 
+`model.json` used to state that twice. Beside `blend` it carried
+`recentForm.volumeWeight: 0.75`, annotated with exactly the claim above — and it
+steered nothing. All three callers that supply a recent volume also supply its
+weight, so 0.75 was reachable only as a default no code path could take, and 0.75 is
+the number `blend`'s own note retracts at 22.6 points a week over 111 paired weeks. A
+weights file whose stated premise is that editing a number here changes the
+recommendation cannot carry a number that does not, so the knob is deleted and
+`project`'s default is now the shipped blend. No output moves: the default was
+unreachable, and `test/engine.mjs` pins both the deletion and the new default.
+
 ### 3.4 The rate
 
 The projected line is the player's own per-unit rate scaled to the projected
@@ -311,7 +321,22 @@ on the Streaming tab.
 The same coverage arithmetic governs the other side of the probables feed, the
 *opposing* starter a hitter is booked against. A starter throws about 58% of a
 game's innings, so his own quality carries that share of the matchup index and the
-opponent's staff carries the rest. That 58% is the share of **one game**, and in
+opponent's staff carries the rest.
+
+Two things about that sentence were overstated, and both are now written down in
+`src/engine/matchup.ts` rather than glossed. **The remainder is not "the bullpen
+innings behind him"** — the team index is the opponent's *whole* staff, starters
+included, so the named starter is counted twice: about 0.58 + 0.42 × 0.58 ≈ **0.82**
+effective weight on him and **0.18** on the bullpen. Splitting the opponent's staff
+into rotation and bullpen would fix it and would also reorder every hitter, which
+probables cannot be backtested to justify, so the term is left alone and the
+arithmetic is stated. **And 0.58 was justified as "about 5.2 of 9", which the capture
+does not reproduce**: pro-rating each swingman's outs by his share of starts,
+starters throw **55.7%** of league innings (39.9% by pure starters, 27.4% by pure
+relievers, 32.7% by pitchers who do both), and the median start by a pure starter is
+16.6 outs — **5.53** innings, not 5.2. 0.58 sits just above the measured share and is
+kept, because moving it moves every hitter's index and there is no leak-free way to
+say whether that helped. That 58% is the share of **one game**, and in
 the reference capture the published names cover **44 of 402 team-games** on the
 14-day board (10.9%) — one rated name per team, typically. Weighting that name at 58%
 of a fortnight let a single announced ace speak for thirteen games he will not pitch:
@@ -365,8 +390,62 @@ pitcher's own rate of starting — which is precisely what the team-games fallba
 already doing implicitly for the entire window:
 
 ```
-starts = published(him) + unnamed(his club) × (his GS ÷ his club's GP)
+starts = published(him) + unnamed(his club) × startRate(him)
 ```
+
+#### The denominator that rate was computed over was wrong
+
+`startRate` was `his GS ÷ his club's GP`, and that is a numerator and a denominator
+drawn from different populations — the shape of every bug this codebase has found.
+His starts accrue only over the part of the season he was actually in a rotation;
+his club's games count the whole of it. **Every starter who missed time therefore
+read as a man who rarely starts**, and the second term then credited him with almost
+no turns.
+
+On the committed capture over the resolved scoring period, 44 of 193
+predominantly-starting pitchers carried a rate below 0.10 — against the 0.20 a
+five-man rotation actually runs at. Blake Snell, a full-time starter (5 starts in 5
+appearances) who missed most of the season, was credited with **0.11 starts and 1.7
+outs** for a week his club had three unnamed games in: half an inning, for a man who
+takes a turn every fifth day. Chris Bassitt read 0.40 starts across four unnamed
+games. Tyler Glasnow, Quinn Mathews and Randy Dobnak are the same case.
+
+The rate is now taken from the same recency-blended per-team-game volume the
+fallback itself uses, divided by his own measured outs per start:
+
+```
+startRate = blended outs per team game ÷ (season outs ÷ gamesStarted)
+```
+
+Both quantities are observed and both are already trusted elsewhere in the model, so
+no constant is introduced. It **generalises** the old formula rather than replacing
+it: where no recent window exists the blend *is* the season rate, and
+`(outs ÷ teamGP) ÷ (outs ÷ GS) = GS ÷ teamGP` exactly. All 43 such pitchers on the
+capture reproduce the previous number to the digit, and `test/engine.mjs` asserts it.
+
+It is also what makes the paragraph below true. The season-only rate did **not**
+reproduce the team-games estimate when nothing was published — it reproduced only
+the *season half* of a fallback that is 50% recent, so a starter's projection
+silently lost the recency blend §3.3 calls the single largest source of accuracy in
+the model. 150 of the capture's 193 starts-based pitchers have a recent window, and
+their recent workload differs from their season rate by a median of **67%**.
+
+| | before | after |
+|---|---|---|
+| median start rate per unnamed game, pure starters | 0.167 | **0.223** |
+| of those 40, credited below 0.10 per unnamed game | 9 | **2** |
+| Blake Snell, streaming rank | 985 | **298** |
+| Tyler Glasnow, streaming rank | 722 | **322** |
+
+Across the whole board 95 of 193 start counts move, by a median of 0.00 and a mean
+of +0.08 starts; 1,168 of 1,433 rows change rank, almost all of them by the shift in
+the SP and P replacement bars that follows. The Stash view is untouched, because it
+uses no probables at all.
+
+Like the term it corrects this cannot be backtested — nothing archives what was
+announced when — so it is reported as a correction to a wrong population, not as a
+measured gain. If you disagree with it, the whole change is `startRate` in
+`src/engine/bscore.ts`.
 
 Both ends are correct by construction. **Fully published:** the second term is zero,
 so this reduces exactly to the previous behaviour, including §3.5.2's rule that an
@@ -459,6 +538,15 @@ The default is `qualityWeight: 0` and `rateAll` never passes anything else, so
 displayed, and the drill-down says in so many words that it is shown and not used.
 Why, in §7.1.
 
+What the drill-down said until now was out of date with §7.1: it told the reader the
+played-season evidence was "not yet settled", months after the re-measurement in
+§7.1 settled it. A drill-down that contradicts the methodology is the same defect as
+a number that contradicts its source, so the string now states the verdict it is
+reporting — every formulation loses over 111 paired weeks, the least-bad by 0.7
+points a week, while xwOBA genuinely out-predicts wOBA for the next seven days
+(ρ 0.102 against 0.058). `test/engine.mjs` asserts the string carries the finished
+result.
+
 ### 3.7 The matchup multiplier — present, at half weight
 
 `src/engine/matchup.ts` rates every team's offence and its staff by linear-weights
@@ -520,6 +608,18 @@ knob that was actually applied, with its real parameters. A player with no
 projectable volume is marked `rateable: false` and is excluded from the board
 rather than ranked at zero alongside real players — 1 of 1,432 in the reference
 capture.
+
+**And every refusal now carries its reason.** `Rated.unrateable` documents itself as
+"null when he is rateable — an empty string and 'no reason given' are different
+claims", and the contract did not hold: only two of the four ways to become
+unrateable filled it in. An unconfigured league, a missing volume line, and a volume
+that rounds to nothing all produced `rateable: false` alongside `unrateable: null`,
+which is this project's own rule broken in the one place whose whole job is
+reporting absence. Measured over the resolved scoring period, **7 of 221** unrateable
+players carried no reason (1 of 200 over the fortnight) — men with a single plate
+appearance all season, whose projected volume rounds to 0.0. All four cases are now
+answered in words, and `test/engine.mjs` asserts both directions: no unrateable
+player without a reason, and no rateable player with one.
 
 ---
 
@@ -1083,6 +1183,36 @@ populations are not on the same footing, and no source distinguishes "not schedu
 from "not yet announced". The Streaming tab is where the number is closest to right.
 This one is a live wart, not a solved problem.
 
+**An empty recent window reads as unknown, not as zero — and for playing time those
+are different claims.** The lookback windows in `data/snapshot.json` carry a row only
+for players who actually appeared, so a man whose club played and who did not is
+simply absent from that window; `blendWindows` skips it and renormalises the
+remaining weights. For a hitter who has lost his job that is the wrong reading — his
+club played, he did not, and 0 PA per team game is an observation. Measured on the
+capture over the resolved scoring period: **300 of 1,212** rateable players carry no
+row in any of the 3-, 7- or 21-day windows and no injury flag either, and are
+therefore projected at their full season rate. The cost is small because almost all
+of them are deep-bench players whose season rate is low anyway — **2 of the 300 sit
+inside the top 400** — but one of those two is James Wood at rank 76 on 538 season
+plate appearances and nothing at all in three weeks. Fixing it means filling absent
+players in at zero where their club has games in the window, which changes the
+ranking, so it needs a backtest before it ships; the windows are cached in
+`data/backtest-cache/` and it is one of the few probables-free changes here that
+genuinely can be replayed.
+
+**A swingman named for one start is priced on that lineup for a whole week of relief.**
+`pitcherMatchupIndex` uses the lineups MLB has named a pitcher against, weighted by
+the share of his expected turns those cover. For a pitcher below `minStartShare` the
+start count is refused (§3.5.1), so `expectedStarts` is null, so the share defaults
+to 1 — his matchup index becomes 100% the one lineup he was named against while his
+volume still comes from his club's whole week of relief appearances. That is a
+numerator and a denominator over different populations again, in the term next to
+the one §3.5.0 fixes. **13 of the 85 named probables** on the capture are in that
+position, and the effect is bounded by the matchup clamp at ±12% before the 0.5
+weight, so it is a small wrong number rather than a large one. Left as it is because
+correcting it requires an expected-appearance count for relievers, which no source
+here publishes.
+
 **Injuries are binary.** On the IL or not: a flat 0.5 confidence multiplier, and a
 horizon-dependent policy rather than a modelled return — an injured man is dropped from
 the Streaming and fortnight boards altogether and ranked normally on Stash. Nothing
@@ -1477,6 +1607,159 @@ fills its weekly roster with its own greedy pass. Changing that one would invali
 every stored measurement in `data/results`, so it stays as it was measured; the
 gap between the two is the same 4-point order as above, and is stated here rather
 than quietly closed.
+
+## 13. Speed, and how it was measured
+
+`rateAll` runs on every horizon switch — Streaming, the fortnight, Stash — over
+1,433 players, and nothing is cached between switches, so its cost is what the
+reader feels when they click a tab.
+
+### 13.1 Where the time actually went
+
+`node --cpu-prof` over 200 `rateAll` calls against `data/snapshot.json`, self time:
+
+| | share of samples |
+|---|---|
+| `project` | 46.4% |
+| the per-player map body in `rateAll` | 21.8% |
+| `scoreStats` | 8.1% |
+| garbage collector | 6.2% |
+| `teamStrength` | 5.7% |
+| everything else | 11.8% |
+
+Line-level ticks inside `project` put the weight on four places, and none of them
+was the modelling: the `stats[key] = Number((...).toFixed(3))` store, the
+`Object.entries(s)` loop header, the eight-element array literal in
+`["avg", "obp", …].includes(key)`, and the two-level `QUALITY_SCALED` lookup — all
+of them per stat, so about 43,000 times a board.
+
+### 13.2 What changed
+
+Four things, none of which touches an equation:
+
+1. **The decimal round-trip.** `Number(x.toFixed(d))` formats a string and parses it
+   back, and a board runs it about 100,000 times — ~43,000 in projected stat lines
+   and ~57,000 in the two points breakdowns per player. `roundTo` in
+   `src/engine/points.ts` takes a guarded arithmetic path instead, falling back to
+   `toFixed` wherever a rounding tie is within reach. This is the whole of the win.
+2. **The scoring table is memoised on the table object.** `scoreStats` ran
+   `Object.entries(table)` 2,866 times a board over the same ~20 pairs of the same
+   object.
+3. **`teamStrength` sums the six fields `wobaish` reads**, not all thirty of every
+   player's line. It was also summing rate stats, so a club's `avg` was the sum of
+   its hitters' batting averages — a number with no meaning that nothing read.
+4. **Set membership** for the rate-stat skip list and the slot-eligibility groups,
+   instead of array literals rebuilt and linearly scanned per stat and per player.
+
+### 13.3 Proving it changed nothing
+
+A speedup that reorders players is not a speedup, it is a different model, and it
+would invalidate all twenty stored runs in `data/results/`. So identity is checked
+rather than argued: both implementations are loaded into one process and run on the
+same options, and **every field of every rated row is compared positionally** —
+rank, points, bscore, addValue, slot, replacement, rateable, confidence value and
+reasons, scheduled starts, projected volume, both multipliers, the whole projected
+stat line, `modelled`, `missing`, both points breakdowns, `unscoreable`, slots,
+undervaluation, market edge, uscore, rostered %, `unrateable`, regression gap. 32
+fields × 1,433 rows × the three horizons, ties included, positional so that a
+reordering of equal values is a failure.
+
+To re-run it, extract the comparison revision into a scratch tree
+(`git archive <rev> src model.json | tar -x -C /tmp/before`), import `rateAll` from
+both that tree and this one in a single process, call each on the same options
+object for the streaming, fortnight and rest-of-season horizons, and compare the two
+row arrays element by element with `Object.is`. Nothing about it is specific to
+these four changes — it is the check any future speedup here owes.
+
+Result: **identical in all three modes.** The one place the fast rounding path did
+diverge was found by the exhaustive check in `test/engine.mjs` rather than by
+reasoning — negative zero, which `toFixed` formats as `"0.000"` and parses back
+*positive* while the arithmetic path keeps the sign. That check compares `roundTo`
+against `Number(x.toFixed(d))` at 1, 2 and 3 digits over a list of adversarial values
+and 600,000 random ones, a third of them parked exactly on a rounding tie.
+
+### 13.4 A negative result: hoisting the loop invariants made it slower
+
+The obvious next step was to lift the four per-stat constants out of the loop —
+`QUALITY_SCALED[scope][group]`, `rates?.perUnit`, the quality × matchup product, and
+the recent-rate weight. It is strictly less work per iteration, and it measured
+**0.80-0.90x** — 10-20% *slower* — repeatedly and in both interleave orders. Reading
+the key with `for (const key in s)` instead of `Object.entries` was slower again, at
+0.85x. Both were reverted; only the skip-list `Set` was kept, which measured
+1.02-1.07x on its own.
+
+Two caveats on that, because it was measured with the single-process harness §13.5
+goes on to discredit. The direction was consistent across runs and orders, which the
+bimodality is not — it moves both ways — so the sign is believable even though the
+magnitude is not. And no mechanism is claimed: V8 evidently compiles the original
+shape better, and an argument from first principles about which version does less
+work was simply wrong. Being wrong cheaply is the reason the harness existed before
+the edits did.
+
+### 13.5 The measurement itself is the hard part on this box
+
+This machine runs several agents at once, and the first design — interleaving both
+implementations inside one process — proved unusable. Repeated runs of the identical
+harness returned 1.59x and 0.95x on the same code. A control that A/B'd the current
+source *against a copy of itself* came back at 1.00–1.04x, so the harness was not
+biased; the variance is real, and it is bimodal: the same source settles into a fast
+mode or a slow one, per process, and which one is not deterministic.
+
+`process.cpuUsage()` does not rescue it either — it came back 1.5x *larger* than wall
+time, because it sums V8's concurrent compiler and GC threads too.
+
+So the reported figure is a distribution over independent processes, one
+implementation per process, 400 warm-up calls before 60 measured ones, and the three
+implementations interleaved round by round so that drift in machine load falls on all
+of them equally.
+
+Even then the wall-clock distribution is bimodal, so the headline is taken from a
+third method that is insensitive to machine load: **sampled CPU work inside
+`rateAll`, from `--cpu-prof`, over 200 calls.** Six independent processes per
+implementation, ms per call:
+
+| | runs | median | best | worst |
+|---|---|---|---|---|
+| `git HEAD` | 6 | **127.7** | 115.7 | 132.3 |
+| + the correctness changes above | 6 | **127.4** | 77.5 | 132.0 |
+| + the speed changes | 6 | **88.2** | 84.2 | 95.6 |
+
+**About 1.45x on the median, and a much tighter distribution** — the new code ran
+84-96 in all six, where the old ran 77-132.
+
+That last column is the part that has to be said out loud. **The before-code
+occasionally ran faster than any after-run.** Two of its six processes came in at
+77.5 and 82.4 ms/call, beating the new code's best of 84.2. `project` and the
+per-player map body in `rateAll` are both large functions whose optimization outcome
+is a per-process lottery on this box, and that lottery is worth more than everything
+in §13.2 put together. So the honest claim is: the median is ~1.45x better and the
+variance is smaller; it is *not* "always faster".
+
+What is unambiguous is the part with a mechanism, because those functions are not
+bimodal. Sampled self time per 200 calls, on the same profiles:
+
+| | before | after |
+|---|---|---|
+| `scoreStats` | 2,291-2,334ms | **528-559ms** |
+| `teamStrength` | 1,674-1,701ms | **117-135ms** |
+
+That is about 8.8ms and 7.8ms per call, saved by the memo and by summing six fields
+instead of thirty — arithmetic that does not depend on which tier V8 picked. The
+`roundTo` calls that replaced the `toFixed` round-trips cost 342-378ms of the same
+budget, against a `toFixed`/`Number` cost that was spread through `project` and
+`scoreStats` and never appeared as its own line.
+
+One more thing was tried and rejected. `roundTo` is imported into `project.ts` from
+`points.ts`, and a module-local copy measured 78.5 and 84.0 ms/call against
+84.2-95.6 for the import — suggestive, but two samples inside a noise band this
+wide, and the cost is a second, separately-untested copy of a routine whose entire
+correctness argument is a floating-point bound. One definition, one test.
+
+
+Read it as "about 1.5x on this box, with a wide error bar", not as a precise
+constant. The identity check above carries no such caveat: it is exact.
+
+---
 
 ## Reproducing any of this
 

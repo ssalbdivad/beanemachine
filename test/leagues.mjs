@@ -9,7 +9,15 @@ import { League, ScoringPeriod } from "../src/schema.ts"
 import { rateAll, slotsFor } from "../src/engine/bscore.ts"
 import { activeSlots, replacementBySlot, startingLineup } from "../src/engine/trade.ts"
 import { HITTING_MAP, PITCHING_MAP } from "../src/engine/points.ts"
-import { deriveScoringPeriod, importLeague } from "../src/import.ts"
+import {
+  agentHeaders,
+  detect,
+  deriveScoringPeriod,
+  importableInBrowser,
+  importLeague,
+  IN_BROWSER,
+  readableInBrowser
+} from "../src/import.ts"
 import { resolvePeriod } from "../src/engine/period.ts"
 
 const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
@@ -394,6 +402,53 @@ try {
 } finally {
   globalThis.fetch = realFetch
 }
+
+// ── Which platforms a browser is allowed to read for itself ──────────────────────
+// Measured 2026-09-04, each with `Origin: https://beanemachine.com` on the exact
+// endpoint the importer uses:
+//
+//   ESPN     lm-api-reads.fantasy.espn.com     access-control-allow-origin: https://beanemachine.com
+//   Sleeper  api.sleeper.app                   access-control-allow-origin: *
+//   Yahoo    baseball.fantasysports.yahoo.com  no access-control headers at all
+//
+// That table is the whole reason the hosted build can now import a league, so it is
+// asserted rather than left as a comment. It is a claim about the PLATFORMS, not
+// about this code, and it is the client's only input for deciding whether to read a
+// league itself or hand the URL to the server — get it wrong in either direction and
+// the hosted build either lies about what it can do or fires a doomed cross-origin
+// request. test/static.mjs proves the ESPN and Sleeper halves against the live APIs.
+t("ESPN and Sleeper are readable from a page; Yahoo, which sends no CORS headers, is not",
+  readableInBrowser("espn") && readableInBrowser("sleeper") && !readableInBrowser("yahoo"),
+  ["espn", "sleeper", "yahoo"].map(x => `${x}:${readableInBrowser(x)}`).join(" "))
+t("and a platform nobody has taught it about is not assumed readable either",
+  !readableInBrowser("fleaflicker") && !readableInBrowser(""))
+
+// The URL form, which is what the client actually holds when the user hits Import.
+const URLS = {
+  "https://fantasy.espn.com/baseball/league?leagueId=81134470&seasonId=2021": true,
+  "https://sleeper.com/leagues/289646328504385536": true,
+  "https://baseball.fantasysports.yahoo.com/b1/228947/8": false,
+  // not a league URL at all: not browser-importable, and `detect` is what gets to
+  // say why — naming Yahoo for this would be a lie about a URL that names no platform
+  "https://example.com/my-league": false
+}
+for (const [url, expected] of Object.entries(URLS))
+  t(`"${url.slice(0, 52)}…" is ${expected ? "" : "not "}importable from a page`,
+    importableInBrowser(url) === expected)
+t("every URL the importer recognizes agrees with the platform table",
+  Object.keys(URLS).every(url => {
+    let platform
+    try { platform = detect(url).platform } catch { return importableInBrowser(url) === false }
+    return importableInBrowser(url) === readableInBrowser(platform)
+  }))
+
+// Under node there is no browser to speak for us, so the desktop user-agent still
+// goes out — the header every scrape here has always carried. In a page it is
+// dropped, which is what keeps each read a simple GET with no CORS preflight; that
+// half is only observable in a browser, and test/static.mjs is where it is observed.
+t("node still sends a user-agent, so nothing about the server-side scrape changed",
+  IN_BROWSER === false && agentHeaders("UA/1.0")["user-agent"] === "UA/1.0",
+  JSON.stringify({ IN_BROWSER, headers: agentHeaders("UA/1.0") }))
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

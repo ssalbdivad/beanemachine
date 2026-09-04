@@ -1,5 +1,34 @@
 # beanemachine user guide
 
+## Start here — the board you are looking at is not yours yet
+
+The first time you open beanemachine with nothing stored, it seeds itself from the
+league committed to this repo: **Mrs. Met's Harem**, Yahoo head-to-head points league
+228947. That is deliberate — a bscore has no meaning without a league's scoring
+behind it, so an empty first screen would teach you nothing. The page says so, in the
+band above the board, and offers the one button that ends it.
+
+Until you replace it, every number on the page is denominated in *that* league's
+points. A home run is worth 10.4 there (`test/ui.mjs` pins that value against the
+committed `scoring.json`); in a league that scores it differently the same players
+rank differently. [Set up your own league](#how-do-i-set-up-my-own-league) is three
+inputs — what each stat is worth, how many teams, and the roster slots — and the band
+disappears the moment your league is the active one.
+
+Two sentences of vocabulary, and the rest of this page is elaboration on them:
+
+- A **bscore** is *points above a free replacement* — what your league scores with a
+  player in a roster slot, minus what it scores with the best free agent at the same
+  slot, over the horizon you picked. It is the column the board is ranked on.
+- A **uscore** is that same figure discounted by how widely he is already rostered:
+  bscore asks who is best, uscore asks who is the best you can actually get.
+
+Every column on the board carries its own definition in its header tooltip, and all
+of them together sit under the table in *How this ranking was built*. The measured
+results behind them — what was validated, what was measured and rejected, and what
+cannot be measured at all — are in
+[METHODOLOGY.md](METHODOLOGY.md), summarised in the footer of the app itself.
+
 ## Which view you want
 
 The board opens on three tabs, and they are three different questions rather than

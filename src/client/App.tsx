@@ -12,7 +12,10 @@ import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
 import { leagues } from "./leagues.ts"
 import {
+	BoardPrimer,
 	EligibilityPanel,
+	EXAMPLE_LEAGUE_KEY,
+	ExampleNote,
 	Fragment2,
 	freshness,
 	leagueReady,
@@ -133,16 +136,24 @@ export const App = () => {
 				    for running a dev server — read by everyone, relevant to the few who are
 				    about to import. The reassurance a visitor needs is one line; the caveat
 				    belongs where importing is attempted, and it is on that form already. */}
+				{/* It also said "importing one by URL needs the local server", flatly, which
+				    is false for two platforms out of three: ESPN reflects our origin in
+				    `access-control-allow-origin` and Sleeper sends `*`, so a browser reads
+				    both directly. Only Yahoo has no CORS headers at all, and Yahoo is a
+				    scrape rather than an API. That blanket sentence was the single thing
+				    standing between a visitor and using this on their own league. */}
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
-						Your leagues are saved in this browser.{" "}
+						Your leagues are saved in this browser. Paste an <b>ESPN</b> or{" "}
+						<b>Sleeper</b> league URL and it imports right here.{" "}
 						<a
 							href="https://github.com/ssalbdivad/beanemachine#running-it"
 							target="_blank"
 							rel="noreferrer"
 						>
-							Importing one by URL needs the local server.
+							Yahoo alone needs the local server
 						</a>
+						, because Yahoo sends no CORS headers for a browser to read.
 					</p>
 				)}
 			</header>
@@ -250,10 +261,27 @@ export const App = () => {
 				/>
 			)}
 
+			{/* On every tab, not just the board: the demo is not a property of one
+			    screen, and League setup is where the note is most useful. It goes
+			    away by itself the moment a different league is the active one. */}
+			{league && key === EXAMPLE_LEAGUE_KEY && (
+				<ExampleNote
+					league={league}
+					onOpenSetup={view === "league" ? undefined : () => setView("league")}
+				/>
+			)}
+
 			{view === "board" ?
-				<div className="grid">
-					<Board snapshot={snapshot} league={league ?? null} error={snapshotError} />
-				</div>
+				<>
+					{/* Above the grid, not in it: `.grid` is two columns and this is one
+					    line of orientation, not a card. Only once there is something to
+					    orient — with the league unset the Setup panel above is the
+					    message, and a definition of bscore is not what is missing. */}
+					{ready && <BoardPrimer />}
+					<div className="grid">
+						<Board snapshot={snapshot} league={league ?? null} error={snapshotError} />
+					</div>
+				</>
 			: view === "draft" ?
 				<div className="grid">
 					<Draft
@@ -300,10 +328,97 @@ export const App = () => {
 				</div>
 			}
 
+			<Colophon />
+
 			{toast && <div className={`toast on${toast.bad ? " bad" : ""}`} role="status">{toast.message}</div>}
 		</div>
 	)
 }
+
+/**
+ * What the app is willing to claim, and where the working is.
+ *
+ * The advanced reader has the opposite problem to the beginner: the measured
+ * results exist, in detail, and the app pointed at exactly one of them — a
+ * single "How to read this" link in the nav, to the guide. METHODOLOGY.md is
+ * where the backtest, the negative results and the caveats live and nothing on
+ * screen mentioned it at all.
+ *
+ * The three caveats here are the ones that change how a number on this page
+ * should be read, so they belong on the page and not only in a doc:
+ *
+ * - Ranking, docs/METHODOLOGY.md §6.5: mean Spearman rho 0.6759 vs a naive
+ *   0.5743 for hitting (+17.7%, 48 of 50 folds) and 0.5318 vs 0.4697 for
+ *   pitching (+13.2%, 49 of 50), 14-day horizon, 2016-2026.
+ * - The human comparison, §9: 63/111 weeks is 63W-47L with ties excluded,
+ *   z 1.53, one-sided p 0.064 — short of the 5% bar this project applies to
+ *   its other results, and quoting the win count without the p-value is the
+ *   asymmetry METHODOLOGY calls out by name. Beating an inactive manager
+ *   (98/111) and a streak-chaser (74/111) is the part that is established.
+ * - Probables, §3.5: "This cannot be backtested, and the weight was not set by
+ *   a measurement." Nothing archives what was announced when.
+ *
+ * Market edge gets its own line because it is a control on the board a reader
+ * can select today, and the board's own warning does not cover it: Board.tsx
+ * warns only when `edgeCoverage < 0.35`, and about coverage, not about the
+ * leaked values. docs/GUIDE.md documents the per-game weather percentage that
+ * reached the committed capture's "% Ros" sweep, 225 players across four games
+ * reading 51%.
+ */
+const Colophon = () => (
+	<footer className="colophon">
+		<p className="links">
+			<a
+				href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/GUIDE.md"
+				target="_blank"
+				rel="noreferrer"
+			>
+				How to read the board
+			</a>
+			<a
+				href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/METHODOLOGY.md"
+				target="_blank"
+				rel="noreferrer"
+			>
+				Methodology &amp; measured results
+			</a>
+			<a href="https://github.com/ssalbdivad/beanemachine" target="_blank" rel="noreferrer">
+				Source
+			</a>
+		</p>
+		<dl>
+			<Fragment2 term="what is measured">
+				Scored against a naive &ldquo;he keeps doing what he has been doing&rdquo;
+				baseline over 2016&ndash;2026 at a 14-day horizon, this ordering won 48 of 50
+				hitting folds (mean Spearman &rho; 0.676 against 0.574) and 49 of 50 pitching
+				folds (0.532 against 0.470). The consistency is the result, not the size:
+				&rho; 0.68 leaves a great deal of disagreement between the projected order and
+				the real one, and a bscore of 55 is not a forecast that you gain 55 points.
+			</Fragment2>
+			<Fragment2 term="what is not">
+				Playing five seasons out, the model beats an inactive manager 98 weeks of 111
+				and a streak-chaser 74, both clearly. Against a manager who blends season and
+				recent form it is 63 of 111 &mdash; 63W&ndash;47L, z 1.53, one-sided p 0.064.
+				That is suggestive and does not clear the 5% bar the rest of these results
+				are held to.
+			</Fragment2>
+			<Fragment2 term="what cannot be checked">
+				Where MLB has published a probable starter the board projects a pitcher from
+				his own scheduled starts. Probables are announced and then overwritten and
+				nothing archives them, so that step cannot be backtested at all, and its
+				weight was set by judgment rather than by a measurement.
+			</Fragment2>
+			<Fragment2 term="what is known broken">
+				<b>Market edge</b> is selectable and unreliable, so it is not the default.
+				The sweep that reads Yahoo&rsquo;s &ldquo;% Ros&rdquo; caught a per-game
+				weather figure in the committed capture, and being per-game it is shared by
+				everyone in both clubs &mdash; 225 players across four games read 51%. bscore
+				is the honest column, and <b>Free agents only</b> is the control that answers
+				what edge was there to answer.
+			</Fragment2>
+		</dl>
+	</footer>
+)
 
 const Toolbar = ({
 	config,

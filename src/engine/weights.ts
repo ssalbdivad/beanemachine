@@ -19,7 +19,8 @@ export const ModelWeights = type({
 	version: "number",
 	about: Why,
 	recentForm: {
-		volumeWeight: "0 <= number <= 1",
+		// no `volumeWeight`: it was a knob no call path could reach, holding the value
+		// `blend`'s own note retracts. See model.json `recentForm.why`.
 		blend: SideWeights,
 		rate: SideWeights,
 		windows: { hitting: { "[string]": "number" }, pitching: { "[string]": "number" } },

@@ -562,6 +562,101 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
 ]
 
 /**
+ * The league committed to `public/scoring.json`, which `leagues.ts` seeds into a
+ * new browser on a first visit so the page opens on a real board instead of an
+ * empty screen.
+ *
+ * The key is hardcoded because it is the only durable signal there is. The seed
+ * is written into localStorage and from then on is indistinguishable from a
+ * league somebody imported — same shape, same `provenance.verified: true`,
+ * because it genuinely was read off Yahoo. Deriving "is this the demo" from the
+ * `store` state would only be true on the visit that seeded it, and the visitor
+ * who comes back tomorrow is the one most likely to have forgotten. So it is the
+ * key, and it holds for as long as this file and `public/scoring.json` agree.
+ * `test/ui.mjs` already pins that agreement: it asserts the selected league is
+ * `yahoo:228947` and that the chip reads "Mrs. Met's Harem".
+ */
+export const EXAMPLE_LEAGUE_KEY = "yahoo:228947"
+
+/**
+ * What a first-time visitor is actually looking at.
+ *
+ * A demo you can explore beats an empty state — nothing here means anything
+ * without a league, and an empty board teaches nobody what a bscore is. But a
+ * demo you mistake for YOUR team is worse than either: every number below is
+ * denominated in a stranger's scoring, the ranking is ordered by it, and the
+ * only thing on screen that hinted at it was a chip reading "Mrs. Met's Harem"
+ * — a name a new visitor has no reason to read as somebody else's.
+ *
+ * So the demo stays, and it says so. It names itself, it makes the point
+ * concrete with a scoring value read out of the league rather than asserted
+ * here (so it stays true if the value is edited), and it offers the one move
+ * that ends it. It clears itself: the moment another league is active this
+ * stops rendering, with nothing to dismiss and nothing to remember.
+ */
+export const ExampleNote = ({
+	league,
+	onOpenSetup
+}: {
+	league: League
+	/** Absent when League setup is already the open tab. */
+	onOpenSetup?: () => void
+}) => {
+	// Read, never asserted: the point is that scoring is per-league, so quoting a
+	// number this page can't see would be the exact mistake it is warning about.
+	const hr = league.scoring.batting.HR
+	const team = league.meta.team_name ?? league.meta.league_name ?? EXAMPLE_LEAGUE_KEY
+	return (
+		<div className="example-note">
+			<p>
+				<b>This is an example league, not yours.</b> {team} is a real{" "}
+				{league.meta.max_teams != null && <>{league.meta.max_teams}-team </>}
+				league that beanemachine is developed against, and it is here so the board has
+				something real to rank.{" "}
+				{typeof hr === "number" ?
+					<>
+						Every number below is in <i>its</i> points &mdash; a home run is worth {hr}{" "}
+						here, and a league that scores it differently ranks differently.
+					</>
+				:	<>
+						Every number below is in <i>its</i> points, and a league that scores
+						differently ranks differently.
+					</>}
+			</p>
+			{onOpenSetup && (
+				<button className="primary" onClick={onOpenSetup}>
+					Use my league instead
+				</button>
+			)}
+		</div>
+	)
+}
+
+/**
+ * The orientation a beginner needs before the first number, and nothing more.
+ *
+ * The definitions of every column already exist in-page: `COLUMN_HELP` in
+ * `Board.tsx` writes them into each header's `title` and into the "How this
+ * ranking was built" disclosure under the table. What did not exist was
+ * anything at the top saying what kind of thing the list IS, so the first
+ * screen was a ranked table of numbers with no unit stated anywhere on it.
+ *
+ * This is therefore a pointer, not a second glossary — two copies of the same
+ * definitions drift, and this file has already been burned by that (see the
+ * note on `VIEWS`). It says what the ordering means and where the full
+ * definitions are; the disclosure under the table keeps owning them.
+ */
+export const BoardPrimer = () => (
+	<p className="primer">
+		Every row is a player, ranked on <b>points above a free replacement</b>: what this
+		league scores with him in a slot, minus the best free agent at the same slot, over
+		the window you pick below. That is a <b>bscore</b>; <b>uscore</b> discounts it by
+		how widely he is already rostered. Full definitions are on each column header, and
+		under the table.
+	</p>
+)
+
+/**
  * Rendered above whichever tab is open, never instead of it: each tab still
  * says its own piece, and this says the piece none of them can see.
  */
@@ -573,7 +668,9 @@ export const Setup = ({
 }: {
 	leagueKey: string | null
 	league: League | null
-	/** False in the static build, where reading a league needs the local server. */
+	/** Whether a league can be read from wherever this page is running. True with a
+	 *  server behind it; on the static build true for ESPN and Sleeper, which allow
+	 *  a browser to read them, and false only for Yahoo, which sends no CORS headers. */
 	canImport: boolean
 	/** Absent when League setup is already the open tab — a button to where you
 	 *  are is furniture. */
@@ -631,8 +728,17 @@ export const Setup = ({
 							ends with <i>read from source</i> against them.{" "}
 						</>
 					:	<>
-							<b>Importing needs the local server</b>, and this is the static build, so the
-							values have to be typed in here. They are stored in this browser either way.{" "}
+							{/* This said "importing needs the local server" flatly. Measured: ESPN
+							    reflects our origin in `access-control-allow-origin` and Sleeper
+							    sends `*`, so both import straight from the page; Yahoo sends no
+							    such header at all and is a scrape rather than an API. Telling an
+							    ESPN user to type his scoring by hand was turning away the visitor
+							    this build exists for. */}
+							<b>Paste your ESPN or Sleeper league&rsquo;s URL</b> in the field above and
+							beanemachine reads the real values off it. A <b>Yahoo</b> league has to be
+							typed in here instead: this build has no server behind it, and Yahoo sends
+							no CORS headers for a browser to read. Either way it is stored in this
+							browser.{" "}
 						</>
 					}
 					{league && onOpenSetup ?

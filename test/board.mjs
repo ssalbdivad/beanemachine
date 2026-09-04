@@ -67,25 +67,68 @@ t("the board pages in more rows as you reach the end",
 await page.evaluate(() => window.scrollTo(0, 0))
 
 /**
- * uscore — bscore per point of ownership — is its own column and its own ranking.
+ * SEVEN columns, each answering a different question, and each cell placed by the
+ * name of its column rather than by its index among its siblings.
  *
- * The board carries eight columns now. `proj pts` and `waiver pts` are gone from
- * it: bscore is one minus the other, so the table was stating a single subtraction
- * three times in the place where scanning matters most. Both are in the drill-down,
- * which is asserted further down.
+ * `proj pts` and `waiver pts` went first: bscore is one minus the other, so the
+ * table was stating a single subtraction three times in the place where scanning
+ * matters most. Both are in the drill-down, which is asserted further down.
+ *
+ * `owned` has now gone the same way, into uscore. uscore is `addValue x (1 -
+ * owned)`, so the two were blank on precisely the same rows — 500 of the 1,233
+ * rateable rows on the committed fixture, and 36 of the first 60, which is why the
+ * board opened on seven straight rows of two dashes side by side. One missing
+ * input must be reported once.
  */
 const headers = await page.$$eval(".board-head > *", n => n.map(e => e.textContent.trim()))
-t("the board shows the eight decision columns",
-  ["uscore", "bscore", "owned", "GP"].every(h => headers.some(x => x.startsWith(h))),
+t("the board shows the seven decision columns",
+  ["#", "Player", "uscore", "bscore", "games", "confidence", "luck"]
+    .every(h => headers.some(x => x.startsWith(h))) && headers.length === 7,
   headers.join(" | "))
 t("and no longer restates bscore's own arithmetic beside it",
   !headers.some(h => /proj pts|waiver pts/.test(h)), headers.join(" | "))
+t("ownership is no longer a column of its own",
+  !headers.some(h => /^owned/.test(h)), headers.join(" | "))
 
+/**
+ * The head and the row must agree cell for cell, in name and in pixels.
+ *
+ * app.css places both by `nth-child`, and that has failed before in exactly this
+ * spot: auto-placement once put the confidence gauge under "GP" and the games
+ * count under "confidence", so every number in two columns was labelled as the
+ * other one. Each cell now carries `data-col` and the grid places by that, which
+ * is only true as long as something checks it — including at the widths where
+ * columns are dropped, because a header dropped without its body is the same bug
+ * with a smaller blast radius.
+ */
+const columnsLineUp = async () =>
+  page.evaluate(() => {
+    const vis = el => getComputedStyle(el).display !== "none"
+    const right = el => Math.round(el.getBoundingClientRect().right)
+    const head = [...document.querySelectorAll(".board-head > [data-col]")].filter(vis)
+    const row = [...document.querySelector(".board-row").querySelectorAll(":scope > [data-col]")].filter(vis)
+    return {
+      head: head.map(e => `${e.dataset.col}@${right(e)}`),
+      row: row.map(e => `${e.dataset.col}@${right(e)}`),
+      names: head.map(e => e.dataset.col)
+    }
+  })
+const wide = await columnsLineUp()
+t("every heading sits over the cells it names",
+  wide.head.join() === wide.row.join(), `${wide.head.join(" ")} vs ${wide.row.join(" ")}`)
+t("all seven columns are on screen at 1280px",
+  wide.names.join() === "rank,who,uscore,bscore,games,conf,luck", wide.names.join())
+
+/**
+ * uscore carries its own denominator now, so the cell holds two numbers and the
+ * ranking has to be read off the score rather than off the cell's text.
+ */
 await page.click(".board-head .sort-head:has-text('uscore')")
 await page.waitForTimeout(300)
-const us = await page.$$eval(".board-row .uscore", n =>
-  n.map(e => Number(String(e.textContent).replace("—", "NaN")))
-)
+const usCells = await page.$$eval(".board-row [data-col=uscore]", n => n.map(e => e.textContent.trim()))
+t("the uscore cell prints the ownership it divided by",
+  usCells.length > 0 && usCells.every(c => /^[\d.]+\d% owned$/.test(c)), String(usCells.slice(0, 3)))
+const us = await page.$$eval(".board-row [data-col=uscore] .us-val", n => n.map(e => Number(e.textContent)))
 t("choosing uscore orders by uscore",
   us.length > 0 && us.every(v => Number.isFinite(v)) &&
     us.every((v, i) => i === 0 || us[i - 1] >= v), String(us.slice(0, 5)))
@@ -93,6 +136,71 @@ t("choosing uscore orders by uscore",
 // rostering at all, so the same guard the other comparative sorts use applies
 const usB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("uscore ranks only players above replacement", usB.every(v => v > 0), String(usB.slice(0, 5)))
+
+await page.selectOption("[data-ctl=sort]", "bscore")
+await page.waitForTimeout(300)
+
+/**
+ * The window column is per SIDE, and it says which of the two units it is in.
+ *
+ * It used to be "GP" for everybody — the games a player's TEAM plays. For a
+ * starting pitcher that is the wrong quantity by roughly a factor of six: on the
+ * committed fixture the starters with published turns average about 3 of them
+ * against 14 team games over the fortnight, and about 1 against 6 over the
+ * streaming week, which is the view where 12 of the top 20 rows are starters. The
+ * engine has computed `scheduledStarts` all along and the projection is already
+ * built on it, so the board was ranking on one number and displaying another.
+ *
+ * A null is not a zero: MLB publishes probables about a week out, so the
+ * rest-of-season view has none at all and a reliever never gets one. Those fall
+ * back to team games and say GP. What is asserted is that the two are never
+ * confused — a GS row must be a pitcher, and its value must be far below the
+ * team's game count rather than equal to it.
+ */
+const windowCells = await page.$$eval(".board-row", rows =>
+  rows.map(r => ({
+    slot: r.querySelector(".who .code")?.textContent?.trim(),
+    text: r.querySelector("[data-col=games]")?.textContent?.trim() ?? "",
+    unit: r.querySelector("[data-col=games] .g-unit")?.textContent?.trim() ?? ""
+  }))
+)
+t("every row states which unit its window count is in",
+  windowCells.length > 0 && windowCells.every(c => c.unit === "GS" || c.unit === "GP"),
+  JSON.stringify(windowCells.slice(0, 3)))
+const gsRows = windowCells.filter(c => c.unit === "GS")
+t("the fortnight board shows own-starts for pitchers", gsRows.length > 0,
+  `${gsRows.length} of ${windowCells.length} rendered rows`)
+t("a start count is only ever shown for a pitcher",
+  gsRows.every(c => c.slot === "P" || c.slot === "SP" || c.slot === "RP"),
+  JSON.stringify(gsRows.slice(0, 4)))
+// the whole point: it is his own number, not his club's, so it must be far smaller
+t("a starter's own turns are a fraction of his club's games",
+  gsRows.every(c => Number(c.text.replace("GS", "")) < 8),
+  JSON.stringify(gsRows.slice(0, 4)))
+const gpRows = windowCells.filter(c => c.unit === "GP")
+t("everyone without published turns still gets his team's games",
+  gpRows.length > 0 && gpRows.every(c => Number(c.text.replace("GP", "")) >= 1),
+  JSON.stringify(gpRows.slice(0, 3)))
+/**
+ * And the same distinction out loud. The row is markup a screen reader reads as a
+ * run of unlabelled numbers, so the aria-label carries the labels the columns
+ * carry visually — which means it has to make the same per-side choice, or the
+ * spoken board says "14 games scheduled" about a man taking three turns.
+ */
+const spokenWindow = await page.$$eval(".board-row", rows =>
+  rows.map(r => ({
+    gs: !!r.querySelector("[data-col=games] .g-unit")?.textContent?.includes("GS"),
+    label: r.getAttribute("aria-label") ?? ""
+  }))
+)
+t("a row showing own starts says starts out loud, and never calls them team games",
+  spokenWindow.some(r => r.gs) &&
+    spokenWindow.every(r =>
+      r.gs ?
+        /[\d.]+ scheduled starts/.test(r.label) && !/team games/.test(r.label)
+      :	/team games scheduled|no scheduled games/.test(r.label)
+    ),
+  JSON.stringify(spokenWindow.filter(r => r.gs).slice(0, 2)))
 
 // Market edge keeps its ranking without keeping a column — same as `contact`.
 await page.selectOption("[data-ctl=sort]", "marketEdge")
@@ -271,6 +379,29 @@ t("drill-down separates measured, Statcast model and our model",
   sections.some(s => s.includes("statcast model")) &&
   sections.some(s => s.includes("our model")),
   sections.join("|"))
+/**
+ * The advanced reader opens a row to ask why this player is ranked here, and the
+ * first thing under his thumb has to be the answer.
+ *
+ * It was not. The first column was the per-stat points ledger — "K 75.58, OUT 54,
+ * W 14.94, H -12.68" — eight lines of arithmetic behind a number the next column
+ * states in one line. On a phone the four columns stack, so all of it came before
+ * anything explanatory. Nothing was dropped in fixing it; the ledger is the same
+ * eight rows, last instead of first.
+ */
+t("the drill-down leads with what the ranking is, not with the ledger behind it",
+  sections[0].includes("what he is worth"), sections.join(" | "))
+t("and it ends with the per-category ledger",
+  sections[sections.length - 1].includes("by category"), sections.join(" | "))
+/**
+ * What the model could not read is the product's own promise, and it used to sit
+ * at the bottom of the rightmost column, below two Statcast tables. It is second
+ * now — beside the assumptions it qualifies — whenever there is any.
+ */
+const missingAt = sections.findIndex(s => s.includes("missing"))
+t("anything missing is reported next to the model that missed it, not last",
+  missingAt === -1 || missingAt < sections.indexOf("projected points by category"),
+  sections.join(" | "))
 const modelled = await page.$$eval(".detail .notes li", n => n.map(e => e.textContent))
 // Volume is derived one of two legitimate ways: blended playing time, or — for a
 // starter whose starts MLB has published — outs per start times scheduled starts.
@@ -315,7 +446,11 @@ const why = await page.textContent(".pick-why")
 const pickScore = Number(await page.textContent(".pick-score b"))
 t("Billy's reasoning cites the actual bscore",
   why.includes(String(pickScore)) && /more points than the best/.test(why), why)
-t("Billy's reasoning cites real scheduled games", /plays \d+ games/.test(why), why)
+// Per side, like the column: a hitter's club's games, a starter's own turns. The
+// card used to quote team games at everybody, which for a starting pitcher is the
+// biggest number on his row and the least relevant one.
+t("Billy's reasoning cites a real count of what is scheduled",
+  /plays \d+ games/.test(why) || /down for [\d.]+ starts/.test(why), why)
 t("Billy uses the right volume unit for the side",
   /plate appearances per team game|outs recorded per team game/.test(why), why)
 
@@ -521,6 +656,58 @@ await page.waitForSelector(".board-row")
 const topAfter = await page.$eval(".board-row .who b", e => e.textContent)
 t("re-scoring the league re-ranks the board",
   typeof topAfter === "string" && topAfter.length > 0, `${topBefore} → ${topAfter}`)
+
+/**
+ * The phone. Below 640px only two numbers fit beside the name — measured, the
+ * board is 300px wide at 390px — and which two is a decision, not an accident.
+ *
+ * They used to be uscore and bscore, and uscore is the column that is blank on 36
+ * of the first 60 rows: the mobile reader got a column of dashes as one of his two
+ * numbers. The window count has the slot now. It is never blank (0 of 1,233 rows
+ * on the fixture), it is the only number on the row that is a fact about the
+ * window rather than about the player, and for a starter it is his own turns.
+ * uscore comes back only when the board is RANKED by it, because a board must
+ * always show the number it is sorted by.
+ */
+const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
+await phone.goto(BASE, { waitUntil: "networkidle" })
+await phone.waitForSelector(".board-row", { timeout: 30000 })
+const cols = async () =>
+  phone.evaluate(() => {
+    const vis = el => getComputedStyle(el).display !== "none"
+    const right = el => Math.round(el.getBoundingClientRect().right)
+    const head = [...document.querySelectorAll(".board-head > [data-col]")].filter(vis)
+    const row = [...document.querySelector(".board-row").querySelectorAll(":scope > [data-col]")].filter(vis)
+    return {
+      names: head.map(e => e.dataset.col),
+      head: head.map(e => `${e.dataset.col}@${right(e)}`),
+      row: row.map(e => `${e.dataset.col}@${right(e)}`)
+    }
+  })
+const small = await cols()
+t("at 390px the board keeps the name and the two numbers that are never blank",
+  small.names.join() === "rank,who,bscore,games", small.names.join())
+t("and the headings still sit over the cells they name at 390px",
+  small.head.join() === small.row.join(), `${small.head.join(" ")} vs ${small.row.join(" ")}`)
+t("no column on the phone board is empty",
+  (await phone.$$eval(".board-row [data-col=games]", n => n.map(e => e.textContent.trim())))
+    .every(x => /\d/.test(x)))
+t("the page does not scroll sideways at 390px",
+  (await phone.evaluate(() => document.documentElement.scrollWidth)) <= 390,
+  String(await phone.evaluate(() => document.documentElement.scrollWidth)))
+await phone.selectOption("[data-ctl=sort]", "uscore")
+await phone.waitForTimeout(400)
+const sorted = await cols()
+t("ranking by uscore brings its column back on a phone",
+  sorted.names.includes("uscore") && sorted.head.join() === sorted.row.join(),
+  sorted.names.join())
+// and confidence, which the phone drops, has to survive somewhere the phone reaches
+await phone.click(".board-row")
+await phone.waitForSelector(".detail")
+const phoneDetail = await phone.$$eval(".detail .pair dt", n => n.map(e => e.textContent.trim()))
+t("what the phone drops from the row is in the drill-down it can open",
+  phoneDetail.includes("confidence"), phoneDetail.join(", "))
+await phone.close()
 
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)

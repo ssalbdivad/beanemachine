@@ -1,3 +1,4 @@
+import { agentHeaders, readableInBrowser } from "../import.ts"
 import { parseRoster, type RosterEntry } from "./yahoo-pool.ts"
 
 /**
@@ -23,8 +24,22 @@ const UA =
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
 	"Chrome/124.0.0.0 Safari/537.36"
 
+/**
+ * Every reader below runs unchanged in a page as well as in node — the two that a
+ * browser is allowed to reach, anyway. `agentHeaders` drops the `user-agent` in a
+ * browser so each read stays a simple GET with no CORS preflight (see the measured
+ * table on `readableInBrowser` in src/import.ts); `yahoo` keeps sending one because
+ * only node ever calls it.
+ *
+ * Re-exported so the client can ask the same question with one import: whether a
+ * roster read needs the server is exactly whether the platform sends CORS headers,
+ * which is the fact `src/import.ts` already carries.
+ */
+export { readableInBrowser }
+
 const yahoo = async (leagueId: string, teamId: string, sport: string): Promise<RosterRead> => {
 	const url = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/${teamId}`
+	// node only: Yahoo sends no CORS headers, so this is never reached from a page.
 	const res = await fetch(url, { headers: { "user-agent": UA } })
 	if (!res.ok) return { players: [], note: `Yahoo returned HTTP ${res.status} for that team.` }
 	const text = await res.text()
@@ -148,7 +163,7 @@ const espn = async (
 		fetch(
 			`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${sport}` +
 				`/seasons/${yr}/segments/0/leagues/${leagueId}?view=mRoster&view=mSettings`,
-			{ headers: { "user-agent": UA, accept: "application/json" } }
+			{ headers: { ...agentHeaders(UA), accept: "application/json" } }
 		)
 	let res = await get(season)
 	// ESPN 404s a season the league never played, and the default season is the
@@ -231,6 +246,11 @@ const espn = async (
  * own docs ask that you "save this information on your own servers" and call it
  * "once per day at most". So it is fetched once per sport per process and held.
  * A failure is NOT cached: a throttled read should be retryable.
+ *
+ * In a page the same cache is per page load, and the download is the user's own
+ * bandwidth — which is the one place the browser-direct path is measurably worse
+ * than going through the server. It is still the only way to name a Sleeper id, and
+ * it only ever runs for a roster read the user asked for.
  */
 const sleeperDicts = new Map<string, Promise<Record<string, any> | null>>()
 
@@ -239,7 +259,7 @@ const sleeperPlayers = (sport: string): Promise<Record<string, any> | null> => {
 	if (hit) return hit
 	const pending = (async () => {
 		const res = await fetch(`https://api.sleeper.app/v1/players/${sport}`, {
-			headers: { "user-agent": UA }
+			headers: agentHeaders(UA)
 		})
 		if (!res.ok) return null
 		return (await res.json().catch(() => null)) as Record<string, any> | null
@@ -293,7 +313,7 @@ const SLEEPER_BENCH = new Set(["BN", "IR", "TAXI"])
  * can never match the multi-position line Yahoo prints, and the note says so.
  */
 const sleeper = async (leagueId: string, teamId: string, sport: string): Promise<RosterRead> => {
-	const headers = { "user-agent": UA }
+	const headers = agentHeaders(UA)
 
 	// the league first: it names the sport, and it holds the seat chart
 	const leagueRes = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`, { headers })

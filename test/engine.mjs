@@ -551,5 +551,176 @@ t("players with full confidence are negative too, so negative is not noise",
   confident.filter(x => x < 0).length > confident.length / 2,
   `${confident.filter(x => x < 0).length} of ${confident.length} at confidence ≥ 0.70 are below 0, worst ${confident[0]}`)
 
+
+// ---------------------------------------------------------------------------
+// 11. The start rate for the games MLB has not named yet.
+//
+// It was `gamesStarted ÷ his club's games played` — a numerator accrued only over
+// the part of the season the pitcher was actually in a rotation, over a
+// denominator counting the whole of it. Every starter who missed time read as a
+// man who rarely starts, and the split-start formula then credited him with almost
+// no turns. METHODOLOGY 3.5.0.
+// ---------------------------------------------------------------------------
+const { resolvePeriod } = await import("../src/engine/period.ts")
+const { MODEL: M } = await import("../src/engine/weights.ts")
+const seasonEnd = hyd.slate.reduce((a, g) => (g.date > a ? g.date : a), snap.horizon.end)
+const per = resolvePeriod(league, snap.horizon.start, seasonEnd)
+const wk = windowFrom(hyd.slate, per.start, per.end)
+const weekBoard = rateAll({
+  ...base, eligibility: hyd.eligibility, gamesByTeam: wk.games, opponentsByTeam: wk.opponents,
+  probableStarts: wk.probableStarts, probableCoverage: wk.coverage,
+  opposingStarters: wk.opposingStarters, startOpponents: wk.startOpponents,
+  injuryPolicy: "exclude"
+})
+const mostlyStarter = r => {
+  const gp = r.player.stats.gamesPitched ?? 0
+  return r.player.group === "pitching" && gp > 0 &&
+    (r.player.stats.gamesStarted ?? 0) / gp >= M.probables.minStartShare
+}
+const starters = weekBoard.filter(mostlyStarter)
+t("the streaming window has partly-published clubs, or the rest of this is vacuous",
+  [...wk.coverage.values()].some(c => c.published > 0 && c.published < c.games) && starters.length > 50,
+  `${starters.length} mostly-starting pitchers, ` +
+  `${[...wk.coverage.values()].filter(c => c.published > 0 && c.published < c.games).length} partly-published clubs`)
+
+// The new rate GENERALISES the old one rather than replacing it: with no recent
+// window the blend is the season rate, and (outs÷teamGP)÷(outs÷GS) = GS÷teamGP.
+// Every such pitcher must still land on exactly the old number.
+const noRecent = starters.filter(r => !hyd.recentVolumeByWindow[`${r.player.id}:pitching`])
+const reproduced = noRecent.filter(r => {
+  const cov = wk.coverage.get(r.player.teamId)
+  const teamGP = hyd.teamGamesPlayed.get(r.player.teamId)
+  if (!cov || !teamGP || cov.games === 0) return r.scheduledStarts === null
+  const published = wk.probableStarts.get(r.player.id) ?? 0
+  const unnamed = Math.max(cov.games - cov.published, 0)
+  const old = Number((published + unnamed * Math.min((r.player.stats.gamesStarted ?? 0) / teamGP, 1)).toFixed(2))
+  return r.scheduledStarts === old
+})
+t("a pitcher with no recent window still gets exactly the season-rate answer",
+  noRecent.length > 20 && reproduced.length === noRecent.length,
+  `${reproduced.length}/${noRecent.length} reproduce the old formula to the digit`)
+
+// ...and where a recent window exists, the credited rate is a rotation's rate.
+// Pure starters with nothing of their own published are the clean population:
+// whatever the model believes about them comes entirely from this term.
+const clean = starters.filter(r => {
+  const gs = r.player.stats.gamesStarted ?? 0
+  const cov = wk.coverage.get(r.player.teamId)
+  return gs === (r.player.stats.gamesPitched ?? 0) && gs >= 4 && cov &&
+    (wk.probableStarts.get(r.player.id) ?? 0) === 0 &&
+    Math.max(cov.games - cov.published, 0) >= 2 &&
+    !!hyd.recentVolumeByWindow[`${r.player.id}:pitching`]
+})
+const perGame = clean.map(r => {
+  const cov = wk.coverage.get(r.player.teamId)
+  return r.scheduledStarts / Math.max(cov.games - cov.published, 0)
+}).sort((a, b) => a - b)
+const med = perGame[Math.floor(perGame.length / 2)]
+t("an unnamed game is credited at roughly a five-man rotation's rate",
+  clean.length >= 20 && med > 0.16 && med < 0.26,
+  `${clean.length} pure starters, median ${med.toFixed(3)} starts per unnamed game (a rotation is 0.20)`)
+// the specific failure: the season-only rate put 9 of these 40 below 0.10 — a
+// starter credited with one turn in ten or worse. Blake Snell read 0.037.
+const oldPerGame = clean.map(r =>
+  Math.min((r.player.stats.gamesStarted ?? 0) / hyd.teamGamesPlayed.get(r.player.teamId), 1))
+t("and no longer at one turn in ten, which is what a missed month used to buy",
+  oldPerGame.filter(x => x < 0.10).length > perGame.filter(x => x < 0.10).length,
+  `${oldPerGame.filter(x => x < 0.10).length} were below 0.10 on the season-only rate, ` +
+  `${perGame.filter(x => x < 0.10).length} are now`)
+
+// ---------------------------------------------------------------------------
+// 12. Every unrateable player owes a reason. `unrateable: null` means rateable —
+// that is the field's stated contract, and three of the four ways to become
+// unrateable did not honour it.
+// ---------------------------------------------------------------------------
+for (const [label, rows] of [["the streaming week", weekBoard], ["the fortnight", board]]) {
+  const silent = rows.filter(r => !r.rateable && (r.unrateable === null || r.unrateable === undefined))
+  t(`no unrateable player is refused without a reason (${label})`,
+    silent.length === 0,
+    `${silent.length} of ${rows.filter(r => !r.rateable).length}: ` +
+    silent.slice(0, 3).map(r => r.player.name).join(", "))
+  t(`and a rateable player carries no reason (${label})`,
+    rows.filter(r => r.rateable).every(r => r.unrateable === null))
+}
+
+// ---------------------------------------------------------------------------
+// 13. Speed. The fast rounding path must be the same function as the decimal
+// round-trip it replaces, and the memoised scoring table must not collapse two
+// different leagues into one. METHODOLOGY 13.
+// ---------------------------------------------------------------------------
+const { roundTo, scoreStats: score } = await import("../src/engine/points.ts")
+const adversarial = [
+  0, -0, 1, -1, 0.5, -0.5, 0.0005, -0.0005, 0.0015, -0.0015, 1.0005, 8.575, 1.005,
+  0.1 + 0.2, 1 / 3, 2 / 3, 1e-9, -1e-9, 999999.9995, 0.4445, 0.4455, 123.4565,
+  Number.MIN_VALUE, Number.EPSILON, 1e9, -1e9, 1e15, -1e15, Infinity, -Infinity, NaN
+]
+let mism = 0, firstBad = ""
+const checkRound = x => {
+  for (const d of [1, 2, 3]) {
+    const a = Number(x.toFixed(d)), b = roundTo(x, d)
+    if (!Object.is(a, b) && !(Number.isNaN(a) && Number.isNaN(b))) {
+      mism++
+      if (!firstBad) firstBad = `${x} @${d}: toFixed ${a} vs roundTo ${b}`
+    }
+  }
+}
+for (const x of adversarial) checkRound(x)
+// and a wide random sweep across the magnitudes a projected line actually reaches,
+// plus values deliberately parked on a rounding tie
+for (let i = 0; i < 200000; i++) {
+  checkRound((Math.random() - 0.4) * Math.pow(10, Math.floor(Math.random() * 8) - 3))
+  checkRound((Math.floor(Math.random() * 200000) + 0.5) / 1000)
+  checkRound(-(Math.floor(Math.random() * 200000) + 0.5) / 100)
+}
+t("the fast rounding path is the same function as Number(x.toFixed(d))",
+  mism === 0, firstBad)
+
+// the scoring table is memoised on the object; two different tables must not share
+const tableA = { HR: 10, R: 2 }
+const tableB = { HR: 1, R: 1 }
+const scoredLine = { homeRuns: 3, runs: 4 }
+t("the memoised scoring table is keyed per league, not shared",
+  score(scoredLine, tableA, "hitting").points === 38 && score(scoredLine, tableB, "hitting").points === 7 &&
+  score(scoredLine, tableA, "hitting").points === 38,
+  `${score(scoredLine, tableA, "hitting").points} / ${score(scoredLine, tableB, "hitting").points}`)
+
+// teamStrength now sums only the six fields wobaish reads. The indices are ratios
+// to the league mean, so they must still centre on 1 across all 30 clubs.
+const { teamStrength: ts } = await import("../src/engine/matchup.ts")
+const strength = ts(hyd.players)
+const mean = m => [...m.values()].reduce((a, c) => a + c, 0) / m.size
+t("team strength indices still centre on the league, on both sides",
+  strength.offense.size === 30 && strength.defense.size === 30 &&
+  Math.abs(mean(strength.offense) - 1) < 1e-9 && Math.abs(mean(strength.defense) - 1) < 1e-9,
+  `${strength.offense.size}/${strength.defense.size} clubs, means ` +
+  `${mean(strength.offense).toFixed(6)} / ${mean(strength.defense).toFixed(6)}`)
+
+// ---------------------------------------------------------------------------
+// 14. model.json must not carry a knob that steers nothing.
+// ---------------------------------------------------------------------------
+const modelJson = JSON.parse(readFileSync("model.json", "utf8"))
+t("the retracted volumeWeight knob is gone from model.json",
+  !("volumeWeight" in modelJson.recentForm),
+  Object.keys(modelJson.recentForm).join(","))
+// and project's own default is now the shipped value, so the file and the code
+// cannot disagree about what an unspecified weight means
+const withDefault = proj(
+  { id: 2, name: "y", team: null, teamId: 1, position: "OF", group: "hitting",
+    stats: { plateAppearances: 400, hits: 100, homeRuns: 20, runs: 50 } },
+  undefined, 100, 14, { recentVolumePerGame: 8 })
+const withExplicit = proj(
+  { id: 2, name: "y", team: null, teamId: 1, position: "OF", group: "hitting",
+    stats: { plateAppearances: 400, hits: 100, homeRuns: 20, runs: 50 } },
+  undefined, 100, 14, { recentVolumePerGame: 8, recentWeight: RECENT_BLEND_WEIGHT.hitting })
+t("an unspecified recent weight means the shipped blend, not a retracted 0.75",
+  withDefault.volumePerTeamGame === withExplicit.volumePerTeamGame &&
+  withDefault.volumePerTeamGame === 6,
+  `${withDefault.volumePerTeamGame} vs ${withExplicit.volumePerTeamGame}`)
+
+// the drill-down must report the verdict METHODOLOGY 7.1 actually reached
+t("the Statcast note states the finished verdict, not an open question",
+  probe.modelled.some(m => /111 paired weeks/.test(m) && !/not yet settled/.test(m)),
+  probe.modelled.find(m => /Statcast/.test(m)))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -1,5 +1,6 @@
 import type { StatLine, PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
+import { roundTo } from "./points.ts"
 import { MODEL, type ModelWeights, windowsFor } from "./weights.ts"
 
 /**
@@ -52,6 +53,11 @@ const lambdaFor = (pa: number, cfg = MODEL.statcast.lambda): number => {
  * listed falls back to DEFAULT_K, which is deliberately heavy because an unlisted
  * stat is one we have no stabilisation evidence for.
  */
+/** Rate stats and identifiers: they do not scale with playing time, so they are
+ *  skipped rather than multiplied. A Set, because this is tested once per stat per
+ *  player per board — an array literal here allocated and scanned 43,000 times. */
+const NOT_VOLUME_SCALED = new Set(["avg", "obp", "slg", "ops", "era", "whip", "age", "babip"])
+
 const DEFAULT_K = MODEL.shrinkage.default
 const SHRINK_K: Record<string, number> = MODEL.shrinkage.perStat
 
@@ -94,10 +100,16 @@ export interface ProjectOptions {
 	/** Volume per team game over the recent window, if known. */
 	recentVolumePerGame?: number | null
 	/**
-	 * How much to trust recent playing time over season-long. 0.75 measured best on
-	 * both sides across 100 folds and ten seasons: a player who just took over an
-	 * everyday job has a season-long rate that understates his coming volume, and
-	 * that is a volume error, not a rate error.
+	 * How much to trust recent playing time over season-long.
+	 *
+	 * Defaults to `recentForm.blend` for the player's own side, which is what every
+	 * caller in the app and the simulator passes. It used to default to a separate
+	 * `recentForm.volumeWeight: 0.75` knob, and that number had been RETRACTED —
+	 * model.json's own `blend` note records 0.75 losing 22.6 points a week over 111
+	 * paired weeks. No caller could reach it (all three that supply
+	 * `recentVolumePerGame` also supply this weight), so model.json carried a knob
+	 * that steered nothing while claiming to steer the recommendation. The knob is
+	 * gone and the default is now the shipped value.
 	 */
 	recentWeight?: number
 	/** The player's own line over the recent window, if known. */
@@ -219,7 +231,7 @@ export const project = (
 		rates,
 		qualityWeight = MODEL.statcast.weight,
 		recentVolumePerGame = null,
-		recentWeight = MODEL.recentForm.volumeWeight,
+		recentWeight = MODEL.recentForm.blend[player.group],
 		recentStats = null,
 		recentRateWeight = 0,
 		qualityLambda = MODEL.statcast.lambda,
@@ -270,6 +282,10 @@ export const project = (
 	 * says why rather than a number being invented.
 	 */
 	const startShare = s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 0
+	/** The same ratio the rate blend reads, which defaults to 1 rather than 0 where
+	 *  appearances are not reported — a hitter, or a pitcher with no games logged,
+	 *  must not fall into the mostly-relieving branch. */
+	const startShareOrOne = s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 1
 	const startsBased =
 		!isHitter &&
 		projectedStarts !== null &&
@@ -335,11 +351,17 @@ export const project = (
 				`quality: wOBA ${underlying.woba} → ${blended.toFixed(3)} (λ=${lambda.toFixed(2)} toward xwOBA ${underlying.xwoba}) ⇒ ×${qualityMultiplier.toFixed(3)}`
 			)
 		else
+			// METHODOLOGY 7.1 and model.json's `statcast.why` both record the finished
+			// verdict; this string was left saying the re-measurement had not landed
+			// yet, months after it did. A drill-down that contradicts the methodology
+			// is the same defect as a number that contradicts its source.
 			modelled.push(
 				`Statcast weight is 0, so xwOBA ${underlying.xwoba} is shown but not applied. ` +
-					`The earlier "it does not help" result ran on leaked data and has been ` +
-					`retracted; on clean point-in-time data the ranking evidence is strong and ` +
-					`the played-season evidence is not yet settled`
+					`The original "it does not help" result ran on leaked data and was ` +
+					`retracted; re-measured on clean point-in-time data over 111 paired weeks ` +
+					`every formulation still loses, the least-bad by 0.7 points a week. The ` +
+					`signal is real — xwOBA out-predicts wOBA for the next seven days ` +
+					`(rho 0.102 vs 0.058) — and it still does not change which players you roster`
 			)
 	} else missing.push("underlying expected stats")
 
@@ -368,9 +390,22 @@ export const project = (
 
 	const stats: StatLine = {}
 	if (projectedVolume !== null && volume) {
+		/**
+		 * Everything constant across one player's line, hoisted out of the loop.
+		 *
+		 * This loop is the hot spot of the whole board: ~30 stats x 1,433 players on
+		 * every horizon switch, and a CPU profile put 46% of `rateAll` inside
+		 * `project` with the two heaviest lines being the loop header itself and the
+		 * store below it. Every one of these five values was being recomputed per
+		 * stat — including an eight-element array literal allocated and linearly
+		 * searched 43,000 times a board, and a two-level lookup into QUALITY_SCALED.
+		 * None of them depends on `key`, so none of them belongs in here. Pure
+		 * motion: the arithmetic is untouched and the A/B in METHODOLOGY 13 diffs
+		 * every rated row of all three horizons, ties included.
+		 */
 		for (const [key, value] of Object.entries(s)) {
 			// rate stats and identifiers don't scale with volume
-			if (["avg", "obp", "slg", "ops", "era", "whip", "age", "babip"].includes(key)) continue
+			if (NOT_VOLUME_SCALED.has(key)) continue
 			// Shrink the observed rate toward the population rate in proportion to how
 			// little volume backs it. Without this a 90-PA hot streak projects forward
 			// at face value, which is the single biggest source of bad recommendations.
@@ -399,7 +434,7 @@ export const project = (
 				QUALITY_SCALED[qualityScope][player.group].has(key) ?
 					qualityMultiplier * matchupMultiplier
 				:	1
-			stats[key] = Number((perUnit * projectedVolume * scaled).toFixed(3))
+			stats[key] = roundTo(perUnit * projectedVolume * scaled, 3)
 		}
 		if (rates) modelled.push(`shrunk toward league rates by stat-specific sample weight`)
 		if (isHitter) stats.plateAppearances = Number(projectedVolume.toFixed(1))

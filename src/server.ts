@@ -9,9 +9,19 @@ import { fetchAvailable } from "./data/yahoo-pool.ts"
 import { fetchTeamRoster } from "./data/rosters.ts"
 
 /**
- * The API is now only what a browser genuinely cannot do for itself: read a
- * league's own pages. Leagues live in the browser's storage, so nothing here
- * reads or writes scoring.json and the static build behaves identically.
+ * The API reads leagues off their own pages. Leagues live in the browser's storage,
+ * so nothing here reads or writes scoring.json.
+ *
+ * What is genuinely IMPOSSIBLE without it is narrower than this file: measured
+ * 2026-09-04, ESPN reflects the requesting origin and Sleeper answers `*`, so a page
+ * reads both for itself and the static build imports them with no backend at all
+ * (see `readableInBrowser` in src/import.ts, and the routing in src/client/api.ts).
+ * Yahoo sends no access-control headers, which leaves /available — Yahoo-only — and
+ * the Yahoo half of /import and /roster as the part no browser can replace.
+ *
+ * The other three quarters stay here because that is what every local run and every
+ * suite uses: the client prefers this server wherever one answers, and only falls
+ * back to reading for itself when nothing does.
  *
  * Request bodies are still validated at the edge, so a malformed call is
  * rejected with a real error message rather than reaching a scraper.
@@ -34,7 +44,8 @@ app.onError((e, c) => {
 
 const api = new Hono()
 	// how the client tells a served build from a local one: on a static host there
-	// is no JSON here, so importing is off and the banner says why
+	// is no JSON here, so the client reads ESPN and Sleeper for itself and says that
+	// Yahoo, which sends no CORS headers, is what still needs this process
 	.get("/health", c => c.json({ ok: true }))
 
 	// read from the league's own pages and handed straight back: the browser is
@@ -44,8 +55,8 @@ const api = new Hono()
 	)
 
 	.post("/available", arktypeValidator("json", type({ leagueId: "string > 0" })), async c => {
-		// Browsers can't read Yahoo directly (no CORS headers), so the pool is
-		// fetched here and handed to the client.
+		// Browsers can't read Yahoo directly (no CORS headers), and the pool is Yahoo
+		// only, so this endpoint has no browser-direct counterpart at all.
 		const { leagueId } = c.req.valid("json")
 		if (!/^\d+$/.test(leagueId)) throw new ImportError("A numeric Yahoo league id is required.")
 		// An empty pool is a STATE, not an error: the league may be private, or Yahoo
@@ -70,9 +81,11 @@ const api = new Hono()
 	/**
 	 * A team's own roster, off its own Yahoo page.
 	 *
-	 * Same footing as /available: browsers cannot read Yahoo directly, so the fetch
-	 * happens here and the names are handed back. Nothing is stored — the browser
-	 * owns the roster, exactly as it owns the league.
+	 * The Yahoo read here is the one a browser cannot do for itself. The ESPN and
+	 * Sleeper reads it CAN do (`fetchTeamRoster` is the same function either side of
+	 * the wire) stay served from here for anyone running locally, because a request
+	 * that already works is not worth rerouting. Nothing is stored — the browser owns
+	 * the roster, exactly as it owns the league.
 	 */
 	.post(
 		"/roster",
@@ -115,5 +128,7 @@ const port = Number(process.argv.find(a => a.startsWith("--port="))?.slice(7) ??
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, info => {
 	console.log(`beanemachine api → http://localhost:${info.port}`)
 	console.log(`leagues           kept in your browser; this only reads them from their URL`)
-	if (!existsSync(DIST)) console.log(`client            run \`nub run dev\` (Vite serves it)`)
+	// `nub` is not a binary anyone has; naming it sent whoever followed this line to
+	// a command not found. Vite is what actually serves the client in dev.
+	if (!existsSync(DIST)) console.log(`client            run \`npx vite\` (it serves the client)`)
 })

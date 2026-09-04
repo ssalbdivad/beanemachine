@@ -1,4 +1,4 @@
-import { fetchTeamRoster } from "../data/rosters.ts"
+import { fetchEspnPool, fetchTeamRoster } from "../data/rosters.ts"
 import {
 	detect,
 	ImportError,
@@ -206,7 +206,38 @@ export const api = {
 	 * ownership estimate; on the hosted build there was simply never one to prefer,
 	 * so the list it opened on was headed by four pitchers already on rosters.
 	 */
-	available: async (leagueId: string): Promise<AvailablePool> => {
+	/**
+	 * `leagueId` alone was enough while Yahoo was the only platform this could read.
+	 * ESPN needs its season too, and knowing the platform is what lets an ESPN league
+	 * skip the server entirely.
+	 */
+	available: async (
+		leagueId: string,
+		league?: { platform?: string | null; season?: string | number | null; sport?: string | null }
+	): Promise<AvailablePool> => {
+		/**
+		 * ESPN's own free-agent list, read straight from the page.
+		 *
+		 * Measured: ESPN answers the preflight for `x-fantasy-filter` and reflects our
+		 * origin, so the one read Yahoo can never do without a local run — who is
+		 * actually available in YOUR league — an ESPN user gets on the hosted site with
+		 * no server at all. Tried before the server precisely because it needs no
+		 * server: a live read beats a proxied one, and it is the same read either way.
+		 */
+		const season = Number(league?.season)
+		if (league?.platform === "espn" && Number.isFinite(season)) {
+			const pool = await fetchEspnPool(leagueId, season, league.sport ?? "flb")
+			if (pool.players.length)
+				return {
+					players: pool.players.map((x: { yahooId: string; name: string; team: string | null; positions: string[] }) => ({
+						yahooId: x.yahooId, name: x.name, team: x.team, positions: x.positions
+					})),
+					positionsRead: pool.positionsRead,
+					note: pool.note
+				}
+			// an empty read is a state, not an answer: fall through to whatever else
+			// this build can offer rather than reporting a league with no free agents
+		}
 		if (mode === "server")
 			try {
 				return await send<AvailablePool>("/api/available", { leagueId })

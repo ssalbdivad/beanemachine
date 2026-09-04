@@ -524,5 +524,46 @@ t("a pasted Sleeper league URL is refused by name, not left as 'unrecognized'",
 
 globalThis.fetch = liveFetch
 
+
+// --- ESPN's own free-agent list, read from a page with no server ------------
+//
+// Yahoo sends no CORS headers, so who is actually free in YOUR league is the one
+// read a browser can never do for it — hence the local-run-and-carry-a-file route.
+// ESPN is different, and measured rather than assumed (2026-09-04, Origin
+// https://beanemachine.com):
+//
+//   OPTIONS ...?view=kona_player_info
+//     -> access-control-allow-origin: https://beanemachine.com
+//     -> access-control-allow-headers: x-fantasy-filter
+//
+// The filter must travel as a custom header, which forces a preflight, and ESPN
+// answers that preflight naming the header. So an ESPN league is fully
+// self-service on the hosted site: settings, scoring, period, roster and wire.
+//
+// Offline here. What is pinned is the SHAPE and the failure behaviour — the live
+// read is exercised by hand and by test/static.mjs, and a suite that depended on
+// ESPN answering would fail for reasons that are not this repo's.
+const { fetchEspnPool, espnPositions, ESPN_POOL_LIMIT } = await import("../src/data/rosters.ts")
+
+t("the pool is capped, and the cap is a number the note can state",
+  Number.isInteger(ESPN_POOL_LIMIT) && ESPN_POOL_LIMIT > 0, String(ESPN_POOL_LIMIT))
+
+// A league that cannot be reached returns a state, never an exception — the same
+// contract every other reader in this file keeps.
+const espnUnreachable = await fetchEspnPool("0", 1900)
+t("an ESPN league that cannot be read yields a note, not a throw",
+  Array.isArray(espnUnreachable.players) && espnUnreachable.players.length === 0 &&
+    espnUnreachable.note.length > 0, espnUnreachable.note)
+
+// Eligibility is shared with the roster reader so a pool and a roster cannot
+// disagree about what a man can fill.
+t("derived seats are not offered as positions",
+  !espnPositions([12, 16, 17, 19]).length, JSON.stringify(espnPositions([12, 16, 17, 19])))
+t("real positions are named from ESPN's ids",
+  espnPositions([0, 5]).join("/") === "C/OF", espnPositions([0, 5]).join("/"))
+t("and a league that seats nobody there is not told he is eligible there",
+  espnPositions([0, 5], new Set([5])).join("/") === "OF",
+  espnPositions([0, 5], new Set([5])).join("/"))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

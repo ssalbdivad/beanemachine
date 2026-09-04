@@ -82,6 +82,29 @@ const yahoo = async (leagueId: string, teamId: string, sport: string): Promise<R
  * fixes their meaning. 18 and 20-22 were never observed anywhere and are
  * deliberately absent rather than guessed at.
  */
+/**
+ * The seats a player is eligible for, from ESPN's numeric `eligibleSlots`.
+ *
+ * Shared by the roster read and the free-agent read so the two cannot disagree
+ * about what a man can fill — a pool that thinks he is an outfielder and a roster
+ * that thinks he is a shortstop would seat him in one place and price him in
+ * another.
+ *
+ * `played` is the set of seats the league actually uses, where the caller knows it;
+ * a league that seats nobody at LF should not be told a player is LF-eligible. The
+ * derived seats (2B/SS, 1B/3B, UTIL, IF, bench, IL) are dropped because they are
+ * combinations rather than positions, and the generic P is dropped for a pitcher
+ * his league already seats as SP or RP.
+ */
+export const espnPositions = (eligibleSlots: unknown, played = new Set<number>()): string[] => {
+	const eligible: number[] = Array.isArray(eligibleSlots) ? (eligibleSlots as number[]) : []
+	return eligible
+		.filter(id => !ESPN_DERIVED_SLOTS.has(id) && (!played.size || played.has(id)))
+		.filter(id => !(id === 13 && played.has(14) && (eligible.includes(14) || eligible.includes(15))))
+		.map(id => ESPN_MLB_SLOT[id])
+		.filter((x): x is string => !!x)
+}
+
 export const ESPN_MLB_SLOT: Record<number, string> = {
 	0: "C",
 	1: "1B",
@@ -218,15 +241,7 @@ const espn = async (
 			unnamed++
 			continue
 		}
-		const eligible: number[] = Array.isArray(pl?.eligibleSlots) ? pl.eligibleSlots : []
-		const positions = eligible
-			.filter(id => !ESPN_DERIVED_SLOTS.has(id) && (!played.size || played.has(id)))
-			// a pitcher his league seats as SP or RP does not also need the generic P
-			.filter(
-				id => !(id === 13 && played.has(14) && (eligible.includes(14) || eligible.includes(15)))
-			)
-			.map(id => ESPN_MLB_SLOT[id])
-			.filter((s): s is string => !!s)
+		const positions = espnPositions(pl?.eligibleSlots, played)
 		const proTeamId = typeof pl?.proTeamId === "number" ? pl.proTeamId : 0
 		players.push({
 			// an ESPN player id, not a Yahoo one — the field name is Yahoo's because
@@ -278,5 +293,85 @@ export const fetchTeamRoster = async (opts: {
 		}
 	} catch (e) {
 		return { players: [], note: `Couldn't reach ${platform} (${(e as Error).message}).` }
+	}
+}
+
+/**
+ * An ESPN league's own free-agent list, read straight from the browser.
+ *
+ * Measured 2026-09-04 against public league 81134470 with
+ * `Origin: https://beanemachine.com`:
+ *
+ *   OPTIONS …?view=kona_player_info  ->  access-control-allow-origin: <the origin>
+ *                                        access-control-allow-headers: x-fantasy-filter
+ *
+ * The filter has to travel as a custom header, which forces a preflight, and ESPN
+ * answers that preflight naming the header. So the one read Yahoo can never do
+ * without a local run — who is actually available in YOUR league — an ESPN user
+ * gets on the hosted site with no server at all. That makes ESPN the only platform
+ * here that is fully self-service: settings, scoring, period, roster and wire.
+ *
+ * `filterStatus` FREEAGENT plus WAIVERS because a man on waivers is one you can put
+ * a claim on; treating him as taken would hide exactly the players a streamer is
+ * looking for in the days after a drop.
+ *
+ * Sorted by ESPN's own `percentOwned` descending and capped, because the list is
+ * every unrostered player in baseball and the ranking only needs the ones anybody
+ * would take. The cap is reported in the note rather than applied silently.
+ */
+export const ESPN_POOL_LIMIT = 300
+
+export const fetchEspnPool = async (
+	leagueId: string,
+	season: number,
+	sport = "flb"
+): Promise<{ players: RosterEntry[]; positionsRead: string[]; note: string }> => {
+	const url =
+		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${sport}` +
+		`/seasons/${season}/segments/0/leagues/${leagueId}?view=kona_player_info`
+	const filter = {
+		players: {
+			filterStatus: { value: ["FREEAGENT", "WAIVERS"] },
+			limit: ESPN_POOL_LIMIT,
+			sortPercOwned: { sortAsc: false, sortPriority: 1 }
+		}
+	}
+	try {
+		const res = await fetch(url, {
+			headers: { ...agentHeaders(UA), "x-fantasy-filter": JSON.stringify(filter) }
+		})
+		if (!res.ok)
+			return {
+				players: [],
+				positionsRead: [],
+				note: `ESPN returned HTTP ${res.status} for that league's player list.`
+			}
+		const data = (await res.json().catch(() => null)) as { players?: any[] } | null
+		const rows = Array.isArray(data?.players) ? data!.players : []
+		const players: RosterEntry[] = []
+		for (const row of rows) {
+			const pl = row?.player
+			const name = typeof pl?.fullName === "string" ? pl.fullName.trim() : ""
+			if (!name) continue
+			players.push({
+				yahooId: String(pl.id ?? name),
+				name,
+				// a free agent sits in no seat by definition
+				slot: null,
+				positions: espnPositions(pl.eligibleSlots),
+				team: ESPN_PRO_TEAM[Number(pl.proTeamId)] ?? null
+			})
+		}
+		return {
+			players,
+			positionsRead: [...new Set(players.flatMap(p => p.positions))].sort(),
+			note:
+				players.length ?
+					`${players.length} free agents and waiver claims read off ESPN, the most ` +
+					`widely rostered first${players.length >= ESPN_POOL_LIMIT ? `, capped at ${ESPN_POOL_LIMIT}` : ""}.`
+				:	"ESPN served the league but listed no free agents."
+		}
+	} catch (e) {
+		return { players: [], positionsRead: [], note: `Couldn't reach ESPN (${(e as Error).message}).` }
 	}
 }

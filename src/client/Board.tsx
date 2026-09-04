@@ -511,7 +511,12 @@ export const Board = ({
 	useEffect(() => {
 		if (!leagueId || league?.meta.platform !== "yahoo") return
 		let live = true
-		api.available(leagueId)
+		// the platform and season let an ESPN league read its own wire with no server
+		api.available(leagueId, {
+			platform: league?.meta.platform,
+			season: league?.meta.season,
+			sport: league?.meta.sport
+		})
 			.then(p => live && setPool(p))
 			.catch((e: unknown) => live && setPoolError(e instanceof ApiError ? e.message : String(e)))
 		return () => {

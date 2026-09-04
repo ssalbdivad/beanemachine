@@ -239,7 +239,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		const id = league?.meta.league_id
 		if (!id || league?.meta.platform !== "yahoo") return
 		let live = true
-		api.available(String(id))
+		api.available(String(id), {
+			platform: league?.meta.platform,
+			season: league?.meta.season,
+			sport: league?.meta.sport
+		})
 			.then(p => live && setPool(new Set(p.players.map(x => normalizeName(x.name)))))
 			.catch(() => live && setPool(null))
 		return () => {

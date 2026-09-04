@@ -11,6 +11,7 @@ import { Board } from "./Board.tsx"
 import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
 import { leagues } from "./leagues.ts"
+import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
 	BoardPrimer,
 	EligibilityPanel,
@@ -106,6 +107,33 @@ export const App = () => {
 	}, [])
 	const { snapshot, error: snapshotError } = useSnapshot()
 	const { toast, show } = useToast()
+	/**
+	 * The exact free-agent list this browser is carrying for the active league, if
+	 * any. Read here rather than in `Status` so it is one localStorage hit per
+	 * config change instead of one per render, and recomputed when `config` moves
+	 * because that is what a dropped file changes.
+	 */
+	const wire = useMemo(() => (key ? poolStore.of(key) : null), [key, config])
+	/**
+	 * Remounts the two views that ask for a free-agent list when the list changes
+	 * under them.
+	 *
+	 * Board and Trade each fetch availability once, in an effect keyed on the league
+	 * id — which is right, because that is what the request depends on. Loading a
+	 * file does not change the league id: the commonest case by far is re-reading
+	 * the league you already have, so the id is identical and the effect never
+	 * re-runs. Measured on the static build before this existed: dropping a file
+	 * carrying 150 free agents left the board still saying "can't tell", because the
+	 * one fetch it was ever going to make had already been refused, seconds earlier,
+	 * on a page that had no pool yet.
+	 *
+	 * A remount is the honest fix from outside those components. It is keyed on the
+	 * READ TIME rather than on the league, so it changes exactly when a genuinely
+	 * different list arrives and never on an ordinary re-render — and a browser
+	 * carrying no pool holds one constant key, so this cannot churn the board for
+	 * the visitors who never load a file at all.
+	 */
+	const wireKey = wire?.at ?? "no-carried-pool"
 	const acknowledge = useCallback(() => {
 		setAcknowledged(true)
 		setTimeout(() => setAcknowledged(false), 900)
@@ -178,7 +206,13 @@ export const App = () => {
 				const carried = [
 					`${loaded.leagues} league${loaded.leagues === 1 ? "" : "s"}`,
 					loaded.rosters ? `${loaded.rosters} roster${loaded.rosters === 1 ? "" : "s"}` : null,
-					loaded.lineups ? `${loaded.lineups} lineup${loaded.lineups === 1 ? "" : "s"}` : null
+					loaded.lineups ? `${loaded.lineups} lineup${loaded.lineups === 1 ? "" : "s"}` : null,
+					// Named separately from the leagues because it is the one thing in the
+					// file this page could not otherwise get at all, and because its absence
+					// has to be visible: a file with no pool leaves the board estimating.
+					loaded.pools ?
+						`${loaded.pools} free-agent list${loaded.pools === 1 ? "" : "s"}`
+					:	null
 				].filter(Boolean)
 				show(`Loaded ${carried.join(", ")} from ${file.name}`)
 			})
@@ -354,7 +388,9 @@ export const App = () => {
 						Your leagues are saved in this browser. Paste an <b>ESPN</b> league URL and
 						it imports right here. <b>Yahoo</b> sends no CORS headers, so no browser can
 						read it: start from the Yahoo preset, or read your league once locally and
-						drop the file it writes anywhere on this page.
+						drop the file it writes anywhere on this page — that file is also the only
+						way this page gets your league&rsquo;s real free-agent list, which is what
+						a streaming question is actually about.
 					</p>
 				)}
 			</header>
@@ -416,7 +452,8 @@ export const App = () => {
 					const carried = [
 						`${Object.keys(file.leagues).length} league${Object.keys(file.leagues).length === 1 ? "" : "s"}`,
 						file.rosters ? `${Object.keys(file.rosters).length} roster` : null,
-						file.lineups ? `${Object.keys(file.lineups).length} lineup` : null
+						file.lineups ? `${Object.keys(file.lineups).length} lineup` : null,
+						file.pools ? `${Object.keys(file.pools).length} free-agent list` : null
 					].filter(Boolean)
 					show(`Downloaded scoring.json — ${carried.join(", ")}. Drop it on this page anywhere to load it back.`)
 				}}
@@ -431,6 +468,8 @@ export const App = () => {
 				detail={view === "league"}
 				snapshot={snapshot}
 				snapshotError={snapshotError}
+				wire={wire}
+				onLoadFile={() => openPicker.current?.()}
 			/>
 
 			{/* A store that can't be read is not an empty store, and every tab's own
@@ -546,7 +585,12 @@ export const App = () => {
 					    message, and a definition of bscore is not what is missing. */}
 					{ready && <BoardPrimer />}
 					<div className="grid">
-						<Board snapshot={snapshot} league={league ?? null} error={snapshotError} />
+						<Board
+							key={wireKey}
+							snapshot={snapshot}
+							league={league ?? null}
+							error={snapshotError}
+						/>
 					</div>
 				</>
 			: view === "draft" ?
@@ -561,6 +605,7 @@ export const App = () => {
 			: view === "trade" ?
 				<div className="grid">
 					<Trade
+						key={wireKey}
 						snapshot={snapshot}
 						league={league ?? null}
 						leagueKey={key}
@@ -880,7 +925,9 @@ const Status = ({
 	store,
 	detail,
 	snapshot,
-	snapshotError
+	snapshotError,
+	wire,
+	onLoadFile
 }: {
 	league: League | null
 	store: StoreState
@@ -890,6 +937,9 @@ const Status = ({
 	detail: boolean
 	snapshot: Snapshot | null
 	snapshotError: string | null
+	/** The exact free-agent list this browser holds for the active league, or null. */
+	wire: StoredPool | null
+	onLoadFile: () => void
 }) => {
 	const age = freshness(snapshot?.capturedAt, Date.now())
 	const data =
@@ -908,7 +958,86 @@ const Status = ({
 			<span className={data.className} title="Age of the MLB and Statcast capture the ranking is computed from">
 				player data <b>{data.value}</b>
 			</span>
+			<WireChip league={league} wire={wire} onLoadFile={onLoadFile} />
 		</div>
+	)
+}
+
+/**
+ * Which free agents this page has, and how old they are — beside the league, on
+ * every tab.
+ *
+ * The board already prefers an exact free-agent list to the ownership estimate.
+ * What it could not do was SAY which of the two it was working from, and on the
+ * hosted build the honest answer was always the estimate: the list is read off
+ * Yahoo's own pages and Yahoo sends no CORS headers, so beanemachine.com is never
+ * handed one. A reader asking "which starters should I stream" got a ranking that
+ * silently included everybody already rostered, with nothing on the page admitting
+ * that the availability question had not been answered at all.
+ *
+ * So this states it, permanently, in the masthead:
+ *
+ *   · a list is carried  → how many, and WHEN it was read. The count without the
+ *     time would be the exact failure this project refuses — the wire turns over
+ *     whenever anybody clicks Add, so a pool with no timestamp is a claim about
+ *     right now that nothing supports.
+ *   · none is carried, and there is no server → the way to get one, as a button.
+ *     This is the load door: it works from every tab, whereas Download/Load file
+ *     live in a toolbar that only appears on League setup.
+ *   · none is carried, but a local server is up → nothing, because the server
+ *     reads the wire live on every page load and a prompt would be noise.
+ *
+ * Yahoo-only, because the pool is. ESPN sends CORS headers and the page reads that
+ * league for itself.
+ */
+const STALE_WIRE_HOURS = 24
+
+const WireChip = ({
+	league,
+	wire,
+	onLoadFile
+}: {
+	league: League | null
+	wire: StoredPool | null
+	onLoadFile: () => void
+}) => {
+	if (league?.meta.platform !== "yahoo") return null
+	if (wire) {
+		const age = since(wire.at, Date.now())
+		return (
+			<span
+				className={`chip${age.hours > STALE_WIRE_HOURS || !Number.isFinite(age.hours) ? " warn" : " ok"}`}
+				data-wire="carried"
+				title={
+					`The exact free agents in your league, read on your own machine at ${wire.at} ` +
+					`and carried here in a file — no browser can read them, so this is the only ` +
+					`way this page has them. Anyone added or dropped since is not reflected; run ` +
+					`the import again for a fresher list. ${wire.note}`
+				}
+			>
+				free agents <b>{wire.players.length}</b> read {age.label}
+			</span>
+		)
+	}
+	// A server reads the wire live, so there is nothing here to ask for.
+	if (getMode() === "server") return null
+	return (
+		<button
+			type="button"
+			className="chip warn"
+			data-wire="none"
+			style={{ font: "inherit", fontSize: "var(--fs-3)", cursor: "pointer" }}
+			onClick={onLoadFile}
+			title={
+				`Nothing on this page can read a Yahoo league's free-agent list: Yahoo sends no ` +
+				`CORS headers, so the response never reaches a browser. Until one is carried in, ` +
+				`availability is ESTIMATED from rostered shares rather than read. Run ` +
+				`\`${IMPORT_COMMAND}\` on your own machine and load the scoring.json it writes — ` +
+				`click here, or drop it anywhere on this page.`
+			}
+		>
+			free agents <b>none carried</b> — load a file
+		</button>
 	)
 }
 

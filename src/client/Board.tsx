@@ -1,10 +1,13 @@
-import { useMemo, useRef, useState } from "react"
+import { Fragment, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
 import { Fragment2 } from "./panels.tsx"
-import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
-import { api, ApiError, type AvailablePool } from "./api.ts"
+import {
+	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
+	type BoardRow, type Filters, type Ranked
+} from "./useBoard.ts"
+import { api, ApiError, getMode, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
@@ -30,18 +33,30 @@ const MISSING_LABEL: Record<string, string> = {
 	"underlying expected stats": "Statcast has no expected-stats row for him"
 }
 
-/**
- * Above this share of leagues, a player is not a recommendation — he is a fact.
- *
- * The same bar the Buy low card uses, so the two cards mean the same thing by
- * "still gettable" rather than each picking its own number.
- */
 /** Rows rendered per step as the reader scrolls. */
 const PAGE = 60
 
-const WIDELY_ROSTERED = 70
+/**
+ * `const WIDELY_ROSTERED = 70` used to live here — the bar Billy's pick used to
+ * decide who was still gettable when the league's own wire could not be read. It
+ * is gone, and deliberately not replaced by another number: 70% is the same bar in
+ * a 10-team league and a 20-team one, which cannot both be right. The bar is now
+ * `ownershipCut` in src/engine/bscore.ts, derived from the league's own team count
+ * and roster shape, and every part of this page that asks "can he get him" asks
+ * that one function.
+ */
 
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
+
+/**
+ * The position chips on the Streaming tab.
+ *
+ * The full list is eleven chips, eight of which empty this board by construction —
+ * a streaming list is starters, and there is no such thing as streaming a catcher
+ * for a start. Offering a control whose only effect is "no players match these
+ * filters" is offering the reader a way to break his own page.
+ */
+const STREAM_SLOTS = ["", "SP", "RP", "P"]
 
 /** The three horizons, as a tablist: three questions, not three filters. */
 const MODES = [
@@ -187,6 +202,87 @@ const BOARD_GRID_CSS = `
 }`
 
 /**
+ * The STREAMING grid, which is deliberately not the board's grid.
+ *
+ * The shared seven columns — uscore, bscore, games, confidence, luck — are the
+ * right shape for "who is the best player in baseball right now". They are the
+ * wrong shape for "which arm do I add for the next three days", and two of them
+ * are worse than merely irrelevant there:
+ *
+ * `uscore` is `addValue x (1 - owned)`, i.e. value discounted by availability. On
+ * a list that is ALREADY filtered to players he can add, that discount is applied
+ * twice, and it reorders the survivors by who is rarer rather than by who is
+ * better — the opposite of the question. It is also null wherever Yahoo priced
+ * nobody, which on the live 2026-09-04 capture is 553 of 1,435 players, including
+ * the top row of the gettable list.
+ *
+ * `luck` is a percentile of expected-minus-actual wOBA over 21 days. It is a
+ * buy-low signal about a season, and the Buy low card below the board is where it
+ * is acted on. Nothing about a Saturday start turns on it.
+ *
+ * What goes in their place is the half of the reader's question the board never
+ * answered: "expected performance". `pts` is what he is projected to actually
+ * score over this window in this league's scoring — the quantity — and `bscore`
+ * stays as the comparison against the next arm on the wire. Over three days those
+ * two say very different things: on the live capture the best gettable starter
+ * projects 33.0 points and 15.9 above replacement, and the fifth-best projects
+ * 17.2 points and 0.14 above it. One number alone would have hidden that.
+ *
+ * Six columns, placed by NAME like the board's, for the reason BOARD_GRID_CSS
+ * gives at length: app.css places by nth-child, and this view has a different
+ * number of children, so every index-based rule below has to be answered
+ * explicitly at every width or a heading ends up over the wrong cell.
+ */
+const STREAM_GRID_CSS = `
+.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
+	grid-template-columns:30px minmax(0,1fr) 58px 66px 62px 86px;
+}
+.board[data-mode=stream] .board-head>[data-col=pts],
+.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3;display:block}
+.board[data-mode=stream] .board-head>[data-col=bscore],
+.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:4;display:block}
+.board[data-mode=stream] .board-head>[data-col=games],
+.board[data-mode=stream] .board-row>[data-col=games]{grid-column:5;display:block}
+.board[data-mode=stream] .board-head>[data-col=conf]{grid-column:6;display:flex}
+.board[data-mode=stream] .board-row>[data-col=conf]{grid-column:6;display:block}
+/* Under 900px the projected total goes and the comparison stays: bscore is the one
+   that answers "is this add worth making at all". */
+@media(max-width:899px){
+	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
+		grid-template-columns:26px minmax(0,1fr) 62px 58px 86px;gap:var(--sp-2);
+	}
+	.board[data-mode=stream] .board-head>[data-col=pts],
+	.board[data-mode=stream] .board-row>[data-col=pts]{display:none}
+	.board[data-mode=stream] .board-head>[data-col=bscore],
+	.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:3}
+	.board[data-mode=stream] .board-head>[data-col=games],
+	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4}
+	.board[data-mode=stream] .board-head>[data-col=conf]{grid-column:5;display:flex}
+	.board[data-mode=stream] .board-row>[data-col=conf]{grid-column:5;display:block}
+}
+/* Under 640px, two numbers beside the name: what he is worth over the window, and
+   how many turns he gets in it. Confidence survives in the drill-down, which
+   prints it, and the start line under his name keeps the opponents. */
+@media(max-width:640px){
+	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 58px 58px;gap:var(--sp-2);
+	}
+	.board[data-mode=stream] .board-head>[data-col=conf],
+	.board[data-mode=stream] .board-row>[data-col=conf]{display:none}
+	.board[data-mode=stream] .board-head>[data-col=bscore],
+	.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:3}
+	.board[data-mode=stream] .board-head>[data-col=games],
+	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4}
+}
+/* His rostered share, on the meta line beside slot and club rather than in a
+   column of its own. It is the estimate's own input and it varies row to row, so a
+   reader can audit the claim — but it is a property of the player, not a ranked
+   quantity, and giving it a column would cost the width the pts column now uses. */
+.board .board-row .who .own{color:var(--faint)}
+.board .board-row .who .own.free{color:var(--accent)}
+`
+
+/**
  * The streaming strip and the two things it adds to a row.
  *
  * Belongs in app.css beside the rest of the board's styling and should move there;
@@ -207,8 +303,22 @@ const STREAM_CSS = `
 	text-transform:uppercase;color:var(--faint);
 }
 .stream-strip .moves{flex-direction:row;align-items:center;gap:var(--sp-2)}
+/* app.css sets white-space:nowrap on every .toggle, which is right in the filter
+   row where the labels are two words. In this strip the availability toggle also
+   carries the tier it is using ("est. over 35% is taken"), and at 390px that one
+   label ran to 411px — 21px of horizontal scroll on the whole page, on the view
+   this change exists to fix. It wraps here instead; the box stays pinned to the
+   first line so a two-line label does not centre its checkbox against nothing. */
+.stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
+.stream-strip .toggle input{flex:none;margin-top:3px}
 .stream-strip .moves input{width:56px}
 .stream-note{margin-top:var(--sp-2)}
+/* The availability sentence is NOT a stream-note. That class names the coverage
+   line, and test/board.mjs reads the first element matching it — a second paragraph
+   sharing the class silently retargeted five assertions at the wrong sentence.
+   Same margin, its own name. */
+.avail-note{margin-top:var(--sp-2)}
+.moves-answer b{color:var(--ink)}
 /* the reader's own budget, drawn as a boundary rather than a highlight */
 .board .board-row[data-pick]{border-left-color:var(--accent);background:var(--accent-soft)}
 .board .board-row[data-pick] .rank{color:var(--accent);font-weight:700}
@@ -418,8 +528,35 @@ export const Board = ({
 		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
 		[pool]
 	)
-	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames } =
+	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort } =
 		useBoard(snapshot, league, filters, availableNames)
+	/** What "only players I can add" is doing right now — the reader may not have
+	 *  said, in which case the tab has answered for him. */
+	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
+	/**
+	 * The move budget, scoped to the tab whose strip carries the input.
+	 *
+	 * Left global it marked the top rows of the fortnight and stash boards too,
+	 * with no control on screen to clear it — the same shape as the mode-scoped
+	 * filter that once went on filtering a view whose checkbox had stopped
+	 * rendering. "Two moves buys you these two" is a claim about a scoring period;
+	 * it means nothing over the rest of a season.
+	 */
+	const moves = filters.mode === "stream" ? filters.moves : 0
+	/**
+	 * The availability tooltip, with the wire's own failure in it when there was one.
+	 *
+	 * `poolError` used to reach the screen through this control's title and became
+	 * write-only when the estimate took over: the page fell back correctly and said
+	 * nothing about what it had fallen back FROM. A reader running the local API and
+	 * getting an estimate anyway is entitled to the reason, and "absent is reported
+	 * as absent" covers a source that answered with an error just as much as one that
+	 * was never asked.
+	 */
+	const availTitle =
+		availability.basis === "pool" || !poolError ?
+			availability.basisText
+		:	`${availability.basisText}. Your league's own free-agent list could not be read: ${poolError}`
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
 
@@ -546,22 +683,27 @@ export const Board = ({
 	 * luck and contact each drop everyone they cannot price — so the lens narrows
 	 * the candidates and bscore decides among them.
 	 */
-	const poolKnown = availableNames !== null && availableNames !== undefined
 	// bscore <= 0 means the freely available body at his own slot outscores him, so
 	// adding him is a net loss of points. There is no honest way to recommend that.
 	const addable = rows.filter(r => r.bscore > 0)
-	const best = (c: Ranked[]) => c.reduce((a, b) => (b.bscore > a.bscore ? b : a))
-	const tier =
-		poolKnown ? addable.filter(r => availableNames!.has(normalizeName(r.player.name)))
-		: rows.some(r => r.rosteredPct !== null) ?
-			addable.filter(r => r.rosteredPct !== null && r.rosteredPct < WIDELY_ROSTERED)
-		:	[]
+	const best = (c: BoardRow[]) => c.reduce((a, b) => (b.bscore > a.bscore ? b : a))
+	/**
+	 * The same three tiers, from the same place.
+	 *
+	 * This used to run its own rule — the league's wire if it had one, otherwise
+	 * `rosteredPct < 70` — and that second clause was the only availability answer
+	 * the hosted site could give. It was wrong in both directions at once: 70% is a
+	 * constant where the honest bar is the league's own size, and it required a
+	 * printed ownership figure, so it silently refused to recommend any of the 553
+	 * players the live capture leaves unpriced. `useBoard` now answers the question
+	 * once and both the card and the filter read that answer, so the pick can no
+	 * longer be a man the board beneath it has filtered out.
+	 */
+	const tier = addable.filter(r => r.free === true)
 	const picked = tier.length ? best(tier) : undefined
 	const pick = picked ?? (addable.length ? best(addable) : null)
 	const basis: "pool" | "ownership" | "none" =
-		picked === undefined ? "none"
-		: poolKnown ? "pool"
-		: "ownership"
+		picked === undefined ? "none" : availability.basis === "pool" ? "pool" : "ownership"
 
 	const narrowed = [
 		filters.group === "hitting" ? "batters only"
@@ -578,6 +720,7 @@ export const Board = ({
 				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
 				<style href="board-grid" precedence="default">{BOARD_GRID_CSS}</style>
 				<style href="board-stream" precedence="default">{STREAM_CSS}</style>
+				<style href="board-stream-grid" precedence="default">{STREAM_GRID_CSS}</style>
 				{/* The tabs are the tablist's only children, because a tablist that
 				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
@@ -635,6 +778,40 @@ export const Board = ({
 								</button>
 							))}
 						</div>
+						{/*
+						  The control that makes this tab an answer, and it opens ON.
+
+						  It was a checkbox down in the general filters called "Free agents
+						  only", it read the league's live free-agent list, and that list
+						  needs the local API — so on beanemachine.com it was permanently
+						  disabled and the streaming list opened with Tyler Glasnow (94%
+						  rostered), Blake Snell, Chris Sale (99%) and Drew Rasmussen (95%)
+						  at the top. To stream a starter is to pick one up; four men nobody
+						  can pick up is not a list of streamers, it is the board with a
+						  filter on it.
+
+						  It stays a visible toggle rather than becoming an invisible rule,
+						  because this page has already shipped a mode-scoped filter that
+						  went on filtering after its checkbox stopped rendering and emptied
+						  the board with nothing on screen to undo it. Unticking it is how
+						  the reader asks "and who is out there if I could have anyone".
+						*/}
+						<label className="toggle" data-avail={availability.basis} title={availTitle}>
+							<input
+								type="checkbox"
+								checked={availableOnly}
+								onChange={e => set("availableOnly", e.currentTarget.checked)}
+							/>
+							<span>
+								Only players I can add
+								<em className="pool-count">
+									{" "}
+									{availability.basis === "pool" ? `${availability.size} free`
+									: availability.basis === "ownership" ? `est. over ${availability.cut!.cut}% is taken`
+									:	"can't tell"}
+								</em>
+							</span>
+						</label>
 						<label
 							className="toggle"
 							title="Keeps only players the schedule has pitching inside this window — published turns plus the games his club has not named a starter for yet, at his own rate of starting. It is the same count the ranking is built on."
@@ -680,7 +857,7 @@ export const Board = ({
 				{/* Position first and as chips, not a select: it is the filter people reach
 				    for constantly, and two clicks to change a dropdown is two too many. */}
 				<div className="chips" role="group" aria-label="Position">
-					{SLOTS.map(s => (
+					{(filters.mode === "stream" ? STREAM_SLOTS : SLOTS).map(s => (
 						<button
 							key={s || "any"}
 							type="button"
@@ -706,7 +883,7 @@ export const Board = ({
 						<span>Rank by</span>
 						<select
 							data-ctl="sort"
-							value={filters.sort}
+							value={sort}
 							onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
 						>
 							<option value="bscore">bscore (value over replacement)</option>
@@ -717,24 +894,44 @@ export const Board = ({
 							<option value="contact">best contact vs results (last 21 days)</option>
 						</select>
 					</label>
-					<label className="toggle" title={pool?.note ?? poolError ?? "Reading your league's free agents…"}>
+					{/* Not `disabled` any more, and that is the whole point of this change.
+					    It was disabled whenever the league's live free-agent list had not
+					    arrived, which on the hosted build is always — so the one control
+					    that answers "who can I actually get" was dead on the site the app
+					    is published at. It now falls back to the ownership estimate, which
+					    ships in the snapshot, and only goes inert where even that cannot be
+					    read. The count beside it says which of the two answered.
+
+					    Not rendered in `stream`, where the strip above already carries this
+					    exact control. Both were on screen at once, bound to one piece of
+					    state, and they did not agree about it: on a capture whose ownership
+					    cannot locate the boundary the strip's copy read "can't tell" and was
+					    operable, while this one read "unavailable" and was `disabled`. One
+					    control, one screen, two words for the state and two answers to
+					    whether you may change it. The strip's copy is the one scoped to the
+					    question, so it is the one that survives. */}
+					{filters.mode !== "stream" && (
+					<label className="toggle" data-avail={availability.basis} title={availTitle}>
 						<input
 							type="checkbox"
-							disabled={!availableNames}
-							checked={filters.availableOnly}
+							disabled={availability.basis === "none"}
+							checked={availableOnly}
 							onChange={e => set("availableOnly", e.currentTarget.checked)}
 						/>
 						<span>
-							Free agents only
-							{pool && pool.players.length > 0 && (
-								<em className="pool-count"> {pool.players.length}</em>
-							)}
-							{pool && pool.players.length === 0 && (
-								<em className="pool-count"> unavailable</em>
-							)}
-							{!pool && !poolError && <em className="pool-count"> …</em>}
+							{/* Short, because this label sits in the general filter row and the
+							    row has to survive a 390px phone: the longer wording measured
+							    419px of horizontal scroll on the board. */}
+							Only players I can add
+							<em className="pool-count">
+								{" "}
+								{availability.basis === "pool" ? `${availability.size} free`
+								: availability.basis === "ownership" ? "estimated"
+								:	"can't tell"}
+							</em>
 						</span>
 					</label>
+					)}
 				</div>
 				{/* The four controls above are the ones reached for constantly. These three
 				    are not, and permanently on screen they were part of what pushed the
@@ -815,6 +1012,57 @@ export const Board = ({
 				  the honest answer to "why is my seven-day list the same length as my
 				  three-day one": it is, and the extra four days are estimated.
 				*/}
+				{/*
+				  Which of the three availability answers this page is giving, said once
+				  where the reader can see it rather than implied by a list. The whole
+				  complaint was a streaming list headed by four men who were already
+				  rostered; the fix is only trustworthy if the page is explicit about
+				  whether "he is free" was READ or ESTIMATED.
+				*/}
+				{filters.mode === "stream" && availableOnly && (
+					<p className="sub avail-note">
+						<b>
+							{availability.basis === "pool" ? "Free agents in your league."
+							: availability.basis === "ownership" ? "Probably-free players."
+							:	"Every starter in the window."}
+						</b>{" "}
+						{/* The basis sentences are written to sit mid-sentence elsewhere, so the
+						    capital is applied here rather than baked into each of them —
+						    the same thing this panel already does with `period.basis`. */}
+						{availability.basisText.charAt(0).toUpperCase()}
+						{availability.basisText.slice(1)}.
+						{availability.basis !== "pool" &&
+							" Untick “Only players I can add” to see the whole field."}
+						{/*
+						  The remedy, and it is here because the only one on offer was the
+						  wrong one.
+
+						  Where the basis is `none` this tab is answering "which starters can
+						  I stream" with a list headed by men who are rostered everywhere —
+						  on the committed capture, Chris Sale and Drew Rasmussen — and the
+						  one instruction under it was to UNTICK the filter, which shows more
+						  of them. That is the opposite of what the reader came for. It is
+						  honest about not knowing and silent about the fix.
+
+						  The fix exists and it is one command: the wire is read on a machine
+						  and carried in a file (see pool.ts), and the masthead already has
+						  the door. This names it from the board, where the question is being
+						  asked, under exactly the condition WireChip renders that door — a
+						  Yahoo league with no server to read it live. With a server up the
+						  wire is read on every load and there is nothing to ask for.
+						*/}
+						{availability.basis === "none" &&
+							league?.meta.platform === "yahoo" &&
+							getMode() !== "server" && (
+								<>
+									{" "}
+									To rank only players you can actually add, load your league&rsquo;s
+									free-agent list — <b>free agents: none carried</b> in the header
+									above opens it.
+								</>
+							)}
+					</p>
+				)}
 				{streaming && (
 					<p className="sub stream-note">
 						{period && `${period.basis.charAt(0).toUpperCase()}${period.basis.slice(1)}. `}
@@ -833,16 +1081,73 @@ export const Board = ({
 							" A shorter window is where this data is strongest: MLB names starters about three days ahead and then stops."}
 					</p>
 				)}
-				{filters.moves > 0 && (
-					<p className="sub stream-note">
-						The first <b>{filters.moves}</b> {filters.moves === 1 ? "row is" : "rows are"} marked,
-						down to the rule — that is what {filters.moves === 1 ? "one move" : `${filters.moves} moves`} buys
-						you off this list, in this order, after your filters.
+				{/*
+				  "I have 2 picks remaining" as an ANSWER rather than as a decoration.
+
+				  This said "the first 2 rows are marked, down to the rule" — a sentence
+				  about a rail, describing the drawing rather than the decision. The rail
+				  is still there and is still the right shape for "where does my list
+				  stop", but a reader who came to find out which two men to add should
+				  not have to read a rule off a table to learn their names. So the page
+				  says them.
+
+				  Only where the moves control itself is, for the same reason the start
+				  filter is: a marker that outlives the tab that set it is a claim about
+				  a window nobody is looking at.
+				*/}
+				{moves > 0 && rows.length > 0 && (
+					<p className="sub stream-note moves-answer">
+						<b>
+							{moves === 1 ? "Your move" : `Your ${moves} moves`}
+							{moves < rows.length ? "" : " — the whole list"}:
+						</b>{" "}
+						{rows.slice(0, moves).map((r, i) => {
+							const s = startsFor(r)
+							return (
+								<Fragment key={r.player.id}>
+									{i > 0 && "; "}
+									<b>{r.player.name}</b>
+									{s && s.published > 0 ?
+										` — ${s.published} ${s.published === 1 ? "start" : "starts"} vs ${s.names.join(" and ")}`
+									: s ?
+										` — about ${s.expected.toFixed(1)} starts, none announced yet`
+									:	""}
+									{`, ${r.points.toFixed(1)} pts`}
+								</Fragment>
+							)
+						})}
+						.{" "}
+						{/* The claim is only as strong as its source, and it is never
+						    stronger than "probably" without the league's own wire.
+
+						    It is also never stronger than the LIST it describes. This read
+						    `availability.basis` alone, which says what the page COULD find
+						    out about the wire — not whether the rows above were actually
+						    filtered by it. With the pool loaded and "Only players I can add"
+						    unticked, the sentence named Parker Messick and Chris Sale, both
+						    printed "not listed" two lines below, and told the reader they
+						    were "Free in your league, read off its own list". Both are
+						    rostered; the wire had been read and had excluded them. That is
+						    an estimate dressed as a read, and worse — a read quoted about
+						    men the read ruled out. So the provenance clause is now gated on
+						    the filter that earns it, and when the filter is off the sentence
+						    says what the list actually is. */}
+						<em>
+							{!availableOnly ?
+								"Best of the whole field — “Only players I can add” is off, so these are not filtered by whether you can get them."
+							: availability.basis === "pool" ?
+								"Free in your league, read off its own list."
+							: availability.basis === "ownership" ?
+								// the arithmetic is stated in full one line above; repeating it
+								// here made the answer twice as long as the answer
+								`Estimated as gettable: rostered in ${availability.cut!.cut}% of leagues or fewer.`
+							:	"Availability unknown, so this is the best of the whole pool rather than of the wire."}
+						</em>
 					</p>
 				)}
 				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
 				    uscore column back on a phone when the board is ranked by it. */}
-				<div className="board" data-sort={filters.sort}>
+				<div className="board" data-sort={filters.sort} data-mode={filters.mode}>
 					{/* Seven columns, each answering a different question. `proj pts` and
 					    `waiver pts` used to sit here too, but bscore is one minus the other,
 					    so the table stated the same fact three times; the arithmetic is in
@@ -852,7 +1157,14 @@ export const Board = ({
 					<div className="board-head">
 						<span data-col="rank">#</span>
 						<SortHead col="who" field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
-						<SortHead col="uscore" field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>
+						{/* uscore discounts value by availability, which on a list already
+						    filtered to what he can add is that discount applied twice — see
+						    STREAM_GRID_CSS. What replaces it is the half of his question the
+						    board never answered: what this man actually scores over the
+						    window. */}
+						{filters.mode === "stream" ?
+							<SortHead col="pts" field="points" filters={filters} setFilters={setFilters} right>pts</SortHead>
+						:	<SortHead col="uscore" field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>}
 						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
 						{/* Not "GP" any more. GP is the games a player's TEAM plays, which for a
 						    starting pitcher is the wrong number by about a factor of six: on the
@@ -866,25 +1178,32 @@ export const Board = ({
 							data-col="games"
 							title="What this player gets out of the window. For a starting pitcher whose turns MLB has published it is his own scheduled starts (GS); for everyone else it is the games his team plays (GP). Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start."
 						>
-							games
+							{filters.mode === "stream" ? "starts" : "games"}
 						</span>
 						<SortHead col="conf" field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
 						{/* The number is a percentile, and nothing said so: 88 read as a quantity of
 						    luck rather than as "unluckier than 88% of his side". The denominator
 						    belongs in the heading, read once, rather than on 1,235 rows. */}
-						<SortHead col="luck" field="undervaluation" filters={filters} setFilters={setFilters} right unit="/100">
-							luck
-						</SortHead>
+						{/* Luck is a 21-day expected-minus-actual percentile — a buy-low
+						    reading about a season, acted on in the Buy low card. Nothing
+						    about which arm to start on Saturday turns on it, so it is not on
+						    the streaming grid. */}
+						{filters.mode !== "stream" && (
+							<SortHead col="luck" field="undervaluation" filters={filters} setFilters={setFilters} right unit="/100">
+								luck
+							</SortHead>
+						)}
 					</div>
 					{rows.slice(0, limit).map((r, i) => (
 						<Row
 							key={r.player.id}
 							rank={i + 1}
 							r={r}
+							stream={filters.mode === "stream"}
 							starts={startsFor(r)}
 							/* the reader's budget, counted down the ranking he is actually
 							   looking at — his filters have already decided who is on it */
-							moves={filters.moves}
+							moves={moves}
 							open={open === r.player.id}
 							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)}
 						/>
@@ -940,11 +1259,26 @@ export const Board = ({
 				)}
 			</section>
 
-			{/* Supporting analysis sits AFTER the ranking it supports. Both answer
-			    "where should I spend attention", which is a second question — putting
-			    them above the board pushed the actual recommendations below the fold. */}
-			<BuyLow rows={rows} />
-			<Scarcity pool={rated} league={league} />
+			{/*
+			  Supporting analysis sits AFTER the ranking it supports. Both answer
+			  "where should I spend attention", which is a second question — putting
+			  them above the board pushed the actual recommendations below the fold.
+
+			  And neither is on the Streaming tab at all. Buy low ranks a 21-day
+			  expected-minus-actual gap against ownership: a signal about a season,
+			  and on this fixture its picks are hitters, who cannot be streamed for a
+			  start. "Where it hurts to wait" is a draft and roster-construction
+			  reading — the shape of the drop-off at each slot, which does not change
+			  between now and Sunday. Two full-width cards that cannot help a reader
+			  choose an arm for the weekend are two cards of scrolling between him and
+			  the one that can.
+			*/}
+			{filters.mode !== "stream" && (
+				<>
+					<BuyLow rows={rows} />
+					<Scarcity pool={rated} league={league} />
+				</>
+			)}
 		</>
 	)
 }
@@ -1196,9 +1530,20 @@ const BillysPick = ({
 			<div className="pick-body">
 				<h2>Billy&rsquo;s pick</h2>
 				<p className="pick-name">{r.player.name}</p>
+				{/*
+				  It printed "Rostered in null% of leagues" whenever the estimate picked
+				  a man Yahoo never listed — which is now a live case rather than a
+				  hypothetical: the ownership tier counts an unlisted player as gettable
+				  precisely because the sweep never reached him, so the card's own
+				  recommendation is the row most likely to have no percentage on it. An
+				  absence is stated as an absence.
+				*/}
 				<p className="pick-avail">
 					{basis === "pool" ? "Free agent in your league."
-					: basis === "ownership" ? `Rostered in ${r.rosteredPct}% of leagues.`
+					: basis === "ownership" ?
+						r.rosteredPct === null ?
+							"Probably free — Yahoo lists no rostered share for him, so this is an estimate."
+						:	`Probably free — rostered in ${r.rosteredPct}% of leagues, below what a league this size takes.`
 					:	"Best bscore on this board — availability unknown."}
 				</p>
 				<p className="pick-why">
@@ -1214,7 +1559,7 @@ const BillysPick = ({
 	)
 }
 
-const COLUMN_HELP: Record<Filters["sort"], string> = {
+const COLUMN_HELP: Record<NonNullable<Filters["sort"]>, string> = {
 	name: "Sort by player name.",
 	uscore:
 		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. The ownership it divides by is printed under it; \u201cunlisted\u201d means Yahoo prices no ownership for him — unknown, not unowned, so there is no uscore either.",
@@ -1240,7 +1585,7 @@ const SortHead = ({
 	 *  The grid places by that name rather than by child index — see
 	 *  BOARD_GRID_CSS for why an index is not survivable here. */
 	col: string
-	field: Filters["sort"]
+	field: NonNullable<Filters["sort"]>
 	filters: Filters
 	setFilters: (f: (p: Filters) => Filters) => void
 	right?: boolean
@@ -1292,7 +1637,13 @@ const SortHead = ({
  * clause here names a number that is already on the row; nothing is added, and a
  * value that is missing says it is missing.
  */
-const rowLabel = (rank: number, r: Ranked, starts: Starts | null, moves: number) =>
+const rowLabel = (
+	rank: number,
+	r: BoardRow,
+	starts: Starts | null,
+	moves: number,
+	stream: boolean
+) =>
 	[
 		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
 		// The move marker is drawn as a rail and a rule, which a screen reader gets
@@ -1312,14 +1663,28 @@ const rowLabel = (rank: number, r: Ranked, starts: Starts | null, moves: number)
 				:	`no published starts, about ${starts.expected.toFixed(1)} expected from his own rate`
 			]
 		:	[]),
-		// one clause for the merged column, because it is one fact. Spoken as two it
-		// said "ownership unlisted, so no uscore ... ownership unlisted" on the 500
-		// rows Yahoo does not price — the same absence read out twice.
-		r.uscore === null ?
-			"ownership unlisted, so no uscore"
-		:	`uscore ${r.uscore}, rostered in ${r.rosteredPct} percent of leagues`,
+		/*
+		 * The streaming row and the board row carry different columns, so they
+		 * announce different things. A label naming uscore on a view that does not
+		 * show uscore is the same defect as a heading over the wrong cell, spoken
+		 * instead of drawn — and this file has shipped that defect before.
+		 */
+		...(stream ?
+			[
+				r.rosteredPct === null ?
+					"not on Yahoo's rostered list, so counted as gettable by estimate"
+				:	`rostered in ${r.rosteredPct} percent of leagues`,
+				`${r.points} projected points over this window`
+			]
+			// one clause for the merged column, because it is one fact. Spoken as two it
+			// said "ownership unlisted, so no uscore ... ownership unlisted" on the 500
+			// rows Yahoo does not price — the same absence read out twice.
+		: r.uscore === null ? ["ownership unlisted, so no uscore"]
+		: [`uscore ${r.uscore}, rostered in ${r.rosteredPct} percent of leagues`]),
 		`bscore ${r.bscore}`,
-		`${r.points} projected points against ${r.replacement} for a replacement`,
+		...(stream ?
+			[`against ${r.replacement} for the next arm on the wire`]
+		:	[`${r.points} projected points against ${r.replacement} for a replacement`]),
 		`confidence ${pct(r.confidence.value)}`,
 		// the same choice the games column makes, spoken: his own starts where they
 		// exist, his team's games where they don't, and never one labelled the other
@@ -1385,13 +1750,17 @@ const detailId = (r: Ranked) => `player-detail-${r.player.id}`
 const Row = ({
 	rank,
 	r,
+	stream,
 	starts,
 	moves,
 	open,
 	onToggle
 }: {
 	rank: number
-	r: Ranked
+	r: BoardRow
+	/** On the Streaming tab, where the row answers a different question and
+	 *  therefore carries different columns — see STREAM_GRID_CSS. */
+	stream: boolean
 	/** His schedule in this window, on the streaming tab. Null everywhere else. */
 	starts: Starts | null
 	/** How many moves the reader said he has left. The first `moves` rows carry the
@@ -1408,7 +1777,7 @@ const Row = ({
 			aria-expanded={open}
 			aria-controls={detailId(r)}
 			data-pick={moves > 0 && rank <= moves ? (rank === moves ? "last" : "yes") : undefined}
-			aria-label={rowLabel(rank, r, starts, moves)}
+			aria-label={rowLabel(rank, r, starts, moves, stream)}
 		>
 			<span className="rank" data-col="rank">{rank}</span>
 			<span className="who" data-col="who">
@@ -1416,6 +1785,32 @@ const Row = ({
 				<span className="meta">
 					<span className="code">{r.slot}</span>
 					{r.player.team ?? "—"}
+					{/*
+					  How widely he is rostered, on the streaming tab only, and beside the
+					  club rather than in a column.
+
+					  The list above it is filtered to men he can add, so a per-row "free"
+					  badge would be furniture — every row would carry it. What is NOT
+					  uniform is the STRENGTH of that claim, and this is the number the
+					  claim was made from: 13% is a read, "not listed" is the absence of
+					  one. Blake Snell tops the gettable list on the live capture and is
+					  unlisted, having pitched five games all year; a reader who can see
+					  that can check him in ten seconds, and one who cannot has been asked
+					  to trust an estimate on faith.
+					*/}
+					{stream && (
+						<span
+							className={`own${r.free === true ? " free" : ""}`}
+							title={
+								r.rosteredPct === null ?
+									"Yahoo listed no rostered share for him. He is counted as gettable because the sweep reads about 200 deep per position and never reached him — an estimate, and the one place it is weakest."
+								:	`Rostered in ${r.rosteredPct}% of Yahoo leagues.`
+							}
+						>
+							{" · "}
+							{r.rosteredPct === null ? "not listed" : `${r.rosteredPct}% owned`}
+						</span>
+					)}
 					{r.injury && <em className="hurt">{r.injury}</em>}
 				</span>
 				{starts && <StartLine s={starts} />}
@@ -1425,7 +1820,15 @@ const Row = ({
 			    printed one absence twice — 500 of 1,233 rows, and 36 of the first 60.
 			    Where Yahoo priced him the cell shows both numbers; where it didn't it
 			    says so once, in a word rather than a dash. */}
-			<span
+			{stream ?
+				<span
+					className="r pts"
+					data-col="pts"
+					title={`Projected for ${r.points} points over this window in your league's own scoring — the quantity. bscore beside it is the same number minus what the next arm on the wire would score.`}
+				>
+					{r.points.toFixed(1)}
+				</span>
+			:	<span
 				className={`r uscore${(r.uscore ?? 0) >= 10 ? " up" : ""}`}
 				data-col="uscore"
 				title={
@@ -1441,11 +1844,11 @@ const Row = ({
 						<span className="us-own">{r.rosteredPct}% owned</span>
 					</>
 				}
-			</span>
+			</span>}
 			<span className="r bscore" data-col="bscore">{r.bscore}</span>
 			<Window r={r} />
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
-			<span
+			{!stream && <span
 				className={`r gap${(r.undervaluation ?? 0) >= 70 ? " up" : ""}`}
 				data-col="luck"
 				title={
@@ -1455,7 +1858,7 @@ const Row = ({
 				}
 			>
 				{r.undervaluation === null ? "—" : r.undervaluation}
-			</span>
+			</span>}
 		</button>
 		{open && <Detail r={r} />}
 	</>

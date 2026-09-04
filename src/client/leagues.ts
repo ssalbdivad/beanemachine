@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { Config, League } from "../schema.ts"
 import { ApiError } from "./api.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
+import { pool, type StoredPool } from "./pool.ts"
 import { roster } from "./roster.ts"
 
 /**
@@ -32,9 +33,20 @@ const parse = (raw: string, source: string): Config => {
 	return out
 }
 
-/** Validates before writing, so an invalid config can never reach storage. */
+/**
+ * Validates before writing, so an invalid config can never reach storage.
+ *
+ * The three CARRIED keys are stripped on the way in. `Config` preserves keys it
+ * does not declare — which is what lets a file hold `rosters`, `lineups` and
+ * `pools` at all — but each of those has its own store, and leaving a copy in the
+ * config key means two answers to the same question with no rule for which wins.
+ * A pool is the one that made it matter: it is the largest of the three and the
+ * fastest to go stale, so a stale duplicate riding along in the config would
+ * outlive the read it came from and reappear in the next download.
+ */
 const write = (config: Config): Config => {
-	const out = Config(config)
+	const { rosters: _r, lineups: _l, pools: _p, ...rest } = config as LeagueFile
+	const out = Config(rest)
 	if (out instanceof type.errors)
 		throw new StoreError(`Refusing to store an invalid config:\n${out}`)
 	localStorage.setItem(STORE_KEY, JSON.stringify(out))
@@ -61,12 +73,25 @@ const current = (): Config => {
 	return config
 }
 
+/**
+ * The seed path, which is also a Yahoo user's LOCAL path.
+ *
+ * `npx vite` serves the scoring.json that `src/cli.ts` just wrote, and a first
+ * visit with nothing stored reads it here. That file now carries a roster, a
+ * lineup and a free-agent pool, so this has to install them exactly as a dropped
+ * file does — otherwise the two routes into the same file disagree, and the local
+ * one, which is the one the reader is standing in front of when they run the
+ * command, would be the one that lost the pool.
+ */
 const load = async (): Promise<Config> => {
 	const stored = read()
 	if (stored) return stored
 	const res = await fetch(`${import.meta.env.BASE_URL}scoring.json`)
 	if (!res.ok) throw new StoreError(`Couldn't load the starter scoring.json (HTTP ${res.status}).`)
-	return write(parse(await res.text(), "The starter scoring.json"))
+	const text = await res.text()
+	const config = write(parse(text, "The starter scoring.json"))
+	carry(JSON.parse(text) as LeagueFile, config)
+	return config
 }
 
 const save = (key: string, league: League): Config => {
@@ -140,39 +165,67 @@ const remove = (key: string): Config => {
  *
  * - the leagues themselves, which is what it always held;
  * - `rosters`, which players are yours per league (id:group keys, no player data);
- * - `lineups`, the seat each of them is in, as your platform printed it.
+ * - `lineups`, the seat each of them is in, as your platform printed it;
+ * - `pools`, the league's own free-agent list, stamped with when it was read.
  *
- * The last two live in their own stores (roster.ts, lineup.ts) because they have
- * different lifetimes to a scoring table, and neither can be read from a Yahoo
- * league in a browser at all — so before this, a Yahoo user who ran the importer
- * locally could carry the scoring across and still had no team on the hosted site.
+ * The last of those is the one that makes the hosted site able to answer the
+ * question it exists for. "Which starters should I stream over the next three
+ * days" is a question about players you can ADD, and until the pool travelled, the
+ * hosted board's answer was headed by four pitchers on other people's rosters:
+ * there was no exact availability list to be had, so the ranking simply showed the
+ * best players in baseball. `fetchAvailable` in src/data/yahoo-pool.ts reads the
+ * real one and a browser can never call it — so it rides here instead.
  *
- * Both keys are OPTIONAL and are omitted when empty, so a file downloaded from a
- * browser that has no roster stored is byte-for-byte the shape old files have,
- * and an old file still loads: `Config` ignores keys it does not declare, and the
- * loader below only looks for these two if they are there.
+ * All three live in their own stores (roster.ts, lineup.ts, pool.ts) because they
+ * have different lifetimes to a scoring table. A scoring table is true until the
+ * commissioner changes it; a lineup is true until you move somebody; a pool is
+ * true until anybody in the league clicks Add. That last one is why every pool
+ * entry carries `at`: the difference between "these are the free agents" and
+ * "these were the free agents at 1:11 PM on Thursday" is the difference between a
+ * fact and a claim this app has no right to make.
+ *
+ * Every key is OPTIONAL and omitted when empty, so a file downloaded from a
+ * browser that has none of them is byte-for-byte the shape old files have, and an
+ * old file still loads: `Config` preserves keys it does not declare, and the
+ * loader below only looks for these three if they are there.
  */
 export interface LeagueFile extends Config {
 	/** `{ "yahoo:228947": ["592450:hitting", …] }` — ids only, never player data. */
 	rosters?: Record<string, string[]>
 	lineups?: Record<string, StoredLineup>
+	/** `{ "yahoo:228947": { at, leagueId, players, positionsRead, note } }` — the
+	 *  league's own wire at a named instant. */
+	pools?: Record<string, StoredPool>
 }
 
-/** Reads the two team stores for the leagues this config actually names. A roster
- *  whose league is gone is meaningless, so it is not carried. */
+/**
+ * Reads the three side stores for the leagues this config actually names. A roster
+ * whose league is gone is meaningless, so it is not carried.
+ *
+ * The carried keys are stripped off the base config before the fresh ones are put
+ * back. `write` already keeps them out of storage, but a config held in React
+ * state can still have arrived from a file that had them — and spreading that
+ * would republish a pool the store no longer holds, i.e. one the reader had
+ * cleared, under a timestamp that made it look current.
+ */
 const bundle = (config: Config): LeagueFile => {
 	const rosters: Record<string, string[]> = {}
 	const lineups: Record<string, StoredLineup> = {}
+	const pools: Record<string, StoredPool> = {}
 	for (const key of Object.keys(config.leagues)) {
 		const held = roster.of(key)
 		if (held.length) rosters[key] = held
 		const lineup = lineupStore.of(key)
 		if (lineup) lineups[key] = lineup
+		const wire = pool.of(key)
+		if (wire) pools[key] = wire
 	}
+	const { rosters: _r, lineups: _l, pools: _p, ...rest } = config as LeagueFile
 	return {
-		...config,
+		...rest,
 		...(Object.keys(rosters).length ? { rosters } : {}),
-		...(Object.keys(lineups).length ? { lineups } : {})
+		...(Object.keys(lineups).length ? { lineups } : {}),
+		...(Object.keys(pools).length ? { pools } : {})
 	}
 }
 
@@ -201,6 +254,46 @@ export interface Loaded {
 	leagues: number
 	rosters: number
 	lineups: number
+	/** How many leagues arrived with an exact free-agent list. Counted from the
+	 *  file, never assumed: a file with no pool must not be reported as bringing
+	 *  one, because the whole value of the pool is that it is not a guess. */
+	pools: number
+}
+
+/**
+ * Installs the three side stores a file carried, and reports what was actually in
+ * it.
+ *
+ * Shared by both doors — a dropped file and the scoring.json a local `npx vite`
+ * seeds from — because two copies of this would be two chances for one door to
+ * quietly drop the pool.
+ *
+ * The data goes back through roster.ts, lineup.ts and pool.ts's own setters, which
+ * validate it against the same shapes they always have: a file with a mangled pool
+ * is rejected by the store that owns it, not by a second copy of its rules living
+ * here. Anything keyed to a league the file does not carry is dropped rather than
+ * stored under a key nothing resolves.
+ */
+const carry = (file: LeagueFile, config: Config): Omit<Loaded, "config" | "leagues"> => {
+	let rosters = 0
+	let lineups = 0
+	let pools = 0
+	for (const [key, held] of Object.entries(file.rosters ?? {})) {
+		if (!(key in config.leagues)) continue
+		roster.set(key, held)
+		rosters++
+	}
+	for (const [key, lineup] of Object.entries(file.lineups ?? {})) {
+		if (!(key in config.leagues)) continue
+		lineupStore.set(key, lineup.spots, lineup.at)
+		lineups++
+	}
+	for (const [key, wire] of Object.entries(file.pools ?? {})) {
+		if (!(key in config.leagues)) continue
+		pool.set(key, wire)
+		pools++
+	}
+	return { rosters, lineups, pools }
 }
 
 /**
@@ -227,34 +320,25 @@ const replace = (text: string): Loaded => {
 	// meaningful once its league exists, and a roster for a league the file does
 	// not carry is dropped rather than stored under a key nothing resolves.
 	write(config)
-	const file = parsed as LeagueFile
-	let rosters = 0
-	let lineups = 0
 	// The leagues are already stored by the time this runs, so a file whose team
 	// data is unusable must say that the leagues DID load — reporting it as one
 	// failure would send the reader looking for leagues that are in fact there.
-	// roster.ts and lineup.ts throw their own errors for a shape they refuse; a
-	// `rosters` that is not even an object throws a TypeError here, and both read
+	// The three stores throw their own errors for a shape they refuse; a `rosters`
+	// that is not even an object throws a TypeError inside `carry`, and both read
 	// the same way to whoever dropped the file.
 	try {
-		for (const [key, held] of Object.entries(file.rosters ?? {})) {
-			if (!(key in config.leagues)) continue
-			roster.set(key, held)
-			rosters++
-		}
-		for (const [key, lineup] of Object.entries(file.lineups ?? {})) {
-			if (!(key in config.leagues)) continue
-			lineupStore.set(key, lineup.spots, lineup.at)
-			lineups++
+		return {
+			config,
+			leagues: Object.keys(config.leagues).length,
+			...carry(parsed as LeagueFile, config)
 		}
 	} catch (e) {
 		throw new StoreError(
-			`The leagues in that file loaded, but its saved team could not be read ` +
-				`(${(e as Error).message}). Nothing was invented in its place: read your ` +
-				`roster again, or add players by hand.`
+			`The leagues in that file loaded, but the team and free agents it carried ` +
+				`could not be read (${(e as Error).message}). Nothing was invented in their ` +
+				`place: read them again, or add players by hand.`
 		)
 	}
-	return { config, leagues: Object.keys(config.leagues).length, rosters, lineups }
 }
 
 export const leagues = { load, save, activate, create, suggestKey, remove, download, replace }

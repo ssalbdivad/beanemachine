@@ -156,14 +156,33 @@ each of the four required inputs actually arrived — plus everything the source
 state, verbatim. `--help` lists the URL shapes. The league must be publicly viewable;
 a private one needs a signed-in session the importer cannot hold.
 
+It also makes two reads no browser can: **your league's free agents** and **your own
+roster**, seat by seat. The first is the one that matters. "Which starters should I
+stream over the next three days" is a question about the players you can *add*, and
+Yahoo's free-agent page sends no CORS headers — so beanemachine.com will never be
+handed one, and until the list travelled in this file the hosted board answered a
+streaming question with a ranking of everyone in baseball. Measured against league
+228947 on 2026-09-04: over a three-day window, all 20 rows at the head of the
+Streaming tab were on somebody's roster; with the file's 150-player wire loaded, the
+list was 9 starters, all of them actually free, and the two top-20s had nothing in
+common. Both reads are stamped with the instant they happened, and the masthead says
+how old they are rather than showing them as live — a pool is only true until the next
+person in the league clicks Add. `--settings-only` skips them. The path to the file is
+the last line the command prints.
+
 From there the league is a file:
 
 - `npx vite` seeds a browser that has nothing stored from `scoring.json`, so a local
   run opens straight on your league.
 - **League setup → Download** in the app writes the leagues in your browser to a JSON
-  file; **Load file** on any other machine or browser reads it back
-  (`leagues.download` / `leagues.replace` in `src/client/leagues.ts`). That is how a
-  Yahoo league gets onto the hosted site: read it once locally, carry the file.
+  file; **Load file** on any other machine or browser reads it back, and so does
+  dropping it anywhere on the page (`leagues.download` / `leagues.replace` in
+  `src/client/leagues.ts`). That is how a Yahoo league gets onto the hosted site: read
+  it once locally, carry the file. The file carries four things under four optional,
+  plain-JSON keys — `leagues`, `rosters`, `lineups` and `pools` — and each of the last
+  three has its own store in the browser (`roster.ts`, `lineup.ts`, `pool.ts`) rather
+  than a second copy inside the config. A file written before any of them existed
+  still loads: every one is optional and omitted when empty.
 
 Leagues live in browser storage, never on a server. The API process reads leagues off
 their own pages and hands the result straight back; it stores nothing.

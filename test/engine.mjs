@@ -414,13 +414,29 @@ t("and the coverage denominator is the same set of games as the schedule count",
 //
 // Both are about the same question — are this pitcher's outs START outs — asked in
 // two places, so they share one constant (`MODEL.probables.minStartShare`).
-// A window short enough that MLB has actually published it. Probables thin out
-// fast — measured on this capture, 29 clubs are fully covered one day out, 11 at
-// four days, and ZERO at seven, which is why the engine asks about coverage per
-// club rather than assuming a horizon is knowable. `weekWin` above is seven days
-// and therefore covers nobody, so these assertions would be vacuous against it.
-const coveredWin = windowFrom(hyd.slate, snap.horizon.start,
-  new Date(Date.parse(snap.horizon.start) + 4 * 86400000).toISOString().slice(0, 10))
+/**
+ * A window short enough that MLB has actually published it — CHOSEN FROM THE
+ * CAPTURE rather than hardcoded.
+ *
+ * Probables thin out fast and exactly how fast depends on the hour the capture was
+ * taken. On the 2026-09-04 capture: 30 of 30 clubs fully published one day out, 23
+ * at three days, 0 at five. A fixed four-day offset was covered on an older
+ * capture and covers nobody on this one, so every assertion below silently became
+ * vacuous the day the snapshot was refreshed — which the vacuity guard caught and
+ * is why it is there. The window now walks out from the start and stops at the
+ * last length where enough clubs are complete for the rest to mean something.
+ */
+const coveredWin = (() => {
+  let best = windowFrom(hyd.slate, snap.horizon.start, snap.horizon.start)
+  for (let d = 1; d <= 7; d++) {
+    const end = new Date(Date.parse(snap.horizon.start) + d * 86400000).toISOString().slice(0, 10)
+    const w = windowFrom(hyd.slate, snap.horizon.start, end)
+    const full = [...w.coverage.values()].filter(c => c.games > 0 && c.published >= c.games).length
+    if (full < 6) break
+    best = w
+  }
+  return best
+})()
 t("the short window really is covered for some clubs, or the rest is vacuous",
   [...coveredWin.coverage.values()].filter(c => c.games > 0 && c.published >= c.games).length > 5,
   `${[...coveredWin.coverage.values()].filter(c => c.games > 0 && c.published >= c.games).length} clubs`)
@@ -566,6 +582,10 @@ const { MODEL: M } = await import("../src/engine/weights.ts")
 const seasonEnd = hyd.slate.reduce((a, g) => (g.date > a ? g.date : a), snap.horizon.end)
 const per = resolvePeriod(league, snap.horizon.start, seasonEnd)
 const wk = windowFrom(hyd.slate, per.start, per.end)
+// A fortnight from the capture: long enough that most of it is still unnamed, which
+// is the only condition under which "how is an unnamed game credited" can be asked.
+const unnamedWin = windowFrom(hyd.slate, snap.horizon.start,
+  new Date(Date.parse(snap.horizon.start) + 13 * 86400000).toISOString().slice(0, 10))
 const weekBoard = rateAll({
   ...base, eligibility: hyd.eligibility, gamesByTeam: wk.games, opponentsByTeam: wk.opponents,
   probableStarts: wk.probableStarts, probableCoverage: wk.coverage,
@@ -600,22 +620,47 @@ t("a pitcher with no recent window still gets exactly the season-rate answer",
   noRecent.length > 20 && reproduced.length === noRecent.length,
   `${reproduced.length}/${noRecent.length} reproduce the old formula to the digit`)
 
-// ...and where a recent window exists, the credited rate is a rotation's rate.
-// Pure starters with nothing of their own published are the clean population:
-// whatever the model believes about them comes entirely from this term.
-const clean = starters.filter(r => {
+/**
+ * ...and where a recent window exists, the credited rate is a rotation's rate.
+ * Pure starters with nothing of their own published are the clean population:
+ * whatever the model believes about them comes entirely from this term.
+ *
+ * Rated against `unnamedWin` and divided by `unnamedWin`'s own unnamed games. The
+ * first draft of this took `scheduledStarts` from the PERIOD board and divided by
+ * the FORTNIGHT's unnamed games — a numerator and a denominator from different
+ * windows, which is the exact defect this suite exists to catch, and it read a
+ * median of 0.000.
+ */
+const unnamedBoard = rateAll({
+  ...base, eligibility: hyd.eligibility,
+  gamesByTeam: unnamedWin.games, opponentsByTeam: unnamedWin.opponents,
+  probableStarts: unnamedWin.probableStarts, probableCoverage: unnamedWin.coverage,
+  startOpponents: unnamedWin.startOpponents, injuryPolicy: "exclude"
+})
+const clean = unnamedBoard.filter(mostlyStarter).filter(r => {
   const gs = r.player.stats.gamesStarted ?? 0
-  const cov = wk.coverage.get(r.player.teamId)
+  const cov = unnamedWin.coverage.get(r.player.teamId)
   return gs === (r.player.stats.gamesPitched ?? 0) && gs >= 4 && cov &&
-    (wk.probableStarts.get(r.player.id) ?? 0) === 0 &&
+    (unnamedWin.probableStarts.get(r.player.id) ?? 0) === 0 &&
     Math.max(cov.games - cov.published, 0) >= 2 &&
     !!hyd.recentVolumeByWindow[`${r.player.id}:pitching`]
 })
 const perGame = clean.map(r => {
-  const cov = wk.coverage.get(r.player.teamId)
+  const cov = unnamedWin.coverage.get(r.player.teamId)
   return r.scheduledStarts / Math.max(cov.games - cov.published, 0)
 }).sort((a, b) => a - b)
 const med = perGame[Math.floor(perGame.length / 2)]
+/**
+ * The population here is starters whose club has UNNAMED games left in the window,
+ * so it shrinks as MLB publishes more. On the 2026-09-04 capture the league's own
+ * period is almost fully named — 23 of 30 clubs complete at three days — which left
+ * four qualifying starters and made this assertion fail on sample size while the
+ * median it measures was exactly 0.200, a five-man rotation, i.e. right.
+ *
+ * The claim is about how an unnamed game is credited, so it is measured over a
+ * window that HAS unnamed games rather than over whichever period today happens to
+ * be. The bar on the population stays — a median of four is not evidence.
+ */
 t("an unnamed game is credited at roughly a five-man rotation's rate",
   clean.length >= 20 && med > 0.16 && med < 0.26,
   `${clean.length} pure starters, median ${med.toFixed(3)} starts per unnamed game (a rotation is 0.20)`)
@@ -721,6 +766,99 @@ t("an unspecified recent weight means the shipped blend, not a retracted 0.75",
 t("the Statcast note states the finished verdict, not an open question",
   probe.modelled.some(m => /111 paired weeks/.test(m) && !/not yet settled/.test(m)),
   probe.modelled.find(m => /Statcast/.test(m)))
+
+/**
+ * 15. Who the reader can ACTUALLY ADD, estimated without a server.
+ *
+ * The hosted build has no API, so the league's live free-agent list never arrives
+ * on beanemachine.com and "Free agents only" was permanently disabled there. The
+ * streaming list therefore opened, on the live 2026-09-04 capture, with Tyler
+ * Glasnow (94% rostered), Blake Snell, Chris Sale (99%) and Drew Rasmussen (95%).
+ * The estimate below is what answers the question on a static page, and it lives or
+ * dies on refusing to answer where it cannot.
+ */
+const { likelyAvailable, ownershipCut, rosterableDepth } = await import("../src/engine/bscore.ts")
+
+// The depth is the league's own supply, so it must move with the league's own shape
+t("rosterable depth is every seat on every roster, not the startable ones",
+  rosterableDepth(league) === 270,
+  `${rosterableDepth(league)} — 10 teams x 27 seats (18 active, 5 bench, 4 IL)`)
+t("and it follows the team count rather than a constant",
+  rosterableDepth({ ...league, meta: { ...league.meta, max_teams: 12 } }) === 324,
+  String(rosterableDepth({ ...league, meta: { ...league.meta, max_teams: 12 } })))
+t("a league that has not stated its size gets no estimate at all",
+  rosterableDepth({ ...league, meta: { ...league.meta, max_teams: null } }) === null &&
+    ownershipCut({ ...league, meta: { ...league.meta, max_teams: null } }, hy.ownership) === null)
+
+/**
+ * The gate, and it is the reason this is safe to ship rather than a decoration.
+ *
+ * Yahoo's "% Ros" is swept off player pages whose tooltip also carries a per-game
+ * weather line, and a sweep that reads the wrong cell puts a whole club on one
+ * identical percentage. `leakedByTeam` in data/yahoo-pool.ts discards those at
+ * capture time. The snapshot committed here USED to predate that fix — 225 of its
+ * 848 priced players sat at exactly 51%, 8.3 times the 27 seats on one roster, and
+ * ranking by that column produced a "who you can get" list headed by Zack Wheeler,
+ * Jacob deGrom and Logan Gilbert: the same unreachable aces, differently spelled.
+ *
+ * The capture has since been refreshed and is clean — 4 players tie at the cut
+ * where 225 did — which is exactly the event the previous version of this assertion
+ * was written to notice, and it did. So the LEAK is now reproduced rather than
+ * depended upon: pinning the rule to a fixture that happens to be broken makes the
+ * test evaporate the day the fixture is fixed, and this is that day.
+ */
+const cleanCapture = ownershipCut(league, hy.ownership)
+t("the committed capture is clean enough to estimate from",
+  cleanCapture !== null && cleanCapture.usable === true, cleanCapture?.basis)
+
+// the same column, leaked: one value stamped across far more players than a roster
+// holds, which is the shape a wrong-cell sweep produces
+const leaked = new Map(hy.ownership)
+let stamped = 0
+for (const id of leaked.keys()) {
+  if (stamped >= 225) break
+  leaked.set(id, 51)
+  stamped++
+}
+const cut = ownershipCut(league, leaked)
+const tied = [...leaked.values()].filter(v => v === 51).length
+t("a capture whose ownership column is mostly one leaked value is refused, not used",
+  cut !== null && cut.usable === false && /inside a tie this column cannot order/.test(cut.basis),
+  `${tied} players at 51% — ${cut?.basis}`)
+t("and the refusal quotes the measurement rather than asserting a verdict",
+  cut.basis.includes(String(tied)) && cut.basis.includes(String(cut.seats)), cut.basis)
+
+/**
+ * The arithmetic itself, on ownership built to order so the assertion pins the RULE
+ * rather than whatever a capture happened to contain. 300 players, ownership 300
+ * down to 1 by ones: the 270th most owned is at 31%, so 31 is the boundary and the
+ * 269 above it are taken.
+ */
+const synthetic = new Map([...Array(300)].map((_, i) => [i, 300 - i]))
+const cleanCut = ownershipCut(league, synthetic)
+t("the cut is the ownership of the (teams x seats)-th most rostered player",
+  cleanCut.usable && cleanCut.cut === 31 && cleanCut.depth === 270 && cleanCut.tied === 1,
+  JSON.stringify(cleanCut))
+t("a bigger league reaches further down the same list and gets a lower bar",
+  ownershipCut({ ...league, meta: { ...league.meta, max_teams: 8 } }, synthetic).cut === 85,
+  String(ownershipCut({ ...league, meta: { ...league.meta, max_teams: 8 } }, synthetic).cut))
+t("above the cut is taken, on it is not — a tie falls to the gettable side",
+  likelyAvailable(30, cleanCut) && likelyAvailable(31, cleanCut) && !likelyAvailable(32, cleanCut))
+/**
+ * An UNLISTED player counts as gettable. Yahoo's sweep walks about 200 deep per
+ * position ordered by ownership, so a player it never reached is far below a
+ * 270-player boundary — measured on the live 2026-09-04 capture, 0 of the top 270
+ * players by season points are unlisted, and the listed pool's median season total
+ * is 337 points against the unlisted pool's 36. Deep unlisted arms are exactly who
+ * a streamer picks up. The rule is only safe because the gate above refuses the
+ * thin captures where it is false; on this committed one, 67 of the top 270 by
+ * season points are unlisted.
+ */
+t("a player Yahoo never listed is counted gettable rather than dropped",
+  likelyAvailable(null, cleanCut))
+/** A capture too thin to reach the boundary cannot locate it, and says so. */
+t("ownership for fewer players than the league can hold is refused",
+  ownershipCut(league, new Map([...Array(100)].map((_, i) => [i, 100 - i]))).usable === false)
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

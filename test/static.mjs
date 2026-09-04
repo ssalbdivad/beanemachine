@@ -42,8 +42,21 @@ let pass=0, fail=0
 const t=(n,ok,x="")=>{ok?pass++:fail++; console.log(`${ok?"PASS":"FAIL"}  ${n}${ok?"":"  "+x}`)}
 t("no page errors", errs.length===0, errs.join(" | "))
 t("the board renders with no server", (await p.$$eval(".board-row", n=>n.length)) > 50)
-t("free-agents toggle is disabled rather than failing",
-  await p.$eval(".toggle input", e => e.disabled))
+/**
+ * The availability toggle WORKS with no server now, which is the point of the whole
+ * ownership estimate. It used to be asserted disabled, because "who can I add" read
+ * the league's live free-agent list and that needs the API — so on the hosted build
+ * the one control that answers "which starters should I stream" was dead, and this
+ * assertion was pinning that deadness in place.
+ *
+ * A player's rostered share is in the snapshot, and ranking by it and cutting at
+ * `teams x seats` estimates who is taken without any server at all. So the toggle
+ * is live here, and what has to hold is that it is honest about being an estimate.
+ */
+t("the availability toggle works with no server", !(await p.$eval(".toggle input", e => e.disabled)))
+t("and says the answer is estimated rather than read",
+  /estimate|estimated/i.test(await p.$eval("body", e => e.innerText)),
+  (await p.$eval("body", e => e.innerText)).slice(0, 160))
 t("Billy's pick renders", await p.locator(".card.pick").isVisible())
 // now switch to the config editor for the remaining assertions
 await p.click(".views button:nth-child(2)")
@@ -313,6 +326,121 @@ t("and dropping it loads the leagues it carries, with no server",
   /Loaded \d+ league/.test(await p.textContent(".toast")), await p.textContent(".toast"))
 t("which is the same leagues, back in this browser",
   await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length >= 2))
+
+/**
+ * ── The question the hosted site could not answer ───────────────────────────────
+ *
+ * "I have two picks left this week; which starters should I stream over the next
+ * three days?" is a question about players the reader can ADD. The Streaming tab,
+ * the 3-day window, the start counts and the opponents all shipped, and the list
+ * still opened with Tyler Glasnow (94% rostered), Blake Snell, Chris Sale (99%)
+ * and Drew Rasmussen (95%) at its head — because the exact free-agent list is read
+ * off Yahoo's own pages, Yahoo sends no `access-control-allow-*` headers, and this
+ * build has no backend to read it for the page. The control that would have fixed
+ * it was permanently disabled here.
+ *
+ * The file is the route, and this is where it is proved: a pool read on a machine,
+ * carried in a JSON file, dropped on a page with EVERY /api/** call aborted, and
+ * used to narrow the ranking to players who are actually on the wire.
+ */
+await p.evaluate(() => localStorage.clear())
+await p.reload({ waitUntil: "networkidle" })
+await p.waitForSelector(".board-row", { timeout: 25000 })
+const streamHead = async (n = 6) => {
+  await p.click('.modes .mode:has-text("Streaming")')
+  await p.waitForTimeout(400)
+  return p.$$eval(".board-row .who b", els => els.map(e => e.textContent.trim()))
+    .then(names => names.slice(0, n))
+}
+const estimated = await streamHead()
+t("the streaming tab ranks somebody before any free-agent list is carried",
+  estimated.length === 6, estimated.join(", "))
+// Nothing is carried yet, so the masthead has to say so — and say it as the way to
+// fix it, on every tab, rather than as a disabled checkbox three controls down.
+t("with no pool carried, the masthead says so and offers the way to get one",
+  await p.locator('[data-wire="none"]').isVisible(),
+  await p.locator(".wrap > .chips").textContent())
+
+/**
+ * The carried pool. Its players are taken from DEEP in this same streaming list —
+ * rows 15-22, well below anything on screen — for a reason: if the filter is doing
+ * nothing, they cannot reach the head, so the assertions below cannot pass by
+ * accident.
+ */
+const listed = await p.$$eval(".board-row .who b", els => els.map(e => e.textContent.trim()))
+const deep = listed.slice(14, 22)
+t("the ranking runs deep enough to draw a pool from a part of it nobody would see",
+  deep.length === 8 && !deep.some(n => estimated.includes(n)),
+  `${listed.length} rows ranked; drew ${deep.join(", ")}`)
+const READ_AT = new Date(Date.now() - 3 * 3_600_000).toISOString()
+const withWire = JSON.parse(await p.evaluate(() => localStorage.getItem("beanemachine:config")))
+withWire.pools = {
+  "yahoo:228947": {
+    at: READ_AT,
+    leagueId: "228947",
+    players: deep.map((name, i) => ({ yahooId: String(9000 + i), name, team: null, positions: ["SP"] })),
+    positionsRead: ["SP"],
+    note: "Top 25 free agents per position (SP)."
+  }
+}
+await p.evaluate(() => localStorage.clear())
+await p.reload({ waitUntil: "networkidle" })
+await p.waitForSelector(".board-row", { timeout: 25000 })
+const wireDt = await p.evaluateHandle(text => {
+  const d = new DataTransfer()
+  d.items.add(new File([text], "scoring.json", { type: "application/json" }))
+  return d
+}, JSON.stringify(withWire))
+await p.dispatchEvent("body", "drop", { dataTransfer: wireDt })
+await p.waitForSelector(".toast", { timeout: 10000 })
+t("dropping the file says a free-agent list came with it",
+  /free-agent list/.test(await p.textContent(".toast")), await p.textContent(".toast"))
+await p.waitForTimeout(800)
+
+// It is EXACT and it is OLD, and the page has to say both. A count on its own would
+// be the failure this project refuses: a wire turns over whenever anybody in the
+// league clicks Add, so 8 free agents with no read time is a claim about right now
+// that nothing supports.
+const carriedChip = (await p.locator('[data-wire="carried"]').textContent()).replace(/\s+/g, " ")
+t("the masthead now states the exact list AND when it was read",
+  /free agents 8 read 3h ago/.test(carriedChip), carriedChip)
+t("and its tooltip names the instant itself, not only the age",
+  (await p.locator('[data-wire="carried"]').getAttribute("title")).includes(READ_AT),
+  (await p.locator('[data-wire="carried"]').getAttribute("title")).slice(0, 140))
+
+// The control that was permanently dead on this build.
+const wired = await streamHead()
+const toggleText = (await p.$eval(".toggle", e => e.textContent)).replace(/\s+/g, " ").trim()
+t("the availability control is live on the static build and counts the carried list",
+  /8 free/.test(toggleText) && !(await p.$eval(".toggle input", e => e.disabled)), toggleText)
+t("and the streaming list is now made only of players he can actually add",
+  wired.length > 0 && wired.every(n => deep.includes(n)), wired.join(", "))
+t("which is a different list from the one the estimate produced",
+  !wired.some(n => estimated.includes(n)), `${estimated.join(", ")} → ${wired.join(", ")}`)
+
+// A week-old wire is not this week's wire. The page must go on saying how old it is
+// rather than quietly presenting it as live — this is the same rule `resolvePeriod`
+// follows when it falls back to a Monday and says so.
+await p.evaluate(() => localStorage.clear())
+await p.reload({ waitUntil: "networkidle" })
+await p.waitForSelector(".board-row", { timeout: 25000 })
+withWire.pools["yahoo:228947"].at = new Date(Date.now() - 7 * 86_400_000).toISOString()
+const staleDt = await p.evaluateHandle(text => {
+  const d = new DataTransfer()
+  d.items.add(new File([text], "scoring.json", { type: "application/json" }))
+  return d
+}, JSON.stringify(withWire))
+await p.dispatchEvent("body", "drop", { dataTransfer: staleDt })
+await p.waitForSelector(".toast", { timeout: 10000 })
+await p.waitForTimeout(600)
+const staleChip = await p.locator('[data-wire="carried"]')
+t("a week-old free-agent list is shown as a week old, and flagged",
+  /read 7d ago/.test((await staleChip.textContent()).replace(/\s+/g, " ")) &&
+    (await staleChip.getAttribute("class")).includes("warn"),
+  `${(await staleChip.textContent()).replace(/\s+/g, " ")} [${await staleChip.getAttribute("class")}]`)
+t("and it is still USED, because a stale exact list beats an estimate that is not one",
+  /8 free/.test((await p.$eval(".toggle", e => e.textContent)).replace(/\s+/g, " ")),
+  (await p.$eval(".toggle", e => e.textContent)).replace(/\s+/g, " ").trim())
 
 t("no page errors after all of that", errs.length===0, errs.join(" | "))
 await b.close()

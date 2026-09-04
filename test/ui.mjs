@@ -345,11 +345,25 @@ t("and the board still ranks, because the values did not change",
 
 // Route 2: the file a Yahoo user carries from a local run. Everything a hosted page
 // cannot read for a Yahoo league has to survive the trip — not just the leagues,
-// which is all the file used to hold, but the roster and the seats it was read in.
+// which is all the file used to hold, but the roster, the seats it was read in, and
+// the league's own FREE-AGENT LIST, which is the one a streaming question is
+// actually about and the one no browser will ever be handed.
 await fp.evaluate(() => {
   localStorage.setItem("beanemachine:roster", JSON.stringify({ "yahoo:228947": ["691718:hitting", "608369:pitching"] }))
   localStorage.setItem("beanemachine:lineup", JSON.stringify({
     "yahoo:228947": { at: "2026-09-04T00:00:00.000Z", spots: [{ slot: "OF", name: "Pete Crow-Armstrong", positions: ["OF"], team: "CHC" }] }
+  }))
+  localStorage.setItem("beanemachine:pool", JSON.stringify({
+    "yahoo:228947": {
+      at: "2026-09-04T12:00:00.000Z",
+      leagueId: "228947",
+      players: [
+        { yahooId: "12781", name: "Max Meyer", team: "MIA", positions: ["SP"] },
+        { yahooId: "11728", name: "Shea Langeliers", team: "ATH", positions: ["C"] }
+      ],
+      positionsRead: ["C", "SP"],
+      note: "Top 25 free agents per position (C, SP)."
+    }
   }))
 })
 await fp.reload({ waitUntil: "networkidle" })
@@ -360,11 +374,19 @@ const [taken] = await Promise.all([
   fp.click('.bar button:text-is("Download")')
 ])
 const carried = JSON.parse(readFileSync(await taken.path(), "utf8"))
-t("the file carries the leagues, the roster and the seats — all of them",
+t("the file carries the leagues, the roster, the seats and the free agents — all of them",
   Object.keys(carried.leagues).length === 2 &&
     carried.rosters["yahoo:228947"].length === 2 &&
-    carried.lineups["yahoo:228947"].spots.length === 1,
-  JSON.stringify({ leagues: Object.keys(carried.leagues), rosters: Object.keys(carried.rosters ?? {}), lineups: Object.keys(carried.lineups ?? {}) }))
+    carried.lineups["yahoo:228947"].spots.length === 1 &&
+    carried.pools["yahoo:228947"].players.length === 2,
+  JSON.stringify({ leagues: Object.keys(carried.leagues), rosters: Object.keys(carried.rosters ?? {}), lineups: Object.keys(carried.lineups ?? {}), pools: Object.keys(carried.pools ?? {}) }))
+// The stamp travels with the players or the file is a lie by omission: a wire read
+// at noon and one read a week ago are different claims about who is addable, and
+// only the timestamp tells them apart.
+t("and the free-agent list travels with the instant it was read, not just the names",
+  carried.pools["yahoo:228947"].at === "2026-09-04T12:00:00.000Z" &&
+    carried.pools["yahoo:228947"].leagueId === "228947",
+  JSON.stringify(carried.pools["yahoo:228947"].at))
 t("and it is still a valid config, so a file from an older build still loads",
   carried.schema_version === cfgFile.schema_version && typeof carried.description === "string",
   carried.schema_version)
@@ -385,18 +407,51 @@ t("a file dragged over the page is offered a drop target", await fp.locator(".dr
 await fp.dispatchEvent("body", "drop", { dataTransfer: dt })
 await fp.waitForSelector(".toast", { timeout: 10000 })
 t("dropping it says what arrived, counted from the file",
-  /Loaded 2 leagues, 1 roster, 1 lineup/.test(await fp.textContent(".toast")),
+  /Loaded 2 leagues, 1 roster, 1 lineup, 1 free-agent list/.test(await fp.textContent(".toast")),
   await fp.textContent(".toast"))
 const back = await fp.evaluate(k => ({
   leagues: Object.keys(JSON.parse(localStorage.getItem(k)).leagues),
   roster: JSON.parse(localStorage.getItem("beanemachine:roster") ?? "null"),
-  lineup: JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "null")
+  lineup: JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "null"),
+  wire: JSON.parse(localStorage.getItem("beanemachine:pool") ?? "null"),
+  // the config key must NOT keep a second copy: two answers to "who is free" with
+  // no rule for which wins is how a cleared pool comes back from the dead
+  cfgKeys: Object.keys(JSON.parse(localStorage.getItem(k)))
 }), STORE)
 t("and the whole team is back in this browser, not just the leagues",
   back.leagues.length === 2 &&
     JSON.stringify(back.roster["yahoo:228947"]) === JSON.stringify(["691718:hitting", "608369:pitching"]) &&
     back.lineup["yahoo:228947"].spots[0].slot === "OF",
   JSON.stringify(back))
+t("and so is the free-agent list, with its read time intact",
+  back.wire["yahoo:228947"].players.length === 2 &&
+    back.wire["yahoo:228947"].at === "2026-09-04T12:00:00.000Z",
+  JSON.stringify(back.wire))
+t("each carried store owns its own key; the config keeps no second copy",
+  !back.cfgKeys.includes("pools") && !back.cfgKeys.includes("rosters") &&
+    !back.cfgKeys.includes("lineups"),
+  back.cfgKeys.join(","))
+
+// The masthead has to SAY which of the two availability answers the page is on.
+// The board prefers an exact list and always has; what it could not do was tell you
+// that it had one — or, on the hosted build where it never did, that it did not.
+//
+// A pool belongs to ONE league, and the file carries two. The preset league the
+// earlier route created is active when the file lands, and it has no wire — so the
+// chip must be absent there rather than showing 228947's free agents beside a
+// league they say nothing about.
+t("a pool is not shown for a league it was not read from",
+  (await fp.locator('[data-wire="carried"]').count()) === 0,
+  await fp.locator('[data-wire="carried"]').textContent().catch(() => "(absent)"))
+await fp.selectOption('select[aria-label="Scoring these picks against"], select[aria-label="League being edited"]', "yahoo:228947")
+await fp.waitForTimeout(500)
+const wireChip = await fp.locator('[data-wire="carried"]').textContent()
+t("the masthead names the exact list and how old it is",
+  /free agents\s*2\s*read\s*(just now|\d+[mhd] ago)/.test(wireChip.replace(/\s+/g, " ")),
+  wireChip)
+t("and its tooltip names the instant, not just the age",
+  /2026-09-04T12:00:00\.000Z/.test(await fp.locator('[data-wire="carried"]').getAttribute("title")),
+  (await fp.locator('[data-wire="carried"]').getAttribute("title")).slice(0, 120))
 t("no page errors through either route", freshErrors.length === 0, freshErrors.join(" | "))
 await fresh.close()
 

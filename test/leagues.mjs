@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs"
 import { type } from "arktype"
 import { hydrate } from "../src/data/snapshot.ts"
-import { League, ScoringPeriod } from "../src/schema.ts"
+import { Config, League, ScoringPeriod } from "../src/schema.ts"
 import { rateAll, slotsFor } from "../src/engine/bscore.ts"
 import { activeSlots, replacementBySlot, startingLineup } from "../src/engine/trade.ts"
 import { HITTING_MAP, PITCHING_MAP } from "../src/engine/points.ts"
@@ -566,6 +566,78 @@ t("every URL the importer recognizes agrees with the platform table",
 t("node still sends a user-agent, so nothing about the server-side scrape changed",
   IN_BROWSER === false && agentHeaders("UA/1.0")["user-agent"] === "UA/1.0",
   JSON.stringify({ IN_BROWSER, headers: agentHeaders("UA/1.0") }))
+
+/**
+ * ── The carrier file: what a Yahoo user's one local command has to produce ──────
+ *
+ * Yahoo sends no CORS headers, so beanemachine.com can never read a Yahoo league's
+ * free-agent list — and "which starters should I stream before the reset" is a
+ * question about the players you can ADD. The hosted board's answer was therefore
+ * a ranking of everyone in baseball with the availability question unanswered, and
+ * its head was four pitchers rostered in 94-99% of leagues.
+ *
+ * The route that closes it is a file: `src/cli.ts` reads the pool on a machine and
+ * writes it into scoring.json; `src/client/pool.ts` validates and stores it in the
+ * browser. Two files, no shared code path at runtime, and nothing but this section
+ * to notice if they drift — so the CLI's own written shape is put through the
+ * store's own validator here, in node, where a rename fails loudly instead of
+ * producing a file the page silently discards.
+ */
+const { StoredPoolShape } = await import("../src/client/pool.ts")
+
+// What src/cli.ts writes, spelled out here rather than imported: the point is to
+// catch the two ends disagreeing, and importing the writer's own object would make
+// that impossible to detect.
+const writtenPool = {
+  at: new Date().toISOString(),
+  leagueId: "228947",
+  players: [
+    { yahooId: "11728", name: "Shea Langeliers", team: "ATH", positions: ["C"] },
+    { yahooId: "12781", name: "Max Meyer", team: "MIA", positions: ["SP"] }
+  ],
+  positionsRead: ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"],
+  note: "Top 25 free agents per position (C, 1B, …)."
+}
+const poolOut = StoredPoolShape(writtenPool)
+t("the pool entry src/cli.ts writes is one src/client/pool.ts will store",
+  !(poolOut instanceof type.errors), String(poolOut))
+
+// The stamp is the whole difference between a fact and a claim. A free-agent list
+// turns over whenever anybody in the league clicks Add, so a pool with no read time
+// is last Tuesday's wire presented as today's — and this project's rule is that an
+// assumption gets stated. The store REFUSES one rather than defaulting the time.
+t("a pool with no read time is refused rather than stamped with a guess",
+  StoredPoolShape({ ...writtenPool, at: undefined }) instanceof type.errors)
+t("and one with no league id is refused too, so it cannot be served to another league",
+  StoredPoolShape({ ...writtenPool, leagueId: undefined }) instanceof type.errors)
+
+// The two ways the CLI's summary can lie by omission. Both reads can fail — a
+// private league, a throttled sweep, a URL with no team in it — and the summary has
+// to print the failure rather than a shorter list of successes.
+const cliSource = readFileSync("src/cli.ts", "utf8")
+t("the CLI reads the free agents and the roster in the same command as the settings",
+  /fetchAvailable/.test(cliSource) && /fetchRoster/.test(cliSource) &&
+    /--settings-only/.test(cliSource),
+  "cli.ts no longer performs the two reads a browser cannot do")
+t("and it prints the failure of either read rather than only its successes",
+  /✗ \$\{"free agents"/.test(cliSource) && /✗ \$\{"your roster"/.test(cliSource))
+t("the file path is the LAST thing it prints, because it is the only line to act on",
+  cliSource.lastIndexOf("${CONFIG}") > cliSource.lastIndexOf("needs_review"),
+  "the path is buried above the caveats again")
+
+// An old file still has to load. Every carried key is optional and the committed
+// seed carries none of them, which is what makes a file written before any of this
+// existed load exactly as it did.
+t("the committed scoring.json carries no pool, roster or lineup, and is still valid",
+  !("pools" in cfg) && !("rosters" in cfg) && !("lineups" in cfg) &&
+    !(Config(cfg) instanceof type.errors))
+// …and the schema has to PRESERVE the carried keys rather than strip them, which is
+// the one property the whole file route rests on: `Config` is applied to the file
+// on the way in, and a validator that dropped undeclared keys would drop the pool.
+const withPool = Config({ ...cfg, pools: { "yahoo:228947": writtenPool } })
+t("and a config validated with a pool attached still has the pool afterwards",
+  !(withPool instanceof type.errors) && withPool.pools?.["yahoo:228947"]?.players.length === 2,
+  withPool instanceof type.errors ? String(withPool) : JSON.stringify(Object.keys(withPool)))
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

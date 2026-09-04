@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
-import { rateAll, withMarketEdge, withUndervaluation, type Ranked } from "../engine/bscore.ts"
+import {
+	likelyAvailable, ownershipCut, rateAll, withMarketEdge, withUndervaluation,
+	type OwnershipCut, type Ranked
+} from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
 import { resolvePeriod, windowFrom, withinDays } from "../engine/period.ts"
 
 export type { Ranked }
+
+/**
+ * A ranked player plus the one fact the board could not previously answer without
+ * a server: can the reader actually add him.
+ *
+ * `true` / `false` are claims; `null` is the refusal to make one. Nothing is hidden
+ * on a null — a man we cannot price is a man we have no grounds to remove.
+ */
+export type BoardRow = Ranked & { free: boolean | null }
 
 /**
  * The ranking engine is pure, so it runs here in the browser against a snapshot of
@@ -52,7 +64,24 @@ export interface Filters {
 	slot: string
 	group: "all" | "hitting" | "pitching"
 	hideInjured: boolean
-	availableOnly: boolean
+	/**
+	 * Keep only players the reader can actually ADD.
+	 *
+	 * Null is not a third state on screen — it means the reader has not touched the
+	 * control, so each tab may open on the answer its own question wants. Streaming
+	 * opens ON, because "which starter should I stream" is a question about the wire
+	 * and a list headed by four 95%-rostered aces does not answer it; the other two
+	 * open OFF, because the standing board is the standing board and Stash is about
+	 * players you already hold. The moment the reader ticks or unticks it the value
+	 * becomes an explicit boolean and follows him across tabs — he has said what he
+	 * wants and the page stops guessing. See `AVAILABLE_ONLY_DEFAULT`.
+	 *
+	 * This used to be a plain `false` reading the league's live free-agent list, and
+	 * that list needs the local API. On beanemachine.com it never arrives, so the
+	 * checkbox was permanently disabled and the one question the tab exists for was
+	 * unanswerable on the site it is hosted at.
+	 */
+	availableOnly: boolean | null
 	minConfidence: number
 	/**
 	 * Which question the board is answering. The three differ only in horizon, but
@@ -90,7 +119,10 @@ export interface Filters {
 	 * arithmetic he does not: which N of the ranking those moves should buy.
 	 */
 	moves: number
+	/** Null until the reader picks one, so each view can open on the ranking its own
+	 *  question wants — see `SORT_DEFAULT`. Same shape as `availableOnly`. */
 	sort:
+		| null
 		| "uscore"
 		| "marketEdge"
 		| "bscore"
@@ -108,7 +140,8 @@ export const DEFAULT_FILTERS: Filters = {
 	slot: "",
 	group: "all",
 	hideInjured: false,
-	availableOnly: false,
+	// unset, so each tab opens on the answer its own question wants — see the field
+	availableOnly: null,
 	minConfidence: 0,
 	mode: "board",
 	// the league's own period, not a day count: the reset is what a head-to-head
@@ -137,8 +170,56 @@ export const DEFAULT_FILTERS: Filters = {
 	 * column. Market edge stays selectable — a reader who picks it has asked for
 	 * exactly what it can price.
 	 */
-	sort: "bscore",
+	sort: null,
 	desc: true
+}
+
+/**
+ * What "only players I can add" means before the reader has said anything.
+ *
+ * One click — the Streaming tab — has to land on candidates rather than on aces,
+ * because that click is the whole complaint: the tab, the 3-day chip, the start
+ * counts and the opponents all shipped and the list still opened with Tyler
+ * Glasnow (94% rostered) at the top. A control the reader must find and switch on
+ * to get an answer is a control that has not answered him.
+ */
+export const AVAILABLE_ONLY_DEFAULT: Record<Filters["mode"], boolean> = {
+	stream: true,
+	board: false,
+	stash: false
+}
+
+/**
+ * What each view ranks by until the reader says otherwise.
+ *
+ * Streaming ranks by POINTS, not bscore, and it is the only view that does.
+ *
+ * bscore is points minus the best freely available player AT THE SAME SLOT, which
+ * is the right question for a roster you hold all season: a catcher who beats
+ * catchers is worth more than an outfielder who ties outfielders. A streamer is not
+ * asking that. He is filling ONE seat for a few days, and comparing a reliever's
+ * surplus over relievers against a starter's surplus over starters answers no
+ * question he has.
+ *
+ * Measured on the shipped capture: within a slot the two rank IDENTICALLY — implied
+ * replacement across the eight P rows was 14.68 to 14.77, a spread of 0.09 — so the
+ * only reordering bscore performs here is lifting the lone RP over every starter, by
+ * exactly the 3.5-point gap between the RP and P bars. That put Kyle Leahy, a
+ * reliever with 0.6 expected starts and none announced, above Kumar Rocker and his
+ * named start against the Rays, on a tab that asks which STARTERS to stream.
+ *
+ * The honest size of the win: top-2 by points beat top-2 by bscore by +0.0, +0.2,
+ * +1.7, +2.7 and +2.7 points across the five windows — mean about 1.5 on 27-to-55
+ * point totals, one capture, n=5. That is suggestive and nothing more, and it is not
+ * why this changed. It changed because ranking a reliever first on a starters list
+ * is wrong regardless of which number wins by a point and a half.
+ *
+ * bscore stays on the row, so the disagreement is visible rather than buried.
+ */
+export const SORT_DEFAULT: Record<Filters["mode"], NonNullable<Filters["sort"]>> = {
+	stream: "points",
+	board: "bscore",
+	stash: "bscore"
 }
 
 /** Names vary by accent, punctuation and suffix between Yahoo and MLB. */
@@ -237,6 +318,91 @@ export const useBoard = (
 		)
 	}, [snapshot, league, filters.mode, week])
 
+	/**
+	 * Can the reader actually add this man — and how sure is the answer.
+	 *
+	 * Three tiers, the SAME three Billy's pick already speaks, because two
+	 * vocabularies for one fact is how a page ends up disagreeing with itself:
+	 *
+	 *   "pool"      the league's own free-agent list is loaded. Exact. It wins
+	 *               outright wherever it exists, and the UI is entitled to say
+	 *               "free in your league" rather than "probably free".
+	 *   "ownership" no wire, but this capture's rostered shares can locate the
+	 *               boundary. An ESTIMATE, calibrated to the league's own size —
+	 *               see `ownershipCut`. Labelled as an estimate everywhere it shows.
+	 *   "none"      neither. Nothing is claimed and nothing is hidden.
+	 *
+	 * The middle tier is the point of this whole block. The wire needs the local
+	 * API; the hosted build has none; so on beanemachine.com the top tier can never
+	 * fire and the bottom one used to be the only thing left. The snapshot already
+	 * ships ownership, so the estimate costs no request and works on the static
+	 * site.
+	 */
+	/**
+	 * Where each player sits in the value ranking, so an UNLISTED player can be
+	 * judged on whether he is good enough to be rostered. See `likelyAvailable`:
+	 * the sweep reaches ~200 deep per position, so a man both inside a league's
+	 * rostered depth AND absent from the sweep means the read has a hole, and the
+	 * honest answer about him is that we do not know.
+	 */
+	const valueRank = useMemo(() => {
+		const order = [...rated].sort((a, b) => b.points - a.points)
+		return new Map(order.map((r, i) => [r.player.id, i]))
+	}, [rated])
+
+	const availability = useMemo(() => {
+		if (availableNames && availableNames.size > 0)
+			return {
+				basis: "pool" as const,
+				exact: true,
+				cut: null as OwnershipCut | null,
+				size: availableNames.size,
+				basisText: `read off your league's own free-agent list: ${availableNames.size} players are actually free`
+			}
+		// the same map `hydrate` builds, without re-hydrating a 2.1 MB snapshot to
+		// read one field of it
+		const owned = new Map(
+			Object.entries(snapshot?.ownership ?? {}).map(([k, v]) => [Number(k), v])
+		)
+		const cut = league ? ownershipCut(league, owned) : null
+		if (cut?.usable)
+			return { basis: "ownership" as const, exact: false, cut, size: null, basisText: cut.basis }
+		return {
+			basis: "none" as const,
+			exact: false,
+			cut,
+			size: null,
+			basisText:
+				cut?.basis ??
+				"nothing this page can read says who is on the wire in your league, so nobody is filtered out for it"
+		}
+	}, [availableNames, league, snapshot])
+
+	/**
+	 * The ranking with that answer attached to every row.
+	 *
+	 * Separate from `rated` on purpose: re-rating 1,433 players costs ~90 ms and
+	 * depends on the horizon, while availability depends on the league's free-agent
+	 * list arriving. Folding them together would re-rate the whole pool the moment
+	 * the wire responded.
+	 */
+	const board: BoardRow[] = useMemo(
+		() =>
+			rated.map(r => ({
+				...r,
+				free:
+					availability.basis === "pool" ?
+						availableNames!.has(normalizeName(r.player.name))
+					: availability.basis === "ownership" ?
+						likelyAvailable(r.rosteredPct, availability.cut!, {
+							rank: valueRank.get(r.player.id) ?? Number.MAX_SAFE_INTEGER,
+							depth: availability.cut!.depth
+						})
+					:	null
+			})),
+		[rated, availability, availableNames, valueRank]
+	)
+
 	/** Which sides this league actually scores — an unconfigured template scores
 	 *  neither, and the board must say so rather than rank a field of zeros. */
 	const scored = useMemo(
@@ -280,18 +446,20 @@ export const useBoard = (
 	 * a position chip on, "market edge dropped the rest" would be a lie about why
 	 * the list is short.
 	 */
+	const sort: NonNullable<Filters["sort"]> = filters.sort ?? SORT_DEFAULT[filters.mode]
+
 	const rankable = useMemo(
 		() =>
 			rated.filter(r => {
 				if (!r.rateable) return false
-				if (filters.sort === "undervaluation" && r.bscore <= 0) return false
-				if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
+				if (sort === "undervaluation" && r.bscore <= 0) return false
+				if (sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 					return false
-				if (filters.sort === "uscore" && r.uscore === null) return false
-				if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
+				if (sort === "uscore" && r.uscore === null) return false
+				if (sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
 				return true
 			}).length,
-		[rated, filters.sort]
+		[rated, sort]
 	)
 
 	/**
@@ -354,6 +522,8 @@ export const useBoard = (
 
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()
+		// null means "the reader hasn't said", so the tab answers for him
+		const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
 		/**
 		 * "Has a start in this window" — the filter that makes a streaming view a
 		 * streaming view rather than the same board over a shorter horizon.
@@ -375,20 +545,20 @@ export const useBoard = (
 		 * board is ranking.
 		 */
 		const startersOnly = streaming !== null && filters.startersOnly
-		const out = rated.filter(r => {
+		const out = board.filter(r => {
 			// a player with no projectable volume has no bscore to rank
 			if (!r.rateable) return false
 			// "most undervalued" asks who is due for positive regression among players
 			// worth rostering. Unrestricted it just finds the unluckiest replacement-level
 			// player in baseball, which answers nobody's question.
-			if (filters.sort === "undervaluation" && r.bscore <= 0) return false
+			if (sort === "undervaluation" && r.bscore <= 0) return false
 			// Same guard for market edge: a replacement-level body nobody rosters beats
 			// the par for his ownership by definition, and recommending him is noise.
 			// No longer gated on coverage: edge is no longer the default, so picking it
 			// is an explicit request for the subset it can price, and quietly handing
 			// back a bscore ranking under the "market edge" label is now the confusing
 			// behaviour rather than the safe one.
-			if (filters.sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
+			if (sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
 				return false
 			// No bscore floor here, unlike the other comparative sorts. Those two can be
 			// gamed by a replacement-level body — a tiny denominator or a par he beats by
@@ -396,22 +566,32 @@ export const useBoard = (
 			// bscore and floors at zero, so a player nobody should add simply sorts to the
 			// bottom instead of needing to be excluded. The old floor cut the board to 44
 			// rows, which read as a broken capture.
-			if (filters.sort === "uscore" && r.uscore === null) return false
+			if (sort === "uscore" && r.uscore === null) return false
 			// Contact quality only means something for someone worth rostering, and only
 			// where a rolling Statcast window actually exists for him.
-			if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
+			if (sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
 			if (startersOnly && !(r.scheduledStarts != null && r.scheduledStarts > 0)) return false
 			if (q && !r.player.name.toLowerCase().includes(q)) return false
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
 			if (filters.hideInjured && r.injury) return false
-			if (filters.availableOnly && availableNames && !availableNames.has(normalizeName(r.player.name)))
-				return false
+			/**
+			 * Only players he can get.
+			 *
+			 * `r.free === false` rather than `!r.free`: false is a claim that he is
+			 * taken, null is the absence of one, and hiding a man on an absence is the
+			 * failure this app is built to refuse. Where the league's real wire is
+			 * loaded nothing is null; where only the estimate is, null cannot occur
+			 * either, because an unlisted player is counted available (see
+			 * `likelyAvailable`). Null therefore reaches here only in the "none" tier,
+			 * where the filter is correctly inert on every row.
+			 */
+			if (availableOnly && r.free === false) return false
 			if (r.confidence.value < filters.minConfidence) return false
 			return true
 		})
 		const key = (r: (typeof out)[number]) => {
-			switch (filters.sort) {
+			switch (sort) {
 				case "points": return r.points
 				case "replacement": return r.replacement
 				case "confidence": return r.confidence.value
@@ -433,7 +613,12 @@ export const useBoard = (
 			return filters.desc ? -cmp : cmp
 		})
 		return out
-	}, [rated, filters, availableNames, streaming])
+	}, [board, filters, streaming])
 
-	return { rated, rows, rankable, scored, edgeCoverage, period, streaming, teamNames }
+	// `sort` is returned resolved, so the Rank-by control shows what the view is
+	// actually ranked by rather than an empty box when the reader has not chosen.
+	return {
+		rated: board, rows, rankable, scored, edgeCoverage, period, streaming, teamNames,
+		availability, sort
+	}
 }

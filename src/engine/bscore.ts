@@ -616,3 +616,196 @@ export const withMarketEdge = (
 		}
 	})
 }
+
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Who the reader can actually ADD, without a server.
+ *
+ * The board's whole streaming answer was unreachable on beanemachine.com. "Free
+ * agents only" reads the league's live free-agent list through the local API, and
+ * the hosted page has no API — so the control was permanently disabled there and
+ * the streaming list opened, measured on the live capture of 2026-09-04, with
+ * Tyler Glasnow (94% rostered), Blake Snell, Chris Sale (99%) and Drew Rasmussen
+ * (95%). To stream a starter is to pick one up. Four men nobody can pick up is not
+ * an answer to that question.
+ *
+ * The snapshot already carries Yahoo's "% Ros" for everyone Yahoo listed, so the
+ * estimate below needs nothing the hosted page does not already have.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * How many players this league can hold at once: every seat on every roster.
+ *
+ * Deliberately NOT `RESERVE_SLOTS`-filtered, which is the mistake waiting to be
+ * made here. That set exists because a bench seat starts nobody and therefore sets
+ * no replacement bar — a question about VALUE. This is a question about SUPPLY, and
+ * a player on somebody's bench is every bit as unavailable as one in his lineup. An
+ * IL seat counts for the same reason and for one more: the ownership column being
+ * ranked below prices injured stars too, so dropping IL seats from the count while
+ * leaving injured players in the ranking would be a numerator and a denominator
+ * drawn from different populations, which is the shape of every bug this codebase
+ * has found in itself.
+ *
+ * League 228947: 10 teams x 27 seats (18 active, 5 bench, 4 IL) = 270 players.
+ */
+export const rosterableDepth = (league: League): number | null => {
+	const teams = league.meta.max_teams
+	if (teams == null) return null
+	const seats = Object.values(league.roster.slots).reduce((a, b) => a + b, 0)
+	return seats > 0 ? teams * seats : null
+}
+
+/**
+ * The ownership percentage that separates "probably taken" from "probably free" —
+ * calibrated to this league's own size rather than to a threshold somebody picked.
+ *
+ * Rank everyone Yahoo priced by how widely he is rostered and count down to the
+ * (teams x seats)-th name. That player is, by construction, the last one the league
+ * has room for; the field agrees he is roughly the most-owned player still gettable.
+ * A 12-team league reaches further down that list than a 10-team one and gets a
+ * lower cut out of the same data, which is the point — `WIDELY_ROSTERED = 70` in
+ * Board.tsx was one number standing in for every league in the world.
+ *
+ * The comparison is STRICTLY above the cut, so a tie at the boundary falls on the
+ * available side. That is the deliberate direction: showing a man who turns out to
+ * be taken costs the reader a click on Yahoo, hiding one who was free costs him the
+ * pickup.
+ */
+export interface OwnershipCut {
+	/** Whether this capture's ownership can support the estimate at all. */
+	usable: boolean
+	/** The boundary percentage. Meaningless when `usable` is false. */
+	cut: number
+	/** teams x seats — how many players the league can hold. */
+	depth: number
+	/** Seats on ONE roster, which is the bar the tie test below is measured against. */
+	seats: number
+	/** How many players this capture priced at all. */
+	priced: number
+	/** How many of them sit on exactly the cut, unable to be ordered against it. */
+	tied: number
+	/** One sentence naming what the estimate is, or why there isn't one. */
+	basis: string
+}
+
+export const ownershipCut = (
+	league: League,
+	ownership: Map<number, number> | undefined
+): OwnershipCut | null => {
+	const depth = rosterableDepth(league)
+	const teams = league.meta.max_teams
+	if (depth === null || teams == null) return null
+	const seats = depth / teams
+	const values = [...(ownership?.values() ?? [])].sort((a, b) => b - a)
+	const priced = values.length
+	const nothing = (basis: string): OwnershipCut => ({
+		usable: false, cut: 0, depth, seats, priced, tied: 0, basis
+	})
+	/**
+	 * A capture that priced fewer players than the league has seats cannot locate
+	 * the boundary at all — the cut would fall off the end of the list and every
+	 * unpriced player, which is most of baseball, would be called free on no
+	 * evidence.
+	 */
+	if (priced < depth)
+		return nothing(
+			`this capture carries a rostered share for only ${priced} players, fewer than the ` +
+				`${depth} a ${teams}-team league with ${seats} seats can hold, so there is no ` +
+				`point in the list where the league runs out of room`
+		)
+	const cut = values[depth - 1]!
+	const tied = values.filter(v => v === cut).length
+	/**
+	 * The gate, and it is not decoration: it is what stops this estimate repeating
+	 * the failure it exists to fix.
+	 *
+	 * Yahoo's "% Ros" is swept off player pages whose tooltip also carries a
+	 * per-game weather line, and a sweep that reads the wrong cell puts a whole
+	 * club on one identical percentage. `leakedByTeam` in data/yahoo-pool.ts
+	 * discards those at capture time, but the snapshot committed at 2026-09-02
+	 * predates it, and on that capture 225 of 848 priced players sit at exactly
+	 * 51% — 83% of the 270-deep boundary is a single tie the column cannot order.
+	 * Ranking by it there produced a "who you can get" list headed by Zack Wheeler,
+	 * Jacob deGrom and Logan Gilbert: the same unreachable aces, differently
+	 * spelled.
+	 *
+	 * So the tie at the cut must be smaller than ONE roster. Past that the estimate
+	 * cannot even say which team's worth of players the boundary falls in, and a
+	 * boundary that cannot be located to within a single roster is not a boundary.
+	 * The bar is the league's own seat count, not a constant.
+	 *
+	 * Measured, both captures, 10 teams x 27 seats, depth 270:
+	 *   2026-09-02 (committed, leaked)  cut 51%, 225 tied — 8.3x one roster, refused
+	 *   2026-09-04 (live, deleaked)     cut 35%,   4 tied — 0.15x one roster, used
+	 */
+	if (tied > seats)
+		return nothing(
+			`${tied} players in this capture are rostered in exactly ${cut}% of leagues, which ` +
+				`is more than the ${seats} seats on one roster — the boundary between taken and ` +
+				`free lands inside a tie this column cannot order, so it is not read`
+		)
+	return {
+		usable: true,
+		cut,
+		depth,
+		seats,
+		priced,
+		tied,
+		basis:
+			`estimated: a ${teams}-team league with ${seats} seats holds ${depth} players, and the ` +
+			`${depth}th most widely rostered player in this capture is rostered in ${cut}% of ` +
+			`leagues — so above ${cut}% is treated as taken`
+	}
+}
+
+/**
+ * Is this player likely to be sitting on the wire in a league of this size?
+ *
+ * An UNLISTED player counts as available, and that is a decision rather than an
+ * oversight, so here is the argument and the measurement behind it.
+ *
+ * Yahoo's sweep walks 8 pages of 25 across 9 positions — about 200 deep per
+ * position, ordered by ownership. A player it never reached is therefore below
+ * roughly the 200th-most-owned man at his position, which is far below a
+ * 270-player boundary. Measured on the live 2026-09-04 capture: 0 of the top 270
+ * players by season points are unlisted, the listed pool's median season total is
+ * 337 points against the unlisted pool's 36, and the single best unlisted player
+ * scored 386 where the best listed one scored 1,531. Deep unlisted arms are exactly
+ * who a streamer picks up, and dropping them would cut 19 of the 106 pitchers with
+ * a start in the window — so they are shown.
+ *
+ * The rule is only safe because `ownershipCut` refuses first. On the thin, leaked
+ * 2026-09-02 capture the same measurement reads 67 of the top 270 unlisted —
+ * Ohtani, Harper, Schwarber, Alonso — and calling those free would be the original
+ * complaint with worse manners. The gate catches that capture before this function
+ * is ever consulted.
+ *
+ * A single hole in an otherwise clean read is caught by the VALUE test instead.
+ * Blake Snell and Garrett Crochet are both unlisted on the 2026-09-04 capture and
+ * both rostered everywhere; Snell came out top of the gettable list. The reasoning
+ * that makes unlisted mean gettable is precisely what rules them out: the sweep is
+ * ordered by Yahoo's own rank and reaches ~200 deep per position, so a player good
+ * enough to sit inside a league's rostered depth CANNOT also be too obscure for the
+ * sweep to have reached. If he is both, the read has a hole and the honest answer
+ * about him is that we do not know — not that he is free.
+ *
+ * So an unlisted player counts as gettable only while his own projection puts him
+ * outside the rostered depth. No new constant: it is the same `teams x seats`
+ * boundary the ownership cut uses, applied to the ranking instead of to ownership.
+ * A listed player is unaffected — his percentage is a real read and answers for
+ * itself.
+ */
+export const likelyAvailable = (
+	rosteredPct: number | null,
+	cut: OwnershipCut,
+	/** Where this player sits in the value ranking, and how deep the league rosters.
+	 *  Omitted keeps the old behaviour, which is correct wherever the caller has no
+	 *  ranking to hand — a name search, a single row. */
+	value?: { rank: number; depth: number }
+): boolean =>
+	rosteredPct === null ?
+		// unlisted: gettable only if he is not also good enough to be rostered
+		value === undefined || value.rank >= value.depth
+	:	rosteredPct <= cut.cut

@@ -155,8 +155,18 @@ const horizon = async label => {
 const pickName = async () => (await page.textContent(".pick-name")).trim()
 const fortnightPick = await pickName()
 const stream = await horizon("Streaming")
-t("switching to Streaming re-ranks against the next seven days",
-	stream.length === 10 && stream.join() !== fortnight.join(), `${stream.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
+/**
+ * Rewritten, not weakened: `stream.length === 10` was a claim about the RENDER
+ * WINDOW that has stopped being true of this tab, and for the reason the tab
+ * exists. Streaming now opens filtered to players the reader can actually add —
+ * a list of men who are both on the wire and taking a turn before the reset is
+ * legitimately short, and on the committed capture with the local API up it is
+ * nine names. Asserting ten would be asserting that the tab has NOT been narrowed
+ * to the handful it is supposed to name. The assertion that matters is unchanged:
+ * a different question gives a different answer.
+ */
+t("switching to Streaming re-ranks against the league's own scoring period",
+	stream.length > 0 && stream.join() !== fortnight.join(), `${stream.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
 const streamPick = await pickName()
 const stash = await horizon("Stash")
 t("switching to Stash re-ranks against the rest of the season",

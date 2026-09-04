@@ -7,6 +7,7 @@ import {
 	readableInBrowser
 } from "../import.ts"
 import type { League } from "../schema.ts"
+import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 
 export class ApiError extends Error {}
 
@@ -134,6 +135,15 @@ export interface AvailablePool {
 	players: { yahooId: string; name: string; team: string | null; positions: string[] }[]
 	positionsRead: string[]
 	note: string
+	/**
+	 * ISO instant this list was read off the league, when it is known.
+	 *
+	 * Present only on a pool CARRIED IN from a local run, because that is the only
+	 * one whose age can differ from now: a server read happens while you wait.
+	 * Absent means "read just now by the server", never "age unknown" — the two
+	 * would be opposite claims and the UI treats them as such.
+	 */
+	readAt?: string
 }
 
 export interface YahooRoster {
@@ -151,18 +161,65 @@ export interface YahooRoster {
 }
 
 /**
+ * A pool that arrived in a file, presented as what it is.
+ *
+ * The note is what the board hangs on its "Free agents only" control, so it is the
+ * one sentence that has to be exactly true: this list is EXACT — it is the league's
+ * own wire, not an inference from ownership percentages — and it is OLD, by a
+ * stated amount. Both halves matter. Dropping the first would waste the only
+ * unambiguous availability signal this app can get; dropping the second would let a
+ * pool read last Tuesday pass for today's.
+ *
+ * The reader's own note travels underneath, unedited, because it is the thing that
+ * knows what was actually swept.
+ */
+const fromCarried = (carried: StoredPool, why?: string): AvailablePool => ({
+	players: carried.players,
+	positionsRead: carried.positionsRead,
+	readAt: carried.at,
+	note:
+		`${why ? `${why} ` : ""}Using the exact free-agent list carried in from a local ` +
+		`read of your league, taken ${since(carried.at, Date.now()).label} ` +
+		`(${carried.at}). ${carried.players.length} players. Anyone added or dropped in ` +
+		`your league since then is not in it — read it again to refresh. ${carried.note}`
+})
+
+/**
  * Server first wherever there is a server: that path is the one every local run and
  * every other suite exercises, and this change is meant to ADD a route, not to
  * reroute the working one. Browser-direct is what a page with no backend does
  * instead of giving up.
  */
 export const api = {
-	/** Yahoo's free-agent pool, scraped from Yahoo's own pages. There is no
-	 *  browser-direct version of this and there cannot be — see `yahooNeedsServer`. */
-	available: (leagueId: string): Promise<AvailablePool> =>
-		mode === "server" ?
-			send<AvailablePool>("/api/available", { leagueId })
-		:	yahooNeedsServer<AvailablePool>("Reading your league's free agents"),
+	/**
+	 * Yahoo's free-agent pool. No browser can read it — see `yahooNeedsServer` —
+	 * so there are exactly two places it can come from, and both are tried.
+	 *
+	 * Server first, because a server read is happening NOW and a carried one
+	 * happened whenever the reader last ran the command. Where there is no server,
+	 * or where the server's own read failed (a private league, Yahoo throttling),
+	 * the file a local run carried over is served instead, stamped with the time it
+	 * was read so nothing downstream can present it as live.
+	 *
+	 * This is what makes "which starters can I stream this week" answerable at
+	 * beanemachine.com. The board has always preferred an exact pool to the
+	 * ownership estimate; on the hosted build there was simply never one to prefer,
+	 * so the list it opened on was headed by four pitchers already on rosters.
+	 */
+	available: async (leagueId: string): Promise<AvailablePool> => {
+		if (mode === "server")
+			try {
+				return await send<AvailablePool>("/api/available", { leagueId })
+			} catch (e) {
+				const carried = poolStore.byLeagueId(leagueId)
+				// the server's own message is the better one when there is no fallback
+				if (!carried) throw e
+				return fromCarried(carried, `The local server could not read it (${(e as Error).message}).`)
+			}
+		const carried = poolStore.byLeagueId(leagueId)
+		return carried ? fromCarried(carried)
+			:	yahooNeedsServer<AvailablePool>("Reading your league's free agents")
+	},
 	/** The team's roster read off its own league. Empty is a state — a private league
 	 *  or a throttled read — and the caller offers the manual path. */
 	roster: (body: {

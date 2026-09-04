@@ -846,12 +846,22 @@ export const WaysIn = ({
 						the exact route for a Yahoo league, and the file is plain JSON you can
 						read. Clone the repo, then:
 						<pre>{IMPORT_COMMAND}</pre>
-						It writes <code>scoring.json</code> and prints what it did and did not
-						read. Drop that file anywhere on this page — or use the button below —
-						and its leagues load into this browser. A file taken out with{" "}
-						<b>Download</b> carries more than the importer writes: your roster and the
-						seat each man was in travel with it, so a team read during a local run
-						comes over too.
+						One command, three reads: the league&rsquo;s settings, <b>the free agents
+						in your league</b>, and your roster with the seat each man is in. The
+						middle one is the reason this route exists rather than being a backup
+						feature — &ldquo;which starter should I stream this week&rdquo; is a
+						question about the players you can <i>add</i>, and Yahoo&rsquo;s
+						free-agent page sends no CORS headers, so no browser will ever be handed
+						it. Carrying the file is the only way this page gets the real list
+						instead of estimating it from rostered shares. Both reads are stamped
+						with the time they happened, and the strip at the top of the page says
+						how old they are rather than showing them as live.
+						<p style={{ margin: "var(--sp-2) 0 0" }}>
+							It writes <code>scoring.json</code>, prints what it did and did not read,
+							and prints the path last. Drop that file anywhere on this page — or use
+							the button below — and all of it loads into this browser. A file taken
+							out with <b>Download</b> carries the same things back out.
+						</p>
 						{onLoadFile && (
 							<p style={{ margin: "var(--sp-2) 0 0" }}>
 								<button onClick={onLoadFile}>Load a league file…</button>

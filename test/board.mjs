@@ -296,6 +296,115 @@ t("and a streaming list holds no hitters, because a hitter cannot be streamed fo
   openSides.length > 5 && openSides.every(c => c === "SP" || c === "RP" || c === "P"),
   openSides.filter(c => !["SP", "RP", "P"].includes(c)).join(",") || openSides.slice(0, 6).join(","))
 
+/**
+ * 1a. It opens filtered to players he can ACTUALLY ADD — one click from landing,
+ * and no configuration.
+ *
+ * This is the whole complaint. The tab, the day-count chips, the start counts, the
+ * opponents and the move budget all shipped, and the list still opened, on the live
+ * 2026-09-04 capture, with Tyler Glasnow (94% rostered), Blake Snell, Chris Sale
+ * (99%) and Drew Rasmussen (95%) at the top. To stream a starter is to pick one up;
+ * a list whose head is four men nobody can pick up is the board with a filter on it.
+ *
+ * The control that would have fixed it — "Free agents only" — read the league's live
+ * free-agent list through the local API, and the hosted build has no API, so on
+ * beanemachine.com it was permanently disabled. The question was unanswerable on the
+ * site the app is published at.
+ */
+const availTier = () => page.$eval(".stream-strip .toggle[data-avail]", e => e.dataset.avail)
+const availNote = () =>
+  page.$eval("#horizon-panel .avail-note", e => e.textContent.replace(/\s+/g, " ").trim())
+t("Streaming opens filtered to players the reader can add, with no click at all",
+  await page.$eval(".stream-strip .toggle[data-avail] input", e => e.checked))
+const tierOnOpen = await availTier()
+t("and it says which of the three answers it is giving rather than implying one",
+  ["pool", "ownership", "none"].includes(tierOnOpen) &&
+    new RegExp(
+      tierOnOpen === "pool" ? "free-agent list"
+      : tierOnOpen === "ownership" ? "estimated"
+      : "not read|no point in the list",
+      "i"
+    ).test(await availNote()),
+  `${tierOnOpen}: ${await availNote()}`)
+/**
+ * The estimate has to be CALIBRATED to the league rather than to a constant. The
+ * bar it replaced was `WIDELY_ROSTERED = 70` in Board.tsx — one number standing in
+ * for a 10-team league and a 20-team one, which cannot both be right. It is now the
+ * ownership of the (teams x seats)-th most rostered player, so the note must quote
+ * the league's own shape and every surviving row must sit at or under the cut.
+ */
+if (tierOnOpen === "ownership") {
+  const note = await availNote()
+  const cut = Number((note.match(/above (\d+)% is treated as taken/) ?? [])[1])
+  t("the estimated bar is derived from the league's own size, not a constant",
+    /\d+-team league with \d+ seats holds \d+ players/.test(note) && Number.isFinite(cut), note)
+  const owned = await page.$$eval(".board-row .who .own", n => n.map(e => e.textContent.trim()))
+  t("and nobody above that bar is on the list",
+    owned.length > 0 &&
+      owned.every(o => /not listed/.test(o) || Number(o.replace(/[^0-9]/g, "")) <= cut),
+    owned.filter(o => !/not listed/.test(o) && Number(o.replace(/[^0-9]/g, "")) > cut).join(", "))
+}
+/**
+ * Unticking has to bring the unreachable aces back. A filter that changes nothing
+ * is not a filter, and this is the direct test that the head of the default list is
+ * not the head of the whole one.
+ */
+if (tierOnOpen !== "none") {
+  const gettable = await page.$$eval(".board-row .who b", n => n.slice(0, 4).map(e => e.textContent.trim()))
+  const gettableCount = await rankedNow()
+  await page.uncheck(".stream-strip .toggle[data-avail] input")
+  await page.waitForTimeout(500)
+  const everyone = await page.$$eval(".board-row .who b", n => n.slice(0, 4).map(e => e.textContent.trim()))
+  t("the default list is not simply the whole field with a shorter horizon",
+    (await rankedNow()) > gettableCount && everyone.join() !== gettable.join(),
+    `${gettable.join(", ")} vs ${everyone.join(", ")}`)
+  await page.check(".stream-strip .toggle[data-avail] input")
+  await page.waitForTimeout(500)
+}
+
+/**
+ * 1b. The streaming grid is not the board's grid, because it is not the board's
+ * question.
+ *
+ * `uscore` is `addValue x (1 - owned)` — value discounted by availability — and on
+ * a list already filtered to what he can add that discount lands twice, reordering
+ * the survivors by who is rarer rather than by who is better. It is also null on
+ * 553 of the live capture's 1,435 players, including the top row of the gettable
+ * list. `luck` is a 21-day expected-minus-actual percentile: a signal about a
+ * season, acted on in the Buy low card, and nothing about a Saturday start turns on
+ * it. What replaces them is the half of the reader's question the board never
+ * answered — what this man is projected to actually score over this window.
+ */
+const streamHeads = await page.$$eval(".board-head > [data-col]", n =>
+  n.map(e => `${e.dataset.col}:${e.textContent.trim().replace(/[\u25be\u25b4]/g, "")}`))
+t("the streaming board carries six columns, not the board's seven",
+  streamHeads.length === 6 &&
+    streamHeads.map(h => h.split(":")[0]).join() === "rank,who,pts,bscore,games,conf",
+  streamHeads.join(" | "))
+t("uscore and luck are not among them",
+  !streamHeads.some(h => /^uscore|^luck/.test(h)), streamHeads.join(" | "))
+t("and the window column is named for what a streamer counts",
+  streamHeads.some(h => h === "games:starts"), streamHeads.join(" | "))
+const streamAlign = await columnsLineUp()
+t("every streaming heading sits over the cells it names",
+  streamAlign.head.join() === streamAlign.row.join(),
+  `${streamAlign.head.join(" ")} vs ${streamAlign.row.join(" ")}`)
+t("and the projected total is a real number on every row, not a dash",
+  (await page.$$eval(".board-row [data-col=pts]", n => n.map(e => e.textContent.trim())))
+    .every(x => /^\d+(\.\d+)?$/.test(x)))
+/**
+ * Ruthlessness: two full-width cards that cannot help a reader choose an arm for
+ * the weekend are two cards of scrolling between him and the one that can. Buy low
+ * ranks a 21-day contact gap against ownership and its picks on this fixture are
+ * hitters; "Where it hurts to wait" is the shape of each slot's drop-off, which
+ * does not move between now and Sunday.
+ */
+t("the season-long cards are not on the streaming tab",
+  (await page.$(".buylow")) === null && (await page.$(".scarcity")) === null)
+t("but the position chips that would empty this board are gone rather than the useful ones",
+  (await page.$$eval(".board-controls .chips[aria-label=Position] .chip-btn", n =>
+    n.map(e => e.textContent.trim()))).join() === "All,SP,RP,P")
+
 // 2. the horizon is the reader's to choose, and the choice reaches the ranking
 const periodRange = await streamRange()
 const periodNote = await streamNote()
@@ -391,20 +500,87 @@ t("two moves marks exactly the top two rows, and marks where the second one ends
 t("and the boundary is spoken, because a rail and a rule say nothing out loud",
   /within your 2 moves/.test(marked[0].label) && /and the last one/.test(marked[1].label),
   marked[1].label.slice(0, 90))
+/**
+ * "2 picks remaining" has to read as an ANSWER, not as a caption on a decoration.
+ *
+ * It said "The first 2 rows are marked, down to the rule" — a sentence about a
+ * rail, describing the drawing rather than the decision. A reader who came to find
+ * out which two men to add should not have to read a rule off a table to learn
+ * their names, so the page now says them, with what each one is projected for and
+ * how strong the availability claim behind them is.
+ */
+const movesLine = await page.$eval("#horizon-panel .moves-answer", e =>
+  e.textContent.replace(/\s+/g, " ").trim())
+const markedNames = await page.$$eval(".board-row[data-pick] .who b", n =>
+  n.map(e => e.textContent.trim()))
+t("two moves are named, in words, rather than described as two marked rows",
+  /^Your 2 moves/.test(movesLine) && markedNames.every(n => movesLine.includes(n)),
+  movesLine.slice(0, 140))
+t("and each named move carries what it is worth over the window",
+  (movesLine.match(/[\d.]+ pts/g) ?? []).length === 2, movesLine.slice(0, 140))
+t("and the sentence says how strong the availability claim behind it is",
+  /Free in your league|Estimated as gettable|Availability unknown/.test(movesLine),
+  movesLine.slice(-90))
+
+/*
+ * ...and that claim is about THIS list, not about what the page could have found out.
+ *
+ * The clause was chosen from `availability.basis` alone, which says whether a wire
+ * could be read — not whether these rows were filtered by it. With the pool loaded
+ * and "Only players I can add" unticked, the sentence named Parker Messick and
+ * Chris Sale, both printed "not listed" two rows below, and told the reader they
+ * were "Free in your league, read off its own list". The wire HAD been read; it had
+ * excluded both. A read quoted about men the read ruled out is worse than an
+ * estimate, so the provenance clause is now gated on the filter that earns it.
+ */
+const availToggle = ".stream-strip .toggle:has-text('I can add') input"
+if (await page.$(availToggle)) {
+  await page.uncheck(availToggle)
+  await page.waitForTimeout(500)
+  const looseLine = await page.$eval("#horizon-panel .moves-answer", e =>
+    e.textContent.replace(/\s+/g, " ").trim())
+  t("with the availability filter off, the moves sentence claims no availability",
+    !/Free in your league|Estimated as gettable/.test(looseLine), looseLine.slice(-120))
+  t("and it says instead that the list is not filtered by what he can get",
+    /not filtered by whether you can get them/.test(looseLine), looseLine.slice(-120))
+  await page.check(availToggle)
+  await page.waitForTimeout(500)
+}
+
+/*
+ * One control, one screen.
+ *
+ * The general filter row carried its own copy of the availability toggle while the
+ * streaming strip carried another, both bound to one piece of state — and on a
+ * capture whose ownership cannot locate the boundary they disagreed about it: the
+ * strip read "can't tell" and was operable, the other read "unavailable" and was
+ * disabled. The strip's copy is the one scoped to the question, so it is the one
+ * that survives on this tab.
+ */
+t("the streaming tab offers exactly one availability control, not two that disagree",
+  (await page.$$(".toggle:has-text('I can add')")).length === 1,
+  String((await page.$$(".toggle:has-text('I can add')")).length))
+
 await page.fill(".stream-strip .moves input", "0")
 await page.waitForTimeout(400)
 t("zero moves marks nothing rather than marking everything",
   (await page.$$(".board-row[data-pick]")).length === 0)
 
 // 4. the filter is the reader's, and it is scoped to the tab that offers it
+//
+// Located by its own label rather than by position. It was `.stream-strip .toggle
+// input`, and the strip now leads with the availability toggle — so the assertion
+// went on unchecking the FIRST toggle, which is a different control, and reported
+// the start filter as broken when nothing had touched it.
+const startToggle = ".stream-strip .toggle:has-text('with a start') input"
 const streamingCount = await rankedNow()
-await page.uncheck(".stream-strip .toggle input")
+await page.uncheck(startToggle)
 await page.waitForTimeout(500)
 const unfilteredCount = await rankedNow()
 t("turning the start filter off brings the rest of the pool back",
   unfilteredCount > streamingCount * 3 && (await startLines()).length < (await boardRows()),
   `${streamingCount} with a start, ${unfilteredCount} in the whole pool`)
-await page.check(".stream-strip .toggle input")
+await page.check(startToggle)
 await page.waitForTimeout(500)
 
 /**
@@ -524,12 +700,23 @@ t("the drill-down carries the arithmetic the row no longer repeats",
 t("bscore equals projected minus replacement",
   Math.abs(rowBscore - (Number(value["projected points"]) - Number(value["waiver points"]))) < 0.05,
   `${rowBscore} vs ${value["projected points"]} − ${value["waiver points"]}`)
-// and uscore really is that bscore over that ownership
+/**
+ * ...and uscore really is what he adds times the share of leagues he is still free
+ * in. This asserted the old QUOTIENT, `bscore / owned`, and survived the change to
+ * `addValue x (1 - owned)` only because the row it happened to open was always
+ * "unlisted" and the whole block was skipped. It fired the day the capture was
+ * refreshed and the top row finally had an ownership figure — which is the correct
+ * behaviour of a guard, arriving several commits late.
+ *
+ * `addValue` is `max(bscore, 0)`, so a below-replacement player has uscore 0 rather
+ * than a negative one: you do not lose points by not adding him.
+ */
 if (value["rostered"] !== "unlisted") {
-  const pctOwned = Math.max(Number(String(value["rostered"]).replace("%", "")), 0.5)
-  t("uscore equals bscore over ownership",
-    Math.abs(Number(value["uscore"]) - rowBscore / pctOwned) < 0.06,
-    `${value["uscore"]} vs ${rowBscore}/${pctOwned}`)
+  const pctOwned = Number(String(value["rostered"]).replace("%", ""))
+  const addValue = Math.max(rowBscore, 0)
+  t("uscore is what he adds times the share of leagues he is free in",
+    Math.abs(Number(value["uscore"]) - addValue * (1 - pctOwned / 100)) < 0.06,
+    `${value["uscore"]} vs ${addValue} x (1 - ${pctOwned}/100)`)
 }
 await page.click(".board-row")
 await page.waitForTimeout(200)
@@ -713,20 +900,24 @@ await page.waitForTimeout(400)
  * The pool is optional data and Yahoo rate-limits it, so this asserts the card
  * tells the truth about WHICH claim it is making in either case.
  */
+// Which of the three availability tiers answered, read off the control itself
+// rather than sniffed out of its prose. It used to be
+// `Number(textContent(".pool-count")) > 50`, which parsed a count out of a label —
+// so rewording the label to "150 free" silently turned the tier into NaN and this
+// assertion started demanding the wrong sentence. The tier is now stated in an
+// attribute, which is what an attribute is for.
 await page.waitForFunction(
-  () => {
-    const t = document.querySelector(".pool-count")?.textContent?.trim()
-    return t && t !== "…"
-  },
+  () => document.querySelector(".filters .toggle[data-avail]") !== null,
   { timeout: 30000 }
 ).catch(() => {})
 const availLine = (await page.textContent(".pick-avail")).trim()
-const poolRead = Number((await page.textContent(".pool-count")).trim()) > 50
+const tier = await page.$eval(".filters .toggle[data-avail]", e => e.dataset.avail)
 t("Billy's card says which claim it is making",
-  poolRead
-    ? /free agent in your league/i.test(availLine)
-    : /availability unknown|rostered in/i.test(availLine),
-  `pool ${poolRead ? "read" : "unread"}: ${availLine}`)
+  tier === "pool" ? /free agent in your league/i.test(availLine)
+  : tier === "ownership" ? /probably free/i.test(availLine)
+  : /availability unknown/i.test(availLine),
+  `tier ${tier}: ${availLine}`)
+const poolRead = tier === "pool"
 if (poolRead) {
   // the decisive one: the pick has to be somebody you can actually get
   await page.locator(".toggle input").first().check()
@@ -871,6 +1062,31 @@ await phone.waitForSelector(".detail")
 const phoneDetail = await phone.$$eval(".detail .pair dt", n => n.map(e => e.textContent.trim()))
 t("what the phone drops from the row is in the drill-down it can open",
   phoneDetail.includes("confidence"), phoneDetail.join(", "))
+
+/**
+ * The phone, on the STREAMING tab — which this block never reached, and which is
+ * now the view with its own grid and its own control strip.
+ *
+ * It went sideways there: app.css sets `white-space:nowrap` on every `.toggle`,
+ * and the availability toggle carries the tier it is using ("est. over 35% is
+ * taken"), so at 390px that one label measured 411px — 21px of horizontal scroll
+ * on the page this whole change exists to fix, while the fortnight board it was
+ * measured on sat at exactly 390.
+ */
+await phone.click(".board-row")
+await phone.waitForTimeout(150)
+await phone.click(".modes .mode:has-text('Streaming')")
+await phone.waitForSelector(".stream-strip", { timeout: 15000 })
+await phone.waitForTimeout(600)
+t("the streaming board does not scroll sideways at 390px either",
+  (await phone.evaluate(() => document.documentElement.scrollWidth)) <= 390,
+  String(await phone.evaluate(() => document.documentElement.scrollWidth)))
+const smallStream = await cols()
+t("at 390px streaming keeps the name, what he is worth and how many turns he gets",
+  smallStream.names.join() === "rank,who,bscore,games", smallStream.names.join())
+t("and those headings still sit over the cells they name",
+  smallStream.head.join() === smallStream.row.join(),
+  `${smallStream.head.join(" ")} vs ${smallStream.row.join(" ")}`)
 await phone.close()
 
 await browser.close()

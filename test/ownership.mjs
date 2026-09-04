@@ -166,11 +166,22 @@ const constant = [...byTeam.values()].filter(vals => {
   for (const v of vals) counts.set(v, (counts.get(v) ?? 0) + 1)
   return Math.max(...counts.values()) / vals.length > 0.5
 })
-// This capture is the diseased one. The assertion records that, so the day a
-// clean capture is committed this line fails and has to be updated deliberately
-// rather than the evidence quietly evaporating.
-t("the committed capture is the known-bad one this check was written for",
-  constant.length >= 15, `${constant.length} of ${byTeam.size} clubs sit on one value`)
+/**
+ * This used to assert the committed capture WAS the diseased one — 20 of 30 clubs
+ * sitting on a single percentage — so that the day a clean capture landed the line
+ * would fail and have to be updated deliberately rather than the evidence quietly
+ * evaporating. That day came: the capture was refreshed through the fixed sweep and
+ * now reads 0 of 30.
+ *
+ * So it flips to the permanent form, which is the stronger one. Recording that a
+ * fixture is broken protects nothing once it is fixed; asserting the invariant
+ * holds catches the leak coming back, which is the thing that actually matters.
+ * The diseased shape is still pinned — `leakedByTeam` is exercised against it
+ * directly above, on input built to order rather than on whatever a capture
+ * happens to contain.
+ */
+t("no club in the committed capture sits on one shared percentage",
+  constant.length === 0, `${constant.length} of ${byTeam.size} clubs sit on one value`)
 
 
 // --- reading a roster off a team's own Yahoo page -----------------------------

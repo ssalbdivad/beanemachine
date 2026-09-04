@@ -6,6 +6,7 @@ import { BoardPrimer, Fragment2 } from "./panels.tsx"
 import { readView, writeView } from "./view.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
+	realInnings,
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
 import { canReadPool, api, ApiError, getMode, type AvailablePool } from "./api.ts"
@@ -710,6 +711,26 @@ export const Board = ({
 	}
 
 	/**
+	 * The innings a pick is expected to throw in the window, for leagues that state
+	 * a weekly innings floor — the reason much streaming happens at all.
+	 *
+	 * MLB reports innings in baseball notation, so 85.2 is 85 and two THIRDS, not
+	 * 85.2. Read as a decimal it is short by up to 0.8 per pitcher, and this sums
+	 * over a whole week of picks. Converted through outs.
+	 *
+	 * A rate needs starts to divide by. A pitcher with none this season gets no
+	 * estimate rather than a guessed one, and the line below says how many of the
+	 * picks it could speak for.
+	 */
+	const inningsFor = (r: Ranked): number | null => {
+		const st = r.player.stats as Record<string, number> | undefined
+		const gs = st?.gamesStarted ?? 0
+		const ip = st?.inningsPitched ?? 0
+		if (!(gs > 0) || !(ip > 0) || r.scheduledStarts == null) return null
+		return (realInnings(ip) / gs) * r.scheduledStarts
+	}
+
+	/**
 	 * Billy names the best player you can GET, not the best player. The top of a
 	 * bscore board is the best man in baseball, who is rostered everywhere — true,
 	 * and useless as a recommendation.
@@ -1238,6 +1259,26 @@ export const Board = ({
 							)
 						})}
 						.{" "}
+						{/* Against the floor the line above states. An ESTIMATE, and labelled
+						    one: it is each pitcher's own innings-per-start this season across
+						    his expected turns, and MLB has not named every one of those turns.
+						    Only shown where the league states a floor, because without one the
+						    number answers nothing, and only where every pick could be
+						    estimated — a partial sum read against a floor is worse than no
+						    sum, since it looks like a shortfall. */}
+						{leagueRules.innings !== null &&
+							(() => {
+								const each = rows.slice(0, moves).map(inningsFor)
+								if (each.some(x => x === null)) return null
+								const ip = each.reduce((a, b) => a! + b!, 0)!
+								return (
+									<em className="ip-estimate">
+										About <b>{ip.toFixed(1)} innings</b> from them, against your
+										league&rsquo;s {leagueRules.innings} — an estimate from each
+										pitcher&rsquo;s own innings per start.{" "}
+									</em>
+								)
+							})()}
 						{/* The claim is only as strong as its source, and it is never
 						    stronger than "probably" without the league's own wire.
 

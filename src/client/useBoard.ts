@@ -685,3 +685,19 @@ export const useBoard = (
 		availability, sort
 	}
 }
+
+/**
+ * Baseball's innings notation as a real number.
+ *
+ * MLB reports 85.2 for eighty-five and two THIRDS, so the digit after the point is
+ * a count of outs, not a fraction. Read as a decimal, 85.2 is short by 0.467 and
+ * 85.1 by 0.233 — under an inning each, but these are summed over a week of picks
+ * and compared against a league's innings floor, where being a couple short is the
+ * whole question. Only .0, .1 and .2 are legal; anything else is a value that did
+ * not come from this notation and is passed through as itself.
+ */
+export const realInnings = (ip: number): number => {
+	const whole = Math.floor(ip)
+	const outs = Math.round((ip - whole) * 10)
+	return outs > 2 ? ip : whole + outs / 3
+}

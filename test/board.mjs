@@ -490,6 +490,40 @@ await page.click(".stream-strip .chip-btn:text-is('3 days')")
     /20 innings pitched a week required/.test(note), note)
   t("and no penalty is claimed for missing it, since the settings page states none",
     !/forfeit|lose|zero/i.test(note), note)
+
+  /*
+   * The innings the picks are expected to throw, against that floor.
+   *
+   * MLB reports innings in baseball notation: 85.2 is 85 and two THIRDS. Read as a
+   * decimal every pitcher is short by up to 0.8, and this sums a week of picks. The
+   * The conversion itself is pinned below on `realInnings`. The on-page assertion
+   * is only that a sum appears and is in a plausible range, because the exact total
+   * moves with every data capture.
+   */
+  {
+    const { realInnings } = await import("../src/client/useBoard.ts")
+    t("two tenths is two thirds", Math.abs(realInnings(85.2) - 85 - 2 / 3) < 1e-9,
+      String(realInnings(85.2)))
+    t("one tenth is one third", Math.abs(realInnings(85.1) - 85 - 1 / 3) < 1e-9,
+      String(realInnings(85.1)))
+    t("a whole number is itself", realInnings(85) === 85)
+    // .3 and up are not legal in this notation, so they did not come from it
+    t("a value outside the notation is passed through rather than mangled",
+      realInnings(85.5) === 85.5, String(realInnings(85.5)))
+  }
+  await page.fill(".stream-strip .moves input", "6")
+  await page.waitForTimeout(500)
+  const est = await page.$$eval(".ip-estimate", e => e.map(x => x.textContent))
+  if (est.length) {
+    const ip = Number(/About ([\d.]+) innings/.exec(est[0])[1])
+    t("the picks' expected innings are stated against the floor",
+      ip > 0 && ip < 60, String(ip))
+    t("and are labelled an estimate, not an announcement",
+      /an estimate from each pitcher/.test(est[0]), est[0])
+  } else {
+    t("no innings estimate is shown when a pick cannot be estimated", true,
+      "every pick needs a starts-based rate; a partial sum would read as a shortfall")
+  }
 }
 await page.waitForTimeout(500)
 

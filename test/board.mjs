@@ -457,6 +457,34 @@ t("and that count is measured off the window rather than baked into the sentence
   `${pubPeriod}/${gamesPeriod} over the period vs ${pubSeven}/${gamesSeven} over seven days`)
 
 await page.click(".stream-strip .chip-btn:text-is('3 days')")
+
+/**
+ * The weekly budget comes from the league, not from a blank box.
+ *
+ * The shipped league's settings page says "Max Acquisitions per Week: 6" and the
+ * import harvested that row, so asking the reader to type 6 was asking him for a
+ * number the app already held. It seeds only an untouched control, and the note
+ * says whose number it is — the app knows the league's CAP, never how many he has
+ * already spent this week.
+ */
+{
+  await page.click(".modes .mode:has-text('Streaming')")
+  await page.waitForSelector(".stream-strip", { timeout: 15000 })
+  const seeded = await page.$eval(".stream-strip .moves input", e => e.value)
+  t("the moves box opens on the league's own weekly cap", seeded === "6", seeded)
+  const note = await page.$eval(".stream-strip .moves .cap-note", e => e.textContent.trim())
+  t("and says it is the league's allowance, not his remaining count",
+    /allows 6 a week/.test(note) && /used/.test(note), note)
+  t("so the answer below it is already the league's question",
+    /6 moves/.test(await page.$eval(".moves-answer", e => e.textContent)),
+    await page.$eval(".moves-answer", e => e.textContent.slice(0, 80)))
+
+  // his own answer outranks the cap
+  await page.fill(".stream-strip .moves input", "2")
+  await page.waitForTimeout(400)
+  t("a number he types is not pushed back to the cap",
+    (await page.$eval(".stream-strip .moves input", e => e.value)) === "2")
+}
 await page.waitForTimeout(500)
 
 /**

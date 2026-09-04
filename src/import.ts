@@ -854,3 +854,36 @@ export const importLeague = async (url: string): Promise<{ key: string; league: 
 		target.platform === "yahoo" ? await importYahoo(target) : await importEspn(target)
 	return { key: `${target.platform}:${target.leagueId}`, league }
 }
+
+/**
+ * How many players the league lets a team add in one scoring period.
+ *
+ * Yahoo prints this on the settings page as "Max Acquisitions per Week", and
+ * `importYahoo` already harvests every row of that page verbatim, so for a Yahoo
+ * league the number has been sitting in `league_rules.raw_settings` all along
+ * while the board asked the reader to type it. Derived here rather than stored as
+ * a new field so it applies to leagues captured before this existed, including
+ * the shipped one.
+ *
+ * What this is NOT is how many moves he has LEFT. The cap is a league rule and is
+ * printed; the count he has spent this week is on his team page, which none of
+ * these readers open. So this seeds the control and he adjusts it — a better
+ * starting point than zero, and still his number.
+ *
+ * "No maximum" is a real and common answer, and it returns null rather than some
+ * large stand-in: unlimited is not 26. Only the per-WEEK row is read. A league can
+ * cap the season and not the week, and reading a season cap as a weekly budget
+ * would tell a reader in April he may make 40 moves before Sunday.
+ */
+export const deriveMoveLimit = (
+	settings: Record<string, string>
+): { perPeriod: number | null; source: string | null } => {
+	const row = settings["Max Acquisitions per Week"]
+	if (row === undefined) return { perPeriod: null, source: null }
+	const n = Number(row.trim())
+	if (!Number.isInteger(n) || n < 0) {
+		// "No maximum", or anything else Yahoo decides to print
+		return { perPeriod: null, source: `Max Acquisitions per Week "${row}"` }
+	}
+	return { perPeriod: n, source: `Max Acquisitions per Week "${row}"` }
+}

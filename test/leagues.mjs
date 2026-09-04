@@ -13,6 +13,7 @@ import {
   agentHeaders,
   detect,
   deriveScoringPeriod,
+  deriveMoveLimit,
   importableInBrowser,
   importLeague,
   IN_BROWSER,
@@ -760,6 +761,39 @@ const { canReadPool } = await import("../src/client/api.ts")
 t("Yahoo can be asked (through the local server it needs)", canReadPool("yahoo"))
 t("ESPN can be asked (straight from the page)", canReadPool("espn"))
 t("a platform with no reader is not asked", !canReadPool("sleeper") && !canReadPool(null))
+
+/**
+ * The weekly add cap comes from the league, not from the reader.
+ *
+ * Yahoo prints "Max Acquisitions per Week" on the settings page and the import
+ * already harvests every row of it, so the board asked for a number it was
+ * holding. Read against the SHIPPED league's own settings rather than a fixture:
+ * those are the strings Yahoo actually printed, and a fixture here would only
+ * prove the fixture matches the parser.
+ */
+{
+  const shipped = deriveMoveLimit(shippedRaw)
+  t("the shipped league's stated weekly cap is read, not typed",
+    shipped.perPeriod === 6, JSON.stringify(shipped))
+  t("the cap quotes the row it came from",
+    shipped.source === 'Max Acquisitions per Week "6"', shipped.source)
+
+  // unlimited is not a big number
+  const none = deriveMoveLimit({ "Max Acquisitions per Week": "No maximum" })
+  t("a league with no weekly cap yields null, not a stand-in",
+    none.perPeriod === null, JSON.stringify(none))
+  t("even then the row is quoted, so the null can be traced",
+    none.source === 'Max Acquisitions per Week "No maximum"', none.source)
+
+  // a season cap is not a weekly budget
+  const seasonOnly = deriveMoveLimit({ "Max Acquisitions for Entire Season": "40" })
+  t("a season-long cap is never read as this week's budget",
+    seasonOnly.perPeriod === null && seasonOnly.source === null,
+    JSON.stringify(seasonOnly))
+
+  t("a settings map without the row says nothing",
+    deriveMoveLimit({}).perPeriod === null, "")
+}
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

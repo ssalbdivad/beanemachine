@@ -9,6 +9,7 @@ import {
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
 import { canReadPool, api, ApiError, getMode, type AvailablePool } from "./api.ts"
+import { deriveMoveLimit } from "../import.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
@@ -304,6 +305,7 @@ const STREAM_CSS = `
 .stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
 .stream-strip .toggle input{flex:none;margin-top:3px}
 .stream-strip .moves input{width:56px}
+.stream-strip .moves .cap-note{font-size:11px;color:var(--soft);font-style:normal;max-width:15ch;line-height:1.25}
 .stream-note{margin-top:var(--sp-2)}
 /* The availability sentence is NOT a stream-note. That class names the coverage
    line, and test/board.mjs reads the first element matching it — a second paragraph
@@ -483,6 +485,32 @@ export const Board = ({
 	 * deliberately are not.
 	 */
 	const [filters, setFilters] = useState<Filters>(() => ({ ...DEFAULT_FILTERS, ...readView() }))
+	/**
+	 * The weekly add cap the loaded league states, or null where it states none.
+	 * Read off the settings rows the import already harvested, so a league captured
+	 * before this existed still answers.
+	 */
+	const moveCap = useMemo(
+		() =>
+			deriveMoveLimit(
+				((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
+					?.raw_settings ?? {}) as Record<string, string>
+			).perPeriod,
+		[league]
+	)
+	/**
+	 * Seed the budget from the league once, and only into an untouched control.
+	 * `readView` returning a moves value means this reader has answered the question
+	 * himself on this browser, and his answer outranks the league's cap — he may
+	 * have spent four of six. The ref makes this a seed rather than a correction:
+	 * without it, typing 2 would be pushed back to 6 on the next render.
+	 */
+	const seeded = useRef(readView().moves !== undefined)
+	useEffect(() => {
+		if (seeded.current || moveCap === null) return
+		seeded.current = true
+		setFilters(f => ({ ...f, moves: moveCap }))
+	}, [moveCap])
 	const [open, setOpen] = useState<number | null>(null)
 	/**
 	 * How many rows are rendered. The board used to stop dead at 120 with a line
@@ -864,11 +892,16 @@ export const Board = ({
 								fortnight instead and the filter is off
 							</em>
 						)}
-						{/* The reader's own budget. Nothing in any source this app reads carries
-						    his transaction count, waiver position, FAAB or weekly add limit, so
-						    the number is typed rather than guessed — see `Filters.moves`. What
-						    the board contributes is the part he cannot do: which N of the
-						    ranking those moves should buy, after his filters. */}
+						{/* The reader's own budget, seeded from his league where the league
+						    says. Yahoo prints "Max Acquisitions per Week" on the settings page and
+						    the import harvests it, so `deriveMoveLimit` reads the CAP off the
+						    league he loaded. What no reader here carries is how many he has SPENT
+						    this week — that is on his team page — so the seeded number is a
+						    starting point he corrects, which is why the note below says whose
+						    number it is. Nothing seeds it for a league that states no weekly cap,
+						    or once he has typed one himself. What the board contributes either
+						    way is the part he cannot do: which N of the ranking those moves
+						    should buy, after his filters. */}
 						<label className="ctl moves">
 							<span>Moves left</span>
 							<input
@@ -881,6 +914,11 @@ export const Board = ({
 									set("moves", Math.max(0, Math.min(26, Math.floor(Number(e.currentTarget.value) || 0))))
 								}
 							/>
+							{moveCap !== null && (
+								<em className="cap-note">
+									your league allows {moveCap} a week — subtract any you have used
+								</em>
+							)}
 						</label>
 					</div>
 				)}

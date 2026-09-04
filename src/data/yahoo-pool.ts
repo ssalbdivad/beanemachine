@@ -413,6 +413,10 @@ export interface RosterEntry {
 	name: string
 	/** The slot Yahoo has him in — "C", "OF", "BN", "IL". Null where unreadable. */
 	slot: string | null
+	/** Eligibility as YOUR league prints it, which is the only place the real
+	 *  multi-position line is readable. Empty means the cell could not be read. */
+	positions: string[]
+	team: string | null
 }
 
 /**
@@ -421,33 +425,47 @@ export interface RosterEntry {
  * The alternative was typing it. "My team" is the gate to the starting lineup and
  * to every trade verdict, and it opened on an empty search box and the instruction
  * to add the ones you own — twenty-seven times, by hand, before the page could say
- * anything at all. The three cards under it each rendered their own "add your team
- * first". That is the single largest barrier in the product.
+ * anything at all.
  *
  * Nothing new has to be reachable for this: `src/import.ts` already downloads this
  * exact page to read the team NAME out of its `<title>` and throws the rest away.
- * The roster is in the markup it already has — 24 `data-ys-playerid` links on the
- * reference team, publicly readable without signing in, the same footing the
- * free-agent pool and the ownership sweep already stand on.
+ * The roster is in the markup it already has — publicly readable without signing
+ * in, the same footing the free-agent pool and the ownership sweep already stand on.
+ *
+ * The SLOT matters as much as the name. `src/auto/plan.ts` decides what to start
+ * and what to drop from a roster whose seats it knows; handed a fabricated "BN" for
+ * everybody it would report points "sitting on your bench" that it has no way to
+ * know are benched. One `<tr>` per player, slot in the first `<td>`, so the seat is
+ * read rather than assumed — and where a row cannot be read the slot is null and
+ * the caller is told, never filled in.
  *
  * Names are returned rather than ids because Yahoo's ids are its own; the join to
- * MLBAM runs through `normalizeName`, which is the same join `ownership` and
- * `eligibility` already use and which is pinned by tests.
+ * MLBAM runs through `normalizeName`, the same join `ownership` and `eligibility`
+ * already use.
  */
 export const parseRoster = (htmlText: string): RosterEntry[] => {
 	const out: RosterEntry[] = []
 	const seen = new Set<string>()
-	// Each roster row carries the slot in its own cell before the player link, so
-	// the row is split on the link and the slot read from what precedes it.
-	const rows = htmlText.split(/data-ys-playerid="/).slice(1)
-	for (const row of rows) {
-		const yahooId = /^(\d+)/.exec(row)?.[1]
-		if (!yahooId || seen.has(yahooId)) continue
-		const head = row.slice(0, 400)
-		const name = cellText(/title="([^"]+)"/.exec(head)?.[1] ?? "").trim()
+	for (const row of htmlText.split(/<tr[^>]*>/).slice(1)) {
+		const idMatch = /data-ys-playerid="(\d+)"/.exec(row)
+		if (!idMatch) continue
+		const yahooId = idMatch[1]!
+		if (seen.has(yahooId)) continue
+		const name = cellText(/title="([^"]+)"/.exec(row)?.[1] ?? "").trim()
 		if (!name) continue
 		seen.add(yahooId)
-		out.push({ yahooId, name, slot: null })
+		// the seat is the row's first cell; anything else there is not a slot
+		const firstCell = cellText(/<td[^>]*>([\s\S]{0,200}?)<\/td>/.exec(row)?.[1] ?? "").trim()
+		const slot = /^(C|[123]B|SS|OF|Util|SP|RP|P|BN|IL\+?|NA)$/i.test(firstCell) ? firstCell : null
+		// "NYY - C,1B" beside the name: the league's own eligibility line
+		const meta = /\b([A-Z]{2,3})\s*-\s*([A-Z0-9,]+)/.exec(cellText(row))
+		out.push({
+			yahooId,
+			name,
+			slot,
+			positions: (meta?.[2] ?? "").split(",").map(x => x.trim()).filter(Boolean),
+			team: meta?.[1] ?? null
+		})
 	}
 	return out
 }

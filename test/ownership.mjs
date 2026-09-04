@@ -182,10 +182,16 @@ t("the committed capture is the known-bad one this check was written for",
 // because a roster that quietly loses a player misprices every lineup under it.
 const { parseRoster } = await import("../src/data/yahoo-pool.ts")
 
-const rosterRow = (id, name) =>
-  `<a class="name F-link" data-ys-playerid="${id}" title="${name}">${name}</a>`
+// One <tr> per player, slot in the first <td>, "NYY - C,1B" beside the name —
+// the shape the real page uses, so the fixture cannot drift from it silently.
+const rosterRow = (id, name, slot = "C", meta = "NYY - C,1B") =>
+  `<tr><td>${slot}</td><td>` +
+  `<a class="name F-link" data-ys-playerid="${id}" title="${name}">${name}</a>` +
+  `<span>${meta}</span></td></tr>`
 
-const roster = parseRoster(`<div>${rosterRow(1, "Ben Rice")}${rosterRow(2, "Juan Soto")}</div>`)
+const roster = parseRoster(
+  `<table>${rosterRow(1, "Ben Rice", "C")}${rosterRow(2, "Juan Soto", "OF", "NYM - OF")}</table>`
+)
 t("a roster page yields one entry per player",
   roster.length === 2 && roster[0].name === "Ben Rice" && roster[1].name === "Juan Soto",
   JSON.stringify(roster))
@@ -193,18 +199,63 @@ t("and carries Yahoo's own id for each", roster.map(x => x.yahooId).join(",") ==
 
 // Yahoo repeats a player's id across the row (the note link, the icon), and a
 // roster listing him twice would double-count him in every slot he fills.
-const dupes = parseRoster(`<div>${rosterRow(7, "Byron Buxton")}${rosterRow(7, "Byron Buxton")}</div>`)
+const dupes = parseRoster(
+  `<table>${rosterRow(7, "Byron Buxton")}${rosterRow(7, "Byron Buxton")}</table>`
+)
 t("a player repeated in the markup is stored once", dupes.length === 1, JSON.stringify(dupes))
 
 t("a page with no roster rows yields nothing rather than throwing",
   parseRoster("<html><body>Please sign in</body></html>").length === 0)
 t("an entry without a readable name is skipped rather than stored blank",
-  parseRoster(`<a data-ys-playerid="9"></a>`).length === 0)
+  parseRoster(`<tr><td>C</td><td><a data-ys-playerid="9"></a></td></tr>`).length === 0)
+
+// The SEAT is what the add/drop planner reasons over, so it is read rather than
+// assumed — a fabricated "BN" for everybody would have the plan report points
+// "sitting on your bench" that nothing established were benched.
+t("the seat is read from the row's first cell",
+  roster[0].slot === "C" && roster[1].slot === "OF",
+  roster.map(x => x.slot).join(","))
+t("and the league's own eligibility line comes with it",
+  roster[0].positions.join("/") === "C/1B" && roster[1].positions.join("/") === "OF",
+  JSON.stringify(roster.map(x => x.positions)))
+t("a first cell that is not a slot leaves the seat null rather than guessing",
+  parseRoster(`<tr><td>Wed 7:05</td><td><a data-ys-playerid="5" title="X Y">X Y</a></td></tr>`)[0]
+    .slot === null)
 
 // The join to MLBAM runs through normalizeName, the same join ownership uses.
 const { normalizeName } = await import("../src/data/yahoo-pool.ts")
 t("a roster name normalizes onto the same key ownership joins by",
   normalizeName("José Soriano") === normalizeName("Jose Soriano"))
+
+// --- the roster read, per platform ------------------------------------------
+//
+// Yahoo is scraped because Yahoo has no public API. ESPN and Sleeper both publish
+// JSON for a publicly-viewable league, and src/import.ts already reads their
+// SETTINGS through the same endpoints — but no publicly-viewable baseball league
+// on either is available here to verify a roster read against, and probing a
+// stranger's league to find one is not something this should do.
+//
+// So what is pinned is the property that makes an unverified reader safe: every
+// path returns {players, note} and NEVER throws on a shape it did not expect. A
+// roster read WRONG is worse than one not read, because the lineup and every
+// add/drop under it would be priced against a team you do not have.
+const { fetchTeamRoster } = await import("../src/data/rosters.ts")
+
+const unsupported = await fetchTeamRoster({ platform: "fantrax", leagueId: "1", teamId: "1" })
+t("an unsupported platform is named rather than silently returning nothing",
+  unsupported.players.length === 0 && /fantrax/.test(unsupported.note), unsupported.note)
+
+const blank = await fetchTeamRoster({ platform: "", leagueId: "1", teamId: "1" })
+t("a missing platform still answers in the same shape",
+  Array.isArray(blank.players) && typeof blank.note === "string", JSON.stringify(blank))
+
+// A reader that throws would take the whole page down; every one of them catches.
+const unreachable = await fetchTeamRoster({
+  platform: "espn", leagueId: "0", teamId: "0", sport: "flb", season: 1900
+})
+t("a platform that cannot be reached returns a note, never an exception",
+  Array.isArray(unreachable.players) && unreachable.players.length === 0 &&
+    unreachable.note.length > 0, unreachable.note)
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -5,7 +5,8 @@ import { type } from "arktype"
 import { Hono } from "hono"
 import { existsSync } from "node:fs"
 import { ImportError, importLeague } from "./import.ts"
-import { fetchAvailable, fetchRoster } from "./data/yahoo-pool.ts"
+import { fetchAvailable } from "./data/yahoo-pool.ts"
+import { fetchTeamRoster } from "./data/rosters.ts"
 
 /**
  * The API is now only what a browser genuinely cannot do for itself: read a
@@ -75,15 +76,26 @@ const api = new Hono()
 	 */
 	.post(
 		"/roster",
-		arktypeValidator("json", type({ leagueId: "string > 0", teamId: "string > 0" })),
+		arktypeValidator(
+			"json",
+			type({
+				platform: "string > 0",
+				leagueId: "string > 0",
+				teamId: "string > 0",
+				"sport?": "string",
+				"season?": "number"
+			})
+		),
 		async c => {
-			const { leagueId, teamId } = c.req.valid("json")
-			if (!/^\d+$/.test(leagueId) || !/^\d+$/.test(teamId))
-				throw new ImportError("A numeric Yahoo league id and team id are required.")
+			const body = c.req.valid("json")
+			// Sleeper's roster and owner ids are not always numeric, so the shape is
+			// checked per platform rather than globally.
+			if (body.platform !== "sleeper" && !/^[\w-]{1,32}$/.test(body.leagueId))
+				throw new ImportError("That doesn't look like a league id.")
 			// An unreadable roster is a state, not an error: the league may be private
-			// or Yahoo may be throttling, and the client offers the manual path either
-			// way rather than logging a failed request.
-			return c.json(await fetchRoster(leagueId, teamId))
+			// or the platform may be throttling, and the client offers the manual path
+			// either way rather than logging a failed request.
+			return c.json(await fetchTeamRoster(body))
 		}
 	)
 

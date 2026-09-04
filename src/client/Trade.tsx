@@ -7,6 +7,8 @@ import {
 import type { League } from "../schema.ts"
 import { api, ApiError } from "./api.ts"
 import { roster as store, rosterKey } from "./roster.ts"
+import { lineupStore, type StoredLineup } from "./lineup.ts"
+import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
 import "./trade.css"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 
@@ -132,6 +134,16 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 * NAMED rather than silently dropped: a roster that quietly lost two players
 	 * would misprice every lineup below it.
 	 */
+	const [seats, setSeats] = useState<StoredLineup | null>(null)
+	/**
+	 * The free agents you could actually add.
+	 *
+	 * The board has fetched this for a while to power its "free agents only" filter;
+	 * this page never had it, which is why it could price a trade but not propose a
+	 * pickup. An add/drop plan is meaningless without it — every candidate would be
+	 * somebody already on a roster.
+	 */
+	const [pool, setPool] = useState<Set<string> | null>(null)
 	const [pulling, setPulling] = useState(false)
 	const [pullNote, setPullNote] = useState<string | null>(null)
 	const leagueId = league?.meta.league_id ?? null
@@ -142,7 +154,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		setPulling(true)
 		setPullNote(null)
 		try {
-			const res = await api.roster(String(leagueId), String(teamId))
+			const res = await api.roster({
+				platform: league?.meta.platform ?? "yahoo",
+				leagueId: String(leagueId),
+				teamId: String(teamId)
+			})
 			if (!res.players.length) {
 				setPullNote(res.note)
 				return
@@ -166,6 +182,18 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				for (const r of hits) keys.push(rosterKey(r.player))
 			}
 			persist(() => store.set(leagueKey, keys))
+			// the seats as they were read, which is what the planner needs and what
+			// the id list cannot carry
+			const at = new Date().toISOString()
+			setSeats(
+				lineupStore.set(
+					leagueKey,
+					res.players
+						.filter(y => y.slot)
+						.map(y => ({ slot: y.slot!, name: y.name, positions: y.positions, team: y.team })),
+					at
+				)
+			)
 			setPullNote(
 				`Read ${res.players.length} players off Yahoo.` +
 					(missed.length ?
@@ -178,6 +206,71 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			setPulling(false)
 		}
 	}
+
+	useEffect(() => {
+		if (!leagueKey) return
+		setSeats(lineupStore.of(leagueKey))
+	}, [leagueKey])
+
+	useEffect(() => {
+		const id = league?.meta.league_id
+		if (!id || league?.meta.platform !== "yahoo") return
+		let live = true
+		api.available(String(id))
+			.then(p => live && setPool(new Set(p.players.map(x => normalizeName(x.name)))))
+			.catch(() => live && setPool(null))
+		return () => {
+			live = false
+		}
+	}, [league?.meta.league_id, league?.meta.platform])
+
+	/**
+	 * What to add and what to drop, from the same analysis the board runs on.
+	 *
+	 * `src/auto/plan.ts` has decided this since the autonomous runner shipped: it is
+	 * pure, it is covered by 75 assertions, and until now nothing in the browser
+	 * could reach it. It needs three things this page did not have — your seats as
+	 * the platform renders them, the free agents you can actually add, and the
+	 * league's real roster shape — and now has all three.
+	 *
+	 * Fed the FORTNIGHT board deliberately. `DEFAULTS` (keepFloor 25, minGain 5) are
+	 * absolute point quantities and were measured against that horizon; handing them
+	 * the current scoring period, which tops out around a fifth of the scale, makes
+	 * the planner mute by construction rather than cautious.
+	 *
+	 * `railViolations` re-checks the finished plan against its own rules, exactly as
+	 * `src/auto/run.ts` does, and anything it returns is a bug rather than a warning
+	 * — so the card withholds the plan and says so instead of showing a move that
+	 * broke a rail.
+	 */
+	const advice = useMemo((): { plan: Plan; rails: string[] } | null => {
+		if (!league || !seats?.spots.length || !pool?.size || league.meta.max_teams === null) return null
+		const input = {
+			roster: seats.spots.map(sp => ({
+				slot: sp.slot,
+				name: sp.name,
+				positions: sp.positions,
+				team: sp.team ?? null,
+				status: ""
+			})),
+			rated,
+			availableNames: pool,
+			shape: {
+				slots: league.roster.slots,
+				slot_order: league.roster.slot_order,
+				slot_accepts: league.roster.slot_accepts
+			},
+			options: DEFAULTS
+		}
+		try {
+			const out = plan(input)
+			return { plan: out, rails: railViolations(out, input) }
+		} catch {
+			// a planner that throws is a bug, and a card that renders half a plan is
+			// worse than one that renders none
+			return null
+		}
+	}, [league, seats, pool, rated])
 
 	const persist = (next: () => string[]) => {
 		try {
@@ -296,7 +389,8 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							{pulling ? "Reading…" : owned.length ? "Re-read my roster from Yahoo" : "Read my roster from Yahoo"}
 						</button>
 						<span className="sub">
-							{pullNote ?? "Only publicly-viewable Yahoo leagues can be read without signing in."}
+							{pullNote ??
+								"Only publicly-viewable leagues can be read without signing in."}
 						</span>
 					</div>
 				)}
@@ -379,6 +473,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			</section>
 
 			<LineupCard league={league} lineup={lineup} count={mine.length} barMen={barMen} />
+			<AdviceCard advice={advice} seats={seats} pool={pool} platform={league.meta.platform ?? null} />
 
 			<section className="card full trade-deal">
 				<h2>The deal</h2>
@@ -523,6 +618,116 @@ const SOURCE_CLASS: Record<Start["source"], string> = {
 	roster: "roster",
 	replacement: "wire",
 	empty: "hole"
+}
+
+/**
+ * The add/drop the analysis actually recommends.
+ *
+ * Every other card on this page prices something you propose. This is the only one
+ * that proposes something itself, and it is the reason the roster read exists.
+ *
+ * It shows the planner's own reasoning rather than a verdict: the gain, the man
+ * going out and the man coming in with the scores that decided it, and the notes
+ * saying what was considered and declined. `skipped` is printed too — a plan that
+ * silently ignored a candidate would be indistinguishable from one that never saw
+ * him.
+ */
+const AdviceCard = ({
+	advice,
+	seats,
+	pool,
+	platform
+}: {
+	advice: { plan: Plan; rails: string[] } | null
+	seats: StoredLineup | null
+	pool: Set<string> | null
+	platform: string | null
+}) => {
+	if (!seats?.spots.length)
+		return (
+			<section className="card full advice">
+				<h2>What to add and drop</h2>
+				<p className="empty">
+					Read your roster above and this fills in. It needs the seats your league has
+					you in, not just who you own, because what to start and what to drop both
+					turn on where a man currently sits.
+				</p>
+			</section>
+		)
+	if (!pool?.size)
+		return (
+			<section className="card full advice">
+				<h2>What to add and drop</h2>
+				<p className="empty">
+					{platform === "yahoo" ?
+						"Your league's free agent list couldn't be read, so there is nobody to " +
+						"recommend adding. Only publicly-viewable Yahoo leagues can be read " +
+						"without signing in, and this needs the local server."
+					:	"Reading the free agent list only works for publicly-viewable Yahoo " +
+						"leagues right now, so there is nobody to recommend adding here."}
+				</p>
+			</section>
+		)
+	if (!advice) return null
+	const { plan: p, rails } = advice
+	// A rail violation is a bug in the planner, not advice to weigh. run.ts prints
+	// nothing when one fires and neither does this.
+	if (rails.length)
+		return (
+			<section className="card full advice">
+				<h2>What to add and drop</h2>
+				<ul className="notes warn">
+					{rails.map(r => (
+						<li key={r}>{r}</li>
+					))}
+				</ul>
+				<p className="sub">
+					The plan broke one of its own rules, so it is withheld rather than shown.
+				</p>
+			</section>
+		)
+	return (
+		<section className="card full advice">
+			<h2>What to add and drop</h2>
+			<p className="sub">
+				From your seats as read {seats.at.slice(0, 10)}, the fortnight board, and your
+				league&rsquo;s own free agents. Nothing here is executed — it is a
+				recommendation to review.
+			</p>
+			{p.moves.length ?
+				<ul className="advice-moves">
+					{p.moves.map(m => (
+						<li key={`${m.add}-${m.drop}`}>
+							<span className="advice-gain">+{m.gain}</span>
+							<span className="advice-swap">
+								<b>{m.add}</b> <span className="advice-score">{m.addScore}</span>
+								<span className="advice-arrow"> for </span>
+								<b>{m.drop}</b> <span className="advice-score">{m.dropScore}</span>
+							</span>
+							<span className="advice-reason">{m.reason}</span>
+						</li>
+					))}
+				</ul>
+			:	<p className="empty">No move clears the bar.</p>}
+			{p.notes.length > 0 && (
+				<ul className="notes">
+					{p.notes.map(n => (
+						<li key={n}>{n}</li>
+					))}
+				</ul>
+			)}
+			{p.skipped.length > 0 && (
+				<details className="advice-skipped">
+					<summary>{p.skipped.length} considered and passed over</summary>
+					<ul className="notes">
+						{p.skipped.map(x => (
+							<li key={x}>{x}</li>
+						))}
+					</ul>
+				</details>
+			)}
+		</section>
+	)
 }
 
 /** What you actually start. Every spot is accounted for out loud: filled by you,

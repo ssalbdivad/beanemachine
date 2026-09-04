@@ -80,7 +80,16 @@ export interface AvailablePool {
 }
 
 export interface YahooRoster {
-	players: { yahooId: string; name: string; slot: string | null }[]
+	players: {
+		yahooId: string
+		name: string
+		/** The seat the platform has him in — what the add/drop planner reasons over. */
+		slot: string | null
+		/** Eligibility as YOUR league prints it, the one place the real
+		 *  multi-position line is readable. */
+		positions: string[]
+		team: string | null
+	}[]
 	note: string
 }
 
@@ -91,10 +100,16 @@ export const api = {
 		:	send<AvailablePool>("/api/available", { leagueId }),
 	/** The team's roster read off its own Yahoo page, by name. Empty is a state —
 	 *  a private league or a throttled read — and the caller offers the manual path. */
-	roster: (leagueId: string, teamId: string): Promise<YahooRoster> =>
+	roster: (body: {
+		platform: string
+		leagueId: string
+		teamId: string
+		sport?: string
+		season?: number
+	}): Promise<YahooRoster> =>
 		mode === "static" ?
-			staticOnly<YahooRoster>("Reading your roster from Yahoo")
-		:	send<YahooRoster>("/api/roster", { leagueId, teamId }),
+			staticOnly<YahooRoster>("Reading your roster")
+		:	send<YahooRoster>("/api/roster", body),
 	/** Returns the scraped league for the browser to store; the server keeps nothing. */
 	import: (url: string): Promise<{ key: string; league: League }> =>
 		mode === "static" ?

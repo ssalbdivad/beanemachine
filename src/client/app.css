@@ -712,6 +712,18 @@ pre{
    the manual search rather than beside it, with its own outcome line. */
 .pull-roster{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 var(--sp-2)}
 .pull-roster .sub{margin:0;flex:1 1 260px;min-width:0}
+/* The one card that proposes rather than prices: the gain leads, the swap reads as
+   one line, and the planner's own reasoning sits under it rather than in a tooltip. */
+.advice-moves{list-style:none;margin:var(--sp-3) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-3)}
+.advice-moves li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--sp-1) var(--sp-3);align-items:baseline}
+.advice-gain{grid-row:1/3;font-family:var(--mono);font-size:var(--fs-6);font-weight:600;color:var(--accent);
+  font-variant-numeric:tabular-nums}
+.advice-swap{font-size:var(--fs-4)}
+.advice-score{font-family:var(--mono);font-size:var(--fs-2);color:var(--muted);font-variant-numeric:tabular-nums}
+.advice-arrow{color:var(--faint)}
+.advice-reason{grid-column:2;font-size:var(--fs-3);color:var(--muted);line-height:var(--lh-snug)}
+.advice-skipped{margin-top:var(--sp-3)}
+@media(max-width:640px){.advice-moves li{grid-template-columns:1fr}.advice-gain{grid-row:auto}}
 .legend{margin-top:var(--sp-4)}
 .legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}
 .legend dt{color:var(--accent);font-weight:500;text-transform:none}

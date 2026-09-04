@@ -722,7 +722,7 @@ pre{
 .advice-score{font-family:var(--mono);font-size:var(--fs-2);color:var(--muted);font-variant-numeric:tabular-nums}
 .advice-arrow{color:var(--faint)}
 .advice-reason{grid-column:2;font-size:var(--fs-3);color:var(--muted);line-height:var(--lh-snug)}
-.advice-skipped{margin-top:var(--sp-3)}
+.advice-notes,.advice-skipped{margin-top:var(--sp-3)}
 @media(max-width:640px){.advice-moves li{grid-template-columns:1fr}.advice-gain{grid-row:auto}}
 .legend{margin-top:var(--sp-4)}
 .legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}

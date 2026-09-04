@@ -709,12 +709,25 @@ const AdviceCard = ({
 					))}
 				</ul>
 			:	<p className="empty">No move clears the bar.</p>}
+			{/* The planner explains every move it DIDN'T make, one line per player, and
+			    on a full roster that is sixteen near-identical sentences burying the two
+			    it did. They are the honest reasoning and none is dropped — they are just
+			    a click down, where the moves are the headline. Folded wholesale rather
+			    than grouped by matching their prose: a UI that keys on the wording of an
+			    engine string breaks silently the day that string is reworded. */}
 			{p.notes.length > 0 && (
-				<ul className="notes">
-					{p.notes.map(n => (
-						<li key={n}>{n}</li>
-					))}
-				</ul>
+				<details className="advice-notes">
+					<summary>
+						{p.notes.length === 1 ? "Why one other move wasn’t made" : (
+							`Why ${p.notes.length} other moves weren’t made`
+						)}
+					</summary>
+					<ul className="notes">
+						{p.notes.map(n => (
+							<li key={n}>{n}</li>
+						))}
+					</ul>
+				</details>
 			)}
 			{p.skipped.length > 0 && (
 				<details className="advice-skipped">

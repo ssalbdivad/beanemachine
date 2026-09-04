@@ -3,6 +3,7 @@ import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
 import { BoardPrimer, Fragment2 } from "./panels.tsx"
+import { readView, writeView } from "./view.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
 	type BoardRow, type Filters, type Ranked
@@ -476,7 +477,12 @@ export const Board = ({
 	league: League | null
 	error: string | null
 }) => {
-	const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
+	/**
+	 * Opens on the question this reader last asked, not on a guess about a stranger.
+	 * Only mode, window and moves are restored — see `view.ts` for why the filters
+	 * deliberately are not.
+	 */
+	const [filters, setFilters] = useState<Filters>(() => ({ ...DEFAULT_FILTERS, ...readView() }))
 	const [open, setOpen] = useState<number | null>(null)
 	/**
 	 * How many rows are rendered. The board used to stop dead at 120 with a line
@@ -548,6 +554,10 @@ export const Board = ({
 		availability.basis === "pool" || !poolError ?
 			availability.basisText
 		:	`${availability.basisText}. Your league's own free-agent list could not be read: ${poolError}`
+	useEffect(() => {
+		writeView(filters)
+	}, [filters.mode, filters.days, filters.moves])
+
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
 

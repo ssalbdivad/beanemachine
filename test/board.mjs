@@ -1096,6 +1096,46 @@ t("and those headings still sit over the cells they name",
 await phone.close()
 
 /**
+ * The board opens on the question this reader last asked.
+ *
+ * It opened on "This fortnight" for everybody, every time, so a reader who came back
+ * to check the wire before the reset paid the same tab-click and window-chip every
+ * visit. Remembering beats changing the default: the default is a guess about a
+ * stranger, this is a fact about him.
+ *
+ * The filters are deliberately NOT carried. A search string or a position chip left
+ * over from last week is a board that opens narrowed for a reason the reader cannot
+ * see, which is the same defect as a hidden filter — and this page has been bitten
+ * by that once already.
+ */
+{
+  await page.click(".modes .mode:has-text('Streaming')")
+  await page.waitForTimeout(600)
+  await page.click(".board-controls button:has-text('7 days')")
+  await page.waitForTimeout(600)
+  const before = await streamRange()
+
+  // A reload, not a second page: `browser.newPage()` opens a fresh CONTEXT with its
+  // own localStorage, which is precisely what coming back to a site is not.
+  const back = page
+  await back.reload({ waitUntil: "domcontentloaded" })
+  await back.waitForSelector(".board-row", { timeout: 30000 })
+  await back.waitForTimeout(1400)
+  t("coming back opens on the question you last asked",
+    await back.$eval(".modes .mode.on b", e => e.textContent.trim()) === "Streaming",
+    await back.$eval(".modes .mode.on b", e => e.textContent.trim()))
+  t("and on the window you last chose",
+    (await back.$eval("#horizon-panel .sub", e => e.textContent)).includes(before.split(" → ")[1] ?? "zz"),
+    `${before} vs ${await back.$eval("#horizon-panel .sub", e => e.textContent.trim())}`)
+  t("but not on a filter you cannot see",
+    (await back.$eval(".board-controls input[type=text]", e => e.value).catch(() => "")) === "",
+    "search box should open empty")
+  // leave the tab where the rest of this suite expects it
+  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.waitForTimeout(600)
+}
+
+/**
  * How far down the page the answer starts, pinned.
  *
  * This has regressed three times: 1,187px, fixed to 895, back to 1,506 on the

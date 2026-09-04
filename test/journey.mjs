@@ -23,7 +23,13 @@ const num = s => Number(String(s).replace(/[^0-9.+-]/g, ""))
 /** Everything this app keeps in the browser. Cleared going in so the journey is
  *  the same journey every run, and cleared coming out so it cannot poison the
  *  next suite — these keys outlive a page, not a process. */
-const KEYS = ["beanemachine:config", "beanemachine:roster", "beanemachine:draft"]
+// `beanemachine:view` remembers which question the reader last asked (mode, window,
+// moves). A suite that leaves it behind opens the NEXT run on somebody else's tab,
+// which is the class of cross-run contamination this list exists to prevent.
+const KEYS = [
+  "beanemachine:config", "beanemachine:roster", "beanemachine:draft",
+  "beanemachine:lineup", "beanemachine:pool", "beanemachine:view"
+]
 
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
 const errors = []

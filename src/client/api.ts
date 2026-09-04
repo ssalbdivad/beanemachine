@@ -18,10 +18,13 @@ export class ApiError extends Error {}
  * it always has.
  *
  * `static` — a build served from somewhere with no backend (GitHub Pages,
- * beanemachine.com). Editing, saving and deleting are unaffected, and ESPN and
- * Sleeper leagues are read by the page itself: both send CORS headers that permit
- * it, measured 2026-09-04 and written down on `readableInBrowser` in src/import.ts.
- * Yahoo sends none, so Yahoo — and Yahoo alone — is what the server is still for.
+ * beanemachine.com). Editing, saving and deleting are unaffected, and an ESPN
+ * league is read by the page itself: ESPN sends CORS headers that permit it,
+ * measured 2026-09-04 and written down on `readableInBrowser` in src/import.ts.
+ * Sleeper does too and the code still reads it, but Sleeper runs no fantasy
+ * baseball, so this app no longer offers it as a way in — see the template list in
+ * scoring.json. Yahoo sends no such headers at all, so a Yahoo league arrives here
+ * either as the preset or as a file read on your own machine.
  */
 export type Mode = "server" | "static"
 
@@ -82,18 +85,28 @@ export const detectMode = async (): Promise<Mode> => {
  * the whole static build's render down until this was fixed.
  *
  * Reached only for Yahoo now, and for the free-agent pool, which is Yahoo-only. The
- * sentence names Yahoo rather than "importing", because ESPN and Sleeper import
- * here with no server at all and a blanket claim would be false for them.
+ * sentence names Yahoo rather than "importing", because ESPN imports here with no
+ * server at all and a blanket claim would be false for it.
+ *
+ * It also has to end somewhere other than a dead end, which is what it was: a
+ * Yahoo user was told to go and run a server, on a page they had opened precisely
+ * because they were not going to run anything. So the FILE route leads — read the
+ * league once on your own machine, carry the file back — and the server is named
+ * second, as the live version of the same thing. Sleeper is not offered at all any
+ * more: it runs no fantasy baseball, so naming it here was padding a refusal with
+ * a platform that cannot help.
  */
 const yahooNeedsServer = <T,>(action: string): Promise<T> =>
 	Promise.reject(
 		new ApiError(
-			// The command has to be one that exists: there is no `nub` binary, so the
-			// instruction this toast used to give failed for anyone who followed it.
-			`${action} needs the local server, because Yahoo sends no CORS headers and a ` +
-				`browser can't read it. ESPN and Sleeper leagues import right here. ` +
-				`For Yahoo, run \`node src/server.ts\` alongside \`npx vite\`. ` +
-				`Your leagues are stored in this browser either way.`
+			// Every command named here has to be one that exists. `nub` is not installed
+			// on a machine that just cloned this repo, and this toast used to name it.
+			`${action} can't be done from this page: Yahoo sends no CORS headers, so a ` +
+				`browser is never handed the response. ESPN leagues do import right here. ` +
+				`For Yahoo, read it once on your own machine — ` +
+				`\`node --experimental-strip-types src/cli.ts <your league URL>\` — then press ` +
+				`Download and drop that file onto this page. Running the local server does ` +
+				`the same job live. Your leagues are stored in this browser either way.`
 		)
 	)
 

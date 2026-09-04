@@ -6,7 +6,7 @@ import { Fragment2 } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 import { api, ApiError, type AvailablePool } from "./api.ts"
 import { useEffect } from "react"
-import type { ResolvedPeriod } from "../engine/period.ts"
+import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -45,9 +45,34 @@ const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
 /** The three horizons, as a tablist: three questions, not three filters. */
 const MODES = [
-	["stream", "Streaming", "this week's matchup — who wins it for you"],
+	// It used to say "this week's matchup — who wins it for you", which is what the
+	// tab did: it re-ranked the same 1,400 players over a shorter horizon. The most
+	// common question in the game is narrower than that and the tab now answers it —
+	// which pitchers actually take the ball before the reset, what they get, and
+	// against whom.
+	["stream", "Streaming", "who's pitching before the reset — starts, matchups, and what they're worth"],
 	["board", "This fortnight", "the standing board, 14 days out"],
 	["stash", "Stash", "rest of season — who to hold, not who to start"]
+] as const
+
+/**
+ * The streaming horizons, as one control.
+ *
+ * "Rest of period" leads because in a head-to-head league the reset IS the
+ * decision — a start on Monday scores for a matchup this week's is already settled
+ * without. The day counts are the same control with a nearer far edge (see
+ * `withinDays`), and they stop at seven because that is where the schedule data
+ * stops paying: on the committed capture MLB has named the starter in 41 of 92
+ * games three days out and still only 43 of 184 seven days out, so days five
+ * through seven add games and no extra certainty about who pitches them.
+ */
+const WINDOWS = [
+	[null, "Rest of period"],
+	[1, "Today"],
+	[2, "2 days"],
+	[3, "3 days"],
+	[5, "5 days"],
+	[7, "7 days"]
 ] as const
 
 const tabId = (mode: Filters["mode"]) => `horizon-${mode}`
@@ -161,6 +186,49 @@ const BOARD_GRID_CSS = `
 	.board[data-sort=uscore] .board-row>[data-col=games]{display:none}
 }`
 
+/**
+ * The streaming strip and the two things it adds to a row.
+ *
+ * Belongs in app.css beside the rest of the board's styling and should move there;
+ * it is here because app.css is not this change's file.
+ *
+ * The move marker is a left rail plus a rule under the last one you can afford,
+ * rather than a colour on the text: the question is "where does my list stop",
+ * which is a boundary, and a boundary is a line. The rail reuses `border-left`,
+ * the same 2px the row already reserves for hover and open, so nothing shifts.
+ */
+const STREAM_CSS = `
+.stream-strip{
+	display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-3);
+	margin-top:var(--sp-2);
+}
+.stream-strip .strip-label{
+	font-family:var(--mono);font-size:var(--fs-2);letter-spacing:var(--caps);
+	text-transform:uppercase;color:var(--faint);
+}
+.stream-strip .moves{flex-direction:row;align-items:center;gap:var(--sp-2)}
+.stream-strip .moves input{width:56px}
+.stream-note{margin-top:var(--sp-2)}
+/* the reader's own budget, drawn as a boundary rather than a highlight */
+.board .board-row[data-pick]{border-left-color:var(--accent);background:var(--accent-soft)}
+.board .board-row[data-pick] .rank{color:var(--accent);font-weight:700}
+.board .board-row[data-pick=last]{border-bottom:2px solid var(--accent)}
+/* his starts and who they are against, under his name. A block, so it elides on a
+   phone the way the meta line above it does rather than pushing the row wide. */
+.board .board-row .who .starts{
+	display:block;font-size:var(--fs-2);color:var(--muted);
+	overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* Deliberately not a <b>: test/journey.mjs reads every player name off
+   \`.board-row .who b\` and test/board.mjs off \`.board-row b\`, so a second bold
+   element inside the row would silently turn both into lists of interleaved
+   names and start counts. */
+.board .board-row .who .starts .n{
+	font-family:var(--mono);font-weight:700;color:var(--accent);
+}
+.board .board-row .who .starts.soft .n{color:var(--muted);font-weight:600}
+`
+
 /** Arrow keys walk the tab strip, because a tablist is one tab stop rather than
  *  three. Focus moves without selecting: picking a horizon re-rates all ~1,430
  *  players (~90 ms measured), so activating on every arrow press would make
@@ -204,14 +272,21 @@ const horizonSpan = (
 	period: ResolvedPeriod | null
 ) => {
 	const { start, end } = snapshot.horizon
-	if (mode === "stream" && period)
+	if (mode === "stream" && period) {
+		const days = datesBetween(period.start, period.end)
 		return {
 			range: `${period.start} → ${period.end}`,
 			phrase:
-				period.kind === "daily" ? "today"
+				// A window the reader chose by length is named by that length, not by the
+				// period it was cut out of: "the rest of this scoring period" under a
+				// board ranked over three days is the exact class of sentence — true of
+				// something else on screen — this file keeps having to delete.
+				period.kind === "days" ? `these ${days} days`
+				: period.kind === "daily" ? "today"
 				: period.kind === "rolling" ? "a rolling 7 days"
 				: "the rest of this scoring period"
 		}
+	}
 	if (mode === "stash")
 		return {
 			range: `${start} → the end of the regular season`,
@@ -219,6 +294,76 @@ const horizonSpan = (
 		}
 	const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000)
 	return { range: `${start} → ${end}`, phrase: `the next ${days} days` }
+}
+
+/**
+ * "Chicago White Sox" → "White Sox". The row has room for a nickname, not for a
+ * city, and on a streaming row the opponent is the whole point.
+ *
+ * Derived from the club name the snapshot already carries rather than from a
+ * table of abbreviations, because a second table of team names is a second thing
+ * to fall out of date — MLB has renamed a club as recently as the Athletics
+ * dropping their city, which is why the snapshot's own list has a one-word entry
+ * in it. "Sox" is the only nickname ambiguous on its own (Boston and Chicago), so
+ * it takes the word in front of it; everything else is unique as its last word.
+ */
+const nickname = (name: string | undefined): string | null => {
+	if (!name) return null
+	const w = name.split(" ")
+	const last = w[w.length - 1]!
+	return last === "Sox" && w.length > 1 ? `${w[w.length - 2]} ${last}` : last
+}
+
+/** What the schedule says a player gets out of a streaming window. */
+interface Starts {
+	/** Turns MLB has actually PUBLISHED — an integer, and the length of `names`. */
+	published: number
+	/** The engine's own count: published plus his club's unnamed games at his rate
+	 *  of starting. This is the number the projection is multiplied by. */
+	expected: number
+	/** The lineups those published turns fall on, in schedule order. */
+	names: string[]
+}
+
+/**
+ * The two facts a streaming pick turns on, under the player's name.
+ *
+ * Both were already computed and neither reached the screen. `startOpponents`
+ * moved the projection through `pitcherMatchupIndex` — so the board priced a start
+ * against Colorado differently from one against Los Angeles — and then showed the
+ * reader neither opponent, leaving a ranking he had to take on faith.
+ *
+ * Published and expected are kept visibly apart. MLB names starters about three
+ * days out and then stops, so over a longer window most of a pitcher's turns are
+ * the model's estimate rather than an announcement; printing "2 starts" for one
+ * announced turn plus one guessed one would be exactly the kind of sentence that
+ * looks read off the schedule and was not.
+ */
+const StartLine = ({ s }: { s: Starts }) => {
+	const extra = s.expected - s.published
+	if (s.published > 0)
+		return (
+			<span
+				className="starts"
+				title={`MLB has published ${s.published} of his turns in this window: ${s.names.join(", ")}.${
+					extra >= 0.05 ?
+						` His club has games in it with no starter named yet, worth about ${extra.toFixed(1)} more turns at his own rate of starting.`
+					:	""
+				}`}
+			>
+				<span className="n">{s.published}</span> {s.published === 1 ? "start" : "starts"} ·{" "}
+				{s.names.join(", ")}
+				{extra >= 0.5 && ` · ~${extra.toFixed(1)} more once MLB names the rest`}
+			</span>
+		)
+	return (
+		<span
+			className="starts soft"
+			title="MLB has not published any of his turns in this window. This is his own rate of starting applied to his club's unnamed games — an estimate, not an announcement."
+		>
+			<span className="n">~{s.expected.toFixed(1)}</span> starts · none announced yet
+		</span>
+	)
 }
 
 export const Board = ({
@@ -273,7 +418,7 @@ export const Board = ({
 		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
 		[pool]
 	)
-	const { rated, rows, scored, edgeCoverage, period } =
+	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames } =
 		useBoard(snapshot, league, filters, availableNames)
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -355,6 +500,23 @@ export const Board = ({
 	const span = horizonSpan(snapshot, filters.mode, period)
 
 	/**
+	 * A row's start schedule, or null where there is nothing honest to say: off the
+	 * streaming tab, or for a player the window cannot speak about — no club, a club
+	 * with no games in it, or a reliever, whose published count says nothing about
+	 * when he next appears.
+	 */
+	const startsFor = (r: Ranked): Starts | null => {
+		if (!streaming || r.scheduledStarts == null || r.scheduledStarts <= 0) return null
+		return {
+			published: streaming.publishedStarts.get(r.player.id) ?? 0,
+			expected: r.scheduledStarts,
+			names: (streaming.startOpponents.get(r.player.id) ?? []).map(
+				id => nickname(teamNames.get(id)) ?? `club ${id}`
+			)
+		}
+	}
+
+	/**
 	 * Billy names the best player you can GET, not the best player. The top of a
 	 * bscore board is the best man in baseball, who is rostered everywhere — true,
 	 * and useless as a recommendation.
@@ -415,6 +577,7 @@ export const Board = ({
 				<h2>What are you deciding?</h2>
 				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
 				<style href="board-grid" precedence="default">{BOARD_GRID_CSS}</style>
+				<style href="board-stream" precedence="default">{STREAM_CSS}</style>
 				{/* The tabs are the tablist's only children, because a tablist that
 				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
@@ -439,6 +602,81 @@ export const Board = ({
 						</button>
 					))}
 				</div>
+				{/*
+				  The streaming controls, and only on the streaming tab.
+
+				  They sit directly under the tabs, above the position chips, because they
+				  are the horizon: picking "3 days" is the same kind of act as picking
+				  "Streaming", and putting it below the general filters would have made the
+				  most specific control the least findable one. One click from landing gets
+				  here; the second click is the window.
+
+				  Scoped to `stream` in the same expression that scopes the filters in
+				  useBoard, so the controls and their effects appear and disappear together.
+				*/}
+				{filters.mode === "stream" && (
+					<div className="stream-strip">
+						<div
+							className="chips"
+							role="group"
+							aria-label="Streaming window"
+							title="How far ahead to count. The league's own scoring period is the default because the reset is what a head-to-head matchup is settled on. The short counts are where the schedule data is strongest: MLB names starters about three days ahead and then stops, so a longer window adds games without adding certainty about who pitches them."
+						>
+							<span className="strip-label">Window</span>
+							{WINDOWS.map(([days, label]) => (
+								<button
+									key={label}
+									type="button"
+									className={`chip-btn${filters.days === days ? " on" : ""}`}
+									aria-pressed={filters.days === days}
+									onClick={() => set("days", days)}
+								>
+									{label}
+								</button>
+							))}
+						</div>
+						<label
+							className="toggle"
+							title="Keeps only players the schedule has pitching inside this window — published turns plus the games his club has not named a starter for yet, at his own rate of starting. It is the same count the ranking is built on."
+						>
+							<input
+								type="checkbox"
+								checked={filters.startersOnly}
+								onChange={e => set("startersOnly", e.currentTarget.checked)}
+							/>
+							<span>Only players with a start</span>
+						</label>
+						{/* A capture older than the period it is asked about resolves to a window
+						  with no games in it. The ranking already falls back to the fortnight
+						  rather than rate everyone at zero, and the streaming controls fall
+						  back with it — so they have to say why, or the checkbox above reads
+						  as broken rather than as inapplicable. */}
+						{!streaming && (
+							<em className="strip-label">
+								this capture holds no games in that window, so the board is ranking the
+								fortnight instead and the filter is off
+							</em>
+						)}
+						{/* The reader's own budget. Nothing in any source this app reads carries
+						    his transaction count, waiver position, FAAB or weekly add limit, so
+						    the number is typed rather than guessed — see `Filters.moves`. What
+						    the board contributes is the part he cannot do: which N of the
+						    ranking those moves should buy, after his filters. */}
+						<label className="ctl moves">
+							<span>Moves left</span>
+							<input
+								type="number"
+								min={0}
+								max={26}
+								step={1}
+								value={filters.moves}
+								onChange={e =>
+									set("moves", Math.max(0, Math.min(26, Math.floor(Number(e.currentTarget.value) || 0))))
+								}
+							/>
+						</label>
+					</div>
+				)}
 				{/* Position first and as chips, not a select: it is the filter people reach
 				    for constantly, and two clicks to change a dropdown is two too many. */}
 				<div className="chips" role="group" aria-label="Position">
@@ -568,6 +806,40 @@ export const Board = ({
 				<p className="sub">
 					<b className="count">{rows.length}</b> players · {span.range}
 				</p>
+				{/*
+				  How much of this window MLB has actually named, MEASURED off the window
+				  on screen rather than quoted. Coverage is a property of the capture as
+				  much as of the horizon — probables reach about three days past a capture
+				  and then stop — so a number written into this string would have been
+				  right on the day it was written and wrong every day after. It is also
+				  the honest answer to "why is my seven-day list the same length as my
+				  three-day one": it is, and the extra four days are estimated.
+				*/}
+				{streaming && (
+					<p className="sub stream-note">
+						{period && `${period.basis.charAt(0).toUpperCase()}${period.basis.slice(1)}. `}
+						MLB has named the starter in{" "}
+						<b>
+							{streaming.published} of {streaming.games}
+						</b>{" "}
+						games in it, {streaming.fullyNamed} of {streaming.clubs} clubs completely.
+						{streaming.fullyNamed < streaming.clubs &&
+							" The rest are estimated from each pitcher's own rate of starting, and every row says which of the two it is showing."}
+						{/* Only when NOT ONE club is fully named — the point at which a longer
+						    window has stopped buying certainty and is only buying games. Said
+						    here rather than as a permanent caption, because on a three-day
+						    window it is not true and a warning that is always on is furniture. */}
+						{streaming.fullyNamed === 0 &&
+							" A shorter window is where this data is strongest: MLB names starters about three days ahead and then stops."}
+					</p>
+				)}
+				{filters.moves > 0 && (
+					<p className="sub stream-note">
+						The first <b>{filters.moves}</b> {filters.moves === 1 ? "row is" : "rows are"} marked,
+						down to the rule — that is what {filters.moves === 1 ? "one move" : `${filters.moves} moves`} buys
+						you off this list, in this order, after your filters.
+					</p>
+				)}
 				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
 				    uscore column back on a phone when the board is ranked by it. */}
 				<div className="board" data-sort={filters.sort}>
@@ -605,8 +877,17 @@ export const Board = ({
 						</SortHead>
 					</div>
 					{rows.slice(0, limit).map((r, i) => (
-						<Row key={r.player.id} rank={i + 1} r={r} open={open === r.player.id}
-							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)} />
+						<Row
+							key={r.player.id}
+							rank={i + 1}
+							r={r}
+							starts={startsFor(r)}
+							/* the reader's budget, counted down the ranking he is actually
+							   looking at — his filters have already decided who is on it */
+							moves={filters.moves}
+							open={open === r.player.id}
+							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)}
+						/>
 					))}
 					{!rows.length && <p className="empty">No players match these filters. Try clearing the slot filter or lowering the confidence minimum.</p>}
 				</div>
@@ -1011,9 +1292,26 @@ const SortHead = ({
  * clause here names a number that is already on the row; nothing is added, and a
  * value that is missing says it is missing.
  */
-const rowLabel = (rank: number, r: Ranked) =>
+const rowLabel = (rank: number, r: Ranked, starts: Starts | null, moves: number) =>
 	[
 		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
+		// The move marker is drawn as a rail and a rule, which a screen reader gets
+		// nothing from, so the boundary is spoken on the rows it falls on.
+		...(moves > 0 && rank <= moves ?
+			[rank === moves ? `within your ${moves} moves, and the last one` : `within your ${moves} moves`]
+		:	[]),
+		// The two facts a streaming pick turns on, spoken with the same separation
+		// the row draws: what MLB announced, and what the model added to it.
+		...(starts ?
+			[
+				starts.published > 0 ?
+					`${starts.published} published ${starts.published === 1 ? "start" : "starts"}, against ${starts.names.join(" and ")}` +
+						(starts.expected - starts.published >= 0.5 ?
+							`, and about ${(starts.expected - starts.published).toFixed(1)} more once MLB names the rest`
+						:	"")
+				:	`no published starts, about ${starts.expected.toFixed(1)} expected from his own rate`
+			]
+		:	[]),
 		// one clause for the merged column, because it is one fact. Spoken as two it
 		// said "ownership unlisted, so no uscore ... ownership unlisted" on the 500
 		// rows Yahoo does not price — the same absence read out twice.
@@ -1084,7 +1382,24 @@ const Window = ({ r }: { r: Ranked }) => {
 
 const detailId = (r: Ranked) => `player-detail-${r.player.id}`
 
-const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boolean; onToggle: () => void }) => (
+const Row = ({
+	rank,
+	r,
+	starts,
+	moves,
+	open,
+	onToggle
+}: {
+	rank: number
+	r: Ranked
+	/** His schedule in this window, on the streaming tab. Null everywhere else. */
+	starts: Starts | null
+	/** How many moves the reader said he has left. The first `moves` rows carry the
+	 *  marker; the last of them carries the rule the list stops at. */
+	moves: number
+	open: boolean
+	onToggle: () => void
+}) => (
 	<>
 		<button
 			className={`board-row${open ? " open" : ""}`}
@@ -1092,7 +1407,8 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 			type="button"
 			aria-expanded={open}
 			aria-controls={detailId(r)}
-			aria-label={rowLabel(rank, r)}
+			data-pick={moves > 0 && rank <= moves ? (rank === moves ? "last" : "yes") : undefined}
+			aria-label={rowLabel(rank, r, starts, moves)}
 		>
 			<span className="rank" data-col="rank">{rank}</span>
 			<span className="who" data-col="who">
@@ -1102,6 +1418,7 @@ const Row = ({ rank, r, open, onToggle }: { rank: number; r: Ranked; open: boole
 					{r.player.team ?? "—"}
 					{r.injury && <em className="hurt">{r.injury}</em>}
 				</span>
+				{starts && <StartLine s={starts} />}
 			</span>
 			{/* uscore and its own denominator, in one column. Ownership had a column of
 			    its own and went blank on precisely the rows uscore did, so the board

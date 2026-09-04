@@ -3,7 +3,7 @@ import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import { rateAll, withMarketEdge, withUndervaluation, type Ranked } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
-import { resolvePeriod, windowFrom } from "../engine/period.ts"
+import { resolvePeriod, windowFrom, withinDays } from "../engine/period.ts"
 
 export type { Ranked }
 
@@ -61,6 +61,35 @@ export interface Filters {
 	 * other's ranking.
 	 */
 	mode: "stream" | "board" | "stash"
+	/**
+	 * How long a streaming window to rank, in days. Null is the league's own
+	 * scoring period, which is the right answer most of the time and therefore the
+	 * default — see `withinDays` for why this is one control with the period rather
+	 * than a second one. Read only in `stream` mode: on the other two tabs the
+	 * question is not "how long", so a day count left behind here cannot leak into
+	 * a horizon that never offered it.
+	 */
+	days: number | null
+	/**
+	 * Streaming only: keep only players the schedule actually has pitching inside
+	 * the window. A streaming list with hitters and relievers in it is not a
+	 * streaming list — on the committed capture over the rest of the period, 3 of
+	 * the top 10 rows were hitters, who cannot be streamed for a start at all.
+	 */
+	startersOnly: boolean
+	/**
+	 * How many roster moves the reader has left this period. Zero marks nothing.
+	 *
+	 * This is an INPUT rather than a model output because nothing the app reads
+	 * knows it. No source in the snapshot carries a transaction count, a waiver
+	 * position, a FAAB balance or a weekly add limit, and those are the four things
+	 * that decide it; a league can also cap games started per period, which caps
+	 * adds for a completely different reason. Guessing a number here would be the
+	 * exact failure this project refuses — a figure that looks read off the league
+	 * and was not. So the reader types the one fact he has and the board does the
+	 * arithmetic he does not: which N of the ranking those moves should buy.
+	 */
+	moves: number
 	sort:
 		| "uscore"
 		| "marketEdge"
@@ -82,6 +111,14 @@ export const DEFAULT_FILTERS: Filters = {
 	availableOnly: false,
 	minConfidence: 0,
 	mode: "board",
+	// the league's own period, not a day count: the reset is what a head-to-head
+	// matchup is settled on, so it is the horizon that is right unless asked otherwise
+	days: null,
+	// on by default, because the Streaming tab's whole question is who pitches
+	// before the reset. It is a visible toggle and it is scoped to `stream` below,
+	// so it can neither be left on invisibly nor strand a board it emptied.
+	startersOnly: true,
+	moves: 0,
 	/**
 	 * bscore, because the field's price is not currently readable.
 	 *
@@ -122,8 +159,29 @@ export const useBoard = (
 		if (!snapshot || !league) return null
 		const slate = snapshot.slate ?? []
 		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
-		return resolvePeriod(league, new Date().toISOString().slice(0, 10), seasonEnd)
-	}, [snapshot, league])
+		const p = resolvePeriod(league, new Date().toISOString().slice(0, 10), seasonEnd)
+		// A day count is a STREAMING control. Applying it on the other two tabs would
+		// silently retitle their horizons — "This fortnight" ranked over three days —
+		// so it is read here and nowhere else, and leaving the tab restores the period.
+		return filters.mode === "stream" && filters.days !== null ?
+				withinDays(p, filters.days, seasonEnd)
+			:	p
+	}, [snapshot, league, filters.mode, filters.days])
+
+	/**
+	 * The window itself, lifted out of `rated` because the ROW needs it too.
+	 *
+	 * Who each announced starter faces was computed here and thrown away: it reached
+	 * `rateAll`, moved the projection through `pitcherMatchupIndex`, and never reached
+	 * the screen — so the board priced a start against the Rockies differently from a
+	 * start against the Dodgers and showed the reader neither opponent. Same object,
+	 * same dates, one computation: the number the row prints cannot drift from the
+	 * number the ranking used, because there is only one.
+	 */
+	const week = useMemo(() => {
+		if (!snapshot || !period) return null
+		return windowFrom(snapshot.slate ?? [], period.start, period.end)
+	}, [snapshot, period])
 
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
@@ -131,11 +189,6 @@ export const useBoard = (
 		// honest bscore, so this refuses rather than assuming a league size.
 		if (league.meta.max_teams == null) return []
 		const h = hydrate(snapshot)
-		// The window is now chosen by the LEAGUE's own scoring period rather than by a
-		// rolling seven days, and every count for it comes from one slate — so the
-		// numerator and denominator of the coverage scaling in `starterBlendedIndex`
-		// cannot be drawn from different windows, because there is only one window.
-		const week = period ? windowFrom(h.slate, period.start, period.end) : null
 		// A period can legitimately resolve to nothing — a stale snapshot asked about a
 		// week that starts after its last captured game — and zero games would rank
 		// everyone at zero. Fall back to the fortnight rather than invent a number.
@@ -182,7 +235,7 @@ export const useBoard = (
 			),
 			h.ownership
 		)
-	}, [snapshot, league, filters.mode, period])
+	}, [snapshot, league, filters.mode, week])
 
 	/** Which sides this league actually scores — an unconfigured template scores
 	 *  neither, and the board must say so rather than rank a field of zeros. */
@@ -241,8 +294,87 @@ export const useBoard = (
 		[rated, filters.sort]
 	)
 
+	/**
+	 * What a streaming decision needs on the page beside the ranking: who each
+	 * announced starter faces, and how much of this window MLB has actually named.
+	 *
+	 * The coverage is MEASURED off the window on screen rather than quoted from a
+	 * table, because it is a property of the capture as much as of the horizon.
+	 * Probables reach roughly three days past a capture and then stop: on the
+	 * committed snapshot (captured 2026-09-02), read on 2026-09-04, MLB has named the
+	 * starter in 15 of 32 games one day out, 41 of 92 three days out, and still 43 of
+	 * 184 seven days out. A number baked into a string would have been right on the
+	 * day it was written and wrong every day after, which is the failure mode this
+	 * whole board exists to avoid.
+	 *
+	 * Null off the Streaming tab, so nothing can print a streaming fact under a
+	 * horizon that did not produce one.
+	 */
+	const streaming = useMemo(() => {
+		/**
+		 * Null where there is nothing honest to say, which is two cases: off the
+		 * Streaming tab, and a window with no games in it at all. The second is a
+		 * capture older than the period it is being asked about — the rating below
+		 * already falls back to the fortnight rather than rank everyone at zero, and
+		 * this returning null makes the rest of the tab fall back with it, instead of
+		 * printing "0 of 0 games" and filtering on a count from a window nobody is
+		 * being shown.
+		 */
+		if (filters.mode !== "stream" || !week || week.games.size === 0) return null
+		let published = 0
+		let games = 0
+		let fullyNamed = 0
+		for (const c of week.coverage.values()) {
+			published += c.published
+			games += c.games
+			if (c.published === c.games) fullyNamed++
+		}
+		return {
+			/** Opponent club ids per announced start, in schedule order. */
+			startOpponents: week.startOpponents,
+			/** Starts MLB has actually PUBLISHED for him — an integer, and the length
+			 *  of his opponent list. Distinct from `Rated.scheduledStarts`, which adds
+			 *  an estimate for his club's not-yet-named games. */
+			publishedStarts: week.probableStarts,
+			clubs: week.coverage.size,
+			fullyNamed,
+			published,
+			games
+		}
+	}, [filters.mode, week])
+
+	/** Club id → the club's name, for turning an opponent id on a row into something
+	 *  a reader recognises. Built off the players the snapshot already carries, so
+	 *  there is no second table of team names to fall out of date. */
+	const teamNames = useMemo(() => {
+		const m = new Map<number, string>()
+		for (const p of snapshot?.players ?? []) if (p.teamId && p.team) m.set(p.teamId, p.team)
+		return m
+	}, [snapshot])
+
 	const rows = useMemo(() => {
 		const q = filters.search.trim().toLowerCase()
+		/**
+		 * "Has a start in this window" — the filter that makes a streaming view a
+		 * streaming view rather than the same board over a shorter horizon.
+		 *
+		 * `scheduledStarts` is the engine's own count and the number the projection is
+		 * already multiplied by: published turns plus his club's unnamed games times
+		 * his rate of starting (METHODOLOGY 3.5.0). Greater than zero therefore means
+		 * "the schedule has him pitching in this window" on exactly the arithmetic the
+		 * ranking used — not a second definition invented for the filter. A null is a
+		 * man the window cannot speak about (no club, or a club with no games in it)
+		 * and a reliever with no published appearance, and neither is a start.
+		 *
+		 * Gated on `streaming` rather than on the checkbox alone, so it cannot outlive
+		 * the window it is about: this page has already shipped a mode-scoped filter
+		 * that went on filtering after its checkbox stopped rendering, and the board
+		 * emptied with nothing on screen to undo it. `streaming` is null off the tab
+		 * AND on a capture too old to cover the period, which is exactly the case where
+		 * the counts it would filter on come from a different window than the one the
+		 * board is ranking.
+		 */
+		const startersOnly = streaming !== null && filters.startersOnly
 		const out = rated.filter(r => {
 			// a player with no projectable volume has no bscore to rank
 			if (!r.rateable) return false
@@ -268,6 +400,7 @@ export const useBoard = (
 			// Contact quality only means something for someone worth rostering, and only
 			// where a rolling Statcast window actually exists for him.
 			if (filters.sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
+			if (startersOnly && !(r.scheduledStarts != null && r.scheduledStarts > 0)) return false
 			if (q && !r.player.name.toLowerCase().includes(q)) return false
 			if (filters.group !== "all" && r.player.group !== filters.group) return false
 			if (filters.slot && !r.slots.includes(filters.slot)) return false
@@ -300,7 +433,7 @@ export const useBoard = (
 			return filters.desc ? -cmp : cmp
 		})
 		return out
-	}, [rated, filters, availableNames])
+	}, [rated, filters, availableNames, streaming])
 
-	return { rated, rows, rankable, scored, edgeCoverage, period }
+	return { rated, rows, rankable, scored, edgeCoverage, period, streaming, teamNames }
 }

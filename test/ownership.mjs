@@ -229,9 +229,10 @@ t("a roster name normalizes onto the same key ownership joins by",
 
 // --- the roster read, per platform ------------------------------------------
 //
-// Yahoo is scraped because Yahoo has no public API. ESPN and Sleeper both publish
-// JSON for a publicly-viewable league, and src/import.ts already reads their
-// SETTINGS through the same endpoints.
+// Yahoo is scraped because Yahoo has no public API. ESPN publishes JSON for a
+// publicly-viewable league, and src/import.ts already reads its SETTINGS through the
+// same endpoints. Sleeper was a third reader and is now a refusal — see the section
+// at the bottom of this file, which keeps the evidence that made it one.
 //
 // What is pinned here is the property that has to hold whatever the platform
 // serves: every path returns {players, note} and NEVER throws on a shape it did
@@ -256,7 +257,7 @@ t("a platform that cannot be reached returns a note, never an exception",
   Array.isArray(unreachable.players) && unreachable.players.length === 0 &&
     unreachable.note.length > 0, unreachable.note)
 
-// --- ESPN and Sleeper, against what the live leagues actually served ----------
+// --- ESPN, against what the live league actually served -----------------------
 //
 // The comment above used to say no publicly-viewable league was available to
 // verify either reader against. That is no longer true, and the readers were
@@ -312,12 +313,6 @@ const replay = routes => {
   }
 }
 const espnOnly = () => replay([["seasons/2021", served(espnFixture)]])
-const sleeperOk = (dict = sleeperNfl, sport = "nfl", rosters = sleeperRosters, league = sleeperLeague) =>
-  replay([
-    [`/league/${league.league_id}/rosters`, served(rosters)],
-    [`/league/${league.league_id}`, served(league)],
-    [`/players/${sport}`, served(dict)]
-  ])
 
 // ESPN: the seat table, which is the thing that was wrong -----------------------
 
@@ -436,140 +431,85 @@ for (const status of [401, 403]) {
 }
 
 // Sleeper --------------------------------------------------------------------
+//
+// THE READER IS GONE, and about twenty assertions about its behaviour went with it.
+// They are not being hidden: they asserted that `sleeper()` in src/data/rosters.ts
+// read 15 players off roster 1, recovered all nine seats from `starters`, cached the
+// player dictionary, accepted an owner_id without echoing it, and answered a note
+// rather than throwing on six malformed payloads. Every one of them passed. They
+// tested a function that no longer exists, because that function could only ever run
+// on an NFL league, and this is a baseball app.
+//
+// What is kept is the EVIDENCE, which is about Sleeper and not about our code, and
+// which is exactly what makes deleting the reader correct rather than lazy:
+//
+//   1. Sleeper's player ids are per-sport namespaces that COLLIDE, asserted below on
+//      real entries from both dictionaries. A baseball read of a Sleeper league does
+//      not fail loudly — it hands back plausible men who are not on the team.
+//   2. Sleeper's MLB dictionary is a betting payload, not a fantasy one:
+//      `fantasy_positions` is populated on 32 of its 6,379 entries and every one of
+//      the 32 is a club. Eligibility could only ever have come from `position`, which
+//      is one position per man.
+//
+// Re-measured 2026-09-04: `/v1/state/mlb` carries no `league_create_season`, the
+// field `/v1/state/nfl` and `/v1/state/nba` both have, so there is no season in which
+// a Sleeper MLB league can be created. The fixtures are kept because these two
+// assertions need them, and because a finding with no bytes behind it is an opinion.
 
-// The collision the reader now refuses rather than resolving. These three ids are
-// on roster 1 of the NFL league; the MLB dictionary has entirely different men
-// under them, and the old code returned those.
+// The collision. These three ids are on roster 1 of the NFL example league; the MLB
+// dictionary has entirely different men under them, and the old code returned those.
 t("the same Sleeper id names a different man in each sport",
   sleeperNfl["1352"].full_name === "Robert Woods" && sleeperMlb["1352"].full_name === "Jordan Hicks" &&
     sleeperNfl["2118"].full_name === "Eric Ebron" && sleeperMlb["2118"].full_name === "Brandon Woodruff",
   `${sleeperNfl["1352"]?.full_name} / ${sleeperMlb["1352"]?.full_name}`)
 
-// A baseball app asking Sleeper for baseball must be refused, and refused BEFORE
-// the dictionary is touched — a wrong roster is worse than no roster.
-sleeperOk(sleeperMlb, "mlb")
-const slpDefault = await fetchTeamRoster({
-  platform: "sleeper", leagueId: "289646328504385536", teamId: "1"
-})
-t("a Sleeper league that isn't the sport we asked for is refused rather than resolved",
-  slpDefault.players.length === 0 && /plays NFL/.test(slpDefault.note), slpDefault.note)
-t("and refused without downloading the multi-megabyte player list",
-  !requested.some(u => u.includes("/players/")), requested.join(" "))
-
-// A failing dictionary is a state, and it must not be remembered as one: the next
-// read has to be able to succeed.
-sleeperOk()
-globalThis.fetch = (real => async url => {
-  requested.push(String(url))
-  if (String(url).includes("/players/")) return refused(503)
-  return real(url)
-})(globalThis.fetch)
-const slpNoDict = await fetchTeamRoster({
-  platform: "sleeper", leagueId: "289646328504385536", teamId: "1", sport: "nfl"
-})
-t("a player list that will not load is a note rather than a roster of ids",
-  slpNoDict.players.length === 0 && slpNoDict.note.length > 0, slpNoDict.note)
-
-sleeperOk()
-const slp1 = await fetchTeamRoster({
-  platform: "sleeper", leagueId: "289646328504385536", teamId: "1", sport: "nfl"
-})
-t("Sleeper roster 1 reads back the 15 players the live league served",
-  slp1.players.length === 15, `${slp1.players.length} — ${slp1.note}`)
-
-// starters[] is ordered and aligns with roster_positions minus the bench, which is
-// where the seats come from. The old code threw this away and called everybody null
-// or BN.
-const seatLine = slp1.players.filter(p => p.slot !== "BN").map(p => p.slot).sort().join(",")
-t("the nine seats come back as the league's own chart, not as a started flag",
-  seatLine === "DEF,FLEX,FLEX,QB,RB,RB,TE,WR,WR", seatLine)
-t("and each seat holds the man the league had in it",
-  slp1.players.find(p => p.name === "Lamar Jackson")?.slot === "QB" &&
-    slp1.players.find(p => p.name === "Alvin Kamara")?.slot === "RB" &&
-    slp1.players.find(p => p.name === "Robert Woods")?.slot === "FLEX",
-  slp1.players.map(p => `${p.slot}:${p.name}`).join(" "))
-t("the six men off the field are benched, none of them left unseated",
-  slp1.players.filter(p => p.slot === "BN").length === 6 && slp1.players.every(p => p.slot),
-  slp1.players.filter(p => !p.slot).map(p => p.name).join(","))
-
-// The dictionary is 8-15 MB and Sleeper's docs ask for one call a day, so a second
-// read must not fetch it again.
-const before = requested.filter(u => u.includes("/players/")).length
-const slp12 = await fetchTeamRoster({
-  platform: "sleeper", leagueId: "289646328504385536", teamId: "12", sport: "nfl"
-})
-t("a second roster read reuses the player list rather than re-downloading it",
-  requested.filter(u => u.includes("/players/")).length === before, String(before))
-t("Sleeper roster 12 reads back its 14 players", slp12.players.length === 14, String(slp12.players.length))
-
-// owner_id is an account id for a real person. It is accepted as a way in and then
-// discarded — it must never reach the note the user reads or the roster we store.
-sleeperOk()
-const byOwner = await fetchTeamRoster({
-  platform: "sleeper", leagueId: "289646328504385536", teamId: sleeperRosters[0].owner_id, sport: "nfl"
-})
-t("a roster found by its owner id still reports the roster number",
-  byOwner.players.length === 15 && /roster 1\b/.test(byOwner.note), byOwner.note)
-t("and the owner id itself never appears in what the user is shown",
-  !byOwner.note.includes(String(sleeperRosters[0].owner_id)), byOwner.note)
-
 // Sleeper states one position per baseball player: fantasy_positions is populated
-// on 32 of 6,379 MLB entries and every one of the 32 is a club, not a player. So
-// eligibility has to come from `position`, and the sample proves the shape.
+// on 32 of 6,379 MLB entries and every one of the 32 is a club, not a player.
 const mlbEntries = Object.values(sleeperMlb)
 t("Sleeper's MLB entries carry a position but no fantasy_positions",
   mlbEntries.filter(p => p.position).length === mlbEntries.length &&
     mlbEntries.filter(p => p.fantasy_positions?.length).every(p => p.fantasy_positions.join() === "DEF"),
   JSON.stringify(mlbEntries.filter(p => p.fantasy_positions?.length).map(p => p.fantasy_positions)))
 
-// Seats that do not line up are left unset rather than guessed at — an off-by-one
-// here would put every man in his neighbour's seat.
-const shortStarters = sleeperRosters.map(r =>
-  r.roster_id === 1 ? { ...r, starters: r.starters.slice(0, 8) } : r
-)
-sleeperOk(sleeperNfl, "nfl", shortStarters)
-const mismatched = await fetchTeamRoster({
-  platform: "sleeper", leagueId: "289646328504385536", teamId: "1", sport: "nfl"
-})
-t("starters that don't match the seat chart leave the seats unset and say so",
-  mismatched.players.length === 15 && /didn't line up/.test(mismatched.note) &&
-    mismatched.players.filter(p => p.slot && p.slot !== "BN").length === 0,
-  mismatched.note)
-
-// Truncated and unexpected payloads, again: a note, never a throw.
-for (const [what, routes] of [
-  ["a league that says nothing", [["/league/289646328504385536", served(null)]]],
-  ["a league with no sport on it",
-    [["/league/289646328504385536/rosters", served(sleeperRosters)],
-     ["/league/289646328504385536", served({ league_id: "289646328504385536" })]]],
-  ["no rosters at all",
-    [["/league/289646328504385536/rosters", served([])],
-     ["/league/289646328504385536", served(sleeperLeague)]]],
-  ["rosters that aren't an array",
-    [["/league/289646328504385536/rosters", served({ oops: true })],
-     ["/league/289646328504385536", served(sleeperLeague)]]],
-  ["a roster with no players on it",
-    [["/league/289646328504385536/rosters", served([{ roster_id: 1, players: null, starters: null }])],
-     ["/league/289646328504385536", served(sleeperLeague)]]],
-  ["a player list with none of the roster's ids in it",
-    [["/league/289646328504385536/rosters", served(sleeperRosters)],
-     ["/league/289646328504385536", served(sleeperLeague)],
-     ["/players/nba", served({})]]]
-]) {
-  replay(routes)
-  const sport = what.includes("none of the roster's ids") ? "nba" : "nfl"
-  const league = what.includes("none of the roster's ids") ?
-    { ...sleeperLeague, sport: "nba" } : null
-  if (league) replay([...routes.slice(0, 1), ["/league/289646328504385536", served(league)], ...routes.slice(2)])
+// And the new truth: the platform is still ANSWERED, because a league imported before
+// this change can still be sitting in somebody's browser — but with the finding, and
+// without a request. Sleeper is served its own real payloads here precisely so the
+// refusal cannot be mistaken for a network failure: everything it needs to succeed is
+// on the wire, and it declines anyway.
+replay([
+  [`/league/${sleeperLeague.league_id}/rosters`, served(sleeperRosters)],
+  [`/league/${sleeperLeague.league_id}`, served(sleeperLeague)],
+  ["/players/nfl", served(sleeperNfl)],
+  ["/players/mlb", served(sleeperMlb)]
+])
+for (const sport of [undefined, "mlb", "nfl"]) {
   const out = await fetchTeamRoster({
-    platform: "sleeper", leagueId: "289646328504385536", teamId: "1", sport
+    platform: "sleeper", leagueId: "289646328504385536", teamId: "1",
+    ...(sport ? { sport } : {})
   })
-  t(`Sleeper serving ${what} still answers {players, note}`,
-    Array.isArray(out.players) && out.players.length === 0 && typeof out.note === "string" &&
-      // the note has to SAY which of these it was, or the manual path is offered
-      // for a reason nobody can act on
-      /league|sport|roster|player list/i.test(out.note), JSON.stringify(out))
+  t(`a Sleeper roster read is refused outright (sport ${sport ?? "unstated"})`,
+    Array.isArray(out.players) && out.players.length === 0 &&
+      /doesn't run fantasy baseball/.test(out.note), JSON.stringify(out))
 }
+t("and it says WHY, so the refusal is actionable rather than a dead end",
+  /Yahoo or ESPN/.test((await fetchTeamRoster({
+    platform: "sleeper", leagueId: "289646328504385536", teamId: "1"
+  })).note))
+t("and nothing is fetched to decide it — not the league, not the 8.4 MB player list",
+  requested.length === 0, requested.join(" "))
+
+// The importer refuses the URL at the other end, so nobody reaches the state above
+// by pasting a link. Measured before the cut: importing Sleeper's own documented
+// example league produced a league with sport "nfl", 0 batting stats, 0 pitching
+// stats and slots {QB,RB,WR,TE,FLEX,DEF,BN} — all four inputs the engine needs to
+// rank anything absent or football, with no way to repair it by hand.
+const { detect, ImportError } = await import("../src/import.ts")
+let refusal = null
+try { detect("https://sleeper.com/leagues/289646328504385536") }
+catch (e) { refusal = e }
+t("a pasted Sleeper league URL is refused by name, not left as 'unrecognized'",
+  refusal instanceof ImportError && /doesn't run fantasy baseball/.test(refusal.message) &&
+    !/Unrecognized/.test(refusal.message), String(refusal?.message))
 
 globalThis.fetch = liveFetch
 

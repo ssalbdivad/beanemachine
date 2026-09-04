@@ -2,11 +2,14 @@
 
 > How can you not be robotic about baseball?
 
-A waiver-wire and lineup optimizer for fantasy baseball. Point it at any Yahoo, ESPN
-or Sleeper league and it reads that league's own scoring, roster slots, team count and
-scoring period off the platform, then ranks every player in MLB in *those* points —
-because the same player is genuinely worth different amounts in different leagues, and
-a ranking denominated in somebody else's scoring is a ranking of somebody else's team.
+A waiver-wire and lineup optimizer for fantasy baseball. Point it at a Yahoo or ESPN
+league and it reads that league's own scoring, roster slots, team count and scoring
+period off the platform, then ranks every player in MLB in *those* points — because
+the same player is genuinely worth different amounts in different leagues, and a
+ranking denominated in somebody else's scoring is a ranking of somebody else's team.
+
+Which platform you are on decides how you get in, and the honest answer differs — see
+**[Getting your league in](#getting-your-league-in)** before anything else.
 
 Nothing is assumed on your behalf: a value it could not read stays missing and is
 listed as missing, and the board refuses to rank rather than fill a gap with a
@@ -95,6 +98,75 @@ gap that the field has not priced) and **Where it hurts to wait** (the drop-off 
 each slot). The other three tabs are **League setup**, which everything else is priced
 in; **My team & trades**, which prices a deal by what it does to your starting lineup;
 and **Draft**, which ranks by what a pick adds to the lineup you have already taken.
+Draft is worth opening only once you start marking picks: measured 2026-09-04 on
+league 228947, with nothing marked its top seven *are* the board's top seven in the
+same order, and it diverges as the roster fills — mark five outfielders and no
+outfielder is left in its top five. Its **cliff** table has no counterpart on the
+board at all, because it prices *waiting* per slot rather than players: on that same
+league the drop between the best and second-best available spans 1.76 points at SS and
+22.07 at OF, a 12.5x spread. The tab is asserted against both facts in
+`test/draft.mjs`.
+
+### Getting your league in
+
+Nothing on any tab means anything until the app knows four things: your league's
+**batting scoring**, its **pitching scoring**, its **roster slots** and its **team
+count**. Everything else is refinement. How you supply those depends on the platform,
+and the difference is real rather than cosmetic:
+
+| Platform | In the browser at beanemachine.com | Locally |
+| --- | --- | --- |
+| **ESPN** | Yes. Paste the league URL and it imports. | Yes, same path. |
+| **Yahoo** | **No, and never.** | Yes — run the importer once (below). |
+| **Sleeper** | Not supported: Sleeper runs no fantasy baseball. | Same. |
+
+**Why Yahoo cannot work in a browser.** Measured 2026-09-04 with `Origin:
+https://beanemachine.com` on the exact pages `src/import.ts` reads: ESPN's
+`lm-api-reads.fantasy.espn.com` reflects the origin back in
+`access-control-allow-origin`, so a page may read it. Yahoo's
+`*.fantasysports.yahoo.com` sends no access-control headers at all, so the browser
+never hands the response body to the script, whatever it contains. That is not a bug
+in this app and no amount of client code fixes it. Yahoo is also an HTML scrape rather
+than an API, which is why the free-agent pool (`/api/available`) is Yahoo-only and has
+no browser-direct counterpart either.
+
+**Why Sleeper is refused rather than attempted.** Sleeper does not host fantasy
+baseball. Its support site lists the sports its leagues play and baseball is absent;
+its API documents one sport value, `nfl`; and `/v1/state/mlb` carries no
+`league_create_season` — the field `/v1/state/nfl` and `/v1/state/nba` both have — so
+there is no season in which a Sleeper MLB league can be created. `/v1/players/mlb`
+*does* return 6,379 real players, because Sleeper tracks baseball for news and props,
+which makes it a trap rather than an absence: player ids are per-sport namespaces that
+collide (id `1352` is Robert Woods in NFL and Jordan Hicks in MLB). Importing
+Sleeper's own documented example league used to succeed and produced a league with 0
+batting stats, 0 pitching stats and slots `QB, RB, WR, TE, FLEX, DEF, BN` — unusable
+and unrepairable. A pasted Sleeper URL now gets that explanation instead of a league.
+The evidence is kept in `test/ownership.mjs`; the reader that produced it was deleted.
+
+**The Yahoo route, end to end.** One local run, then a file that goes anywhere:
+
+```sh
+node --experimental-strip-types src/cli.ts \
+  https://baseball.fantasysports.yahoo.com/b1/<league-id>/<team-id>
+```
+
+It reads the league's settings and position-eligibility pages, writes the league into
+`scoring.json`, makes it active, and prints a four-line readiness table saying whether
+each of the four required inputs actually arrived — plus everything the source did not
+state, verbatim. `--help` lists the URL shapes. The league must be publicly viewable;
+a private one needs a signed-in session the importer cannot hold.
+
+From there the league is a file:
+
+- `npx vite` seeds a browser that has nothing stored from `scoring.json`, so a local
+  run opens straight on your league.
+- **League setup → Download** in the app writes the leagues in your browser to a JSON
+  file; **Load file** on any other machine or browser reads it back
+  (`leagues.download` / `leagues.replace` in `src/client/leagues.ts`). That is how a
+  Yahoo league gets onto the hosted site: read it once locally, carry the file.
+
+Leagues live in browser storage, never on a server. The API process reads leagues off
+their own pages and hands the result straight back; it stores nothing.
 
 ### Running it
 
@@ -111,7 +183,9 @@ npm run test:node       # just the pure-Node six — no browser, no server. This
 Two notes a new reader will otherwise hit. The `dev`, `start` and `import` entries
 in `package.json` shell out to `nub`, a TypeScript runner this repo does not
 install, so they fail; the lines above are what they were meant to do, and
-`node src/cli.ts` is the `import` one. And of the ten suites `npm test`
+`node --experimental-strip-types src/cli.ts <league-url>` is the `import` one. (On
+Node 23.6 and later the flag is a no-op — type stripping is on by default — but it is
+required on 22.x and harmless everywhere, so it is what gets printed.) And of the ten suites `npm test`
 runs, six are pure Node (`engine`, `leagues`, `trade`, `draft`, `auto`, `period` — the
 `test:node` script, which is also the CI gate) while four (`ui`, `board`, `trade-ui`,
 `journey`) drive a real page at `http://127.0.0.1:5173`, so **the Vite server has to be

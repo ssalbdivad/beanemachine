@@ -261,16 +261,95 @@ Players with no projectable playing time never appear on the board at all. They 
 
 ## How do I set up my own league?
 
+Nothing on any tab means anything until the app knows four things about your league:
+**batting scoring**, **pitching scoring**, **roster slots** and **team count**.
+Everything else — the scoring period, eligibility rules, slot compatibility — is
+refinement on top of those four. How you supply them depends on your platform, and
+the difference is real:
+
+| Platform | On beanemachine.com | Running locally |
+| --- | --- | --- |
+| **ESPN** | Paste the league URL and it imports. | Same. |
+| **Yahoo** | **Not possible.** Import it once locally, then carry the file. | Run the importer. |
+| **Sleeper** | Refused with an explanation. | Same. |
+
+### If your league is on ESPN
+
 1. Open **League setup**.
-2. Paste your league URL — Yahoo, ESPN, or Sleeper — into "Import a league from its URL" and hit **Import**. Everything that can be read from the league's own settings pages is read: scoring values, roster slots, team count, eligibility rules. Anything the source did not actually state stays blank and is listed under **Needs review** rather than being guessed at.
-3. Fill in whatever landed in Needs review. In particular, **team count must be set** — replacement level is derived from teams × slots, and without a real number there is no honest bscore, so the board stays empty rather than assuming a league size.
-4. Check the **Batting** and **Pitching** tables against your league's settings page. Negative values are penalties. Add any missing stat with its code and point value.
-5. Check **Roster slots**. These drive replacement level directly. Getting the OF or SP count wrong moves every bscore at that position.
-6. **Save.** Your league is stored in this browser; **Download** takes it out as a file. The board re-ranks immediately — the engine runs in your browser, so you can watch a scoring change reprice the league.
+2. Paste your league URL into "Import a league from its URL" and hit **Import**.
+   Include `teamId=` if your URL has one — without it the app cannot know which of
+   the teams is yours and asks for the number rather than assuming.
+3. ESPN identifies stats and lineup slots by numeric id, and this app does **not**
+   guess what each id means: they arrive raw under `scoring.unmapped` and
+   `roster.slots`, and are listed in **Needs review**. Map them against your league's
+   settings page before trusting a ranking. A mislabelled stat would silently
+   corrupt every number downstream, which is why it is left to you rather than
+   inferred.
 
-Your leagues live in the browser you set them up in — **Save** writes them there, and they are still there next time you open the page. **Download** takes the lot out as a `scoring.json` you can keep or move to another browser, and **Load file** reads one back in, replacing what that browser holds. Nothing is stored on a server, and the first visit starts from a real league rather than an empty screen by seeding itself from the copy committed to the repo.
+### If your league is on Yahoo — read this, it is the common case
 
-One note on the hosted site: importing needs the local server (`node src/server.ts` with `npx vite` in front of it), because Yahoo and ESPN send no CORS headers and a browser cannot read them directly. Editing, saving, downloading and loading all work on the hosted build exactly as they do locally. You can also start from a blank or platform template with **New** and enter the values by hand.
+Yahoo sends no CORS headers on any of the pages the importer reads, so a browser is
+never handed the response body. That is a fact about Yahoo, not a limitation of this
+build, and no version of the hosted site will ever be able to import a Yahoo league.
+What works instead is one local run that produces a portable file:
+
+```sh
+node --experimental-strip-types src/cli.ts \
+  https://baseball.fantasysports.yahoo.com/b1/<league-id>/<team-id>
+```
+
+It reads the settings and position-eligibility pages, writes the league into
+`scoring.json`, and prints a readiness table — one line per required input, saying
+whether it actually arrived — followed by everything the source did not state,
+verbatim. On league 228947 that run reads 9 batting stats, 8 pitching stats, 27
+roster seats, 10 teams and a Monday-to-Sunday matchup period.
+
+Then the league is a file and goes anywhere:
+
+- `npx vite` locally seeds a browser that has nothing stored from `scoring.json`, so
+  a local run opens straight on your league.
+- **League setup → Download** writes the leagues in your browser to a JSON file, and
+  **Load file** reads one back in on any other browser or machine — including
+  beanemachine.com. That is the supported route for a Yahoo user onto the hosted
+  site.
+
+Your league must be **publicly viewable** for any of this. A private one needs a
+signed-in session the importer has no way to hold.
+
+### If your league is on Sleeper
+
+It cannot be imported, and the app says so rather than pretending. Sleeper does not
+run fantasy baseball: its support site lists the sports its leagues play and baseball
+is absent, its API documents one sport value (`nfl`), and `/v1/state/mlb` names no
+season in which an MLB league could be created. Sleeper *does* publish 6,379 MLB
+players — it tracks baseball for news and props — which is a trap rather than a
+kindness, because its player ids are per-sport namespaces that collide: id `1352` is
+Robert Woods in football and Jordan Hicks in baseball. A Sleeper import used to
+succeed and hand back a league with no batting scoring, no pitching scoring and
+football roster slots.
+
+### Whichever route you took
+
+1. Fill in whatever landed in **Needs review**. In particular, **team count must be
+   set** — replacement level is derived from teams × slots, and without a real number
+   there is no honest bscore, so the board stays empty rather than assuming a size.
+2. Check the **Batting** and **Pitching** tables against your league's settings page.
+   Negative values are penalties. Add any missing stat with its code and point value.
+3. Check **Roster slots**. These drive replacement level directly. Getting the OF or
+   SP count wrong moves every bscore at that position.
+4. **Save.** The board re-ranks immediately — the engine runs in your browser, so you
+   can watch a scoring change reprice the league.
+
+Your leagues live in the browser you set them up in, never on a server. **Download**
+takes the lot out as a `scoring.json`; **Load file** reads one back in, replacing what
+that browser holds. A first visit starts from a real league rather than an empty
+screen by seeding itself from the copy committed to the repo, and the page names it as
+an example so a demo is never mistaken for your own team.
+
+You can also press **New** to start from a template and type the values in by hand.
+A template is a **stated assumption, not a reading of your league**: it arrives with
+`verified: false` and says on its face that it was not read from anywhere. Check every
+value against your own settings page before you trust a number that came out of it.
 
 ## What this tool does not know
 

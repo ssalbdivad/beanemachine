@@ -41,7 +41,9 @@ export interface ResolvedPeriod {
 	end: string
 	/** The period's own last day, even where `end` was clipped to the slate. */
 	periodEnd: string | null
-	kind: "matchup" | "daily" | "rolling"
+	/** `days` is a window the READER asked for by length — see `withinDays`. The
+	 *  other three are windows the LEAGUE implies. */
+	kind: "matchup" | "daily" | "rolling" | "days"
 	/** True where the league stated no period and this is the fallback. */
 	assumed: boolean
 	/** True where the window was cut short by the end of the captured slate. */
@@ -141,6 +143,62 @@ export const resolvePeriod = (
 			(assumptions.length ?
 				`, assuming ${assumptions.join(" and ")} because the league has not said`
 			:	"")
+	}
+}
+
+/**
+ * The reader's own horizon: the first `days` dates of a resolved window.
+ *
+ * "The rest of the period" is the right default and stays the default — points
+ * scored after the reset belong to the NEXT matchup, so in a head-to-head league
+ * the period is the decision. It is not the only question anyone asks. Streaming a
+ * starter is a two- or three-day decision ("who is pitching between now and
+ * Sunday"), and it is also the only horizon the schedule data can answer sharply:
+ * measured on the committed capture (captured 2026-09-02) as of 2026-09-04, MLB has
+ * named the starter in 15 of 32 games one day out, 41 of 92 three days out, and
+ * still only 43 of 184 seven days out. The published set stops growing about three
+ * days past a capture, so beyond that a longer window buys no extra certainty —
+ * only more games estimated from each pitcher's own rate.
+ *
+ * This is the SAME control as "rest of period", not a second one. Both name one
+ * inclusive window to accrue over, and everything downstream — `windowFrom`,
+ * `rateAll`, the coverage line the board prints — already takes a start and an end
+ * and cannot tell which of the two produced them.
+ *
+ * The count starts at the resolved window's OWN start rather than at today, so a
+ * league whose lineups are locked for the current period counts the first `days` of
+ * the period the reader can actually act on rather than days he cannot.
+ *
+ * A window that runs past the period's end is NOT silently clamped — a reader who
+ * asks for five days is answered with five days — but `basis` says so, because a
+ * pitcher's fifth-day start scores for a matchup this one has already been decided
+ * without.
+ */
+export const withinDays = (p: ResolvedPeriod, days: number, slateEnd: string): ResolvedPeriod => {
+	const want = shift(p.start, days - 1)
+	const clipped = want > slateEnd
+	const end = clipped ? slateEnd : want
+	const past = p.periodEnd !== null && want > p.periodEnd
+	return {
+		...p,
+		end,
+		kind: "days",
+		/**
+		 * A rolling fallback's `assumed` was a claim about the WINDOW — "seven days,
+		 * because this league has not said" — and the reader has just replaced that
+		 * window with one he chose, leaving only a start date of today, which is not
+		 * an assumption about anything. A matchup period keeps its flag: its start
+		 * may still rest on the Monday-and-seven-days fallback, and this control does
+		 * not touch the start.
+		 */
+		assumed: p.kind === "rolling" ? false : p.assumed,
+		clipped: p.clipped || clipped,
+		basis:
+			`${days} days, ${p.start} to ${end}` +
+			(past ?
+				`, which runs past ${p.periodEnd} — games after that score for your next matchup, not this one`
+			:	"") +
+			(clipped ? `, clipped to ${slateEnd} because this capture holds no games after it` : "")
 	}
 }
 

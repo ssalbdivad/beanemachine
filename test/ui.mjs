@@ -235,6 +235,171 @@ t("dropdowns and URL field are labelled",
   labels.some(l => l.includes("import a league")),
   labels.join(" | "))
 
+/**
+ * ── The two routes into your own league, clicked ────────────────────────────────
+ *
+ * A fresh context, because both of these are about what a first-time visitor can
+ * do and the page above has been edited for forty assertions.
+ *
+ * What this is checking is the thing that was broken: the hosted site's only ways
+ * in were "use a stranger's demo league" or "hand-type nine batting values and
+ * eight pitching ones", because Yahoo cannot be read by any browser and every
+ * platform template shipped with 0 stats, 0 slots and no team count. Two routes
+ * now end in a board that ranks, and each has its own way of going wrong — a
+ * preset that ranks but hides that the numbers are borrowed, and a file that
+ * round-trips the leagues but silently drops the team.
+ */
+const cfgFile = JSON.parse(readFileSync("scoring.json", "utf8"))
+const fresh = await browser.newContext({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
+const fp = await fresh.newPage()
+const freshErrors = []
+fp.on("pageerror", e => freshErrors.push(String(e)))
+fp.on("dialog", d => d.accept())
+await fp.goto(BASE, { waitUntil: "networkidle" })
+await fp.waitForSelector(".board-row", { timeout: 25000 })
+await fp.click(".views button:nth-child(2)")
+await fp.waitForSelector("#tpl")
+
+// The picker is generated from scoring.json's platform_templates, so it cannot
+// offer a league type the data does not ship — which is how "a sleeper template"
+// survived in a baseball app for as long as it did.
+const tplOptions = await fp.$$eval("#tpl option", n => n.map(e => ({ value: e.value, label: e.textContent })))
+t("the template picker offers exactly what scoring.json ships",
+  JSON.stringify(tplOptions.map(o => o.value)) === JSON.stringify(Object.keys(cfgFile.platform_templates)),
+  tplOptions.map(o => o.value).join(","))
+t("and it offers no Sleeper league type, because Sleeper runs no fantasy baseball",
+  !tplOptions.some(o => /sleeper/i.test(o.value + o.label)),
+  tplOptions.map(o => o.label).join(" | "))
+t("the ready-made preset is what it lands on, not the blank one",
+  (await fp.inputValue("#tpl")) === "yahoo" && /standard values/i.test(tplOptions.find(o => o.value === "yahoo").label),
+  `${await fp.inputValue("#tpl")} — ${tplOptions.map(o => o.label).join(" | ")}`)
+
+// The routes are NAMED on the tab a first-time visitor is sent to. The demo league
+// can rank, so the "finish setting this league up" card stays hidden, and before
+// this the toolbar was the only thing on screen: a New button, a Download button
+// and a URL field, with nothing saying which of them a Yahoo user wants.
+const routes = await fp.$$eval(".routes dt", n => n.map(e => e.textContent))
+t("the ways into your own league are named on the setup tab", routes.length >= 3, routes.join(" | "))
+t("and the file route prints a command that exists, not `nub`",
+  /^node --experimental-strip-types src\/cli\.ts /.test(await fp.locator(".routes pre").first().textContent()),
+  await fp.locator(".routes pre").first().textContent())
+
+// Route 1: one click from the picker to a ranked board.
+await fp.click('.bar button:text-is("New")')
+await fp.waitForSelector(".board-row", { timeout: 25000 })
+t("choosing the preset lands on a board that actually ranks",
+  (await fp.$$eval(".board-row", n => n.length)) > 50,
+  String(await fp.$$eval(".board-row", n => n.length)))
+const created = await fp.evaluate(k => {
+  const c = JSON.parse(localStorage.getItem(k))
+  return { key: c.active_league, league: c.leagues[c.active_league] }
+}, STORE)
+t("and the league it created is the preset, stored in this browser",
+  created.league.provenance.method.startsWith("preset:") && created.league.provenance.verified === false,
+  JSON.stringify(created.league.provenance))
+t("and it carries scoring, slots and a team count — the three the engine needs",
+  Object.keys(created.league.scoring.batting).length === 9 &&
+    Object.keys(created.league.scoring.pitching).length === 8 &&
+    Object.keys(created.league.roster.slots).length === 12 &&
+    created.league.meta.max_teams === 10,
+  JSON.stringify(created.league.meta.max_teams))
+
+// A board that ranks looks like a board that is right, which is the whole risk of
+// shipping a preset. The page has to keep saying whose numbers these are.
+const preset = await fp.locator(".example-note").first().textContent()
+t("the board says the values were not read from your league",
+  /not read from your league/i.test(preset), preset.slice(0, 120))
+t("and it names what to check, from the league's own needs_review",
+  (await fp.$$eval(".example-note .flags li", n => n.length)) >= 3,
+  String(await fp.$$eval(".example-note .flags li", n => n.length)))
+t("and the provenance chip reads unverified, not read from source",
+  (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).includes("unverified"),
+  (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).join(" / "))
+
+// The notice has to be able to END, or it is a warning people learn to read past —
+// including on a league where it is still true. Nothing clears it automatically:
+// saving an edit is not proof of checking, since changing one home-run value leaves
+// the other sixteen borrowed. This is the user's own statement, and what it records
+// is manual entry, not a read — `verified` stays false either way, because importing
+// the league is still the only thing that can change that.
+await fp.click('.example-note button:text-is("I\u2019ve checked these against my league")')
+await fp.waitForTimeout(400)
+t("saying you checked the preset's values ends the notice",
+  (await fp.locator(".example-note").count()) === 0,
+  await fp.locator(".example-note").first().textContent().catch(() => "(gone)"))
+const checked = await fp.evaluate(k => {
+  const c = JSON.parse(localStorage.getItem(k))
+  return c.leagues[c.active_league]
+}, STORE)
+t("and it is recorded as entered by hand, not as read from the league",
+  !checked.provenance.method.startsWith("preset:") &&
+    /checked by hand/.test(checked.provenance.method) &&
+    checked.provenance.verified === false,
+  JSON.stringify(checked.provenance))
+t("and the one line left says where the values came from and that it is still unverified",
+  checked.needs_review.length === 1 && /preset/.test(checked.needs_review[0]) &&
+    /unverified/.test(checked.needs_review[0]),
+  JSON.stringify(checked.needs_review))
+t("and the board still ranks, because the values did not change",
+  (await fp.$$eval(".board-row", n => n.length)) > 50)
+
+// Route 2: the file a Yahoo user carries from a local run. Everything a hosted page
+// cannot read for a Yahoo league has to survive the trip — not just the leagues,
+// which is all the file used to hold, but the roster and the seats it was read in.
+await fp.evaluate(() => {
+  localStorage.setItem("beanemachine:roster", JSON.stringify({ "yahoo:228947": ["691718:hitting", "608369:pitching"] }))
+  localStorage.setItem("beanemachine:lineup", JSON.stringify({
+    "yahoo:228947": { at: "2026-09-04T00:00:00.000Z", spots: [{ slot: "OF", name: "Pete Crow-Armstrong", positions: ["OF"], team: "CHC" }] }
+  }))
+})
+await fp.reload({ waitUntil: "networkidle" })
+await fp.click(".views button:nth-child(2)")
+await fp.waitForSelector('.bar button:text-is("Download")')
+const [taken] = await Promise.all([
+  fp.waitForEvent("download"),
+  fp.click('.bar button:text-is("Download")')
+])
+const carried = JSON.parse(readFileSync(await taken.path(), "utf8"))
+t("the file carries the leagues, the roster and the seats — all of them",
+  Object.keys(carried.leagues).length === 2 &&
+    carried.rosters["yahoo:228947"].length === 2 &&
+    carried.lineups["yahoo:228947"].spots.length === 1,
+  JSON.stringify({ leagues: Object.keys(carried.leagues), rosters: Object.keys(carried.rosters ?? {}), lineups: Object.keys(carried.lineups ?? {}) }))
+t("and it is still a valid config, so a file from an older build still loads",
+  carried.schema_version === cfgFile.schema_version && typeof carried.description === "string",
+  carried.schema_version)
+
+// Wipe the browser and drop the file back on the page — no file dialog, no toolbar.
+await fp.evaluate(() => localStorage.clear())
+await fp.reload({ waitUntil: "networkidle" })
+await fp.waitForSelector(".board-row", { timeout: 25000 })
+const dropped = readFileSync(await taken.path(), "utf8")
+const dt = await fp.evaluateHandle(text => {
+  const d = new DataTransfer()
+  d.items.add(new File([text], "scoring.json", { type: "application/json" }))
+  return d
+}, dropped)
+await fp.dispatchEvent("body", "dragover", { dataTransfer: dt })
+await fp.waitForTimeout(150)
+t("a file dragged over the page is offered a drop target", await fp.locator(".dropzone").isVisible())
+await fp.dispatchEvent("body", "drop", { dataTransfer: dt })
+await fp.waitForSelector(".toast", { timeout: 10000 })
+t("dropping it says what arrived, counted from the file",
+  /Loaded 2 leagues, 1 roster, 1 lineup/.test(await fp.textContent(".toast")),
+  await fp.textContent(".toast"))
+const back = await fp.evaluate(k => ({
+  leagues: Object.keys(JSON.parse(localStorage.getItem(k)).leagues),
+  roster: JSON.parse(localStorage.getItem("beanemachine:roster") ?? "null"),
+  lineup: JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "null")
+}), STORE)
+t("and the whole team is back in this browser, not just the leagues",
+  back.leagues.length === 2 &&
+    JSON.stringify(back.roster["yahoo:228947"]) === JSON.stringify(["691718:hitting", "608369:pitching"]) &&
+    back.lineup["yahoo:228947"].spots[0].slot === "OF",
+  JSON.stringify(back))
+t("no page errors through either route", freshErrors.length === 0, freshErrors.join(" | "))
+await fresh.close()
+
 // dark mode renders
 const dark = await browser.newContext({ colorScheme: "dark", viewport: { width: 1280, height: 1000 } })
 const dp = await dark.newPage()

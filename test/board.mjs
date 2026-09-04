@@ -244,7 +244,12 @@ const boardTop = await topOf()
 await page.click(".modes .mode:has-text('Streaming')")
 await page.waitForTimeout(250)
 const streamTop = await topOf()
-t("streaming mode re-ranks against the next 7 days",
+// Renamed, not weakened. It never ranked "the next 7 days": `resolvePeriod` has
+// supplied the LEAGUE's own scoring period since the rolling window was measured
+// overstating a Wednesday by 59%, and the tab now also opens filtered to players
+// with a start in it. The assertion — a different question gives a different
+// answer — is the same one and still holds.
+t("streaming mode re-ranks against the league's own scoring period",
   streamTop.length > 0 && streamTop.join() !== boardTop.join(),
   `${streamTop.slice(0, 3)} vs ${boardTop.slice(0, 3)}`)
 await page.click(".modes .mode:has-text('Stash')")
@@ -256,6 +261,165 @@ t("stash mode re-ranks against the rest of the season",
 t("every horizon still produces a full board", stashTop.length >= 5, String(stashTop.length))
 await page.click(".modes .mode:has-text('This fortnight')")
 await page.waitForTimeout(250)
+
+/**
+ * The Streaming tab as a streaming TOOL rather than a horizon toggle.
+ *
+ * The question it now answers, in the owner's words: "which starters should I
+ * stream that will be pitching over the next 3 days, what are they worth over that
+ * window, how many starts do they have and against whom, and which of them can I
+ * actually get." Every clause of that is asserted below, because every clause of it
+ * was previously missing: the tab re-ranked the same 1,400 players — hitters and
+ * relievers included — over a horizon the reader could not change, and threw away
+ * the two facts a streaming pick turns on.
+ */
+const streamNote = () => page.$eval("#horizon-panel .stream-note", e => e.textContent.replace(/\s+/g, " ").trim())
+const streamRange = () => page.$eval("#horizon-panel .sub", e => e.textContent)
+const startLines = () => page.$$eval(".board-row .who .starts", n => n.map(e => e.textContent.trim()))
+const boardRows = () => page.$$eval(".board-row", n => n.length)
+// The RANKING's size, not the render window's: the board pages in 60 rows at a
+// time, so counting rendered rows tops out at 60 and a filter that removed a
+// thousand players would look like it removed none.
+const rankedNow = () => page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
+
+await page.click(".modes .mode:has-text('Streaming')")
+await page.waitForSelector(".stream-strip", { timeout: 15000 })
+await page.waitForTimeout(400)
+
+// 1. it opens as a streaming list, with no click at all
+const openLines = await startLines()
+t("Streaming opens already filtered to players with a start in the window",
+  openLines.length > 5 && openLines.length === (await boardRows()),
+  `${openLines.length} start lines on ${await boardRows()} rendered rows`)
+const openSides = await page.$$eval(".board-row .who .code", n => n.map(e => e.textContent.trim()))
+t("and a streaming list holds no hitters, because a hitter cannot be streamed for a start",
+  openSides.length > 5 && openSides.every(c => c === "SP" || c === "RP" || c === "P"),
+  openSides.filter(c => !["SP", "RP", "P"].includes(c)).join(",") || openSides.slice(0, 6).join(","))
+
+// 2. the horizon is the reader's to choose, and the choice reaches the ranking
+const periodRange = await streamRange()
+const periodNote = await streamNote()
+await page.click(".stream-strip .chip-btn:text-is('7 days')")
+await page.waitForTimeout(500)
+const sevenRange = await streamRange()
+const sevenNote = await streamNote()
+t("a day count is a real horizon: it moves the window the board states",
+  sevenRange !== periodRange && /2026-\d\d-\d\d → 2026-\d\d-\d\d/.test(sevenRange),
+  `${periodRange.trim()} then ${sevenRange.trim()}`)
+t("and it names itself by its length rather than by the period it was cut from",
+  /^7 days, 2026/.test(sevenNote), sevenNote.slice(0, 80))
+// The window this league's period ends on is Sunday; seven days from a Friday runs
+// past it, and points scored after the reset are the NEXT matchup's.
+t("a window running past the reset says the extra games score for the next matchup",
+  /runs past 2026-\d\d-\d\d/.test(sevenNote) && /next matchup/.test(sevenNote), sevenNote)
+// Probables stop about three days past a capture, so a seven-day window on this
+// fixture has not one fully-named club in it. The page says so where the reader can
+// act on it — and says nothing of the kind on a window where it is not true, because
+// a warning that is always on is furniture rather than information.
+t("a window past where probables reach points back at the shorter one",
+  /shorter window is where this data is strongest/.test(sevenNote) &&
+    !/shorter window/.test(periodNote),
+  `seven: ${/shorter window/.test(sevenNote)}, period: ${/shorter window/.test(periodNote)}`)
+
+/**
+ * Coverage is MEASURED off the window on screen, not quoted from a table.
+ *
+ * MLB publishes probables about three days past a capture and then stops, so how
+ * much of a window is named depends on the capture's age as much as on the window's
+ * length. A number written into the sentence would have been right the day it was
+ * written and wrong every day after — so the two windows must report different
+ * fractions of the same slate.
+ */
+const named = note => (note.match(/named the starter in (\d+) of (\d+)/) ?? []).slice(1).map(Number)
+const [pubPeriod, gamesPeriod] = named(periodNote)
+const [pubSeven, gamesSeven] = named(sevenNote)
+t("the page states how much of this window MLB has actually named",
+  Number.isFinite(pubPeriod) && Number.isFinite(gamesPeriod) && pubPeriod <= gamesPeriod,
+  periodNote)
+t("and that count is measured off the window rather than baked into the sentence",
+  gamesSeven > gamesPeriod && pubSeven >= pubPeriod &&
+    pubSeven / gamesSeven < pubPeriod / gamesPeriod,
+  `${pubPeriod}/${gamesPeriod} over the period vs ${pubSeven}/${gamesSeven} over seven days`)
+
+await page.click(".stream-strip .chip-btn:text-is('3 days')")
+await page.waitForTimeout(500)
+
+/**
+ * The two facts a streaming pick turns on, on the row.
+ *
+ * `startOpponents` was computed, fed to `pitcherMatchupIndex` — so the board priced
+ * a start against Colorado differently from one against Los Angeles — and then
+ * thrown away by the UI. And what MLB has ANNOUNCED must stay visibly apart from
+ * what the model estimated for his club's unnamed games; "2 starts" covering one of
+ * each is exactly the sentence that looks read off the schedule and is not.
+ */
+const streamRows = await page.$$eval(".board-row", n =>
+  n.slice(0, 12).map(e => ({
+    starts: e.querySelector(".who .starts")?.textContent.trim() ?? null,
+    gs: e.querySelector("[data-col=games]")?.textContent.trim() ?? null,
+    label: e.getAttribute("aria-label")
+  }))
+)
+t("every streaming row says how many starts he has and who they are against",
+  streamRows.length > 5 &&
+    streamRows.every(r => r.starts && (/\d+ starts? · \S/.test(r.starts) || /^~[\d.]+ starts · none announced yet$/.test(r.starts))),
+  JSON.stringify(streamRows.slice(0, 3).map(r => r.starts)))
+t("an announced start names a real club, not a bare id",
+  streamRows.some(r => /\d+ starts? · [A-Z][a-z]/.test(r.starts)) &&
+    streamRows.every(r => !/club \d+/.test(r.starts)),
+  JSON.stringify(streamRows.slice(0, 4).map(r => r.starts)))
+t("published turns and estimated ones are never added into one number",
+  streamRows.every(r =>
+    !/~/.test(r.starts) || /more once MLB names the rest/.test(r.starts) || /none announced yet/.test(r.starts)),
+  JSON.stringify(streamRows.map(r => r.starts).filter(x => /~/.test(x)).slice(0, 3)))
+t("the row's own GS count is the one the ranking used, beside the announced turns",
+  streamRows.every(r => /GS$/.test(r.gs ?? "")), JSON.stringify(streamRows.slice(0, 3).map(r => r.gs)))
+// The marker and the start line are drawn; a screen reader gets neither, so both
+// have to be spoken.
+t("the schedule a row draws is also the schedule it speaks",
+  streamRows.every(r => /published start|expected from his own rate/.test(r.label)),
+  streamRows[0].label)
+
+// 3. "I have 2 moves" — the one fact no source in this app carries, taken as input
+await page.fill(".stream-strip .moves input", "2")
+await page.waitForTimeout(500)
+const marked = await page.$$eval(".board-row[data-pick]", n =>
+  n.map(e => ({ pick: e.getAttribute("data-pick"), label: e.getAttribute("aria-label") })))
+t("two moves marks exactly the top two rows, and marks where the second one ends",
+  marked.length === 2 && marked[0].pick === "yes" && marked[1].pick === "last",
+  JSON.stringify(marked.map(m => m.pick)))
+t("and the boundary is spoken, because a rail and a rule say nothing out loud",
+  /within your 2 moves/.test(marked[0].label) && /and the last one/.test(marked[1].label),
+  marked[1].label.slice(0, 90))
+await page.fill(".stream-strip .moves input", "0")
+await page.waitForTimeout(400)
+t("zero moves marks nothing rather than marking everything",
+  (await page.$$(".board-row[data-pick]")).length === 0)
+
+// 4. the filter is the reader's, and it is scoped to the tab that offers it
+const streamingCount = await rankedNow()
+await page.uncheck(".stream-strip .toggle input")
+await page.waitForTimeout(500)
+const unfilteredCount = await rankedNow()
+t("turning the start filter off brings the rest of the pool back",
+  unfilteredCount > streamingCount * 3 && (await startLines()).length < (await boardRows()),
+  `${streamingCount} with a start, ${unfilteredCount} in the whole pool`)
+await page.check(".stream-strip .toggle input")
+await page.waitForTimeout(500)
+
+/**
+ * A mode-scoped filter must not outlive the control that switches it. This page has
+ * already shipped one that went on filtering after its checkbox stopped rendering,
+ * and the board emptied with nothing on screen to undo — so leaving the tab has to
+ * restore the full ranking, and the controls have to leave with it.
+ */
+await page.click(".modes .mode:has-text('This fortnight')")
+await page.waitForTimeout(500)
+t("the streaming controls leave with the streaming tab",
+  (await page.$(".stream-strip")) === null && (await page.$("#horizon-panel .stream-note")) === null)
+t("and the filter they own leaves with them rather than silently narrowing another horizon",
+  (await page.$$eval(".board-row .who .code", n => n.some(e => !["SP", "RP", "P"].includes(e.textContent.trim())))),
+  "the fortnight board still has no hitters on it")
 
 // Keyboard and screen-reader access to the same board. These are not cosmetic:
 // the horizon strip is the primary control on the page, and the rows are the

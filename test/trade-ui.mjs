@@ -55,6 +55,19 @@ if (!(await openTrade())) {
 
 t("no page errors", errors.length === 0, errors.join(" | "))
 
+/**
+ * The flat list of who you own is now FOLDED once there is a roster.
+ *
+ * Measured 2026-09-04 on the shipped league at 1280x1000: that list was 899px of a
+ * 3487px page, and "Your starting lineup" below it shows all the same men in the
+ * seats they actually hold. Nothing was removed — this opens the fold, because the
+ * assertions below are about the same rows they always were.
+ */
+const openTeamFold = async () => {
+	const fold = page.locator("details.trade-owned-fold")
+	if (await fold.count()) await fold.evaluate(d => { d.open = true })
+}
+
 // Empty states are load-bearing here: with no roster there IS no lineup, and
 // rendering one anyway would be inventing a team.
 const emptyLineup = (await page.textContent(".trade-lineup .empty")) ?? ""
@@ -72,6 +85,10 @@ const addFrom = async (ctl, action) => {
 }
 
 const first = await addFrom("own-search", "Add")
+// captured the moment the fold first exists, before anything here opens it
+await page.waitForSelector("details.trade-owned-fold")
+const foldStartsClosed = await page.$eval("details.trade-owned-fold", d => d.open) === false
+await openTeamFold()
 await page.waitForSelector(".trade-own")
 const oneTotal = num(await page.textContent(".lineup-total"))
 t("adding a player produces a lineup with a real total", Number.isFinite(oneTotal) && oneTotal > 0, String(oneTotal))
@@ -82,6 +99,35 @@ await page.waitForFunction(() => document.querySelectorAll(".trade-own").length 
 const twoTotal = num(await page.textContent(".lineup-total"))
 t("adding a second player changes the lineup total", twoTotal !== oneTotal, `${oneTotal} → ${twoTotal}`)
 t("a second real starter cannot lower the total", twoTotal > oneTotal, `${oneTotal} → ${twoTotal}`)
+
+/**
+ * The page is ordered by what each card answers WITHOUT being asked.
+ *
+ * "What to add and drop" is the only card here that proposes a move rather than
+ * pricing one you proposed, and it used to be third — measured 2026-09-04 on the
+ * shipped league at 1280x1000, it opened at y=1912 of a 3487px page, under two
+ * screens of a roster you already knew. The order is a claim about which card
+ * matters, so it is asserted rather than left to whoever edits the JSX next.
+ */
+const cardOrder = await page.$$eval("section.card h2", n => n.map(e => e.textContent.trim()))
+const at = re => cardOrder.findIndex(h => re.test(h))
+t("the recommendation comes before the lineup, and both before the deal",
+  at(/add and drop/i) > -1 && at(/add and drop/i) < at(/starting lineup/i) &&
+    at(/starting lineup/i) < at(/the deal/i),
+  cardOrder.join(" | "))
+
+// The flat list of who you own is folded, because "Your starting lineup" below it
+// shows every one of the same men in the seat he holds. Folded, never dropped:
+// it is the only place a player can be removed by hand.
+const foldSummary = (await page.textContent("details.trade-owned-fold summary")) ?? ""
+t("the team list is folded behind a summary that states its own count",
+  /^2 players on this team/.test(foldSummary.trim()), foldSummary)
+t("and it is closed until asked for, so it costs no height", foldStartsClosed)
+await openTeamFold()
+t("opening it shows every player you own, with his numbers",
+  (await page.$$(".trade-own")).length === 2 &&
+    (await page.$$eval(".trade-own .r.bs", n => n.length)) === 2,
+  String((await page.$$(".trade-own")).length))
 
 // Every startable spot must be accounted for out loud: filled by you, covered off
 // the wire, or a hole. A spot that is silently absent is a total you can't trust.
@@ -204,6 +250,7 @@ t("nothing the engine could not read is silently dropped",
 const stored = await page.evaluate(() => localStorage.getItem("beanemachine:roster"))
 t("the team is stored per league in this browser", !!stored && /"\d+:(hitting|pitching)"/.test(stored), String(stored))
 await openTrade()
+await openTeamFold()
 await page.waitForSelector(".trade-own")
 t("the team survives a reload", (await page.$$(".trade-own")).length === 2)
 t("a reload leaves no offer half-built", (await page.$$(".trade-verdict")).length === 0)

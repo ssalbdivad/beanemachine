@@ -13,15 +13,18 @@ import { fetchTeamRoster } from "./data/rosters.ts"
  * so nothing here reads or writes scoring.json.
  *
  * What is genuinely IMPOSSIBLE without it is narrower than this file: measured
- * 2026-09-04, ESPN reflects the requesting origin and Sleeper answers `*`, so a page
- * reads both for itself and the static build imports them with no backend at all
- * (see `readableInBrowser` in src/import.ts, and the routing in src/client/api.ts).
- * Yahoo sends no access-control headers, which leaves /available — Yahoo-only — and
- * the Yahoo half of /import and /roster as the part no browser can replace.
+ * 2026-09-04, ESPN reflects the requesting origin, so a page reads ESPN for itself
+ * and the static build imports it with no backend at all (see `readableInBrowser`
+ * in src/import.ts, and the routing in src/client/api.ts). Yahoo sends no
+ * access-control headers, which leaves /available — Yahoo-only — and the Yahoo half
+ * of /import and /roster as the part no browser can replace.
  *
- * The other three quarters stay here because that is what every local run and every
- * suite uses: the client prefers this server wherever one answers, and only falls
- * back to reading for itself when nothing does.
+ * That makes this process the ONLY route to a Yahoo league, which is the shape most
+ * of this app's users are in. `src/cli.ts` is the other end of the same read: run it
+ * once, get a scoring.json, and the file goes anywhere. The ESPN half stays served
+ * here because that is what every local run and every suite uses: the client prefers
+ * this server wherever one answers, and only falls back to reading for itself when
+ * nothing does.
  *
  * Request bodies are still validated at the edge, so a malformed call is
  * rejected with a real error message rather than reaching a scraper.
@@ -44,8 +47,8 @@ app.onError((e, c) => {
 
 const api = new Hono()
 	// how the client tells a served build from a local one: on a static host there
-	// is no JSON here, so the client reads ESPN and Sleeper for itself and says that
-	// Yahoo, which sends no CORS headers, is what still needs this process
+	// is no JSON here, so the client reads ESPN for itself and says that Yahoo,
+	// which sends no CORS headers, is what still needs this process
 	.get("/health", c => c.json({ ok: true }))
 
 	// read from the league's own pages and handed straight back: the browser is
@@ -81,11 +84,11 @@ const api = new Hono()
 	/**
 	 * A team's own roster, off its own Yahoo page.
 	 *
-	 * The Yahoo read here is the one a browser cannot do for itself. The ESPN and
-	 * Sleeper reads it CAN do (`fetchTeamRoster` is the same function either side of
-	 * the wire) stay served from here for anyone running locally, because a request
-	 * that already works is not worth rerouting. Nothing is stored — the browser owns
-	 * the roster, exactly as it owns the league.
+	 * The Yahoo read here is the one a browser cannot do for itself. The ESPN read it
+	 * CAN do (`fetchTeamRoster` is the same function either side of the wire) stays
+	 * served from here for anyone running locally, because a request that already
+	 * works is not worth rerouting. Nothing is stored — the browser owns the roster,
+	 * exactly as it owns the league.
 	 */
 	.post(
 		"/roster",
@@ -101,9 +104,10 @@ const api = new Hono()
 		),
 		async c => {
 			const body = c.req.valid("json")
-			// Sleeper's roster and owner ids are not always numeric, so the shape is
-			// checked per platform rather than globally.
-			if (body.platform !== "sleeper" && !/^[\w-]{1,32}$/.test(body.leagueId))
+			// Yahoo and ESPN both key a league on a short alphanumeric id. The
+			// per-platform exemption this used to carry existed only for Sleeper's
+			// 18-digit ids, and Sleeper is gone (see SLEEPER_REFUSAL in src/import.ts).
+			if (!/^[\w-]{1,32}$/.test(body.leagueId))
 				throw new ImportError("That doesn't look like a league id.")
 			// An unreadable roster is a state, not an error: the league may be private
 			// or the platform may be throttling, and the client offers the manual path
@@ -128,6 +132,8 @@ const port = Number(process.argv.find(a => a.startsWith("--port="))?.slice(7) ??
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, info => {
 	console.log(`beanemachine api → http://localhost:${info.port}`)
 	console.log(`leagues           kept in your browser; this only reads them from their URL`)
+	console.log(`yahoo             the one platform no browser can read; this is its only route`)
+	console.log(`one-off import    node --experimental-strip-types src/cli.ts <league-url>`)
 	// `nub` is not a binary anyone has; naming it sent whoever followed this line to
 	// a command not found. Vite is what actually serves the client in dev.
 	if (!existsSync(DIST)) console.log(`client            run \`npx vite\` (it serves the client)`)

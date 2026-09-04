@@ -18,18 +18,61 @@ import {
 	ExampleNote,
 	Fragment2,
 	freshness,
+	IMPORT_COMMAND,
+	isPreset,
 	leagueReady,
+	PresetNote,
 	RosterPanel,
 	Setup,
 	StatTable,
 	TeamCountInput,
 	type View,
-	VIEWS
+	VIEWS,
+	WaysIn
 } from "./panels.tsx"
 import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
 
-const TEMPLATES = ["custom", "yahoo", "espn", "sleeper"]
+/**
+ * What "Start a league from" offers, read from `platform_templates` rather than
+ * listed here.
+ *
+ * It used to be the literal list `["custom", "yahoo", "espn", "sleeper"]`, which
+ * was wrong in two directions at once. Sleeper runs no fantasy baseball — src/import.ts
+ * refuses a Sleeper URL and cites the check, `/v1/state/mlb` naming no season — so a
+ * baseball app was offering a Sleeper league type;
+ * and all four templates shipped with 0 stats, 0 slots and no team count, so every
+ * option created a league that could rank nothing. scoring.json now ships the two
+ * that are true (a Yahoo Head-to-Head Points preset, and a blank one), and this
+ * list follows it: removing a template from the data removes it from the picker,
+ * with no second list to remember.
+ */
+interface TemplateOption {
+	key: string
+	label: string
+	/** Whether it arrives with values, which decides where you land after New. */
+	filled: boolean
+}
+
+const templateOptions = (config: Config | null): TemplateOption[] =>
+	Object.entries(config?.platform_templates ?? {}).map(([key, raw]) => {
+		const tpl = raw as League | undefined
+		const platform = tpl?.meta?.platform ?? key
+		const stats =
+			Object.keys(tpl?.scoring?.batting ?? {}).length +
+			Object.keys(tpl?.scoring?.pitching ?? {}).length
+		const name = platform === "custom" ? "" : `${platform[0]!.toUpperCase()}${platform.slice(1)} `
+		return {
+			key,
+			filled: stats > 0,
+			// The label states what you get, from the template's own fields: a scoring
+			// type it names, or the fact that it names nothing at all.
+			label:
+				stats > 0 ?
+					`a ${name}${tpl?.meta?.scoring_type ?? ""} league (standard values)`.replace(/\s+/g, " ")
+				:	`a blank ${name}league (nothing filled in)`
+		}
+	})
 
 /** What is known about the leagues in this browser. Three states, because an
  *  unreadable store and an empty one call for opposite advice. */
@@ -51,6 +94,16 @@ export const App = () => {
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
 	const [view, setView] = useState<View>("board")
+	/** True while a file is over the window. A drop target nobody can see is a
+	 *  feature nobody uses, so the page says it will take the file. */
+	const [dragging, setDragging] = useState(false)
+	/** Set by the toolbar so the Setup card can open the same picker: one file
+	 *  input, three ways to reach it. Stable, so the toolbar's effect that hands it
+	 *  up does not re-run on every render. */
+	const openPicker = useRef<(() => void) | null>(null)
+	const registerPicker = useCallback((open: () => void) => {
+		openPicker.current = open
+	}, [])
 	const { snapshot, error: snapshotError } = useSnapshot()
 	const { toast, show } = useToast()
 	const acknowledge = useCallback(() => {
@@ -96,6 +149,118 @@ export const App = () => {
 		})
 	}, [run, adopt])
 
+	/**
+	 * Loading a league file, from wherever it arrived.
+	 *
+	 * One function, because there are now three doors onto it — the toolbar button,
+	 * the Setup card, and dropping the file on the page — and three copies of a
+	 * confirm-then-replace would be three chances for one of them to skip the
+	 * confirm. The file replaces the store outright (see leagues.replace), so what
+	 * is about to go is named before it goes.
+	 */
+	const loadFile = useCallback(
+		(file: File) => {
+			if (!/\.json$/i.test(file.name) && file.type !== "application/json")
+				return show(`${file.name} isn't a .json league file.`, true)
+			const existing = Object.keys(config?.leagues ?? {}).length
+			if (
+				existing &&
+				!confirm(
+					`Replace the ${existing} league${existing === 1 ? "" : "s"} in this browser with ${file.name}?`
+				)
+			)
+				return
+			void run(async () => {
+				const loaded = leagues.replace(await file.text())
+				adopt(loaded.config)
+				// what actually arrived, counted from the file rather than assumed: a
+				// file with no roster in it must not be reported as having brought one
+				const carried = [
+					`${loaded.leagues} league${loaded.leagues === 1 ? "" : "s"}`,
+					loaded.rosters ? `${loaded.rosters} roster${loaded.rosters === 1 ? "" : "s"}` : null,
+					loaded.lineups ? `${loaded.lineups} lineup${loaded.lineups === 1 ? "" : "s"}` : null
+				].filter(Boolean)
+				show(`Loaded ${carried.join(", ")} from ${file.name}`)
+			})
+		},
+		[config, run, adopt, show]
+	)
+
+	/**
+	 * Starting a league from a template.
+	 *
+	 * Two things changed here and both were in the way of a first-time visitor. The
+	 * key used to come from a `prompt()`, a modal asking for a string that is only
+	 * ever seen again in this dropdown — so it is derived now (leagues.suggestKey).
+	 * And every template used to be blank, so this always landed on League setup
+	 * with a form to fill in; a preset arrives ready to rank, so it lands on the
+	 * board, which is the thing the visitor came for. `leagueReady` decides which,
+	 * from the created league itself rather than from the template's name.
+	 */
+	const create = useCallback(
+		(template: string) =>
+			run(async () => {
+				if (!config) return
+				const k = leagues.suggestKey(config, template)
+				const next = leagues.create(k, template)
+				adopt(next, k)
+				const made = next.leagues[k]!
+				if (leagueReady(made)) {
+					setView("board")
+					// named by the platform the league itself carries, not by the template
+					// key, which is an internal string nobody chose
+					show(
+						`Ranking on the ${made.meta.platform[0]!.toUpperCase()}${made.meta.platform.slice(1)} ` +
+							`preset — check its values in League setup`
+					)
+				} else {
+					setView("league")
+					show(`Created ${k} — every field is blank until you fill it in`)
+				}
+			}),
+		[config, run, adopt, show]
+	)
+
+	/**
+	 * Drag a league file anywhere onto the page.
+	 *
+	 * The file route is the answer for a Yahoo user — the platform no browser can
+	 * read — and it was a button in a toolbar that only appears on one tab, labelled
+	 * as though it were a restore-from-backup. Listening on the window means the
+	 * file lands wherever it is dropped, including on the board a visitor is
+	 * looking at when they realise it is not their league.
+	 *
+	 * `dragover` must be prevented for a drop to fire at all, and the counter-free
+	 * approach (dragleave anywhere clears it) is deliberate: dragleave fires for
+	 * every child element the pointer crosses, so a boolean set on dragover and
+	 * cleared only when the pointer actually leaves the window keeps the overlay
+	 * from flickering.
+	 */
+	useEffect(() => {
+		const over = (e: DragEvent) => {
+			if (!e.dataTransfer?.types.includes("Files")) return
+			e.preventDefault()
+			setDragging(true)
+		}
+		const leave = (e: DragEvent) => {
+			if (e.relatedTarget === null) setDragging(false)
+		}
+		const drop = (e: DragEvent) => {
+			if (!e.dataTransfer?.files.length) return
+			e.preventDefault()
+			setDragging(false)
+			loadFile(e.dataTransfer.files[0]!)
+		}
+		window.addEventListener("dragover", over)
+		window.addEventListener("dragleave", leave)
+		window.addEventListener("drop", drop)
+		return () => {
+			window.removeEventListener("dragover", over)
+			window.removeEventListener("dragleave", leave)
+			window.removeEventListener("drop", drop)
+		}
+	}, [loadFile])
+
 	const league = key && config ? config.leagues[key] : undefined
 	// Nothing is known until the store has been read, and "no leagues", "not looked
 	// yet" and "the store is unreadable" are three different screens. One value
@@ -105,6 +270,10 @@ export const App = () => {
 	// The board, the draft and a trade are all priced in the same three inputs.
 	// Until they exist, the guided panel is what the page leads with.
 	const ready = leagueReady(league)
+	/** What scoring.json offers to start from, and which of those is ready-made.
+	 *  Both read from the data: a preset that stops shipping stops being offered. */
+	const templates = useMemo(() => templateOptions(config), [config])
+	const preset = templates.find(t => t.filled) ?? null
 	/**
 	 * League MANAGEMENT — create, remove, import, download, load a file — is chrome
 	 * for a thing you do once, and it was sitting above the recommendations on every
@@ -124,6 +293,39 @@ export const App = () => {
 
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
+			{/* Styled inline rather than in app.css: it is one element that exists only
+			    while a file is in the air, and it has to sit above everything the page
+			    has painted. `pointer-events: none` matters — the window's own drop
+			    handler is what takes the file, and an overlay that swallowed the event
+			    would make the page look like it accepted a file it never received. */}
+			{dragging && (
+				<div
+					className="dropzone"
+					style={{
+						position: "fixed",
+						inset: 0,
+						zIndex: 50,
+						display: "grid",
+						placeItems: "center",
+						pointerEvents: "none",
+						background: "color-mix(in srgb, var(--bg) 82%, transparent)",
+						outline: "3px dashed var(--accent)",
+						outlineOffset: "-14px",
+						font: "600 18px/1.5 inherit",
+						textAlign: "center",
+						padding: "var(--sp-4)"
+					}}
+				>
+					<span>
+						Drop a league file to load it
+						<br />
+						<span style={{ font: "400 14px/1.6 inherit", opacity: 0.75 }}>
+							the <code>scoring.json</code> that <code>{IMPORT_COMMAND.split(" <")[0]}</code>{" "}
+							writes, or one you downloaded here
+						</span>
+					</span>
+				</div>
+			)}
 			<header>
 				<div className="mark">
 					<Billy />
@@ -142,18 +344,17 @@ export const App = () => {
 				    both directly. Only Yahoo has no CORS headers at all, and Yahoo is a
 				    scrape rather than an API. That blanket sentence was the single thing
 				    standing between a visitor and using this on their own league. */}
+				{/* Sleeper used to be named here as a way in. It runs no fantasy baseball —
+				    src/import.ts refuses a Sleeper URL and quotes the check — so pointing a
+				    baseball user at it was a dead end dressed up as an option. What replaces it is the route
+				    a Yahoo user can actually finish: a preset now, or a file they carry
+				    over, both of which end in a board that ranks. */}
 				{config && getMode() === "static" && (
 					<p className="tag static-note">
-						Your leagues are saved in this browser. Paste an <b>ESPN</b> or{" "}
-						<b>Sleeper</b> league URL and it imports right here.{" "}
-						<a
-							href="https://github.com/ssalbdivad/beanemachine#running-it"
-							target="_blank"
-							rel="noreferrer"
-						>
-							Yahoo alone needs the local server
-						</a>
-						, because Yahoo sends no CORS headers for a browser to read.
+						Your leagues are saved in this browser. Paste an <b>ESPN</b> league URL and
+						it imports right here. <b>Yahoo</b> sends no CORS headers, so no browser can
+						read it: start from the Yahoo preset, or read your league once locally and
+						drop the file it writes anywhere on this page.
 					</p>
 				)}
 			</header>
@@ -192,6 +393,7 @@ export const App = () => {
 				view={view}
 				manage={manage}
 				activeKey={key}
+				templates={templates}
 				onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
 				onImport={url =>
 					void run(async () => {
@@ -201,29 +403,25 @@ export const App = () => {
 						show(`Imported ${league.meta.league_name ?? k}`)
 					})
 				}
-				onCreate={(k, template) =>
-					void run(async () => {
-						adopt(leagues.create(k, template), k)
-						// the new league is blank on purpose, and the setup panel below now says
-						// exactly which values that leaves missing
-						setView("league")
-						show(`Created ${k} — every field is blank until you fill it in`)
-					})
-				}
+				onCreate={template => void create(template)}
 				onRemove={k =>
 					void run(async () => {
 						adopt(leagues.remove(k))
 						show("Removed")
 					})
 				}
-				onDownload={() => config && leagues.download(config)}
-				onLoadFile={file =>
-					void run(async () => {
-						const next = leagues.replace(await file.text())
-						adopt(next)
-						show(`Loaded ${Object.keys(next.leagues).length} leagues from ${file.name}`)
-					})
-				}
+				onDownload={() => {
+					if (!config) return
+					const file = leagues.download(config)
+					const carried = [
+						`${Object.keys(file.leagues).length} league${Object.keys(file.leagues).length === 1 ? "" : "s"}`,
+						file.rosters ? `${Object.keys(file.rosters).length} roster` : null,
+						file.lineups ? `${Object.keys(file.lineups).length} lineup` : null
+					].filter(Boolean)
+					show(`Downloaded scoring.json — ${carried.join(", ")}. Drop it on this page anywhere to load it back.`)
+				}}
+				onLoadFile={loadFile}
+				onPicker={registerPicker}
 				onReject={m => show(m, true)}
 			/>
 
@@ -257,6 +455,9 @@ export const App = () => {
 					leagueKey={key}
 					league={league ?? null}
 					canImport={getMode() !== "static"}
+					preset={preset?.label ?? null}
+					onUsePreset={preset ? () => void create(preset.key) : undefined}
+					onLoadFile={() => openPicker.current?.()}
 					onOpenSetup={view === "league" ? undefined : () => setView("league")}
 				/>
 			)}
@@ -269,6 +470,72 @@ export const App = () => {
 					league={league}
 					onOpenSetup={view === "league" ? undefined : () => setView("league")}
 				/>
+			)}
+
+			{/* A preset ranks immediately, which is the point of it and also the risk:
+			    a board that works looks like a board that is right. This says whose
+			    numbers it is working from, on every tab, until they are checked. */}
+			{league && isPreset(league) && key && (
+				<PresetNote
+					league={league}
+					onOpenSetup={view === "league" ? undefined : () => setView("league")}
+					onChecked={() =>
+						void run(async () => {
+							if (
+								!confirm(
+									`Confirm that these values match ${league.meta.league_name ?? key}'s own ` +
+										`settings page? Nothing was read from your league, so this records ` +
+										`that you checked them by hand — it does not make them verified.`
+								)
+							)
+								return
+							const on = new Date().toISOString().slice(0, 10)
+							const platform = league.meta.platform
+							// The preset marker goes, so the notice ends; `verified` does not,
+							// because nothing was read off the league and only an import can
+							// change that. What replaces the preset's "check this" list is one
+							// line saying where the values came from and who vouched for them.
+							adopt(
+								leagues.save(key, {
+									...league,
+									provenance: {
+										...league.provenance,
+										method: `manual entry: started from the ${platform} preset, then checked by hand against the league's own settings page on ${on}`
+									},
+									needs_review: [
+										`These values were started from the ${platform} preset and confirmed by hand on ${on}. Nothing was read from this league's own pages, so it stays unverified — importing the league is the only route that changes that.`
+									]
+								}),
+								key
+							)
+							show("Recorded as checked by hand — the values are yours now")
+						})
+					}
+				/>
+			)}
+
+			{/* The demo league CAN rank, so the Setup card above stays hidden for a
+			    first-time visitor — which left the routes to their own league named
+			    nowhere at all: the toolbar has a New button, a Download button and a
+			    URL field, and nothing that says which of them is for a Yahoo user.
+			    This is the same list, on the tab they are sent to. */}
+			{!loadError && !loading && ready && view === "league" && key === EXAMPLE_LEAGUE_KEY && (
+				<div className="grid">
+					<section className="card full">
+						<h2>Use your own league</h2>
+						<p className="sub">
+							Everything below is {league?.meta.team_name ?? "somebody else's team"}&rsquo;s.
+							Any of these replaces it.
+						</p>
+						<WaysIn
+							canImport={getMode() !== "static"}
+							preset={preset?.label ?? null}
+							league={league ?? null}
+							onUsePreset={preset ? () => void create(preset.key) : undefined}
+							onLoadFile={() => openPicker.current?.()}
+						/>
+					</section>
+				</div>
 			)}
 
 			{view === "board" ?
@@ -426,12 +693,14 @@ const Toolbar = ({
 	view,
 	manage,
 	activeKey,
+	templates,
 	onSelect,
 	onImport,
 	onCreate,
 	onRemove,
 	onDownload,
 	onLoadFile,
+	onPicker,
 	onReject
 }: {
 	config: Config | null
@@ -440,17 +709,37 @@ const Toolbar = ({
 	/** Whether the create/remove/import/file controls are on screen at all. */
 	manage: boolean
 	activeKey: string | null
+	/** Read from scoring.json, so the picker cannot offer a template the data
+	 *  does not ship. */
+	templates: TemplateOption[]
 	onSelect: (key: string) => void
 	onImport: (url: string) => void
-	onCreate: (key: string, template: string) => void
+	onCreate: (template: string) => void
 	onRemove: (key: string) => void
 	onDownload: () => void
 	onLoadFile: (file: File) => void
+	/** Hands the file input's opener up, so the Setup card can offer the same
+	 *  route without a second `<input type=file>` to keep in step. */
+	onPicker: (open: () => void) => void
 	onReject: (message: string) => void
 }) => {
 	const [url, setUrl] = useState("")
-	const [template, setTemplate] = useState("custom")
+	/**
+	 * The ready-made one leads: it is the only option that ends in a ranked board
+	 * without further typing, and it was not offered at all before.
+	 *
+	 * Null until somebody actually picks, rather than seeded with a default. The
+	 * first render happens while the store is still being read, so `templates` is
+	 * empty then — a `useState` initialiser would have frozen the fallback in, and
+	 * did: it left "a blank league" selected on every load, which is the option that
+	 * ranks nothing.
+	 */
+	const [chosen, setChosen] = useState<string | null>(null)
+	const template = chosen ?? templates.find(t => t.filled)?.key ?? "custom"
 	const picker = useRef<HTMLInputElement>(null)
+	useEffect(() => {
+		onPicker(() => picker.current?.click())
+	}, [onPicker])
 	const keys = Object.keys(config?.leagues ?? {})
 	// the same control means different things per view, so it says which
 	const label = LEAGUE_LABEL[view]
@@ -496,21 +785,22 @@ const Toolbar = ({
 						id="tpl"
 						value={template}
 						aria-label="Start a league from"
-						onChange={e => setTemplate(e.currentTarget.value)}
+						onChange={e => setChosen(e.currentTarget.value)}
 					>
-						{TEMPLATES.map(t => (
-							<option key={t} value={t}>
-								{t === "custom" ? "a blank template" : `a ${t} template`}
+						{templates.map(t => (
+							<option key={t.key} value={t.key}>
+								{t.label}
 							</option>
 						))}
 					</select>
 				</label>
 				<button
-					title="Start an empty league you fill in yourself — no values are invented"
-					onClick={() => {
-						const k = prompt(`Key for the new ${template} league (e.g. "${template}:12345"):`, `${template}:`)
-						if (k?.trim()) onCreate(k.trim(), template)
-					}}
+					title={
+						templates.find(t => t.key === template)?.filled ?
+							"Start from standard values you then check against your own league — nothing here was read from it"
+						:	"Start an empty league you fill in yourself — no values are invented"
+					}
+					onClick={() => onCreate(template)}
 				>
 					New
 				</button>
@@ -524,13 +814,13 @@ const Toolbar = ({
 				</button>
 				<button
 					disabled={!keys.length}
-					title="Download every league in this browser as a scoring.json"
+					title="Take every league in this browser out as one scoring.json — plus your roster and the seats it was read in — and load it into any other browser"
 					onClick={onDownload}
 				>
 					Download
 				</button>
 				<button
-					title="Replace the leagues in this browser with a scoring.json file"
+					title="Replace the leagues in this browser with a scoring.json file — the one the local importer writes, or one downloaded here. Dropping it anywhere on the page does the same."
 					onClick={() => picker.current?.click()}
 				>
 					Load file
@@ -545,16 +835,10 @@ const Toolbar = ({
 						const chosen = e.currentTarget.files?.[0]
 						// picking the same file twice has to fire again, so clear it either way
 						e.currentTarget.value = ""
-						if (!chosen) return
-						// the file replaces the store outright, so say what is about to go
-						if (
-							keys.length &&
-							!confirm(
-								`Replace the ${keys.length} league${keys.length === 1 ? "" : "s"} in this browser with ${chosen.name}?`
-							)
-						)
-							return
-						onLoadFile(chosen)
+						// The confirm moved to the one loader in App: a dropped file and a
+						// picked one have to warn identically, and two copies of that check
+						// is one copy too many to keep in step.
+						if (chosen) onLoadFile(chosen)
 					}}
 				/>
 			</div>
@@ -573,7 +857,7 @@ const Toolbar = ({
 						type="text"
 						value={url}
 						onChange={e => setUrl(e.currentTarget.value)}
-						placeholder="Paste a Yahoo, ESPN, or Sleeper league URL…"
+						placeholder="Paste a Yahoo or ESPN league URL…"
 						aria-label="Import a league from its URL"
 					/>
 				</label>

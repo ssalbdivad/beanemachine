@@ -202,5 +202,33 @@ t("every gain is the difference the lineup actually makes",
 t("the advice does not depend on the order the roster arrives in",
 	advise([...bats].reverse(), board).pick.player.player.id === withoutC.pick.player.player.id)
 
+// --- what this tab is worth, against the tab next to it ---
+//
+// The Draft tab is one of four permanent tabs and is useful for a few days a year,
+// so what it says that the Recommendations board does not is measured rather than
+// asserted in prose. Draft.tsx now tells the reader the first half of this out
+// loud, and that sentence has to keep being true.
+const bscoreOrder = pool.filter(r => r.rateable).sort((a, b) => b.bscore - a.bscore)
+const fresh = advise([], [])
+const freshTop = [fresh.pick, ...fresh.alternatives].filter(Boolean)
+const boardTop = new Set(bscoreOrder.slice(0, freshTop.length).map(key))
+t("with nothing marked, the draft's order IS the board's — a gain against an empty roster is just his value",
+	freshTop.every(c => boardTop.has(key(c.player))),
+	`${freshTop.filter(c => boardTop.has(key(c.player))).length} of ${freshTop.length} shared`)
+// and the divergence, which is the whole reason the tab exists
+const fiveOF = bscoreOrder.filter(r => r.slots.includes("OF")).slice(0, 5)
+const stuffedOF = advise(fiveOF, [])
+const stuffedTop = [stuffedOF.pick, ...stuffedOF.alternatives].filter(Boolean)
+t("fill the outfield and outfielders leave the top of the list entirely",
+	stuffedTop.filter(c => c.at === "OF").length === 0 &&
+		freshTop.some(c => c.at === "OF"),
+	`${stuffedTop.filter(c => c.at === "OF").length} OF left, from ${freshTop.filter(c => c.at === "OF").length}`)
+// The cliff table has no counterpart on the board at all: it prices WAITING per
+// slot, and the board ranks players. A flat table would be one worth cutting.
+const drops = fresh.cliffs.filter(c => c.cliff !== null).map(c => c.cliff)
+t("the cliff table separates the slots that punish waiting from the ones that don't",
+	drops.length > 4 && Math.max(...drops) > 5 * Math.min(...drops),
+	`min ${Math.min(...drops).toFixed(2)}, max ${Math.max(...drops).toFixed(2)} over ${drops.length} slots`)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

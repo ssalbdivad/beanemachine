@@ -275,6 +275,25 @@ export const Draft = ({ snapshot, league, leagueKey, error }: DraftProps) => {
 					left — once your outfield is full another outfielder is worth nothing, and this
 					says so. Priced over the rest of the season against the players still available.
 				</p>
+				{/*
+				 * What this tab is worth, stated rather than implied.
+				 *
+				 * Measured 2026-09-04 on the shipped league (10 teams, 27 seats): with
+				 * nothing marked, this page's top 7 ARE the board's top 7, in the same
+				 * order — a marginal gain against an empty roster is just the board's own
+				 * ranking. Fill the outfield and 0 of the top 5 are outfielders, and the
+				 * overlap with the board falls to 5 of 7. So the tab earns its place
+				 * exactly as far as you tell it what has gone, and a reader who has marked
+				 * nothing should be told he is looking at the board.
+				 */}
+				{gone.length === 0 && owned.length === 0 && (
+					<p className="tiny-note">
+						Nothing is marked yet, so this is the same order the{" "}
+						<b>Recommendations</b> board is in — a gain measured against an empty roster
+						is just each man&rsquo;s own value. It starts to differ as you mark picks:
+						fill your outfield and outfielders leave the top of this list entirely.
+					</p>
+				)}
 				{storeError && (
 					<div className="draft-store-error">
 						<ul className="notes warn">

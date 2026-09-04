@@ -1,7 +1,7 @@
 // Where a streaming week ends. Pure date arithmetic plus window counting, so this
 // suite needs no network and no snapshot — which is the point: the rule about what a
 // league's week IS should be pinned somewhere nothing else can move it.
-import { resolvePeriod, windowFrom, datesBetween } from "../src/engine/period.ts"
+import { resolvePeriod, windowFrom, datesBetween, withinDays } from "../src/engine/period.ts"
 
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
@@ -139,6 +139,76 @@ t("a window that starts after it ends counts nothing rather than everything",
   t("an unannounced game contributes no start opponent",
     !w.startOpponents.has(999) && w.startOpponents.size === 3,
     JSON.stringify([...w.startOpponents.keys()]))
+}
+
+// --- the reader's own horizon -------------------------------------------------
+//
+// "Which starters are pitching over the next three days" is the most common
+// question in the game and the period alone cannot express it. `withinDays` is the
+// SAME control with a nearer far edge: one inclusive window, so everything
+// downstream still takes a start and an end and cannot tell which produced them.
+{
+  // the Monday-anchored period holding Wednesday runs Aug 31 - Sep 6; from Wednesday
+  // the actionable window is Sep 2 - Sep 6, five dates
+  const p = resolvePeriod(lg(WEEK), WED, FAR)
+  const three = withinDays(p, 3, FAR)
+  t("a three-day window is three dates counted from the window's own start",
+    three.start === WED && three.end === "2026-09-04" && datesBetween(three.start, three.end) === 3,
+    `${three.start} → ${three.end}`)
+  t("and it names itself by its length rather than by the period it came out of",
+    three.kind === "days" && three.basis.startsWith("3 days, 2026-09-02 to 2026-09-04"), three.basis)
+  t("a day count shorter than the period says nothing about running past it",
+    three.basis.includes("runs past") === false, three.basis)
+
+  // the period's own end is Sep 6; asking for seven days from Sep 2 reaches Sep 8
+  const seven = withinDays(p, 7, FAR)
+  t("a window longer than the period is answered at the length asked for, not clamped",
+    seven.end === "2026-09-08" && datesBetween(seven.start, seven.end) === 7,
+    `${seven.start} → ${seven.end}`)
+  t("but it says the games past the reset score for the next matchup, because they do",
+    seven.basis.includes("runs past 2026-09-06") && seven.basis.includes("next matchup"),
+    seven.basis)
+  t("the period's own end survives the day count, so the board can still name it",
+    seven.periodEnd === "2026-09-06")
+
+  // a one-day window is a legitimate question (a daily-lineup league, or "who
+  // pitches tonight"), and one date is one day
+  const one = withinDays(p, 1, FAR)
+  t("a one-day window is the single date it starts on",
+    one.start === WED && one.end === WED && datesBetween(one.start, one.end) === 1)
+
+  // a snapshot cannot answer about games it never captured, and a day count must
+  // not manufacture them
+  const short = withinDays(p, 7, "2026-09-05")
+  t("a day count is clipped to the games actually captured, and says it was clipped",
+    short.end === "2026-09-05" && short.clipped === true && short.basis.includes("clipped to 2026-09-05"),
+    short.basis)
+
+  // a locked lineup means this period cannot be acted on: the day count then has to
+  // run from the period the reader CAN act on, not from a date he cannot touch
+  const locked = resolvePeriod(lg({ ...WEEK, lineup_lock: "period" }), WED, FAR)
+  const lockedThree = withinDays(locked, 3, FAR)
+  t("with lineups locked, a three-day window counts the first three days he can act on",
+    lockedThree.start === "2026-09-07" && lockedThree.end === "2026-09-09",
+    `${lockedThree.start} → ${lockedThree.end}`)
+
+  // a rolling fallback's `assumed` was a claim about the WINDOW — seven days,
+  // because the league never said — and the reader has just replaced that window
+  // with one he chose. What is left is a start date of today, which assumes nothing.
+  const rolling = withinDays(resolvePeriod(lg(null), WED, FAR), 3, FAR)
+  t("choosing a window drops the rolling fallback's assumption, because it replaced it",
+    rolling.assumed === false && rolling.basis.includes("has not said") === false, rolling.basis)
+  const stillAssumed = withinDays(resolvePeriod(lg({ ...WEEK, starts_on: null }), WED, FAR), 3, FAR)
+  t("but a period whose START is assumed keeps saying so, because the count begins there",
+    stillAssumed.assumed === true, JSON.stringify(stillAssumed))
+
+  // the whole point of one control rather than two: the counting code cannot tell
+  // which kind of window it was handed
+  const wPeriod = windowFrom(slate, p.start, p.end)
+  const wDays = windowFrom(slate, three.start, three.end)
+  t("windowFrom counts a chosen window exactly as it counts a period",
+    wDays.games.get(1) === 2 && wDays.games.get(2) === 2 && wPeriod.games.get(1) === 2,
+    JSON.stringify([...wDays.games]))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

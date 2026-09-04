@@ -68,6 +68,78 @@ for (const s of blank) {
     s.league.meta.max_teams === null, String(s.league.meta.max_teams))
 }
 
+// ── Presets: a template that DOES ship values ───────────────────────────────────
+// Every platform template used to be blank — 0 stats, 0 slots, no team count — so
+// "new league from a yahoo template" created a league that could rank nothing, and
+// the feature was decoration. A template that ships values fixes that and buys a
+// new way to lie: values that look like they were read from YOUR league.
+//
+// The rule this suite enforces is the one the rest of the project already follows
+// for `resolvePeriod`'s Monday fallback — an assumption is allowed as long as the
+// thing states it. So a template carrying values must be unverified, must mark
+// itself with the marker the UI matches on (PRESET_METHOD in src/client/panels.tsx,
+// checked against this file below), must name where its numbers came from, and must
+// list what to check. Sections 3 and 4 then run the whole engine over it, so a
+// preset that says the right things and ranks nothing still fails.
+const PRESET_METHOD = "preset:"
+const presets = shipped.filter(s => s.kind === "template" && categories(s.league) > 0)
+t("some template ships real values, so a new league can rank without an import",
+  presets.length > 0,
+  "every platform_template is blank: 'new league' cannot produce a board")
+for (const s of presets) {
+  const { provenance, needs_review } = s.league
+  t(`preset "${s.key}" does not claim to have been read from your league`,
+    provenance.verified === false, JSON.stringify(provenance))
+  t(`preset "${s.key}" marks itself a preset, which is what the UI's notice keys on`,
+    provenance.method.startsWith(PRESET_METHOD), provenance.method)
+  t(`preset "${s.key}" names the league its numbers were actually read from`,
+    /\b\d{4,}\b/.test(provenance.method) && provenance.sources.length > 0,
+    provenance.method)
+  t(`preset "${s.key}" tells the user which values to check against their own league`,
+    needs_review.length >= 3 &&
+      needs_review.some(n => /point value/i.test(n)) &&
+      needs_review.some(n => /team/i.test(n)) &&
+      needs_review.some(n => /roster|slot/i.test(n)),
+    JSON.stringify(needs_review))
+  // A preset that carried an identity would be a stranger's league wearing your
+  // name: the values are borrowed on purpose, the league is not.
+  t(`preset "${s.key}" carries no league id, team id or team name`,
+    s.league.meta.league_id === null && s.league.meta.team_id === null &&
+      s.league.meta.team_name === null,
+    JSON.stringify(s.league.meta))
+}
+
+// The marker is a contract between the data and the UI: scoring.json writes it,
+// src/client/panels.tsx matches on it to decide whether to show the "these are not
+// your league's values" notice. Asserted from both ends, because a typo in either
+// would silently drop the notice and leave a borrowed board looking verified.
+t("the preset marker in scoring.json is the one panels.tsx matches on",
+  readFileSync("src/client/panels.tsx", "utf8").includes(`export const PRESET_METHOD = "${PRESET_METHOD}"`),
+  PRESET_METHOD)
+
+// The one command a Yahoo user is told to run, asserted across the two files that
+// say it. The page prints it (IMPORT_COMMAND in panels.tsx) and the tool prints it
+// for itself (RUN in src/cli.ts); the instruction they used to give was
+// `nub src/cli.ts <url>`, and `nub` is not installed on a machine that just cloned
+// this repo — so the single instruction the one required tool gave was a command
+// that does not exist. Both ends are checked, because a page telling you to run
+// something the tool does not answer to is the same failure again.
+const panelsSrc = readFileSync("src/client/panels.tsx", "utf8")
+const cliSrc = readFileSync("src/cli.ts", "utf8")
+t("the page and the CLI name the same runner, and it is not `nub`",
+  /export const IMPORT_COMMAND = "node --experimental-strip-types src\/cli\.ts /.test(panelsSrc) &&
+    cliSrc.includes("`node --experimental-strip-types ${SELF}`") &&
+    !/\bnub\b/.test(panelsSrc),
+  panelsSrc.match(/export const IMPORT_COMMAND = .*/)?.[0] ?? "IMPORT_COMMAND not found")
+
+// Sleeper runs no fantasy baseball: src/import.ts refuses a Sleeper URL by name and
+// cites the check — `/v1/state/mlb` names no season, so no MLB league can exist there. Offering it as a league
+// type in a baseball app is a dead end with a button on it, so it is gone from the
+// choices. This is the assertion that keeps it gone.
+t("no template offers a platform that runs no fantasy baseball",
+  !("sleeper" in cfg.platform_templates),
+  Object.keys(cfg.platform_templates).join(","))
+
 // rateAll refuses to default the team count, so a preset that doesn't state one
 // cannot be rated at all — that is a property of the preset, asserted not assumed.
 const rateable = scored.filter(s => s.league.meta.max_teams !== null)
@@ -168,27 +240,47 @@ if (reference !== null) {
     rq.every(x => x.projected.unscoreable.includes("QS") && !("QS" in x.projected.breakdown)),
     JSON.stringify(rq[0].projected.unscoreable))
 
-  // 6. Two presets must not rank the same board. Identical rankings from different
-  // league types mean the scoring never reached the ranking.
-  const rankings = rateable.map(s => ({
-    key: s.key,
-    top: rate(s.league, s.league.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
-  }))
-  // Only one scored league ships, and that is deliberate rather than an oversight:
-// this project refuses to write a scoring table it did not read from a real league,
-// so the platform templates carry roster shape only and you supply the values by
-// importing your league. The invariant worth asserting is therefore about the
-// ENGINE — that two different tables really do produce different orderings, which
-// assertion 6 covers against a derived table — plus the fact that every league that
-// DOES carry scoring works end to end. This line records the coverage honestly so
-// the gap stays visible instead of being quietly asserted away.
-console.log(
-  `  NOTE  ${scored.length} shipped league(s) carry scoring; ` +
-    `${blank.length} template(s) ship roster shape only and need an import to rank`
-)
-t("at least one shipped league carries real scoring and ranks",
-  scored.length >= 1,
-  `${scored.length} scored`)
+  // 6. What a preset's numbers actually are.
+  //
+  // This used to build a `rankings` array and then assert nothing with it, under a
+  // comment explaining that only one scored league shipped so there was nothing to
+  // compare. Two now ship — and the second is a deliberate COPY of the first, which
+  // is the only way to put values in front of a Yahoo user without inventing any.
+  // So the assertion is the copy itself: every point value in a preset must be
+  // findable, unchanged, in a league this repo read from source. A value that
+  // drifted from its source is a value somebody typed, and typing one here is
+  // exactly what the project forbids.
+  for (const s of presets) {
+    const from = Object.values(cfg.leagues).find(
+      l => JSON.stringify(l.scoring.batting) === JSON.stringify(s.league.scoring.batting) &&
+        JSON.stringify(l.scoring.pitching) === JSON.stringify(s.league.scoring.pitching))
+    t(`preset "${s.key}" carries a scoring table this repo read from a real league`,
+      from !== undefined && from.provenance.verified === true,
+      `${JSON.stringify(s.league.scoring)} matches no verified league in scoring.json`)
+    if (from) {
+      // Same table, same slots, same team count — so the ordering must match too.
+      // If it did not, something between the config and the board would be reading
+      // the preset differently from the league it was copied from.
+      const a = rate(from, from.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
+      const b = rate(s.league, s.league.meta.max_teams).slice(0, 25).map(x => x.player.name).join(",")
+      t(`and it ranks exactly as that league does, which is what a copy means`, a === b,
+        `${a.split(",")[0]} vs ${b.split(",")[0]}`)
+      t(`and it copies that league's roster too, so replacement depth matches`,
+        JSON.stringify(from.roster.slots) === JSON.stringify(s.league.roster.slots) &&
+          from.meta.max_teams === s.league.meta.max_teams,
+        `${JSON.stringify(s.league.roster.slots)} vs ${JSON.stringify(from.roster.slots)}`)
+    }
+  }
+
+  // Coverage, recorded rather than asserted away: how much of what ships can rank.
+  console.log(
+    `  NOTE  ${scored.length} of ${shipped.length} shipped configs carry scoring ` +
+      `(${scored.map(x => x.key).join(", ")}); ${blank.length} blank ` +
+      `(${blank.map(x => x.key).join(", ") || "none"})`
+  )
+  t("at least one shipped league carries real scoring and ranks",
+    scored.length >= 1,
+    `${scored.length} scored`)
 
   // The control for the check above: the same comparison against a scoring table
   // built here, so a failure there can be pinned on what ships rather than on the
@@ -408,25 +500,50 @@ try {
 // endpoint the importer uses:
 //
 //   ESPN     lm-api-reads.fantasy.espn.com     access-control-allow-origin: https://beanemachine.com
-//   Sleeper  api.sleeper.app                   access-control-allow-origin: *
 //   Yahoo    baseball.fantasysports.yahoo.com  no access-control headers at all
 //
-// That table is the whole reason the hosted build can now import a league, so it is
-// asserted rather than left as a comment. It is a claim about the PLATFORMS, not
+// That table is the whole reason the hosted build can import a league at all, so it
+// is asserted rather than left as a comment. It is a claim about the PLATFORMS, not
 // about this code, and it is the client's only input for deciding whether to read a
 // league itself or hand the URL to the server — get it wrong in either direction and
 // the hosted build either lies about what it can do or fires a doomed cross-origin
-// request. test/static.mjs proves the ESPN and Sleeper halves against the live APIs.
-t("ESPN and Sleeper are readable from a page; Yahoo, which sends no CORS headers, is not",
-  readableInBrowser("espn") && readableInBrowser("sleeper") && !readableInBrowser("yahoo"),
-  ["espn", "sleeper", "yahoo"].map(x => `${x}:${readableInBrowser(x)}`).join(" "))
+// request. test/static.mjs proves the ESPN half against the live API.
+//
+// Sleeper WAS on this list, answering `access-control-allow-origin: *`, and it is
+// gone — not because the header changed but because CORS was never the question:
+// Sleeper runs no fantasy baseball (`/v1/state/mlb` names no season), so a readable
+// Sleeper league is another sport's league whose scoring this engine cannot use.
+// This assertion used to say Sleeper was readable, which was true and useless; it
+// now says Sleeper is refused, which is the fact that matters to a baseball user.
+t("ESPN is readable from a page; Yahoo, which sends no CORS headers, is not",
+  readableInBrowser("espn") && !readableInBrowser("yahoo"),
+  ["espn", "yahoo"].map(x => `${x}:${readableInBrowser(x)}`).join(" "))
+t("and Sleeper is not readable either, because there is no baseball league to read",
+  !readableInBrowser("sleeper"), String(readableInBrowser("sleeper")))
 t("and a platform nobody has taught it about is not assumed readable either",
   !readableInBrowser("fleaflicker") && !readableInBrowser(""))
+
+// A Sleeper URL is a URL the user did not get wrong, so the refusal has to be about
+// baseball rather than about the URL. That distinction is the difference between
+// "you typed something odd" and "this platform cannot help you", and only one of
+// them tells a Sleeper user what to do next.
+const sleeperRefusal = (() => {
+  try { detect("https://sleeper.com/leagues/289646328504385536"); return null }
+  catch (e) { return e.message }
+})()
+t("a Sleeper URL is refused by name, citing baseball rather than the URL",
+  sleeperRefusal !== null && /fantasy baseball/i.test(sleeperRefusal) &&
+    !/unrecognized/i.test(sleeperRefusal),
+  String(sleeperRefusal))
+t("and the refusal points at the platforms that do run baseball leagues",
+  /yahoo/i.test(sleeperRefusal ?? "") && /espn/i.test(sleeperRefusal ?? ""),
+  String(sleeperRefusal))
 
 // The URL form, which is what the client actually holds when the user hits Import.
 const URLS = {
   "https://fantasy.espn.com/baseball/league?leagueId=81134470&seasonId=2021": true,
-  "https://sleeper.com/leagues/289646328504385536": true,
+  // refused outright now, so not importable from a page or anywhere else
+  "https://sleeper.com/leagues/289646328504385536": false,
   "https://baseball.fantasysports.yahoo.com/b1/228947/8": false,
   // not a league URL at all: not browser-importable, and `detect` is what gets to
   // say why — naming Yahoo for this would be a lie about a URL that names no platform

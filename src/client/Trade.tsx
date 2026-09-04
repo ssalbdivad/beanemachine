@@ -153,21 +153,15 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	const leagueId = league?.meta.league_id ?? null
 	const teamId = league?.meta.team_id ?? null
 	const platform = league?.meta.platform ?? "yahoo"
-	const platformName =
-		platform === "espn" ? "ESPN"
-		: platform === "sleeper" ? "Sleeper"
-		: "Yahoo"
+	const platformName = platform === "espn" ? "ESPN" : "Yahoo"
 	/**
 	 * Which team in the league is yours, when the league URL never said.
 	 *
 	 * Yahoo puts the team number in the URL you pasted and ESPN puts it in
-	 * `teamId=`, so for those `team_id` is usually already known. A Sleeper league
-	 * URL names the league and nothing else — Sleeper keys a team by `roster_id`,
-	 * the small 1..N it shows beside your team, and ownership by an 18-digit
-	 * account id that appears nowhere in any URL. So it cannot be derived and has
-	 * to be asked for. It used to be neither: this whole card was hidden unless
-	 * `team_id` existed, which on Sleeper meant the button could never appear at
-	 * all, and on an ESPN URL without `teamId=` meant the same.
+	 * `teamId=`, so `team_id` is usually already known — but an ESPN league URL
+	 * without `teamId=` is common, and this card used to be hidden outright unless
+	 * `team_id` existed, which meant those users could never reach the button at
+	 * all. So where the URL did not say, it is ASKED for rather than guessed.
 	 */
 	const [teamEntry, setTeamEntry] = useState("")
 	const readTeamId = teamId ?? (teamEntry.trim() || null)
@@ -366,6 +360,10 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		)
 
 	const held = new Set(owned)
+	/** Men this capture could not project. Named in the fold's summary because a
+	 *  roster whose count looks right while two of it are unpriceable is the one
+	 *  thing a collapsed list could hide. */
+	const unrateable = mine.filter(r => !r.rateable).length
 	const lineup = startingLineup(league, mine, bars)
 	/** Who your lineup actually starts. The Verdict already reduces over this to
 	 *  say a departing bench man cost nothing; the deal side says it beforehand,
@@ -425,8 +423,9 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			<section className="card full trade-team">
 				<h2>My team</h2>
 				<p className="sub">
-					Who you own in {league.meta.league_name ?? leagueKey}, with each man&rsquo;s bscore
-					and then his projected points. Saved in this browser, per league.
+					Who you own in {league.meta.league_name ?? leagueKey}. Read it off the platform
+					or add men by name; either way it is saved in this browser, per league, and
+					everything below is priced against it.
 				</p>
 				{storeError && (
 					<div className="trade-store-error">
@@ -457,20 +456,16 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				{leagueId && (
 					<div className="pull-roster">
 						{/* The league says which team is yours only when its URL carried one.
-						    Where it did not, ASK — hiding the button left Sleeper users with
-						    no way to reach this at all. */}
+						    Where it did not, ASK — hiding the button left every ESPN user whose
+						    URL had no `teamId=` with no way to reach this at all. */}
 						{!teamId && (
 							<label className="ctl">
-								<span>
-									{platform === "sleeper" ?
-										"Your roster number in this league"
-									:	"Your team number in this league"}
-								</span>
+								<span>Your team number in this league</span>
 								<input
 									type="text"
 									data-ctl="read-team-id"
 									value={teamEntry}
-									placeholder={platform === "sleeper" ? "1" : "8"}
+									placeholder="8"
 									onChange={e => setTeamEntry(e.currentTarget.value)}
 								/>
 							</label>
@@ -490,12 +485,8 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						<span className="sub">
 							{pullNote ??
 								(!readTeamId ?
-									platform === "sleeper" ?
-										`Sleeper's league URL doesn't say which team is yours. Its roster number is the ` +
-										`small one beside your team. Sleeper runs no fantasy baseball, so a Sleeper ` +
-										`league will say what sport it is rather than hand back the wrong players.`
-									:	`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
-										`number to read it.`
+									`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
+									`number to read it.`
 								:	"Only publicly-viewable leagues can be read without signing in.")}
 						</span>
 					</div>
@@ -545,20 +536,40 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						)}
 					</div>
 				)}
+				{/*
+				 * FOLDED, not cut. Measured 2026-09-04 on the shipped league (24 players,
+				 * 1280x1000): this list was 899px of an 3487px page, and every one of the
+				 * 24 men in it is shown again — in the seat he actually holds — by
+				 * "Your starting lineup" directly below. A flat copy of a list the next
+				 * card arranges is the least informative 900px on the page, and it was
+				 * pushing the one card that RECOMMENDS something to y=1912.
+				 *
+				 * It is still all here and one click away, because it is the only place a
+				 * man can be removed by hand, and the summary carries the two counts the
+				 * reader would otherwise have to open it to get.
+				 */}
 				<div className="trade-owned">
 					{mine.length ?
-						mine
-							.slice()
-							.sort((a, b) => b.points - a.points)
-							.map(r => (
-								<Line
-									key={rosterKey(r.player)}
-									r={r}
-									className="trade-own"
-									action="Remove"
-									onAction={() => persist(() => store.remove(leagueKey, rosterKey(r.player)))}
-								/>
-							))
+						<details className="trade-owned-fold">
+							{/* One line. The disclosure triangle already says it opens; a summary
+							    that wrapped to two rows was spending the height the fold saved. */}
+							<summary>
+								{mine.length} player{mine.length === 1 ? "" : "s"} on this team
+								{unrateable > 0 && ` · ${unrateable} with no projection`}
+							</summary>
+							{mine
+								.slice()
+								.sort((a, b) => b.points - a.points)
+								.map(r => (
+									<Line
+										key={rosterKey(r.player)}
+										r={r}
+										className="trade-own"
+										action="Remove"
+										onAction={() => persist(() => store.remove(leagueKey, rosterKey(r.player)))}
+									/>
+								))}
+						</details>
 					:	<p className="empty">
 							No players yet. Search above and add the ones you own — every number on
 							this page is about your slots, so there is nothing to say until it knows
@@ -578,8 +589,18 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				)}
 			</section>
 
-			<LineupCard league={league} lineup={lineup} count={mine.length} barMen={barMen} />
+			{/*
+			 * The recommendation comes BEFORE the lineup, and both come before the deal.
+			 *
+			 * This is the only card on the page that proposes something rather than
+			 * pricing something you proposed, and it was third. Measured 2026-09-04 on
+			 * the shipped league at 1280x1000 it opened at y=1912 — below two screens of
+			 * a roster you already knew and a lineup you could see on Yahoo — while the
+			 * page's own answer ("+33.71 Grant Taylor for Randy Vásquez") sat there.
+			 * Ordered by what each card answers without being asked, it goes first.
+			 */}
 			<AdviceCard advice={advice} seats={seats} pool={pool} platform={league.meta.platform ?? null} />
+			<LineupCard league={league} lineup={lineup} count={mine.length} barMen={barMen} />
 
 			{/* The two sides are symmetric now. The right has always been a search box;
 			    the left was every player you own rendered at once — 24 name-only chips

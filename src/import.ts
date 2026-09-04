@@ -21,8 +21,8 @@ export const IN_BROWSER =
 /**
  * `user-agent` on a cross-origin fetch, but only where sending one means anything.
  *
- * A page IS allowed to set it (it stopped being a forbidden header name), and both
- * ESPN and Sleeper answer a preflight for it — measured 2026-09-04, each replying
+ * A page IS allowed to set it (it stopped being a forbidden header name), and ESPN
+ * answers a preflight for it — measured 2026-09-04, replying
  * `access-control-allow-headers: … user-agent`. But setting it makes the request
  * non-simple, so every read costs an extra OPTIONS round trip and depends on a
  * second response staying the way it is. The plain GET is what was measured working
@@ -33,6 +33,40 @@ export const agentHeaders = (ua: string): Record<string, string> =>
 
 /** Thrown for conditions the user can act on; surfaced verbatim in the UI. */
 export class ImportError extends Error {}
+
+/**
+ * Why a Sleeper league URL is refused outright rather than imported.
+ *
+ * Sleeper does not run fantasy baseball, verified four independent ways and
+ * re-measured 2026-09-04:
+ *
+ *   1. Sleeper's support centre lists the sports its leagues play; baseball is absent.
+ *   2. Its API docs document one sport value, `nfl`.
+ *   3. `/v1/state/mlb` answers `{week, season, season_type, previous_season,
+ *      season_start_date, display_week, season_has_scores}` and NOTHING else, while
+ *      `/v1/state/nfl` and `/v1/state/nba` both add `leg`, `league_season` and
+ *      `league_create_season`. There is no season in which a Sleeper MLB league can
+ *      be created, because Sleeper never names one.
+ *   4. `/v1/players/mlb` DOES return 6,379 real players — Sleeper tracks baseball for
+ *      news and props — but `fantasy_positions` is populated on 32 of them and every
+ *      one of those 32 is a club, not a player. It is a betting payload.
+ *
+ * The import used to succeed anyway. Measured 2026-09-04 on Sleeper's OWN documented
+ * example league (289646328504385536), `importSleeper` returned a league with
+ * sport `nfl`, 0 batting stats, 0 pitching stats and roster slots
+ * {QB:1, RB:2, WR:2, TE:1, FLEX:2, DEF:1, BN:6} — and the app then made it ACTIVE.
+ * All four inputs this engine needs to rank anything (scoring.batting,
+ * scoring.pitching, roster.slots, meta.max_teams) were absent or football, and there
+ * is no repair: you cannot hand-enter baseball scoring onto a QB/RB/WR seat chart.
+ * A league you can neither use nor fix is a dead end, so the URL is refused at the
+ * one moment the user can still do something else.
+ */
+const SLEEPER_REFUSAL =
+	"Sleeper doesn't run fantasy baseball — it hosts football, basketball and soccer " +
+	"leagues only, and there is no season in which an MLB league can be created there " +
+	"(`/v1/state/mlb` names none). So a Sleeper league URL can only ever be another " +
+	"sport's league, whose scoring and roster slots this baseball engine cannot use. " +
+	"If your baseball league is on Yahoo or ESPN, paste that URL instead."
 
 const YAHOO_SPORTS = {
 	baseball: "mlb",
@@ -63,7 +97,6 @@ export type Target =
 			teamId: string | null
 			season: number | null
 	  }
-	| { platform: "sleeper"; leagueId: string }
 
 export const detect = (url: string): Target => {
 	const u = url.trim()
@@ -96,12 +129,15 @@ export const detect = (url: string): Target => {
 		}
 	}
 
-	const sleeper = u.match(/sleeper\.(?:app|com)\/leagues?\/(\d+)/)
-	if (sleeper) return { platform: "sleeper", leagueId: sleeper[1]! }
+	// Sleeper URLs are still MATCHED, so the refusal below can name the reason
+	// instead of falling through to "unrecognized" — a Sleeper user who pastes a
+	// real league URL has made no mistake, and telling him the URL is unrecognized
+	// would be a lie about his URL rather than a fact about baseball.
+	if (/sleeper\.(?:app|com)\/leagues?\/\d+/.test(u)) throw new ImportError(SLEEPER_REFUSAL)
 
 	throw new ImportError(
-		"Unrecognized league URL. Supported: Yahoo (*.fantasysports.yahoo.com), " +
-			"ESPN (fantasy.espn.com, needs ?leagueId=), Sleeper (sleeper.com/leagues/…)."
+		"Unrecognized league URL. Supported: Yahoo (*.fantasysports.yahoo.com) and " +
+			"ESPN (fantasy.espn.com, needs ?leagueId=)."
 	)
 }
 
@@ -113,16 +149,20 @@ export const detect = (url: string): Target => {
  *   ESPN     lm-api-reads.fantasy.espn.com  → `access-control-allow-origin:
  *            https://beanemachine.com` (it reflects the origin back), on both the
  *            mSettings read here and the mRoster read in data/rosters.ts.
- *   Sleeper  api.sleeper.app               → `access-control-allow-origin: *`
  *   Yahoo    *.fantasysports.yahoo.com      → NO access-control headers at all
  *
- * So the two JSON platforms import with nothing behind the page, and Yahoo — HTML
- * scraped off pages that send no CORS headers — is the one that cannot. That is not
- * something client code can fix: without an `access-control-allow-origin` the
- * browser will not hand the response body to the script, whatever it contains.
+ * So ESPN imports with nothing behind the page, and Yahoo — HTML scraped off pages
+ * that send no CORS headers — is the one that cannot. That is not something client
+ * code can fix: without an `access-control-allow-origin` the browser will not hand
+ * the response body to the script, whatever it contains.
+ *
+ * Sleeper was the third row of this table and answered `access-control-allow-origin:
+ * *`, which is still true and no longer relevant: a browser being ALLOWED to read a
+ * platform means nothing when that platform hosts no baseball league to read. See
+ * `SLEEPER_REFUSAL`. CORS was never the reason Sleeper failed, which is exactly why
+ * it kept passing a CORS test while shipping a dead end.
  */
-export const readableInBrowser = (platform: string): boolean =>
-	platform === "espn" || platform === "sleeper"
+export const readableInBrowser = (platform: string): boolean => platform === "espn"
 
 /** `readableInBrowser` for a pasted URL, without the throw: an unrecognized URL is
  *  not browser-readable either, and whoever asked gets to decide what that means. */
@@ -582,89 +622,9 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	}
 }
 
-const importSleeper = async (t: Extract<Target, { platform: "sleeper" }>): Promise<League> => {
-	const url = `https://api.sleeper.app/v1/league/${t.leagueId}`
-	const res = await fetch(url, { headers: agentHeaders(USER_AGENT) })
-	if (!res.ok) throw new ImportError(`Sleeper returned HTTP ${res.status}.`)
-	const data = (await res.json()) as Record<string, any> | null
-	if (!data) throw new ImportError(`Sleeper has no league ${t.leagueId}.`)
-
-	const positions: string[] = data.roster_positions ?? []
-	const slots: Record<string, number> = {}
-	for (const p of positions) slots[p] = (slots[p] ?? 0) + 1
-
-	return {
-		meta: {
-			platform: "sleeper",
-			sport: data.sport ?? null,
-			league_id: t.leagueId,
-			league_name: data.name ?? null,
-			league_url: `https://sleeper.com/leagues/${t.leagueId}`,
-			// Sleeper's URL carries the league and nothing else — see needs_review.
-			team_id: null,
-			team_name: null,
-			season: data.season ?? null,
-			scoring_type: data.settings?.type != null ? String(data.settings.type) : null,
-			max_teams: data.total_rosters ?? null
-		},
-		scoring: {
-			unit: "points",
-			batting: {},
-			pitching: {},
-			unmapped: data.scoring_settings ?? {}
-		},
-		roster: {
-			raw: positions.join(", ") || null,
-			slots,
-			slot_order: positions.length ? positions : null,
-			counts: null,
-			slot_accepts: null
-		},
-		eligibility: null,
-		league_rules: { raw_settings: data.settings ?? {} },
-		provenance: {
-			fetched_at: today(),
-			sources: [url],
-			method: "Sleeper v1 league API",
-			verified: false
-		},
-		needs_review: [
-			// Verified 2026-09-03 against Sleeper's own documented example league and its
-			// public state endpoints: Sleeper hosts football, basketball and soccer leagues
-			// and no baseball ones — /v1/state/mlb carries no `league_create_season`, the
-			// field every league-hosting sport has, so there is no season in which an MLB
-			// league can be created. /v1/players/mlb DOES return 6,379 real players, which
-			// makes it a trap rather than an absence: the ids are per-sport namespaces that
-			// collide, so a baseball read of a Sleeper league returns the wrong men.
-			...(data.sport && data.sport !== "mlb" ?
-				[
-					`This is a ${String(data.sport).toUpperCase()} league. Sleeper runs no fantasy ` +
-						"baseball at all, so its scoring and roster shape are that sport's, and its " +
-						"rosters cannot be read into a baseball lineup — a Sleeper player id means a " +
-						"different man in every sport."
-				]
-			:	[]),
-			// The league URL names the league and nothing else. Sleeper identifies a team by
-			// `roster_id`, the small 1..N it shows beside the team, or by an 18-digit account
-			// id; neither appears in any URL, so this cannot be derived and is asked for.
-			"Sleeper's league URL never says which team is yours, so team_id is null. " +
-				"Reading your roster asks for your roster number — the small one Sleeper " +
-				"shows beside your team — rather than guessing at it.",
-			"The scoring period was not read. Sleeper's period grid is NFL-shaped, and " +
-				"there is no Sleeper baseball league anywhere to verify it against, so " +
-				"scoring_period is null and the board ranks a rolling window.",
-			"Sleeper scoring keys are kept raw under scoring.unmapped; split them into " +
-				"batting/pitching against stat_keys before optimizing.",
-			"This endpoint doesn't expose position-eligibility rules; eligibility is null."
-		]
-	}
-}
-
 export const importLeague = async (url: string): Promise<{ key: string; league: League }> => {
 	const target = detect(url)
 	const league =
-		target.platform === "yahoo" ? await importYahoo(target)
-		: target.platform === "espn" ? await importEspn(target)
-		: await importSleeper(target)
+		target.platform === "yahoo" ? await importYahoo(target) : await importEspn(target)
 	return { key: `${target.platform}:${target.leagueId}`, league }
 }

@@ -1,9 +1,12 @@
 // Verifies the GitHub Pages build: no backend, leagues seeded from the committed
 // asset into this browser's storage, editing and saving working exactly as they do
-// with a server behind them, and — measured 2026-09-04 — a real ESPN and a real
-// Sleeper league IMPORTING and their rosters READING with no server at all, because
-// both send CORS headers that let a page read them. Yahoo sends none, so Yahoo is
-// the one thing left that says it needs the server, and it has to say it is Yahoo.
+// with a server behind them, and — measured 2026-09-04 — a real ESPN league
+// IMPORTING and its roster READING with no server at all, because ESPN sends CORS
+// headers that let a page read it. Yahoo sends none, and that is the case this
+// build exists to serve: the last two sections here are a Yahoo user's two routes
+// to a ranked board — the preset, and a file dropped on the page — because before
+// them the hosted site's only honest answers were a stranger's demo league or
+// seventeen point values typed in by hand.
 import { chromium } from "playwright-core"
 // The build's base is relative, so preview serves it at the root and the same
 // artifact would work just as well under /beanemachine/ or at a custom domain's
@@ -47,18 +50,18 @@ await p.click(".views button:nth-child(2)")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
 t("static banner shown", await p.locator(".static-note").isVisible())
 const note = await p.locator(".static-note").textContent()
-// The claim, not the wording. This used to assert that the banner named IMPORTING as
-// the thing the server is for, and that is no longer true: measured 2026-09-04, ESPN
-// reflects the requesting origin and Sleeper answers `*`, so both import on this build
-// with no backend at all (see readableInBrowser in src/import.ts). Yahoo sends no
-// access-control headers and is the only platform left that needs a server. So the
-// banner may still say your leagues live in this browser, and it may still mention the
-// server — but it may not mention the server without naming Yahoo, because a blanket
-// "importing needs the local server" is now false for two platforms out of three and
-// is the single sentence standing between a visitor and using this on their own league.
+// The claim, not the wording. A blanket "importing needs the local server" was the
+// single sentence standing between a visitor and using this on their own league, and
+// it was false for ESPN, which imports here with no backend at all. It is equally
+// false the other way round: a banner that only says the server is needed leaves a
+// Yahoo user — most of this app's users — with nothing to do. So the banner must
+// name Yahoo whenever it raises the server, AND it must name a route that ends
+// somewhere: the preset, or a file carried over from a local read.
 t("the static banner says your leagues live in this browser", /browser/i.test(note), note)
 t("and it does not claim the server is needed to import without naming Yahoo",
   !/server/i.test(note) || /yahoo/i.test(note), note)
+t("and it gives a Yahoo user something they can actually do here",
+  /yahoo/i.test(note) && /(preset|drop)/i.test(note), note)
 const codes = await p.$$eval(".grid section:nth-of-type(1) .code", n=>n.map(e=>e.textContent))
 const vals = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))
 t("scoring seeded from the committed asset", vals[codes.indexOf("HR")]==="10.4", vals.join(","))
@@ -92,18 +95,22 @@ t("the edit survives a reload with no server", kept[codes.indexOf("HR")]==="9.9"
  * endpoint the importer uses:
  *
  *   ESPN     lm-api-reads.fantasy.espn.com  access-control-allow-origin: https://beanemachine.com
- *   Sleeper  api.sleeper.app                access-control-allow-origin: *
  *   Yahoo    baseball.fantasysports.yahoo.com   no access-control headers at all
+ *
+ * Sleeper answered `*` and is no longer on the list: CORS was never why it failed a
+ * baseball user. It runs no fantasy baseball at all, so what it readably returns is
+ * another sport's league. It is refused by name below, and nothing is asked of it.
  *
  * The same reads from `http://127.0.0.1:4173` — this preview's own origin — were
  * checked too, because ESPN reflects whatever origin asks and a wildcard is not
  * what it sends: it answered `access-control-allow-origin: http://127.0.0.1:4173`.
  *
- * Politeness: two requests to ESPN and two to Sleeper per run, both to leagues those
- * projects publish as their own integration-test fixtures — ESPN 81134470/2021 is
- * the id the `espn-api` wrapper uses and the one data/rosters.ts was verified
- * against; Sleeper 289646328504385536 is the league Sleeper's own docs example.
- * No ids are enumerated and no stranger's league is touched.
+ * Politeness: two requests to ESPN per run, to the league that project publishes as
+ * its own integration-test fixture — 81134470/2021 is the id the `espn-api` wrapper
+ * uses and the one data/rosters.ts was verified against. The Sleeper URL below is
+ * Sleeper's own documented example league and is never fetched at all now, because
+ * the refusal happens before any request. No ids are enumerated and no stranger's
+ * league is touched.
  */
 
 /** Toasts dismiss themselves (2.6s for a success, 6.5s for a failure), so the
@@ -153,18 +160,23 @@ t("and the source it cites is ESPN's endpoint, so the provenance is not this ori
   espn?.provenance.sources.every(u => u.startsWith("https://lm-api-reads.fantasy.espn.com/")),
   JSON.stringify(espn?.provenance.sources))
 
-// Sleeper. It answers `*`, so the page reads it too — and what it hands back is an
-// NFL league, which the importer says outright rather than pretending is baseball.
-const sleeperMsg = await importUrl("https://sleeper.com/leagues/289646328504385536", /imported/i)
-t("a Sleeper league imports on the static build too", /^Imported /.test(sleeperMsg.trim()), sleeperMsg)
-t("and that read went straight to Sleeper as well",
-  requested.some(u => u.startsWith("https://api.sleeper.app/")))
-const sleeper = await stored("sleeper:289646328504385536")
-t("and the imported Sleeper league still refuses to pass NFL off as baseball",
-  sleeper !== null && sleeper.meta.league_name === "Sleeper Friends League" &&
-    String(sleeper.meta.season) === "2018" &&
-    sleeper.needs_review.some(n => /NFL league/.test(n)),
-  JSON.stringify(sleeper?.needs_review?.[0] ?? sleeper?.meta))
+// Sleeper. This used to assert that a Sleeper league IMPORTED here — it did, over
+// CORS headers Sleeper is happy to send, and what landed was an NFL league carrying
+// a needs_review line saying so. That was a true assertion about a useless feature:
+// Sleeper runs no fantasy baseball at all (`/v1/state/mlb` names no season), so
+// every Sleeper import this app could ever do lands another sport's league in a
+// baseball engine. It is refused by name now, and the refusal — not the import — is
+// what is asserted, because a dead end with a button on it was the thing being
+// shipped. No request to Sleeper is made at all, which is the other half of it.
+const before = requested.length
+const sleeperMsg = await importUrl("https://sleeper.com/leagues/289646328504385536", /baseball/i)
+t("a Sleeper league URL is refused, and the refusal is about baseball",
+  /fantasy baseball/i.test(sleeperMsg) && !/^Imported /.test(sleeperMsg.trim()), sleeperMsg)
+t("and it tells a Sleeper user where a baseball league can live instead",
+  /yahoo/i.test(sleeperMsg) && /espn/i.test(sleeperMsg), sleeperMsg)
+t("and nothing was asked of Sleeper, because there was nothing there to ask for",
+  !requested.slice(before).some(u => u.startsWith("https://api.sleeper.app/")),
+  requested.slice(before).filter(u => !u.startsWith(BASE)).join(" | ") || "(no request at all)")
 
 // Yahoo, the one platform that genuinely cannot be read here. The old sentence —
 // "Importing a league needs the local server" — was true only about this case and
@@ -175,8 +187,16 @@ const yahooMsg = await importUrl(
 t("a Yahoo import still says it needs the local server", /local server/i.test(yahooMsg), yahooMsg)
 t("and it names Yahoo, and the CORS headers Yahoo doesn't send, as the reason",
   /yahoo/i.test(yahooMsg) && /cors/i.test(yahooMsg), yahooMsg)
-t("and it says ESPN and Sleeper import here, so it can't be read as a blanket refusal",
-  /espn/i.test(yahooMsg) && /sleeper/i.test(yahooMsg), yahooMsg)
+t("and it says ESPN imports here, so it can't be read as a blanket refusal",
+  /espn/i.test(yahooMsg), yahooMsg)
+// The refusal has to end somewhere a visitor can go. It used to end at "run a
+// server", said to somebody who opened a hosted page precisely because they were
+// not going to run one — and it named `nub`, a command that does not exist on a
+// machine that just cloned this repo. Now it names the file route and the command
+// src/cli.ts actually prints for itself.
+t("and it names the route that works for Yahoo: read it locally, carry the file back",
+  /src\/cli\.ts/.test(yahooMsg) && /drop that file/i.test(yahooMsg) && !/\bnub\b/.test(yahooMsg),
+  yahooMsg)
 
 // A URL that is no league at all must not be blamed on Yahoo either — that is the
 // shape the message took when the static build had one refusal for everything.
@@ -237,6 +257,62 @@ t("and the seats it read were stored, which is what the add/drop planner runs on
 t("and anyone this capture cannot place is named rather than silently dropped",
   !/not in this capture/.test(pullNote) || /not in this capture, add by hand: \S/.test(pullNote),
   pullNote)
+
+/**
+ * ── The Yahoo user's two routes, on the build where they are the only ones ──────
+ *
+ * This is the case the hosted site failed at: Yahoo sends no CORS headers, so
+ * nothing on this page can read a Yahoo league, and every platform template shipped
+ * with 0 stats, 0 slots and no team count — so "new league from a yahoo template"
+ * produced a league that ranked nothing. A Yahoo user's only real options here were
+ * a stranger's demo league or typing seventeen point values by hand.
+ */
+await p.evaluate(() => localStorage.clear())
+await p.reload({ waitUntil: "networkidle" })
+await p.waitForSelector(".board-row", { timeout: 25000 })
+await p.click(".views button:nth-child(2)")
+await p.waitForSelector("#tpl", { timeout: 15000 })
+t("the picker offers no Sleeper league type on the hosted build either",
+  !(await p.$$eval("#tpl option", n => n.map(e => `${e.value}${e.textContent}`).join(" "))).match(/sleeper/i),
+  await p.$$eval("#tpl option", n => n.map(e => e.textContent).join(" | ")))
+await p.click('.bar button:text-is("New")')
+await p.waitForSelector(".board-row", { timeout: 25000 })
+t("a Yahoo preset ranks a full board with no server and no import",
+  (await p.$$eval(".board-row", n => n.length)) > 50,
+  String(await p.$$eval(".board-row", n => n.length)))
+const presetNote = await p.locator(".example-note").first().textContent()
+t("and the page says those values were not read from the visitor's league",
+  /not read from your league/i.test(presetNote), presetNote.slice(0, 140))
+t("and the league it made is marked unverified, not read-from-source",
+  await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    const l = c.leagues[c.active_league]
+    return l.provenance.verified === false && l.provenance.method.startsWith("preset:")
+  }))
+
+// The other route: the file a local run writes. Dropped straight onto the page,
+// with the file dialog never opened — which is what makes this a route rather than
+// a button in a toolbar on one tab.
+const file = await p.evaluate(() => localStorage.getItem("beanemachine:config"))
+await p.evaluate(() => localStorage.clear())
+await p.reload({ waitUntil: "networkidle" })
+await p.waitForSelector(".board-row", { timeout: 25000 })
+p.on("dialog", d => d.accept())
+const dt = await p.evaluateHandle(text => {
+  const d = new DataTransfer()
+  d.items.add(new File([text], "scoring.json", { type: "application/json" }))
+  return d
+}, file)
+await p.dispatchEvent("body", "dragover", { dataTransfer: dt })
+await p.waitForTimeout(150)
+t("a dragged league file is offered a drop target on the hosted build",
+  await p.locator(".dropzone").isVisible())
+await p.dispatchEvent("body", "drop", { dataTransfer: dt })
+await p.waitForSelector(".toast", { timeout: 10000 })
+t("and dropping it loads the leagues it carries, with no server",
+  /Loaded \d+ league/.test(await p.textContent(".toast")), await p.textContent(".toast"))
+t("which is the same leagues, back in this browser",
+  await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length >= 2))
 
 t("no page errors after all of that", errs.length===0, errs.join(" | "))
 await b.close()

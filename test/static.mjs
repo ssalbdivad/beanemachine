@@ -73,8 +73,20 @@ const note = await p.locator(".static-note").textContent()
 t("the static banner says your leagues live in this browser", /browser/i.test(note), note)
 t("and it does not claim the server is needed to import without naming Yahoo",
   !/server/i.test(note) || /yahoo/i.test(note), note)
-t("and it gives a Yahoo user something they can actually do here",
-  /yahoo/i.test(note) && /(preset|drop)/i.test(note), note)
+/**
+ * The route a Yahoo user can finish is asserted where importing is ATTEMPTED, not
+ * in the masthead.
+ *
+ * It was six lines in the masthead, on every page view, and measured 134px of a
+ * 1,506px climb to the first recommendation — while the same explanation already
+ * appeared four times in this setup panel. The claim did not change: a build that
+ * raises the server must name Yahoo and must name a route that ends somewhere. It
+ * is checked against the page a person reads when they are actually stuck.
+ */
+const setupText = await p.$eval(".grid", e => e.innerText)
+t("and a Yahoo user is given a route they can finish, where importing is attempted",
+  /yahoo/i.test(setupText) && /(preset|drop|file)/i.test(setupText),
+  setupText.slice(0, 200))
 const codes = await p.$$eval(".grid section:nth-of-type(1) .code", n=>n.map(e=>e.textContent))
 const vals = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))
 t("scoring seeded from the committed asset", vals[codes.indexOf("HR")]==="10.4", vals.join(","))

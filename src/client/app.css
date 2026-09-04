@@ -603,7 +603,11 @@ pre{
    cost 96px more with the explanations in, which is a fifth of one scroll flick
    and buys the difference between a labelled choice and three unexplained words.
    One column already gives them the full width they need. */
-@media(max-width:700px){.modes{grid-template-columns:1fr}}
+/* Stacked, the three descriptions cost ~150px above the answer on a 390px screen —
+   measured, the mode picker alone was 253px there. The label carries the choice; the
+   description stays as the button's `title` and in the guide. This rule existed and
+   was lost in a rewrite, which is why the phone regressed. */
+@media(max-width:700px){.modes{grid-template-columns:1fr}.modes .mode span{display:none}}
 
 /* ---------- filters ----------
    Position first and as chips, not a select: it is the filter people reach for

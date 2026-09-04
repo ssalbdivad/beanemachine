@@ -13,7 +13,6 @@ import { Trade } from "./Trade.tsx"
 import { leagues } from "./leagues.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
-	BoardPrimer,
 	EligibilityPanel,
 	EXAMPLE_LEAGUE_KEY,
 	ExampleNote,
@@ -383,15 +382,14 @@ export const App = () => {
 				    baseball user at it was a dead end dressed up as an option. What replaces it is the route
 				    a Yahoo user can actually finish: a preset now, or a file they carry
 				    over, both of which end in a board that ranks. */}
+				{/* This carried six lines about CORS, in the masthead, on every page view —
+				    134px of a 1,506px climb to the first recommendation. The same explanation
+				    already appears four times in the setup panel, which is where importing is
+				    actually attempted and where somebody is asking the question it answers.
+				    What belongs here is the one fact a visitor needs before doing anything:
+				    their data is not going anywhere. */}
 				{config && getMode() === "static" && (
-					<p className="tag static-note">
-						Your leagues are saved in this browser. Paste an <b>ESPN</b> league URL and
-						it imports right here. <b>Yahoo</b> sends no CORS headers, so no browser can
-						read it: start from the Yahoo preset, or read your league once locally and
-						drop the file it writes anywhere on this page — that file is also the only
-						way this page gets your league&rsquo;s real free-agent list, which is what
-						a streaming question is actually about.
-					</p>
+					<p className="tag static-note">Your leagues are saved in this browser.</p>
 				)}
 			</header>
 
@@ -579,11 +577,9 @@ export const App = () => {
 
 			{view === "board" ?
 				<>
-					{/* Above the grid, not in it: `.grid` is two columns and this is one
-					    line of orientation, not a card. Only once there is something to
-					    orient — with the league unset the Setup panel above is the
-					    message, and a definition of bscore is not what is missing. */}
-					{ready && <BoardPrimer />}
+					{/* The primer moved into Board, which is the only place that knows which
+					    ranking is on screen — it defines bscore, and the streaming list is
+					    ordered by projected points. */}
 					<div className="grid">
 						<Board
 							key={wireKey}

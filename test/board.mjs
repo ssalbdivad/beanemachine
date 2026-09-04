@@ -401,9 +401,15 @@ t("and the projected total is a real number on every row, not a dash",
  */
 t("the season-long cards are not on the streaming tab",
   (await page.$(".buylow")) === null && (await page.$(".scarcity")) === null)
-t("but the position chips that would empty this board are gone rather than the useful ones",
-  (await page.$$eval(".board-controls .chips[aria-label=Position] .chip-btn", n =>
-    n.map(e => e.textContent.trim()))).join() === "All,SP,RP,P")
+/**
+ * The position chips were pruned to All/SP/RP/P here and are now gone entirely.
+ * This list is already only players with a start, so every row is a pitcher and the
+ * chips separated P from RP and nothing else — two rows of controls above an answer
+ * that started 1,506px down the page. They are still on the board tab, where a
+ * reader picks a catcher out of 1,200 players, and in "more filters" here.
+ */
+t("the position chips are not on the streaming list",
+  (await page.$$(".board-controls .chips[aria-label=Position] .chip-btn")).length === 0)
 
 // 2. the horizon is the reader's to choose, and the choice reaches the ranking
 const periodRange = await streamRange()

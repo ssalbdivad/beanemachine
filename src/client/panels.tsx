@@ -725,20 +725,16 @@ export const ExampleNote = ({
 	const team = league.meta.team_name ?? league.meta.league_name ?? EXAMPLE_LEAGUE_KEY
 	return (
 		<div className="example-note">
+			{/* Four sentences and 208px on a 390px screen, permanently, above an answer
+			    that already started 2,165px down. The load-bearing half is the first
+			    clause and the button; why the demo exists is a footnote, and the HR
+			    figure — still read out of the league so it cannot drift — makes the
+			    point that scoring differs in five words rather than twenty. */}
 			<p>
-				<b>This is an example league, not yours.</b> {team} is a real{" "}
-				{league.meta.max_teams != null && <>{league.meta.max_teams}-team </>}
-				league that beanemachine is developed against, and it is here so the board has
-				something real to rank.{" "}
-				{typeof hr === "number" ?
-					<>
-						Every number below is in <i>its</i> points &mdash; a home run is worth {hr}{" "}
-						here, and a league that scores it differently ranks differently.
-					</>
-				:	<>
-						Every number below is in <i>its</i> points, and a league that scores
-						differently ranks differently.
-					</>}
+				<b>This is an example league, not yours.</b> {team}
+				{league.meta.max_teams != null && <>, {league.meta.max_teams} teams</>} — every
+				number below is in <i>its</i> points
+				{typeof hr === "number" && <>, where a home run is worth {hr}</>}.
 			</p>
 			{onOpenSetup && (
 				<button className="primary" onClick={onOpenSetup}>
@@ -763,15 +759,27 @@ export const ExampleNote = ({
  * note on `VIEWS`). It says what the ordering means and where the full
  * definitions are; the disclosure under the table keeps owning them.
  */
-export const BoardPrimer = () => (
-	<p className="primer">
-		Every row is a player, ranked on <b>points above a free replacement</b>: what this
-		league scores with him in a slot, minus the best free agent at the same slot, over
-		the window you pick below. That is a <b>bscore</b>; <b>uscore</b> discounts it by
-		how widely he is already rostered. Full definitions are on each column header, and
-		under the table.
-	</p>
-)
+export const BoardPrimer = ({ mode }: { mode?: string }) => {
+	/**
+	 * Not on the streaming list, for two reasons and the second is the serious one.
+	 *
+	 * It costs 78px above an answer that already starts 1,286px down the page. And
+	 * it describes the WRONG NUMBER there: streaming ranks by projected points over
+	 * the window, not by bscore, so a reader who took this at its word would be
+	 * reading the column beside the one the list is ordered by. A primer that is
+	 * inaccurate on the view it appears above is worse than no primer.
+	 */
+	if (mode === "stream") return null
+	return (
+		<p className="primer">
+			Every row is a player, ranked on <b>points above a free replacement</b>: what this
+			league scores with him in a slot, minus the best free agent at the same slot, over
+			the window you pick below. That is a <b>bscore</b>; <b>uscore</b> discounts it by
+			how widely he is already rostered. Full definitions are on each column header, and
+			under the table.
+		</p>
+	)
+}
 
 /**
  * How a visitor gets from this page to a board ranked in THEIR league.

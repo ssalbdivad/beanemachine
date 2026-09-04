@@ -2,7 +2,7 @@ import { Fragment, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
-import { Fragment2 } from "./panels.tsx"
+import { BoardPrimer, Fragment2 } from "./panels.tsx"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
 	type BoardRow, type Filters, type Ranked
@@ -48,15 +48,6 @@ const PAGE = 60
 
 const SLOTS = ["", "C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP", "P"]
 
-/**
- * The position chips on the Streaming tab.
- *
- * The full list is eleven chips, eight of which empty this board by construction —
- * a streaming list is starters, and there is no such thing as streaming a catcher
- * for a start. Offering a control whose only effect is "no players match these
- * filters" is offering the reader a way to break his own page.
- */
-const STREAM_SLOTS = ["", "SP", "RP", "P"]
 
 /** The three horizons, as a tablist: three questions, not three filters. */
 const MODES = [
@@ -715,6 +706,12 @@ export const Board = ({
 
 	return (
 		<>
+			{/* Moved here from App so it can see the mode: it describes bscore, and the
+			    streaming list is ordered by projected points, so above that list it was
+			    pointing at the wrong column. `.full` because `.grid` is two columns. */}
+			<div className="full">
+				<BoardPrimer mode={filters.mode} />
+			</div>
 			<section className="card full board-controls">
 				<h2>What are you deciding?</h2>
 				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
@@ -856,8 +853,13 @@ export const Board = ({
 				)}
 				{/* Position first and as chips, not a select: it is the filter people reach
 				    for constantly, and two clicks to change a dropdown is two too many. */}
+				{/* Not on the streaming list: it is already only players with a start, so
+				    every row is a pitcher and these chips separate P from RP and nothing
+				    else. Two rows above the answer for that is a bad trade — they live in
+				    "more filters" there. */}
+				{filters.mode !== "stream" && (
 				<div className="chips" role="group" aria-label="Position">
-					{(filters.mode === "stream" ? STREAM_SLOTS : SLOTS).map(s => (
+					{SLOTS.map(s => (
 						<button
 							key={s || "any"}
 							type="button"
@@ -869,7 +871,9 @@ export const Board = ({
 						</button>
 					))}
 				</div>
+				)}
 				<div className="filters">
+					{filters.mode !== "stream" && (
 					<label className="ctl">
 						<span>Search</span>
 						<input
@@ -879,6 +883,12 @@ export const Board = ({
 							onChange={e => set("search", e.currentTarget.value)}
 						/>
 					</label>
+					)}
+					{/* One question, one ranking. The streaming list is ordered by what a man
+					    projects over the window you picked, which is the only ordering that
+					    answers "who should I add"; the other five are board questions and are
+					    a click away under "more filters". */}
+					{filters.mode !== "stream" && (
 					<label className="ctl">
 						<span>Rank by</span>
 						<select
@@ -894,6 +904,7 @@ export const Board = ({
 							<option value="contact">best contact vs results (last 21 days)</option>
 						</select>
 					</label>
+					)}
 					{/* Not `disabled` any more, and that is the whole point of this change.
 					    It was disabled whenever the league's live free-agent list had not
 					    arrived, which on the hosted build is always — so the one control
@@ -982,7 +993,14 @@ export const Board = ({
 				</details>
 			</section>
 
-			{pick ? <BillysPick r={pick} horizon={span.phrase} basis={basis} /> : <NoPick />}
+			{pick ?
+				<BillysPick
+					r={pick}
+					horizon={span.phrase}
+					basis={basis}
+					streaming={filters.mode === "stream"}
+				/>
+			:	<NoPick />}
 
 			{/* The panel the horizon tabs control. The pick, buy-low and scarcity
 			    cards below re-rank with it too, but this is the ranking itself, and
@@ -1478,13 +1496,17 @@ const NoPick = () => (
 const BillysPick = ({
 	r,
 	horizon,
-	basis
+	basis,
+	streaming
 }: {
 	r: Ranked
 	horizon: string
 	/** Which availability source picked him, and therefore which claim the card is
 	 *  entitled to make. */
 	basis: "pool" | "ownership" | "none"
+	/** On the streaming view the card is a waiver-day answer, so it drops the two
+	 *  clauses that describe the projection rather than the decision. */
+	streaming: boolean
 }) => {
 	const clauses: string[] = []
 	clauses.push(
@@ -1494,18 +1516,32 @@ const BillysPick = ({
 	// "% Ros" sweep, most of which is the per-game weather line rather than a
 	// roster share, so it was stating a number that is usually wrong about a
 	// player it is usually wrong about. A missing clause beats a false one.
-	if (r.projection.volumePerTeamGame !== null)
-		clauses.push(
-			r.player.group === "hitting" ?
-				`${r.projection.volumePerTeamGame.toFixed(1)} plate appearances per team game`
-			:	`${r.projection.volumePerTeamGame.toFixed(1)} outs recorded per team game`
-		)
-	if (r.projection.matchupMultiplier !== 1)
-		clauses.push(
-			r.projection.matchupMultiplier > 1 ?
-				`the schedule ahead of him is soft (×${r.projection.matchupMultiplier.toFixed(3)})`
-			:	`the schedule ahead of him is hard (×${r.projection.matchupMultiplier.toFixed(3)})`
-		)
+	/**
+	 * Two clauses that are model detail rather than decision detail, and on the
+	 * streaming card they are neither.
+	 *
+	 * Measured at 390px, this paragraph ran to 430px and the whole card to 661 — the
+	 * largest single block above the answer on a phone. "3.1 outs recorded per team
+	 * game" and "the schedule ahead of him is soft (×1.012)" are inputs to the
+	 * projection, not reasons to add a man for one start: a 1.2% schedule adjustment
+	 * cannot decide a pickup, and the drill-down under his row already takes the
+	 * projection apart for anyone who wants it. On the board and stash views, where
+	 * the card is a season read rather than a waiver-day one, they stay.
+	 */
+	if (!streaming) {
+		if (r.projection.volumePerTeamGame !== null)
+			clauses.push(
+				r.player.group === "hitting" ?
+					`${r.projection.volumePerTeamGame.toFixed(1)} plate appearances per team game`
+				:	`${r.projection.volumePerTeamGame.toFixed(1)} outs recorded per team game`
+			)
+		if (r.projection.matchupMultiplier !== 1)
+			clauses.push(
+				r.projection.matchupMultiplier > 1 ?
+					`the schedule ahead of him is soft (×${r.projection.matchupMultiplier.toFixed(3)})`
+				:	`the schedule ahead of him is hard (×${r.projection.matchupMultiplier.toFixed(3)})`
+			)
+	}
 	// The same per-side choice the games column makes, in prose. "his team plays 14
 	// games in that stretch" is true of a starting pitcher and useless about him:
 	// on this fixture a starter's club plays a median 6.5 games for each turn he

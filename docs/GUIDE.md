@@ -13,9 +13,32 @@ points. A home run is worth 10.4 there (`test/ui.mjs` pins that value against th
 committed `scoring.json`); in a league that scores it differently the same players
 rank differently. [Set up your own league](#how-do-i-set-up-my-own-league) is three
 inputs — what each stat is worth, how many teams, and the roster slots — and the band
-disappears the moment your league is the active one.
+disappears as soon as anything has been READ into a league: your roster, or your
+league's free-agent list. It asks that rather than asking which league is active,
+because for one reader — the author, whose league *is* the example — the second
+question has the wrong answer forever.
 
-Two sentences of vocabulary, and the rest of this page is elaboration on them:
+## The first screen is the answer
+
+Above the board is a card headed **What should I do?**, and it is the reason to open
+the page. It states, for your league's own scoring period:
+
+- **Today** — which seats to change before first pitch, and why, for a league whose
+  lineup locks daily. Not the whole lineup: the difference between the lineup you
+  have in Yahoo and the one you should have. Every active seat is accounted for, and
+  a seat with nobody worth starting says to leave it empty.
+- **Make these moves** — the adds worth one of this week's moves, each naming the man
+  who leaves, priced in what your starting lineup projects afterwards. An add that
+  does not say who goes cannot be made.
+- **Watch** — your league's innings floor against what your pitchers project, both as
+  they stand and as the moves above would leave them.
+
+It needs to know your team. On ESPN the page reads it for itself. On Yahoo nothing
+can — Yahoo sends no CORS headers, so no web page is ever handed your league — and
+the card prints the one command that works, with your own league already in it.
+
+The board below is the second screen: a ranking, for looking things up. Two sentences
+of vocabulary, and the rest of this page is elaboration on them:
 
 - A **bscore** is *points above a free replacement* — what your league scores with a
   player in a roster slot, minus what it scores with the best free agent at the same

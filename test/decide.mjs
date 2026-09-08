@@ -64,8 +64,16 @@ const seedPool = {
 	}
 }
 
-const open = async seeds => {
+/**
+ * @param seeds  what localStorage holds before the page loads
+ * @param opts   `offline` blocks the server read of the wire, so the carried-file
+ *               path is exercised deterministically. Without it this case passes or
+ *               fails on whether a dev API server happens to be running — which is
+ *               exactly how it stopped testing anything the moment one was.
+ */
+const open = async (seeds, opts = {}) => {
 	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	if (opts.offline) await page.route("**/api/available", r => r.abort())
 	await page.addInitScript(([l, p, cfgLeague]) => {
 		if (l) localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
 		if (p) localStorage.setItem("beanemachine:pool", JSON.stringify(p))
@@ -238,7 +246,7 @@ const open = async seeds => {
  * refuses — they depend on different things and must fail independently.
  */
 {
-	const page = await open({ lineup: seedLineup })
+	const page = await open({ lineup: seedLineup }, { offline: true })
 	const text = await page.$eval(".decide", e => e.innerText)
 	// The heading is "Set your lineup" on its own, and "Over the rest of the period"
 	// once a daily-lock league has been answered for today above it — the same

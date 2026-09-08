@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
@@ -8,6 +8,7 @@ import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
+import { canReadPool, api } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
 import { normalizeName } from "./useBoard.ts"
@@ -72,7 +73,45 @@ export const Decide = ({
 	leagueKey: string | null
 }) => {
 	const seats = leagueKey ? lineupStore.of(leagueKey) : null
-	const wire = leagueKey ? poolStore.of(leagueKey) : null
+	const carried = leagueKey ? poolStore.of(leagueKey) : null
+
+	/**
+	 * The same wire the board reads, from the same place.
+	 *
+	 * This card read only the CARRIED pool — the one in the file you dropped — while
+	 * the board asked `api.available`, which prefers a live read where one is
+	 * possible and falls back to the carried copy where it is not. The two then
+	 * disagreed about who was free, and disagreed silently: on 2026-09-08 the board
+	 * offered Chandler Simpson, correctly, because his league had dropped him since
+	 * the file was written, and this card went on recommending against a wire four
+	 * days old. Two answers to "who can I get" on one page is worse than either.
+	 *
+	 * The carried copy is still the answer where nothing better exists, which is the
+	 * hosted site: no server, and Yahoo will not talk to a browser.
+	 */
+	const [live, setLive] = useState<{ players: { name: string; positions: string[] }[] } | null>(
+		null
+	)
+	const leagueId = league?.meta.league_id ?? null
+	useEffect(() => {
+		if (!leagueId || !canReadPool(league?.meta.platform)) return
+		let on = true
+		api.available(leagueId, {
+			platform: league?.meta.platform,
+			season: league?.meta.season,
+			sport: league?.meta.sport
+		})
+			.then(p => on && p.players.length && setLive(p))
+			.catch(() => {
+				// the carried copy below is the fallback, and it needs no announcement
+				// here — the board already reports why a live read failed
+			})
+		return () => {
+			on = false
+		}
+	}, [leagueId, league?.meta.platform, league?.meta.season])
+
+	const wire = live ?? carried
 
 	/**
 	 * Rated over the SCORING PERIOD, not a fortnight.

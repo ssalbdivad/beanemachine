@@ -107,6 +107,61 @@ const open = async seeds => {
 }
 
 /**
+ * TODAY — the decision a daily-lock league forces every day.
+ *
+ * The league's own settings say "Weekly Deadline: Daily", so he sets a lineup every
+ * day. Nothing in this app knew what day it was: `startingLineup` takes no date, so
+ * its answer was identical on every day of the fortnight and it seated men whose
+ * clubs were not playing.
+ *
+ * The invariant asserted here is the one that makes the card copyable into Yahoo:
+ * EVERY active seat is accounted for — filled by a named man or explicitly told to
+ * leave empty. A card that rendered fourteen of eighteen rows and said nothing about
+ * the rest would read as a complete lineup, and that is the failure mode this whole
+ * project exists to avoid.
+ */
+{
+	const page = await open({ lineup: seedLineup, pool: seedPool })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a daily-lock league is answered for TODAY, before the period", /\bToday\b/.test(text),
+		text.slice(0, 200))
+
+	const active = league.roster.slot_order.filter(sl => !/^(BN|IL|NA)/i.test(sl))
+	const rows = await page.$$eval(".decide-today li", ns =>
+		ns.map(e => ({
+			slot: e.querySelector(".decide-slot")?.textContent?.trim(),
+			empty: e.classList.contains("decide-empty"),
+			who: e.querySelector("b")?.textContent?.trim() ?? null
+		})))
+	t("every active seat is accounted for, filled or explicitly left empty",
+		rows.length === active.length,
+		`${rows.length} rows against ${active.length} seats: ${JSON.stringify(rows.map(r => r.slot))}`)
+	t("and the seats it lists are the league's own, in the league's own order",
+		rows.map(r => r.slot).sort().join(",") === [...active].sort().join(","),
+		`${rows.map(r => r.slot)} vs ${active}`)
+	t("an empty seat says to leave it empty rather than going unmentioned",
+		rows.every(r => r.empty === (r.who === null)),
+		JSON.stringify(rows.filter(r => r.empty !== (r.who === null))))
+
+	/*
+	 * Nobody is seated whose club is not playing. On a day when all thirty clubs have
+	 * a game this cannot fail, so it is computed off the slate rather than assumed —
+	 * on a Monday or a Thursday it is the whole point.
+	 */
+	const today = new Date().toISOString().slice(0, 10)
+	const playingClubs = new Set(
+		snap.slate.filter(g => g.date === today).flatMap(g => [g.home, g.away])
+	)
+	const clubOf = new Map(snap.players.map(p => [p.name, p.teamId]))
+	const seated = rows.filter(r => r.who).map(r => r.who)
+	t("nobody is seated whose club has no game today",
+		seated.every(n => !clubOf.has(n) || playingClubs.has(clubOf.get(n))),
+		seated.filter(n => clubOf.has(n) && !playingClubs.has(clubOf.get(n))).join(", ") ||
+			`${playingClubs.size} clubs playing`)
+	await page.close()
+}
+
+/**
  * Without a roster it says so, and does not pretend.
  *
  * The failure it must never make is answering anyway — a ranked board rendered
@@ -129,8 +184,12 @@ const open = async seeds => {
 {
 	const page = await open({ lineup: seedLineup })
 	const text = await page.$eval(".decide", e => e.innerText)
+	// The heading is "Set your lineup" on its own, and "Over the rest of the period"
+	// once a daily-lock league has been answered for today above it — the same
+	// section, named for what distinguishes it.
 	t("the lineup half answers without any free-agent list",
-		/Set your lineup/.test(text) && !/not been told which players are yours/.test(text),
+		/Set your lineup|Over the rest of the period/.test(text) &&
+			!/not been told which players are yours/.test(text),
 		text.slice(0, 160))
 	t("and the moves half says why it cannot, naming CORS rather than shrugging",
 		/free-agent list/.test(text) && /CORS/.test(text), text)

@@ -16,3 +16,11 @@
 .decide-ok{color:var(--muted);font-family:var(--mono);min-width:5ch;text-align:right;flex:none}
 .decide-warn{color:var(--bad);font-family:var(--mono);font-weight:700;min-width:5ch;text-align:right;flex:none}
 .decide-blocked p{max-width:62ch}
+.decide-slot{
+	font-family:var(--mono);font-size:var(--fs-2);color:var(--muted);
+	min-width:5ch;text-align:right;flex:none;
+}
+.decide-today li{align-items:baseline}
+.decide-empty .decide-why{color:var(--muted)}
+.decide-idle{margin:var(--sp-2) 0 0;max-width:74ch}
+.decide-idle b{color:var(--ink)}

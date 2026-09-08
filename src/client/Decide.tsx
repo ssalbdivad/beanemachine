@@ -4,7 +4,7 @@ import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { rateAll } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
-import { planLineup, planSwaps, DEFAULTS, type PlanInput } from "../auto/plan.ts"
+import { activeSlots, planLineup, planSwaps, DEFAULTS, type PlanInput } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
@@ -97,6 +97,93 @@ export const Decide = ({
 		}
 	}, [snapshot, league])
 
+	/**
+	 * TODAY — the decision this league actually forces every day.
+	 *
+	 * "Weekly Deadline: Daily" is a daily lineup lock, so he sets a lineup every
+	 * single day of the season. Nothing in this app knew what day it was:
+	 * `startingLineup` takes no date, so its answer was byte-identical on every day
+	 * of the fortnight and it seated men whose clubs were not playing. On this
+	 * league's own slate that is five idle men seated on 2026-09-10 while two with
+	 * games sat on the bench.
+	 *
+	 * The fix needs no new model. `windowFrom(slate, today, today)` is one day's
+	 * games, the same function the rest of the board runs on, and a roster filtered
+	 * to the clubs in it cannot seat a man who is not playing. A seat left over is
+	 * then honestly empty — nobody you own throws today — rather than filled by
+	 * somebody who is not on the field.
+	 *
+	 * Null bars, deliberately. This is a question about the 24 men he owns and the 18
+	 * seats they go in; "would a waiver body beat him" is a different question, asked
+	 * at most a few times a week, and it is answered under `Make these moves`. Bars
+	 * from a fortnight would also be nonsense here — a fortnight's replacement level
+	 * against one day's points would price almost every seat as a hole.
+	 */
+	const today = useMemo(() => {
+		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length) return null
+		if (league.scoring_period?.lineup_lock !== "daily") return null
+		const h = hydrate(snapshot)
+		const day = new Date().toISOString().slice(0, 10)
+		const w = windowFrom(h.slate ?? [], day, day)
+		if (!w.games.size) return null
+		const rows = rateAll({
+			players: h.players, league, teamGamesPlayed: h.teamGamesPlayed,
+			gamesByTeam: w.games, opponentsByTeam: w.opponents,
+			recentVolumeByWindow: h.recentVolumeByWindow, recentStats: h.recentStats,
+			ownership: h.ownership, probableStarts: w.probableStarts,
+			opposingStarters: w.opposingStarters, startOpponents: w.startOpponents,
+			eligibility: h.eligibility, probableCoverage: w.coverage,
+			underlying: h.underlying, injuries: h.injuries, injuryPolicy: "exclude",
+			teams: league.meta.max_teams
+		})
+		const byName = new Map(rows.map(r => [normalizeName(r.player.name), r]))
+		const playing = new Set<string>()
+		const idle: string[] = []
+		for (const sp of seats.spots) {
+			const r = byName.get(normalizeName(sp.name))
+			const plays = r?.player.teamId != null && w.games.has(r.player.teamId)
+			if (plays) playing.add(normalizeName(sp.name))
+			else if (!RESERVE.test(sp.slot)) idle.push(sp.name)
+		}
+		const lineup = planLineup({
+			roster: seats.spots
+				.filter(sp => playing.has(normalizeName(sp.name)))
+				.map(sp => ({ ...sp, team: sp.team ?? null })),
+			rated: rows,
+			availableNames: new Set(),
+			shape: {
+				slots: league.roster.slots,
+				slot_order: league.roster.slot_order,
+				slot_accepts: league.roster.slot_accepts
+			},
+			options: DEFAULTS
+		})
+		/**
+		 * Seats that ended up with nobody, and why — never dropped in silence.
+		 *
+		 * `planLineup.emptySlots` reports seats no rostered player may LEGALLY fill,
+		 * which is a rarer and different thing. A seat can also come out empty because
+		 * everyone eligible for it projects nothing today: a starting pitcher who is
+		 * not starting is unrateable over a one-day window, correctly, so an SP seat
+		 * behind him has no candidate. Leaving it empty is the right answer and Yahoo
+		 * allows it. Rendering fourteen rows and saying nothing about the other four
+		 * is not — the card would read as a complete lineup.
+		 */
+		const used = new Map<string, number>()
+		for (const st of lineup.starters) used.set(st.slot, (used.get(st.slot) ?? 0) + 1)
+		const unfilled: string[] = []
+		for (const slot of activeSlots({
+			slots: league.roster.slots,
+			slot_order: league.roster.slot_order,
+			slot_accepts: league.roster.slot_accepts
+		})) {
+			const left = used.get(slot) ?? 0
+			if (left > 0) used.set(slot, left - 1)
+			else unfilled.push(slot)
+		}
+		return { day, lineup, idle, unfilled, playing: playing.size }
+	}, [snapshot, league, seats])
+
 	const plan = useMemo(() => {
 		if (!rated || !league || !seats?.spots.length) return null
 		const input: PlanInput = {
@@ -185,8 +272,50 @@ export const Decide = ({
 				</p>
 			)}
 
+			{/* Today first, because today is the one that locks. A lineup change is free
+			    and reversible and this league takes one every day; an add costs a move
+			    and a player and can be made a few times a week. */}
+			{today && (
+				<>
+					<h3 className="decide-head">
+						Today
+						<span className="decide-gain">
+							{today.playing} of your men have a game · {today.lineup.pointsPlanned} projected
+						</span>
+					</h3>
+					{today.lineup.starters.length ?
+						<ul className="decide-list decide-today">
+							{today.lineup.starters.map((st, i) => (
+								<li key={`${st.slot}-${i}`}>
+									<span className="decide-slot">{st.slot}</span>
+									<span>
+										<b>{st.name}</b> <em className="decide-why">{st.points} projected</em>
+									</span>
+								</li>
+							))}
+							{today.unfilled.map((slot, i) => (
+								<li key={`empty-${slot}-${i}`} className="decide-empty">
+									<span className="decide-slot">{slot}</span>
+									<span>
+										<em className="decide-why">
+											leave empty — nobody you own is projected to play here today
+										</em>
+									</span>
+								</li>
+							))}
+						</ul>
+					:	<p className="sub">None of your players has a game today.</p>}
+					{today.idle.length > 0 && (
+						<p className="sub decide-idle">
+							<b>Sit {today.idle.length}:</b> {today.idle.join(", ")} — their clubs are not
+							playing today, so they score nothing in a seat.
+						</p>
+					)}
+				</>
+			)}
+
 			<h3 className="decide-head">
-				Set your lineup
+				{today ? "Over the rest of the period" : "Set your lineup"}
 				{plan?.lineup && plan.lineup.gain > 0 && (
 					<span className="decide-gain">+{plan.lineup.gain} pts, and it costs nothing</span>
 				)}

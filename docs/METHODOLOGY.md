@@ -645,6 +645,31 @@ bscore           = max over the player's slots of (points − replacement_slot)
 A player eligible at several slots is credited at the slot where he is worth
 most, and the board shows which one won.
 
+**Who the depth counts through.** "The best player still on waivers" is what the
+formula is FOR, and until 2026-09-08 it was not what it did: `eligible` was every
+rated player, so the walk ran through men already on somebody's roster and stopped
+on one of them. On the shipped league that put Freddie Freeman and Bobby Witt Jr,
+both 99% rostered, forward as replacement level, and priced every player the reader
+owned against them. With "only players I can add" ticked and the board filtered to
+catchers, every gettable catcher sat under a bar set by the eleventh-best catcher in
+baseball, and the card said "Nobody" about a list it had just ranked.
+
+The list is now filtered before the walk, through the same availability ladder that
+decides which rows to SHOW — the league's own free-agent list where it has been read,
+an ownership cut calibrated to `teams × seats` otherwise, and no filter at all where
+neither is known, which is the honest fallback for a page that cannot see the wire.
+It is opt-in (`RateOptions.available`) and off by default, so the CLI and every run
+in `data/results/` keep the unit they were measured on; only a page that has actually
+read a wire passes it.
+
+Note what the bar is NOT, because the app said it was for a long time: it is not the
+BEST free agent at the slot. It is the `(teams × seats)`-th of them. The best free
+agent is a higher bar than replacement level, and a board measured against him would
+rank every free agent at or below zero. The lineup card in `src/engine/trade.ts` does
+use the first man on the wire, deliberately and for a different question — whether
+the man you own beats the thing you would have instead — and `wireBySlot` is where
+that lives.
+
 **`teams` is required, never defaulted.** If a league's settings don't state a
 team count, `useBoard` returns an empty board rather than picking a number.
 Defaulting it would silently move every replacement level and therefore every

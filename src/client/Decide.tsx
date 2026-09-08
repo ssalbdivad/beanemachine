@@ -656,12 +656,19 @@ export const Decide = ({
 									</span>
 								</li>
 							))}
+							{/* "Leave empty" is a recommendation, and it is only true when the seat
+							    was actually contested. With nobody priced at all, every seat is
+							    unfilled and this fold would advise emptying the whole lineup — the
+							    same "could not answer" read as "answered no" that the section
+							    above now guards. Unknown is said as unknown. */}
 							{today.unfilled.map((slot, i) => (
 								<li key={`empty-${slot}-${i}`} className="decide-empty">
 									<span className="decide-slot">{slot}</span>
 									<span>
 										<em className="decide-why">
-											leave empty — nobody you own is projected to play here today
+											{today.lineup.starters.length ?
+												"leave empty — nobody you own is projected to play here today"
+											:	"not priced — no projection could be made for anyone you own today"}
 										</em>
 									</span>
 								</li>

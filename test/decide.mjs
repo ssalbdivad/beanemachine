@@ -420,6 +420,11 @@ const open = async (seeds, opts = {}) => {
 		!/Bench /.test(text), text.slice(0, 300))
 	t("and it is told why there is nothing to compare against",
 		/could be priced|could not be priced/.test(text), text.slice(0, 300))
+	// the fold is collapsed, so innerText misses it — and it carried the same bug,
+	// advising that all eighteen seats be left empty
+	const fold = await page.$$eval(".decide-today li", ns => ns.map(e => e.textContent))
+	t("nor does the fold beneath it advise emptying every seat",
+		!fold.some(x => /leave empty/.test(x)), JSON.stringify(fold.slice(0, 3)))
 	await page.close()
 }
 

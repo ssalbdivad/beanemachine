@@ -82,6 +82,14 @@ export const Decide = ({
 	 * ranking the next fourteen days would price half of it against a matchup that
 	 * has not started.
 	 */
+	/** The league's own free-agent list as a test any rated player can be put to. */
+	const wireTest = useMemo(() => {
+		const names = new Set((wire?.players ?? []).map(x => normalizeName(x.name)))
+		return names.size ?
+				(r: { player: { name: string } }) => names.has(normalizeName(r.player.name))
+			:	undefined
+	}, [wire])
+
 	const rated = useMemo(() => {
 		if (!snapshot || !league || league.meta.max_teams == null) return null
 		const h = hydrate(snapshot)
@@ -95,6 +103,17 @@ export const Decide = ({
 			rows: rateAll({
 				players: h.players,
 				league,
+				/**
+				 * Priced against the league's own wire, where it has been read.
+				 *
+				 * Everything this card says about a man he can spare — "well below what a
+				 * free agent at his own slot is worth" — is a claim about the wire, and
+				 * `planSwaps` decides who is droppable on the same quantity. Rated
+				 * without this the bar is the whole-pool simulation, so the sentence was
+				 * measured against players he cannot have, which is the exact defect this
+				 * card was built to end.
+				 */
+				available: wireTest,
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: w.games,
 				opponentsByTeam: w.opponents,
@@ -406,7 +425,8 @@ export const Decide = ({
 					<h3 className="decide-head">
 						Today
 						<span className="decide-gain">
-							{today.playing} of your men have a game · {today.lineup.pointsPlanned} projected
+							{today.playing} of your men have a game · your lineup projects{" "}
+							{today.lineup.pointsPlanned}
 						</span>
 					</h3>
 					{today.bench.length || today.start.length ?

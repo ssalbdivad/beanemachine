@@ -13,6 +13,7 @@ import { Trade } from "./Trade.tsx"
 import { Decide } from "./Decide.tsx"
 import { leagues } from "./leagues.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
+import { lineupStore } from "./lineup.ts"
 import {
 	EligibilityPanel,
 	EXAMPLE_LEAGUE_KEY,
@@ -540,9 +541,17 @@ export const App = () => {
 			)}
 
 			{/* On every tab, not just the board: the demo is not a property of one
-			    screen, and League setup is where the note is most useful. It goes
-			    away by itself the moment a different league is the active one. */}
-			{league && key === EXAMPLE_LEAGUE_KEY && (
+			    screen, and League setup is where the note is most useful.
+			    
+			    "It goes away the moment a different league is active" was the whole
+			    gate, and it is wrong for exactly one reader — the one whose league IS
+			    the shipped example. He runs the command line, drops his own file with
+			    his roster and his league's free agents in it, and the page goes on
+			    telling him this is not his team. The demo is the SEEDED copy, and what
+			    distinguishes it is that nobody has read anything into it: the seed
+			    carries scoring and slots and no roster and no wire. So the note asks
+			    that instead of asking for a name. */}
+			{league && key === EXAMPLE_LEAGUE_KEY && !lineupStore.of(key) && !poolStore.of(key) && (
 				<ExampleNote
 					league={league}
 					onOpenSetup={view === "league" ? undefined : () => setView("league")}

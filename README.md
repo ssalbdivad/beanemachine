@@ -2,11 +2,20 @@
 
 > How can you not be robotic about baseball?
 
-A waiver-wire and lineup optimizer for fantasy baseball. Point it at a Yahoo or ESPN
-league and it reads that league's own scoring, roster slots, team count and scoring
-period off the platform, then ranks every player in MLB in *those* points — because
-the same player is genuinely worth different amounts in different leagues, and a
-ranking denominated in somebody else's scoring is a ranking of somebody else's team.
+Tells you what to do with your fantasy baseball team today. Point it at a Yahoo or
+ESPN league and it reads that league's own scoring, roster slots, team count and
+scoring period off the platform, and then answers the two questions you actually
+face: **who do I start today**, and **which add is worth one of this week's moves**.
+
+Every recommendation names both sides and can be carried out without reading
+anything else — "bench Nolan McLean, he is not projected to play today", "add TJ
+Rumfield for your 1B or Util seat, drop Roman Anthony, +21.4 points". A ranked list
+is not a decision, and an add that does not say who leaves cannot be made.
+
+Underneath it there is a ranking, in *those* points, because the same player is
+genuinely worth different amounts in different leagues and a ranking denominated in
+somebody else's scoring is a ranking of somebody else's team. It is the second
+screen, not the first.
 
 Which platform you are on decides how you get in, and the honest answer differs — see
 **[Getting your league in](#getting-your-league-in)** before anything else.
@@ -22,8 +31,13 @@ That league is also what a first visit opens on. `src/client/leagues.ts` seeds
 scoring to rank in rather than showing an empty screen — and because a demo mistaken
 for your own team is worse than either, the page names it as an example, quotes one of
 its scoring values back to make the point concrete, and offers the button to League
-setup. The band is keyed on `EXAMPLE_LEAGUE_KEY` in `src/client/panels.tsx` and stops
-rendering the moment a different league is active.
+setup.
+
+The band is keyed on `EXAMPLE_LEAGUE_KEY` in `src/client/panels.tsx`, and it asks
+whether anything has been READ into that league rather than whether the key matches:
+the seed carries scoring and slots and no roster and no wire, so the moment you load
+your own team into the example league — which is exactly what the author of this
+project does, since the example league is his — it stops calling it an example.
 
 ## Billy
 

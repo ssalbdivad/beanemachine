@@ -181,6 +181,16 @@ const open = async seeds => {
 	t("and it says how old the seats it compared against are",
 		/as read .* (hour|day|in the last hour)/.test(text), text.slice(-400))
 
+	/*
+	 * The shipped example league is his own, which made one sentence permanently
+	 * false for the one reader it was written for. The demo is the SEEDED copy of it,
+	 * and what distinguishes a seed is that nothing has been read into it — no roster,
+	 * no wire. Asked that way it goes quiet the moment a real team is loaded.
+	 */
+	t("a league you have read your own roster into is not called an example",
+		!(await page.$(".example-note")),
+		(await page.$(".example-note").then(e => e && e.innerText())) || "")
+
 	t("nobody is seated whose club has no game today",
 		seated.every(n => !clubOf.has(n) || playingClubs.has(clubOf.get(n))),
 		seated.filter(n => clubOf.has(n) && !playingClubs.has(clubOf.get(n))).join(", ") ||

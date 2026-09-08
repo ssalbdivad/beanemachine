@@ -288,6 +288,44 @@ export const Decide = ({
 		}
 	}, [snapshot, league, seats])
 
+	/**
+	 * Men who are worth too much over the REST OF THE SEASON to give away for a week.
+	 *
+	 * `keepFloor` is a bscore, and bscore is denominated in the horizon it was rated
+	 * over, so the same 25 protects a different set of men depending on the window.
+	 * Over a fortnight 5 of the shipped roster's 21 sit below it; over this league's
+	 * six-day period, 12 do — Juan Soto among them. A short week should not be enough
+	 * to offer up one of the best hitters in baseball, and the week cannot see that,
+	 * because within the week it is true that he is not worth much.
+	 *
+	 * So the same floor is asked of the rest of the season, and a man safe on either
+	 * horizon is safe. Rated once, on games remaining rather than a fixed length,
+	 * because "the rest of the season" is what a keeper decision is actually about.
+	 */
+	const keepForSeason = useMemo(() => {
+		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length)
+			return new Set<string>()
+		const h = hydrate(snapshot)
+		const today = new Date().toISOString().slice(0, 10)
+		const w = windowFrom(h.slate ?? [], today, h.seasonEnd)
+		if (!w.games.size) return new Set<string>()
+		const rows = rateAll({
+			players: h.players, league, available: wireTest, teamGamesPlayed: h.teamGamesPlayed,
+			gamesByTeam: w.games, opponentsByTeam: w.opponents,
+			recentVolumeByWindow: h.recentVolumeByWindow, recentStats: h.recentStats,
+			ownership: h.ownership, eligibility: h.eligibility, underlying: h.underlying,
+			injuries: h.injuries, injuryPolicy: "keep", teams: league.meta.max_teams
+		})
+		const mine = new Set(seats.spots.map(sp => normalizeName(sp.name)))
+		const keep = new Set<string>()
+		for (const r of rows) {
+			if (!r.rateable) continue
+			const n = normalizeName(r.player.name)
+			if (mine.has(n) && r.bscore >= DEFAULTS.keepFloor) keep.add(n)
+		}
+		return keep
+	}, [snapshot, league, seats, wireTest])
+
 	const plan = useMemo(() => {
 		if (!rated || !league || !seats?.spots.length) return null
 		const input: PlanInput = {
@@ -305,8 +343,8 @@ export const Decide = ({
 			},
 			options: DEFAULTS
 		}
-		return { lineup: planLineup(input), swaps: planSwaps(input) }
-	}, [rated, league, seats, wire])
+		return { lineup: planLineup(input), swaps: planSwaps(input, 60, keepForSeason) }
+	}, [rated, league, seats, wire, keepForSeason])
 	const lineup = plan?.lineup ?? null
 
 	/**

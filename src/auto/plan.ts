@@ -771,7 +771,24 @@ export const planSwaps = (
 	/** Candidate adds considered per round. The wire is sorted by projected points
 	 *  and a man below your worst starter cannot improve any seat, so this bounds
 	 *  the search without bounding the answer. Reported in `notes` when it bites. */
-	widthPerRound = 60
+	widthPerRound = 60,
+	/**
+	 * Normalised names that may never be offered up, whatever this horizon says.
+	 *
+	 * The keep floor is a bscore, and bscore is denominated in the horizon it was
+	 * rated over — so the same threshold protects a different set of men depending on
+	 * how long the window is. Measured on the shipped roster: over a fortnight 5 of
+	 * his 21 men sit below the floor, and over his league's own six-day scoring
+	 * period 12 do. Juan Soto is above it on the fortnight and below it on the week,
+	 * which is to say a short week is enough to offer up one of the best hitters in
+	 * baseball.
+	 *
+	 * That is not a bug in the floor — 25 was measured against weeks — it is the
+	 * floor answering the only question it can. A man's value beyond this week is a
+	 * different question, and the caller answers it by rating the rest of the season
+	 * and passing the men who matter there. A player safe on EITHER horizon is safe.
+	 */
+	protect: ReadonlySet<string> = new Set()
 ): { moves: Move[]; skipped: string[]; notes: string[] } => {
 	const options = input.options ?? DEFAULTS
 	const notes: string[] = []
@@ -827,8 +844,30 @@ export const planSwaps = (
 		// the one rail carried over unchanged, and it is a rail rather than a
 		// preference: a season is longer than a horizon.
 		const droppable = resolved.filter(
-			r => !isReserve(r.spot.slot) && r.rated?.rateable && r.rated.bscore < options.keepFloor
+			r =>
+				!isReserve(r.spot.slot) &&
+				r.rated?.rateable &&
+				r.rated.bscore < options.keepFloor &&
+				!protect.has(normalizeName(r.spot.name))
 		)
+		if (round === 0) {
+			const held = resolved.filter(
+				r =>
+					!isReserve(r.spot.slot) &&
+					r.rated?.rateable &&
+					r.rated.bscore < options.keepFloor &&
+					protect.has(normalizeName(r.spot.name))
+			)
+			// One note, however many men. Eight lines each saying the same thing about a
+			// different name is the audit trail becoming the noise it was meant to cut.
+			if (held.length)
+				notes.push(
+					`${held.map(r => r.spot.name).join(", ")} ${held.length === 1 ? "is" : "are"} ` +
+						`below the ${options.keepFloor} keep floor over this window and still not ` +
+						`offered up: worth too much over the rest of the season to give away for ` +
+						`one week of it`
+				)
+		}
 		if (!droppable.length) {
 			notes.push(
 				`nobody left on the roster is below the ${options.keepFloor} keep floor, so nothing ` +

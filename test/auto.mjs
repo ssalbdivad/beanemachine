@@ -592,6 +592,26 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
   t("a man above the keep floor is never offered up, whatever the arithmetic says",
     !planSwaps(starRoster).moves.length, JSON.stringify(planSwaps(starRoster).moves))
 
+  /*
+   * A man safe on EITHER horizon is safe.
+   *
+   * The keep floor is a bscore and bscore is denominated in the window it was rated
+   * over, so the same 25 protects a different set of men depending on how long the
+   * window is. On the shipped roster, 5 of 21 sit below it over a fortnight and 12
+   * do over the league's own six-day period — Juan Soto among them. A short week
+   * must not be enough to offer up one of the best hitters in baseball, and the week
+   * cannot see that, because within the week it is true that he is not worth much.
+   */
+  const protectedRun = planSwaps(input, 60, new Set([normalizeName("My Catcher")]))
+  t("a man the caller protects is never offered up, however low this window rates him",
+    !protectedRun.moves.some(m => m.drop === "My Catcher"), JSON.stringify(protectedRun.moves))
+  t("and holding him is said out loud rather than leaving a silent gap",
+    protectedRun.notes.some(n => /My Catcher/.test(n) && /rest of the season/.test(n)),
+    JSON.stringify(protectedRun.notes))
+  t("however many are held, it is one note rather than one line each",
+    protectedRun.notes.filter(n => /keep floor over this window/.test(n)).length === 1,
+    JSON.stringify(protectedRun.notes))
+
   // names alone cannot seat anyone, so they cannot price a swap either
   const noEligibility = planSwaps({ ...input, available: undefined })
   t("with no eligibility beside the names it refuses rather than guessing a seat",

@@ -8,7 +8,7 @@ import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
-import { canReadPool, api } from "./api.ts"
+import { canReadPool, api, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
 import { normalizeName } from "./useBoard.ts"
@@ -89,9 +89,7 @@ export const Decide = ({
 	 * The carried copy is still the answer where nothing better exists, which is the
 	 * hosted site: no server, and Yahoo will not talk to a browser.
 	 */
-	const [live, setLive] = useState<{ players: { name: string; positions: string[] }[] } | null>(
-		null
-	)
+	const [read, setRead] = useState<AvailablePool | null>(null)
 	const leagueId = league?.meta.league_id ?? null
 	useEffect(() => {
 		if (!leagueId || !canReadPool(league?.meta.platform)) return
@@ -101,7 +99,7 @@ export const Decide = ({
 			season: league?.meta.season,
 			sport: league?.meta.sport
 		})
-			.then(p => on && p.players.length && setLive(p))
+			.then(p => on && p.players.length && setRead(p))
 			.catch(() => {
 				// the carried copy below is the fallback, and it needs no announcement
 				// here — the board already reports why a live read failed
@@ -111,7 +109,29 @@ export const Decide = ({
 		}
 	}, [leagueId, league?.meta.platform, league?.meta.season])
 
-	const wire = live ?? carried
+	const wire = read ?? carried
+	/**
+	 * How old the wire is, where that is a question worth asking.
+	 *
+	 * The card already says when the SEATS were read, because a stale lineup makes the
+	 * diff wrong. A stale wire is worse and quieter: it goes on offering a man the
+	 * league picked up days ago and never offers one it has just dropped. On
+	 * 2026-09-08 the carried file was four days old and did not contain Chandler
+	 * Simpson, whom this league had released in the meantime and who is the best
+	 * outfielder on it.
+	 *
+	 * `AvailablePool.readAt` is the right source and already models this: it is set
+	 * only on a list CARRIED IN from a local run, because that is the only one whose
+	 * age can differ from now — a server read happens while you wait. An earlier
+	 * version of this asked whether `api.available` had answered at all, which is not
+	 * the same question: that call falls back to the carried store itself, so it
+	 * answers with a four-day-old file and reports it as fresh.
+	 */
+	const wireAge =
+		read?.readAt ? readAgo(read.readAt)
+		: read ? null
+		: carried?.at ? readAgo(carried.at)
+		: null
 
 	/**
 	 * Rated over the SCORING PERIOD, not a fortnight.
@@ -661,6 +681,13 @@ export const Decide = ({
 						Each figure is what your starting lineup projects over this period with the
 						move made. The men leaving are all well below what a free agent at their own
 						slot is worth, so losing them costs you nothing you cannot replace.
+						{wireAge && (
+							<>
+								{" "}
+								Read against your league&rsquo;s free-agent list as it stood{" "}
+								<b>{wireAge}</b> — anyone picked up or dropped since is not in it.
+							</>
+						)}
 					</p>
 				</>
 			}

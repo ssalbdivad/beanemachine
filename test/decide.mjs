@@ -190,6 +190,25 @@ const open = async (seeds, opts = {}) => {
 		/as read .* (hour|day|in the last hour)/.test(text), text.slice(-400))
 
 	/*
+	 * A stale WIRE is worse than a stale lineup, and silently so: it goes on offering
+	 * a man the league picked up days ago and never offers one it just dropped. On
+	 * 2026-09-08 the carried file was four days old and did not contain Chandler
+	 * Simpson, whom the league had released and who is the best outfielder on it. So
+	 * when the list is a carried one rather than a live read, the card says how old.
+	 * This test blocks the live read, which is the only way to be sure which of the
+	 * two it is looking at.
+	 */
+	{
+		const off = await open({ lineup: seedLineup, pool: seedPool }, { offline: true })
+		const t2 = await off.$eval(".decide", e => e.innerText)
+		t("a carried free-agent list is dated where the moves are proposed",
+			!/Add .+, drop /.test(t2) ||
+				/free-agent list as it stood .*(hour|day|in the last hour)/.test(t2),
+			t2.slice(-500))
+		await off.close()
+	}
+
+	/*
 	 * The shipped example league is his own, which made one sentence permanently
 	 * false for the one reader it was written for. The demo is the SEEDED copy of it,
 	 * and what distinguishes a seed is that nothing has been read into it — no roster,

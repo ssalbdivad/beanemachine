@@ -1445,9 +1445,10 @@ const BuyLow = ({ rows }: { rows: Ranked[] }) => {
 /**
  * What the card says when the filters leave nobody worth adding.
  *
- * bscore is projected points minus what the best freely available player at the
- * same slot is projected for, so a board on which every bscore is <= 0 holds no
- * recommendation at all — only players who would cost you points. The card stays
+ * bscore is projected points minus what a man you could still pick up at the same
+ * slot is projected for — the (teams x seats)-th of them — so a board on which every
+ * bscore is <= 0 holds no recommendation at all: only players who would cost you
+ * points against the wire as it stands. The card stays
  * on screen and says so: one that silently disappears reads as a bug, and one that
  * names the least-bad option reads as advice.
  */
@@ -1460,9 +1461,9 @@ const NoPick = () => (
 			<h2>Billy&rsquo;s pick</h2>
 			<p className="pick-name">Nobody.</p>
 			<p className="pick-why">
-				Every player these filters leave projects at or below the best man you could
-				already add for free at his own slot, so each of them would cost you points.
-				Widen the filters and ask again.
+				Every player these filters leave projects at or below the man you would have
+				instead at his own slot, so each of them would cost you points. Widen the
+				filters and ask again.
 			</p>
 		</div>
 	</section>
@@ -1579,11 +1580,12 @@ const COLUMN_HELP: Record<NonNullable<Filters["sort"]>, string> = {
 	uscore:
 		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. The ownership it divides by is printed under it; \u201cunlisted\u201d means Yahoo prices no ownership for him — unknown, not unowned, so there is no uscore either.",
 	bscore:
-		"bscore — beanescore. Projected points over the horizon minus what the best freely available player at the same slot would score. 40 means forty more points than the next man up.",
+		"bscore — beanescore. Projected points over the horizon minus what a man you could still pick up at the same slot would score — the (teams × seats)-th of them, which is who is left once every team has filled that slot. 40 means forty more points than that man.",
 	marketEdge:
 		"Edge — how many points he beats the typical player rostered about as widely as he is. Like uscore but a subtraction rather than a ratio, so it stays in league points and is less swayed by the barely-owned.",
 	points: "Projected points — what he scores over the horizon in your league's own scoring.",
-	replacement: "Waiver points — what the next man up at his slot is projected to score.",
+	replacement:
+		"Waiver points — what the man you would have instead is projected to score: the (teams × seats)-th player at this slot that your league still lets you pick up.",
 	confidence:
 		"How much real data stands behind the projection: playing time so far, whether Statcast has him, and whether he's healthy. Not the odds he plays well.",
 	undervaluation:

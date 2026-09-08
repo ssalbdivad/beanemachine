@@ -1133,28 +1133,6 @@ export const Board = ({
 							" A shorter window is where this data is strongest: MLB names starters about three days ahead and then stops."}
 					</p>
 				)}
-				{/*
-				  "I have 2 picks remaining" as an ANSWER rather than as a decoration.
-
-				  This said "the first 2 rows are marked, down to the rule" — a sentence
-				  about a rail, describing the drawing rather than the decision. The rail
-				  is still there and is still the right shape for "where does my list
-				  stop", but a reader who came to find out which two men to add should
-				  not have to read a rule off a table to learn their names. So the page
-				  says them.
-
-				  Only where the moves control itself is, for the same reason the start
-				  filter is: a marker that outlives the tab that set it is a claim about
-				  a window nobody is looking at.
-				*/}
-				{/* The two per-period rules the league states, in one line rather than as
-				    two more headed controls in the strip — on a phone that read as broken
-				    furniture. Both come off the settings rows the import harvested. The
-				    line states the rules and stops. How many adds he has spent and how
-				    many innings his staff has thrown are on his team page, which no reader
-				    here opens, so neither is claimed — and neither is the PENALTY for
-				    missing the floor, which the settings page does not state and which
-				    differs by league. */}
 				{/* A "Moves left" box, a line of the league's per-period rules, and a "Your
 				    N moves" answer all lived here. They are gone because they were a SECOND
 				    recommendation: the decision card above this board names both sides of

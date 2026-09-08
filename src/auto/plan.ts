@@ -870,14 +870,19 @@ export const planSwaps = (
 			drop: best.drop.spot.name,
 			dropScore: best.drop.rated!.points,
 			gain: best.gain,
+			// Written for the reader, not for the model. "bscore -22.62, below the 25
+			// keep floor" is two internal quantities and a threshold nobody outside
+			// this file has heard of; what he needs to know is what the move is worth,
+			// where the man can play, and that the one leaving is someone he can spare.
 			reason:
 				`Your lineup projects ${best.gain} more points this period with ` +
-				`${best.add.rated.player.name} on the roster and ${best.drop.spot.name} off it. ` +
+				`${best.add.rated.player.name} in it. ` +
 				(seats.length ?
-					`He can be seated at ${[...new Set(seats)].join(", ")}. `
+					`He can fill your ${[...new Set(seats)].join(" or ")} seat. `
 				:	`Your league prints no startable position for him, so he would sit. `) +
-				`${best.drop.spot.name} is at bscore ${best.drop.rated!.bscore}, below the ` +
-				`${options.keepFloor} keep floor.`
+				`${best.drop.spot.name} is the man to give up for him: he is well below ` +
+				`what a free agent at his own slot is worth, so losing him costs you nothing ` +
+				`you cannot replace.`
 		})
 		roster = [
 			...roster.filter(sp => normalizeName(sp.name) !== normalizeName(best.drop.spot.name)),

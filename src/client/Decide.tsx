@@ -350,9 +350,22 @@ export const Decide = ({
 
 			<h3 className="decide-head">
 				Make these moves
-				{plan && rules.cap !== null && (
+				{/* "2 of the 6 your league allows" reads as four left on the table. The cap
+				    is the league's rule; the number actually proposed is a measured
+				    finding — two moves a week beat one and beat three across 111 weeks and
+				    five seasons — and a reader deciding whether to make a third deserves
+				    to be told which is which. */}
+				{plan && (
 					<span className="decide-gain">
-						{plan.swaps.moves.length} of the {rules.cap} adds your league allows a week
+						{/* "2 worth making" would claim a third was weighed and rejected. It was
+						    not: the planner stops at two because two is what measured best —
+						    two moves a week beat one and beat three over 111 weeks and five
+						    seasons. Below the cap the sentence is the other one, and true. */}
+						{plan.swaps.moves.length === 0 ? "none clear the bar"
+						: plan.swaps.moves.length < DEFAULTS.maxMoves ?
+							`${plan.swaps.moves.length} clear${plan.swaps.moves.length === 1 ? "s" : ""} the bar`
+						:	`${plan.swaps.moves.length} a week is what measured best`}
+						{rules.cap !== null && ` · your league allows ${rules.cap}`}
 					</span>
 				)}
 			</h3>
@@ -379,7 +392,7 @@ export const Decide = ({
 				</ul>
 			}
 
-			{(rules.floor !== null || plan?.swaps.notes.length) && (
+			{rules.floor !== null && rules.projected !== null && (
 				<>
 					<h3 className="decide-head">Watch</h3>
 					<ul className="decide-list decide-watch">
@@ -402,14 +415,25 @@ export const Decide = ({
 								</span>
 							</li>
 						)}
-						{plan?.swaps.notes.map(n => (
-							<li key={n}>
-								<span className="decide-note">·</span>
-								<span>{n}</span>
-							</li>
-						))}
 					</ul>
 				</>
+			)}
+
+			{/* How the answer was arrived at, under it rather than in it. These are the
+			    planner's own notes — a search depth, a man it protected, a bar something
+			    fell under. They are the audit trail for a recommendation the reader is
+			    asked to act on, so they are not dropped; they are also not "watch items",
+			    which is where they were, sitting beside an innings floor he can actually
+			    be caught out by. */}
+			{!!plan?.swaps.notes.length && (
+				<details className="decide-notes">
+					<summary>How this was decided</summary>
+					<ul>
+						{plan.swaps.notes.map(n => (
+							<li key={n}>{n}</li>
+						))}
+					</ul>
+				</details>
 			)}
 		</section>
 	)

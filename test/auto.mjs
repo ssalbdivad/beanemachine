@@ -641,6 +641,42 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
       r.moves[0]?.drop === "Scrub", JSON.stringify(r.moves))
   }
 
+  /*
+   * The cap is a rail, not a judgement about the third move. A reader deciding
+   * whether to spend one of the other adds his league allows is entitled to know
+   * what the next one was worth — reported, never made, because a planner that
+   * quietly exceeded its own cap because the next gain looked good would be the
+   * churn the cap exists to stop.
+   */
+  {
+    const many = {
+      ...input,
+      rated: [
+        rated("Mine A", { points: 1, bscore: -50, slots: ["C"] }),
+        rated("Mine B", { points: 1, bscore: -50, slots: ["1B"] }),
+        rated("Mine C", { points: 1, bscore: -50, slots: ["OF"] }),
+        rated("Free A", { points: 90, bscore: 5, slots: ["C"] }),
+        rated("Free B", { points: 80, bscore: 5, slots: ["1B"] }),
+        rated("Free C", { points: 70, bscore: 5, slots: ["OF"] })
+      ],
+      roster: [spot("C", "Mine A", ["C"]), spot("1B", "Mine B", ["1B"]), spot("OF", "Mine C", ["OF"])],
+      availableNames: new Set(["Free A", "Free B", "Free C"].map(normalizeName)),
+      available: [
+        { name: "Free A", positions: ["C"] },
+        { name: "Free B", positions: ["1B"] },
+        { name: "Free C", positions: ["OF"] }
+      ],
+      shape: shape({ C: 1, "1B": 1, OF: 1, BN: 2 },
+        { C: ["C"], "1B": ["1B"], OF: ["OF"], BN: "any" }, ["C", "1B", "OF", "BN", "BN"]),
+      options: { ...DEFAULTS, maxMoves: 2 }
+    }
+    const r = planSwaps(many)
+    t("it stops at the cap even when a third move would gain",
+      r.moves.length === 2, JSON.stringify(r.moves.map(m => m.add)))
+    t("and says what the third would have been worth rather than leaving it silent",
+      r.notes.some(n => /third move would gain [\d.]+ more/.test(n)), JSON.stringify(r.notes))
+  }
+
   // names alone cannot seat anyone, so they cannot price a swap either
   const noEligibility = planSwaps({ ...input, available: undefined })
   t("with no eligibility beside the names it refuses rather than guessing a seat",

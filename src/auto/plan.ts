@@ -1000,6 +1000,51 @@ export const planSwaps = (
 		base = planLineup({ ...input, roster }).pointsPlanned
 	}
 
+	/**
+	 * What stopping at the cap cost, where it cost anything.
+	 *
+	 * The cap is a rail, not a judgement about the third move — a reader deciding
+	 * whether to spend one of the four other adds his league allows is entitled to
+	 * know what the next one was worth. Reported rather than made: `maxMoves` is
+	 * where the measurement put it, and a planner that quietly exceeded its own cap
+	 * because the next gain looked good would be the churn the cap exists to stop.
+	 */
+	if (moves.length === options.maxMoves) {
+		const resolved = resolveRoster({ ...input, roster })
+		const droppable = resolved.filter(
+			r =>
+				!isReserve(r.spot.slot) &&
+				r.rated?.rateable &&
+				r.rated.bscore < options.keepFloor &&
+				!protect.has(normalizeName(r.spot.name))
+		)
+		const taken = new Set(moves.map(m => normalizeName(m.add)))
+		const next = candidates.find(a => !taken.has(normalizeName(a.rated.player.name)))
+		if (next && droppable.length) {
+			const base2 = planLineup({ ...input, roster }).pointsPlanned
+			let bestNext = -Infinity
+			for (const d of droppable) {
+				const after = [
+					...roster.filter(sp => normalizeName(sp.name) !== normalizeName(d.spot.name)),
+					{
+						slot: "BN",
+						name: next.rated.player.name,
+						positions: next.positions,
+						team: next.rated.player.team ?? null,
+						status: ""
+					}
+				]
+				bestNext = Math.max(bestNext, planLineup({ ...input, roster: after }).pointsPlanned - base2)
+			}
+			if (Number.isFinite(bestNext))
+				notes.push(
+					`a third move would gain ${r2(bestNext)} more on top of these two — ` +
+						`${options.maxMoves} a week is where the measurement put the cap, not where ` +
+						`the gains stop`
+				)
+		}
+	}
+
 	return { moves, skipped, notes }
 }
 

@@ -327,6 +327,32 @@ const open = async (seeds, opts = {}) => {
 	await page.close()
 }
 
+/**
+ * A league that scores nothing gets a refusal, not a plan.
+ *
+ * The roster templates ship a shape without a scoring table, so until one is entered
+ * every projection is exactly zero. `rateAll` already refuses to rank that — everyone
+ * comes back unrateable — and an unrateable roster reaches the diff as a lineup
+ * nobody is in, which renders as "bench all eighteen of your starters". The surface
+ * that gives instructions is the last one that should skip a refusal the board and
+ * the trade page both make.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	for (const k of Object.keys(cfg.leagues[KEY].scoring.batting))
+		cfg.leagues[KEY].scoring.batting[k] = 0
+	for (const k of Object.keys(cfg.leagues[KEY].scoring.pitching))
+		cfg.leagues[KEY].scoring.pitching[k] = 0
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a league with no scoring is told what is missing rather than given a plan",
+		/not what each stat is worth|every projection here would be exactly zero/.test(text),
+		text.slice(0, 220))
+	t("and it proposes nothing at all — no benchings, no moves",
+		!(await page.$(".decide-changes")) && !/Add .+, drop /.test(text), text.slice(0, 300))
+	await page.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

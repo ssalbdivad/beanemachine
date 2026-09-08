@@ -441,6 +441,36 @@ export const Decide = ({
 
 	if (!league) return null
 
+	/**
+	 * A league that scores nothing gets a refusal, not a plan.
+	 *
+	 * The roster templates ship a shape without a scoring table, so until one is
+	 * entered every projection is exactly zero. `rateAll` already refuses to rank
+	 * that — everyone comes back unrateable — but this card had no guard, and an
+	 * unrateable roster reaches the diff as a lineup nobody is in: it would have told
+	 * him to bench all eighteen of his starters. The board and the trade page both
+	 * make this refusal; the surface that gives instructions is the last one that
+	 * should skip it.
+	 */
+	const scores =
+		Object.values(league.scoring.batting).some(v => v !== 0) ||
+		Object.values(league.scoring.pitching).some(v => v !== 0)
+	if (!scores)
+		return (
+			<section className="card full decide decide-blocked">
+				<h2>What should I do?</h2>
+				<p>
+					Nothing yet — <b>{league.meta.league_name ?? "this league"}</b> gives the roster
+					shape but not what each stat is worth, so every projection here would be exactly
+					zero and every recommendation would be a tie. That is a missing input, not an
+					answer.
+				</p>
+				<p className="sub">
+					Open <b>League setup</b> and read the values off your platform, or enter them.
+				</p>
+			</section>
+		)
+
 	// Each of these is a different missing thing with a different fix, and naming the
 	// wrong one sends the reader to the wrong button.
 	if (!seats?.spots.length) {

@@ -534,17 +534,32 @@ export const Decide = ({
 				<p className="sub">
 					None worth making. {plan?.swaps.notes[0] ?? ""}
 				</p>
-			:	<ul className="decide-list">
-					{plan.swaps.moves.map(m => (
-						<li key={`${m.add}-${m.drop}`}>
-							<span className="decide-delta">+{m.gain}</span>
-							<span>
-								Add <b>{m.add}</b>, drop <b>{m.drop}</b>
-								<em className="decide-why">{m.reason}</em>
-							</span>
-						</li>
-					))}
-				</ul>
+			:	<>
+					<ul className="decide-list">
+						{plan.swaps.moves.map(m => (
+							<li key={`${m.add}-${m.drop}`}>
+								<span className="decide-delta">+{m.gain}</span>
+								<span>
+									Add <b>{m.add}</b>
+									{m.seats?.length ?
+										<span className="decide-seat"> for your {m.seats.join(" or ")} seat</span>
+									:	null}
+									, drop <b>{m.drop}</b>
+								</span>
+							</li>
+						))}
+					</ul>
+					{/* Said once. Every move carried the same two clauses — what the gain is
+					    denominated in, and why the man leaving can be spared — which on a
+					    phone was an eight-line paragraph under each of two moves, most of it
+					    identical. What differs per move is the gain and the seat, and those
+					    are on the row. */}
+					<p className="sub decide-rest">
+						Each figure is what your starting lineup projects over this period with the
+						move made. The men leaving are all well below what a free agent at their own
+						slot is worth, so losing them costs you nothing you cannot replace.
+					</p>
+				</>
 			}
 
 			{rules.floor !== null && rules.projected !== null && (

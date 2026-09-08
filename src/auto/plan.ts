@@ -24,6 +24,17 @@ export interface Move {
 	dropScore: number
 	gain: number
 	reason: string
+	/**
+	 * The startable seats the arriving man can fill, as the league's own eligibility
+	 * grants them.
+	 *
+	 * Carried as data rather than left inside `reason` because the two readers want
+	 * different shapes: the terminal prints the sentence, and the card needs the
+	 * seats on the row and the rationale said once under the list. Rendering the
+	 * whole sentence per move put an eight-line paragraph under each of two moves on
+	 * a phone, most of it identical.
+	 */
+	seats?: string[]
 }
 
 export interface PlanOptions {
@@ -870,6 +881,7 @@ export const planSwaps = (
 			drop: best.drop.spot.name,
 			dropScore: best.drop.rated!.points,
 			gain: best.gain,
+			seats: [...new Set(seats)],
 			// Written for the reader, not for the model. "bscore -22.62, below the 25
 			// keep floor" is two internal quantities and a threshold nobody outside
 			// this file has heard of; what he needs to know is what the move is worth,

@@ -631,7 +631,12 @@ export const App = () => {
 					    board below it is for looking things up. A reader who wants only to be
 					    told what to do should never have to scroll to be told. */}
 					<div className="grid">
-						<Decide snapshot={snapshot} league={league ?? null} leagueKey={key} />
+						<Decide
+							snapshot={snapshot}
+							league={league ?? null}
+							leagueKey={key}
+							error={snapshotError}
+						/>
 					</div>
 					{/* The primer moved into Board, which is the only place that knows which
 					    ranking is on screen — it defines bscore, and the streaming list is

@@ -371,6 +371,29 @@ const open = async (seeds, opts = {}) => {
 	await page.close()
 }
 
+/**
+ * Waiting for the data and failing to get it are different states.
+ *
+ * Both used to reach "no projection could be made for this period" — a sentence
+ * about the answer, where the reader needs one about the app. Blocking the snapshot
+ * outright is the only way to see the failure branch, since it is otherwise served
+ * from the same origin as the page.
+ */
+{
+	const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+	await page.route("**/snapshot.json", r => r.abort())
+	await page.addInitScript(l => localStorage.setItem("beanemachine:lineup", JSON.stringify(l)), seedLineup)
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".decide", { timeout: 30000 })
+	await page.waitForTimeout(2500)
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a snapshot that will not load is reported as that, not as a missing projection",
+		/load the player data|Loading player data/.test(text) &&
+			!/No projection could be made for this period/.test(text),
+		text.slice(0, 220))
+	await page.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

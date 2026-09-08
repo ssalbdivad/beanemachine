@@ -66,11 +66,14 @@ const PERIOD_NAME: Record<string, string> = {
 export const Decide = ({
 	snapshot,
 	league,
-	leagueKey
+	leagueKey,
+	error
 }: {
 	snapshot: Snapshot | null
 	league: League | null
 	leagueKey: string | null
+	/** Why the player data could not be read, when it could not. */
+	error: string | null
 }) => {
 	const seats = leagueKey ? lineupStore.of(leagueKey) : null
 	const carried = leagueKey ? poolStore.of(leagueKey) : null
@@ -440,6 +443,27 @@ export const Decide = ({
 	}, [league, rated, lineup, plan, seats, wire])
 
 	if (!league) return null
+
+	/**
+	 * Waiting for the data and failing to get it are different states, and neither is
+	 * "no projection could be made for this period" — which is what both used to
+	 * reach, a sentence about the answer where the reader needed a sentence about the
+	 * app. The board distinguishes them; so does this now.
+	 */
+	if (error)
+		return (
+			<section className="card full decide decide-blocked">
+				<h2>What should I do?</h2>
+				<p>Couldn&rsquo;t load the player data, so nothing here can be priced: {error}</p>
+			</section>
+		)
+	if (!snapshot)
+		return (
+			<section className="card full decide decide-blocked">
+				<h2>What should I do?</h2>
+				<p className="empty">Loading player data…</p>
+			</section>
+		)
 
 	/**
 	 * A league that scores nothing gets a refusal, not a plan.

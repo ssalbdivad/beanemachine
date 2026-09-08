@@ -639,7 +639,11 @@ export const Decide = ({
 					<h3 className="decide-head">
 						Today
 						<span className="decide-gain">
-							{today.playing} of your men have a game · your lineup projects{" "}
+							{/* "have a game" is not what this counts. A starting pitcher on his club's
+							    off-turn HAS a game — his club is playing — and cannot score in it,
+							    and the set is now the men who are rateable today, which is the
+							    useful one. So the words are the ones that match it. */}
+							{today.playing} of your men can score today · your lineup projects{" "}
 							{today.lineup.pointsPlanned}
 						</span>
 					</h3>

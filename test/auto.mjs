@@ -4,7 +4,8 @@
 // asserting the planner does not do it, and once by handing railViolations a plan
 // that does it and asserting the audit catches it.
 import {
-	activeSlots, DEFAULTS, plan, planLineup, planMoves, planSwaps, railViolations, resolveRoster
+	activeSlots, DEFAULTS, plan, planLineup, planMoves, planSwaps, railViolations,
+	resolveRoster, seatedInnings
 } from "../src/auto/plan.ts"
 import { normalizeName } from "../src/data/yahoo-pool.ts"
 
@@ -605,6 +606,50 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
   })
   t("a player already on the roster is never proposed as an add",
     !dupe.moves.length, JSON.stringify(dupe.moves))
+}
+
+/**
+ * `seatedInnings` — the quantity a weekly innings floor is a question about.
+ *
+ * A league that sets one forfeits its pitching side under it, so a plan that drops
+ * arms can break it. Advice that clears you on the roster you have and then tells
+ * you to drop two pitchers has checked the wrong roster.
+ */
+{
+  const arms = [
+    rated("Ace", { group: "pitching", slots: ["SP", "P"] }),
+    rated("Middle", { group: "pitching", slots: ["SP", "P"] }),
+    rated("Benchwarmer", { group: "pitching", slots: ["SP", "P"] }),
+    rated("Bat", { slots: ["OF"] })
+  ]
+  arms[0].projection = { stats: { outs: 18 } }   // six innings
+  arms[1].projection = { stats: { outs: 16 } }   // five and a third
+  arms[2].projection = { stats: { outs: 30 } }   // ten, and on the bench
+  arms[3].projection = { stats: { outs: 99 } }   // a hitter; must not be counted
+
+  t("it counts the outs of seated pitchers, in thirds",
+    seatedInnings(arms, [{ slot: "SP", name: "Ace" }, { slot: "P", name: "Middle" }]) ===
+      Number(((18 + 16) / 3).toFixed(1)),
+    String(seatedInnings(arms, [{ slot: "SP", name: "Ace" }, { slot: "P", name: "Middle" }])))
+  t("a pitcher on the bench throws innings for nobody",
+    seatedInnings(arms, [
+      { slot: "SP", name: "Ace" },
+      { slot: "BN", name: "Benchwarmer" }
+    ]) === 6,
+    String(seatedInnings(arms, [{ slot: "SP", name: "Ace" }, { slot: "BN", name: "Benchwarmer" }])))
+  t("nor does one on the injured list",
+    seatedInnings(arms, [{ slot: "IL", name: "Ace" }]) === 0)
+  t("a hitter in a seat contributes no innings, whatever his line says",
+    seatedInnings(arms, [{ slot: "OF", name: "Bat" }]) === 0)
+  t("and dropping a seated arm lowers it, which is the whole point",
+    seatedInnings(arms, [{ slot: "SP", name: "Ace" }, { slot: "P", name: "Middle" }]) >
+      seatedInnings(arms, [{ slot: "SP", name: "Ace" }]),
+    "")
+  t("an unrateable pitcher is not counted, because he has no projection to count",
+    seatedInnings(
+      [{ ...arms[0], rateable: false }],
+      [{ slot: "SP", name: "Ace" }]
+    ) === 0)
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

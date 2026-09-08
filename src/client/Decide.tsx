@@ -4,7 +4,9 @@ import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { rateAll } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
-import { activeSlots, planLineup, planSwaps, DEFAULTS, type PlanInput } from "../auto/plan.ts"
+import {
+	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
+} from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
@@ -263,7 +265,8 @@ export const Decide = ({
 			?.raw_settings ?? {}) as Record<string, string>
 		const floor = deriveInningsMinimum(raw).perPeriod
 		const cap = deriveMoveLimit(raw).perPeriod
-		if (floor === null || !rated || !lineup?.starters.length) return { floor, cap, projected: null }
+		if (floor === null || !rated || !lineup?.starters.length)
+			return { floor, cap, projected: null, after: null }
 		/**
 		 * Only the men in SEATS, because only they throw innings that count.
 		 *
@@ -272,19 +275,53 @@ export const Decide = ({
 		 * whose innings accrue to nobody. The floor is a question about the lineup, so
 		 * it is asked of the lineup.
 		 */
-		const started = new Set(
-			lineup.starters
-				.filter(st => !RESERVE.test(st.slot))
-				.map(st => normalizeName(st.name))
-		)
-		let outs = 0
-		for (const r of rated.rows) {
-			if (!r.rateable || r.player.group !== "pitching") continue
-			if (!started.has(normalizeName(r.player.name))) continue
-			outs += (r.projection.stats.outs as number | undefined) ?? 0
+		const inningsOf = (starters: { slot: string; name: string }[]) =>
+			seatedInnings(rated.rows, starters)
+		const projected = inningsOf(lineup.starters)
+
+		/**
+		 * ...and the same question asked of the roster the MOVES would leave.
+		 *
+		 * Two of the swaps above can be a pitcher out and a hitter in, and this league
+		 * forfeits its pitching side under twenty innings. Reporting only the innings
+		 * he has now, next to advice that would remove some of them, is the card
+		 * checking the wrong roster: it would clear him at 63.5 and then tell him to
+		 * drop two arms. So the floor is asked twice, and the second answer is the one
+		 * that can stop a move.
+		 */
+		let after: number | null = null
+		if (league && plan?.swaps.moves.length && league.roster.slot_accepts && seats?.spots.length) {
+			const dropped = new Set(plan.swaps.moves.map(m => normalizeName(m.drop)))
+			const added = plan.swaps.moves.map(m => {
+				const r = rated.rows.find(x => normalizeName(x.player.name) === normalizeName(m.add))
+				return {
+					slot: "BN",
+					name: m.add,
+					positions: (wire?.players ?? []).find(w => normalizeName(w.name) === normalizeName(m.add))
+						?.positions ?? [],
+					team: r?.player.team ?? null
+				}
+			})
+			const post = planLineup({
+				roster: [
+					...seats.spots
+						.filter(sp => !dropped.has(normalizeName(sp.name)))
+						.map(sp => ({ ...sp, team: sp.team ?? null })),
+					...added
+				],
+				rated: rated.rows,
+				availableNames: new Set(),
+				shape: {
+					slots: league.roster.slots,
+					slot_order: league.roster.slot_order,
+					slot_accepts: league.roster.slot_accepts
+				},
+				options: DEFAULTS
+			})
+			after = inningsOf(post.starters)
 		}
-		return { floor, cap, projected: Number((outs / 3).toFixed(1)) }
-	}, [league, rated, lineup])
+		return { floor, cap, projected, after }
+	}, [league, rated, lineup, plan, seats, wire])
 
 	if (!league) return null
 
@@ -516,23 +553,47 @@ export const Decide = ({
 					<ul className="decide-list decide-watch">
 						{rules.floor !== null && rules.projected !== null && (
 							<li>
+								{/* The number that matters is the one AFTER the advice, where there is
+								    advice: two of the swaps above can take a pitcher off the roster,
+								    and this league forfeits its pitching side under the floor. */}
 								<span
 									className={
-										rules.projected >= rules.floor ? "decide-ok" : "decide-warn"
+										(rules.after ?? rules.projected) >= rules.floor ?
+											"decide-ok"
+										:	"decide-warn"
 									}
 								>
-									{rules.projected >= rules.floor ? "OK" : "SHORT"}
+									{(rules.after ?? rules.projected) >= rules.floor ? "OK" : "SHORT"}
 								</span>
 								<span>
 									Your league requires <b>{rules.floor} innings</b> this period and your
-									pitchers project <b>{rules.projected}</b>.{" "}
+									pitchers project <b>{rules.projected}</b>
+									{rules.after !== null && rules.after !== rules.projected && (
+										<>
+											{" "}
+											— <b>{rules.after}</b> if you make the moves above
+										</>
+									)}
+									.{" "}
 									<em className="decide-why">
-										An estimate from their scheduled turns, not an announcement — and it
-										counts the staff you have now, before any move above.
+										An estimate from their scheduled turns, not an announcement.
 									</em>
 								</span>
 							</li>
 						)}
+						{rules.floor !== null &&
+							rules.after !== null &&
+							rules.after < rules.floor &&
+							(rules.projected ?? 0) >= rules.floor && (
+								<li>
+									<span className="decide-warn">STOP</span>
+									<span>
+										Those moves would take you <b>under the innings floor</b> — you
+										project {rules.projected} now and {rules.after} after them. Make the
+										hitter first and watch the arms, or skip the pitcher you would drop.
+									</span>
+								</li>
+							)}
 					</ul>
 				</>
 			)}

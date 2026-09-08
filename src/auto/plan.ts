@@ -899,3 +899,35 @@ export const planSwaps = (
 
 	return { moves, skipped, notes }
 }
+
+/**
+ * Innings the men in SEATS are projected to throw over the horizon.
+ *
+ * A league that sets a weekly innings minimum forfeits its pitching side under it,
+ * so this is a quantity a plan can break: two add/drops can take a pitcher off the
+ * roster, and advice that clears you at 63 innings and then tells you to drop two
+ * arms has checked the wrong roster.
+ *
+ * Only seated men count. Summing the whole staff reported 82.5 against a floor of
+ * 20 on the shipped league — a comfortable pass built out of four pitchers on the
+ * bench, whose innings accrue to nobody.
+ *
+ * `outs` rather than any innings figure, because outs are what the projection
+ * actually models and thirds of an inning are exactly where baseball's notation
+ * bites. One division, at the end, where it can be seen.
+ */
+export const seatedInnings = (
+	rated: Rated[],
+	starters: { slot: string; name: string }[]
+): number => {
+	const seated = new Set(
+		starters.filter(st => !/^(BN|IL|NA)/i.test(st.slot)).map(st => normalizeName(st.name))
+	)
+	let outs = 0
+	for (const r of rated) {
+		if (!r.rateable || r.player.group !== "pitching") continue
+		if (!seated.has(normalizeName(r.player.name))) continue
+		outs += (r.projection?.stats?.outs as number | undefined) ?? 0
+	}
+	return Number((outs / 3).toFixed(1))
+}

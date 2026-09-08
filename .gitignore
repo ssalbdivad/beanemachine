@@ -14,5 +14,9 @@ logo/sheet*.png
 node_modules/
 public/snapshot.json
 
-# scratch screenshots taken while working on the UI
-crop.png
+# scratch screenshots taken while working on the UI. The wildcard is the point:
+# `git add -A` swept crop.png and then ph.png into commits on the same afternoon,
+# and naming them one at a time only ever catches the last one.
+*.png
+!src/**/*.png
+!public/**/*.png

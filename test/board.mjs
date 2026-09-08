@@ -493,71 +493,31 @@ t("and that count is measured off the window rather than baked into the sentence
 await page.click(".stream-strip .chip-btn:text-is('3 days')")
 
 /**
- * The weekly budget comes from the league, not from a blank box.
+ * The board does not make a second recommendation.
  *
- * The shipped league's settings page says "Max Acquisitions per Week: 6" and the
- * import harvested that row, so asking the reader to type 6 was asking him for a
- * number the app already held. It seeds only an untouched control, and the note
- * says whose number it is — the app knows the league's CAP, never how many he has
- * already spent this week.
+ * It used to. A "Moves left" box sat in this strip, seeded from the league's own
+ * cap, over a line reading "Your 6 moves: …" that listed six pitchers and named a
+ * drop for none of them — while the decision card above the board proposed two,
+ * both sides named, capped at the two a week that measured best. One page, two
+ * answers to "what should I add", and the one down here was a ranking with a budget
+ * stapled to it.
+ *
+ * This is the assertion that keeps it gone, because the pull to put a
+ * recommendation next to a ranking is strong and it is what produced that one.
+ * The strip keeps its horizon controls, which is what a ranked list is for.
  */
 {
   await page.click(".modes .mode:has-text('Streaming')")
   await page.waitForSelector(".stream-strip", { timeout: 15000 })
-  const seeded = await page.$eval(".stream-strip .moves input", e => e.value)
-  t("the moves box opens on the league's own weekly cap", seeded === "6", seeded)
-  const note = await page.$eval(".league-rules", e => e.textContent.trim())
-  t("and says it is the league's allowance, not his remaining count",
-    /Your league: 6 adds a week/.test(note) && /subtract any you have used/.test(note), note)
-  t("so the answer below it is already the league's question",
-    /6 moves/.test(await page.$eval(".moves-answer", e => e.textContent)),
-    await page.$eval(".moves-answer", e => e.textContent.slice(0, 80)))
-
-  // his own answer outranks the cap
-  await page.fill(".stream-strip .moves input", "2")
-  await page.waitForTimeout(400)
-  t("a number he types is not pushed back to the cap",
-    (await page.$eval(".stream-strip .moves input", e => e.value)) === "2")
-
-  // the other per-period rule the league states, and the reason to stream at all
-  t("the league's weekly innings floor is stated beside it",
-    /20 innings pitched a week required/.test(note), note)
-  t("and no penalty is claimed for missing it, since the settings page states none",
-    !/forfeit|lose|zero/i.test(note), note)
-
-  /*
-   * The innings the picks are expected to throw, against that floor.
-   *
-   * MLB reports innings in baseball notation: 85.2 is 85 and two THIRDS. Read as a
-   * decimal every pitcher is short by up to 0.8, and this sums a week of picks. The
-   * The conversion itself is pinned below on `realInnings`. The on-page assertion
-   * is only that a sum appears and is in a plausible range, because the exact total
-   * moves with every data capture.
-   */
-  {
-    const { realInnings } = await import("../src/client/useBoard.ts")
-    t("two tenths is two thirds", Math.abs(realInnings(85.2) - 85 - 2 / 3) < 1e-9,
-      String(realInnings(85.2)))
-    t("one tenth is one third", Math.abs(realInnings(85.1) - 85 - 1 / 3) < 1e-9,
-      String(realInnings(85.1)))
-    t("a whole number is itself", realInnings(85) === 85)
-    // .3 and up are not legal in this notation, so they did not come from it
-    t("a value outside the notation is passed through rather than mangled",
-      realInnings(85.5) === 85.5, String(realInnings(85.5)))
-  }
-  await page.fill(".stream-strip .moves input", "6")
-  await page.waitForTimeout(500)
-  const est = await page.$$eval(".ip-estimate", e => e.map(x => x.textContent))
-  if (est.length) {
-    const ip = Number(/About ([\d.]+) innings/.exec(est[0])[1])
-    t("the picks' expected innings are stated against the floor",
-      ip > 0 && ip < 60, String(ip))
-    t("and are labelled an estimate, not an announcement",
-      /an estimate from each pitcher/.test(est[0]), est[0])
-  } else {
-    t("no innings estimate is shown when a pick cannot be estimated", true,
-      "every pick needs a starts-based rate; a partial sum would read as a shortfall")
-  }
+  t("the board carries no move budget of its own",
+    !(await page.$(".stream-strip .moves")), "a moves control is back in the strip")
+  t("and proposes no set of moves",
+    !(await page.$(".moves-answer")) && !(await page.$(".league-rules")),
+    "the board is recommending moves again; the decision card owns that")
+  t("the horizon controls it is actually for are untouched",
+    (await page.$$(".stream-strip .chip-btn")).length > 0 &&
+      !!(await page.$(".stream-strip .toggle[data-avail]")),
+    "the streaming strip lost the controls that make it a ranking")
 }
 await page.waitForTimeout(500)
 
@@ -597,38 +557,19 @@ t("the schedule a row draws is also the schedule it speaks",
   streamRows.every(r => /published start|expected from his own rate/.test(r.label)),
   streamRows[0].label)
 
-// 3. "I have 2 moves" — the one fact no source in this app carries, taken as input
-await page.fill(".stream-strip .moves input", "2")
-await page.waitForTimeout(500)
-const marked = await page.$$eval(".board-row[data-pick]", n =>
-  n.map(e => ({ pick: e.getAttribute("data-pick"), label: e.getAttribute("aria-label") })))
-t("two moves marks exactly the top two rows, and marks where the second one ends",
-  marked.length === 2 && marked[0].pick === "yes" && marked[1].pick === "last",
-  JSON.stringify(marked.map(m => m.pick)))
-t("and the boundary is spoken, because a rail and a rule say nothing out loud",
-  /within your 2 moves/.test(marked[0].label) && /and the last one/.test(marked[1].label),
-  marked[1].label.slice(0, 90))
-/**
- * "2 picks remaining" has to read as an ANSWER, not as a caption on a decoration.
+/*
+ * 3. The moves answer that used to live here.
  *
- * It said "The first 2 rows are marked, down to the rule" — a sentence about a
- * rail, describing the drawing rather than the decision. A reader who came to find
- * out which two men to add should not have to read a rule off a table to learn
- * their names, so the page now says them, with what each one is projected for and
- * how strong the availability claim behind them is.
+ * A "Moves left" box took a number, the top N rows were marked with a rail, and a
+ * sentence under the list named them: "Your 2 moves: X — 1 start vs …, Y — …". Six
+ * assertions covered it and all six were about a recommendation this board should
+ * never have been making. The decision card above it names both sides of every move
+ * and stops where the measurement says to stop; a ranked list marking its own top
+ * rows as "yours" is the same advice with less of the information.
+ *
+ * What replaces them is the guard above — no budget, no answer, no marking — plus
+ * the assertions below, which are about the ranking itself and are unaffected.
  */
-const movesLine = await page.$eval("#horizon-panel .moves-answer", e =>
-  e.textContent.replace(/\s+/g, " ").trim())
-const markedNames = await page.$$eval(".board-row[data-pick] .who b", n =>
-  n.map(e => e.textContent.trim()))
-t("two moves are named, in words, rather than described as two marked rows",
-  /^Your 2 moves/.test(movesLine) && markedNames.every(n => movesLine.includes(n)),
-  movesLine.slice(0, 140))
-t("and each named move carries what it is worth over the window",
-  (movesLine.match(/[\d.]+ pts/g) ?? []).length === 2, movesLine.slice(0, 140))
-t("and the sentence says how strong the availability claim behind it is",
-  /Free in your league|Estimated as gettable|Availability unknown/.test(movesLine),
-  movesLine.slice(-90))
 
 /*
  * ...and that claim is about THIS list, not about what the page could have found out.
@@ -642,15 +583,19 @@ t("and the sentence says how strong the availability claim behind it is",
  * estimate, so the provenance clause is now gated on the filter that earns it.
  */
 const availToggle = ".stream-strip .toggle:has-text('I can add') input"
+/*
+ * The sentence that carried this claim was the moves answer, and it is gone with the
+ * rest of that recommendation. What the claim was FOR survives and is asserted where
+ * it now lives: the availability note above the list, which still has to describe
+ * this list rather than what the page could have found out. See "the note says which
+ * of the three answers it is giving" earlier in this file.
+ */
 if (await page.$(availToggle)) {
   await page.uncheck(availToggle)
   await page.waitForTimeout(500)
-  const looseLine = await page.$eval("#horizon-panel .moves-answer", e =>
-    e.textContent.replace(/\s+/g, " ").trim())
-  t("with the availability filter off, the moves sentence claims no availability",
-    !/Free in your league|Estimated as gettable/.test(looseLine), looseLine.slice(-120))
-  t("and it says instead that the list is not filtered by what he can get",
-    /not filtered by whether you can get them/.test(looseLine), looseLine.slice(-120))
+  t("with the availability filter off, no availability is claimed at all",
+    !(await page.$("#horizon-panel .avail-note")),
+    await page.$eval("#horizon-panel .avail-note", e => e.textContent).catch(() => ""))
   await page.check(availToggle)
   await page.waitForTimeout(500)
 }
@@ -669,10 +614,8 @@ t("the streaming tab offers exactly one availability control, not two that disag
   (await page.$$(".toggle:has-text('I can add')")).length === 1,
   String((await page.$$(".toggle:has-text('I can add')")).length))
 
-await page.fill(".stream-strip .moves input", "0")
-await page.waitForTimeout(400)
-t("zero moves marks nothing rather than marking everything",
-  (await page.$$(".board-row[data-pick]")).length === 0)
+// (the "zero moves marks nothing" assertion went with the marking itself — a board
+// that never marks cannot mark the wrong number of rows)
 
 // 4. the filter is the reader's, and it is scoped to the tab that offers it
 //

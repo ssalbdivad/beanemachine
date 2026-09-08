@@ -10,7 +10,6 @@ import {
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
 import { canReadPool, api, ApiError, getMode, type AvailablePool } from "./api.ts"
-import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
@@ -296,7 +295,6 @@ const STREAM_CSS = `
 	font-family:var(--mono);font-size:var(--fs-2);letter-spacing:var(--caps);
 	text-transform:uppercase;color:var(--faint);
 }
-.stream-strip .moves{flex-direction:row;align-items:center;gap:var(--sp-2)}
 /* app.css sets white-space:nowrap on every .toggle, which is right in the filter
    row where the labels are two words. In this strip the availability toggle also
    carries the tier it is using ("est. over 35% is taken"), and at 390px that one
@@ -305,21 +303,12 @@ const STREAM_CSS = `
    first line so a two-line label does not centre its checkbox against nothing. */
 .stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
 .stream-strip .toggle input{flex:none;margin-top:3px}
-.stream-strip .moves input{width:56px}
-.league-rules{margin:var(--sp-2) 0 0}
-.league-rules b{color:var(--ink)}
-.stream-strip .moves .cap-note{font-size:11px;color:var(--soft);font-style:normal;max-width:15ch;line-height:1.25}
 .stream-note{margin-top:var(--sp-2)}
 /* The availability sentence is NOT a stream-note. That class names the coverage
    line, and test/board.mjs reads the first element matching it — a second paragraph
    sharing the class silently retargeted five assertions at the wrong sentence.
    Same margin, its own name. */
 .avail-note{margin-top:var(--sp-2)}
-.moves-answer b{color:var(--ink)}
-/* the reader's own budget, drawn as a boundary rather than a highlight */
-.board .board-row[data-pick]{border-left-color:var(--accent);background:var(--accent-soft)}
-.board .board-row[data-pick] .rank{color:var(--accent);font-weight:700}
-.board .board-row[data-pick=last]{border-bottom:2px solid var(--accent)}
 /* his starts and who they are against, under his name. A block, so it elides on a
    phone the way the meta line above it does rather than pushing the row wide. */
 .board .board-row .who .starts{
@@ -488,34 +477,6 @@ export const Board = ({
 	 * deliberately are not.
 	 */
 	const [filters, setFilters] = useState<Filters>(() => ({ ...DEFAULT_FILTERS, ...readView() }))
-	/**
-	 * The weekly add cap the loaded league states, or null where it states none.
-	 * Read off the settings rows the import already harvested, so a league captured
-	 * before this existed still answers.
-	 */
-	const leagueRules = useMemo(() => {
-		const raw = ((league?.league_rules as
-			| { raw_settings?: Record<string, string> }
-			| undefined)?.raw_settings ?? {}) as Record<string, string>
-		return {
-			moveCap: deriveMoveLimit(raw).perPeriod,
-			innings: deriveInningsMinimum(raw).perPeriod
-		}
-	}, [league])
-	const moveCap = leagueRules.moveCap
-	/**
-	 * Seed the budget from the league once, and only into an untouched control.
-	 * `readView` returning a moves value means this reader has answered the question
-	 * himself on this browser, and his answer outranks the league's cap — he may
-	 * have spent four of six. The ref makes this a seed rather than a correction:
-	 * without it, typing 2 would be pushed back to 6 on the next render.
-	 */
-	const seeded = useRef(readView().moves !== undefined)
-	useEffect(() => {
-		if (seeded.current || moveCap === null) return
-		seeded.current = true
-		setFilters(f => ({ ...f, moves: moveCap }))
-	}, [moveCap])
 	const [open, setOpen] = useState<number | null>(null)
 	/**
 	 * How many rows are rendered. The board used to stop dead at 120 with a line
@@ -587,16 +548,6 @@ export const Board = ({
 	 *  said, in which case the tab has answered for him. */
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
 	/**
-	 * The move budget, scoped to the tab whose strip carries the input.
-	 *
-	 * Left global it marked the top rows of the fortnight and stash boards too,
-	 * with no control on screen to clear it — the same shape as the mode-scoped
-	 * filter that once went on filtering a view whose checkbox had stopped
-	 * rendering. "Two moves buys you these two" is a claim about a scoring period;
-	 * it means nothing over the rest of a season.
-	 */
-	const moves = filters.mode === "stream" ? filters.moves : 0
-	/**
 	 * The availability tooltip, with the wire's own failure in it when there was one.
 	 *
 	 * `poolError` used to reach the screen through this control's title and became
@@ -612,7 +563,7 @@ export const Board = ({
 		:	`${availability.basisText}. Your league's own free-agent list could not be read: ${poolError}`
 	useEffect(() => {
 		writeView(filters)
-	}, [filters.mode, filters.days, filters.moves])
+	}, [filters.mode, filters.days])
 
 	const set = <K extends keyof Filters,>(k: K, v: Filters[K]) =>
 		setFilters(f => ({ ...f, [k]: v }))
@@ -917,29 +868,6 @@ export const Board = ({
 								fortnight instead and the filter is off
 							</em>
 						)}
-						{/* The reader's own budget, seeded from his league where the league
-						    says. Yahoo prints "Max Acquisitions per Week" on the settings page and
-						    the import harvests it, so `deriveMoveLimit` reads the CAP off the
-						    league he loaded. What no reader here carries is how many he has SPENT
-						    this week — that is on his team page — so the seeded number is a
-						    starting point he corrects, which is why the note below says whose
-						    number it is. Nothing seeds it for a league that states no weekly cap,
-						    or once he has typed one himself. What the board contributes either
-						    way is the part he cannot do: which N of the ranking those moves
-						    should buy, after his filters. */}
-						<label className="ctl moves">
-							<span>Moves left</span>
-							<input
-								type="number"
-								min={0}
-								max={26}
-								step={1}
-								value={filters.moves}
-								onChange={e =>
-									set("moves", Math.max(0, Math.min(26, Math.floor(Number(e.currentTarget.value) || 0))))
-								}
-							/>
-						</label>
 					</div>
 				)}
 				{/* Position first and as chips, not a select: it is the filter people reach
@@ -1227,86 +1155,16 @@ export const Board = ({
 				    here opens, so neither is claimed — and neither is the PENALTY for
 				    missing the floor, which the settings page does not state and which
 				    differs by league. */}
-				{(moveCap !== null || leagueRules.innings !== null) && (
-					<p className="sub league-rules">
-						<b>Your league:</b>{" "}
-						{moveCap !== null &&
-							`${moveCap} ${moveCap === 1 ? "add" : "adds"} a week (subtract any you have used)`}
-						{moveCap !== null && leagueRules.innings !== null && " · "}
-						{leagueRules.innings !== null &&
-							`${leagueRules.innings} innings pitched a week required`}
-					</p>
-				)}
-				{moves > 0 && rows.length > 0 && (
-					<p className="sub stream-note moves-answer">
-						<b>
-							{moves === 1 ? "Your move" : `Your ${moves} moves`}
-							{moves < rows.length ? "" : " — the whole list"}:
-						</b>{" "}
-						{rows.slice(0, moves).map((r, i) => {
-							const s = startsFor(r)
-							return (
-								<Fragment key={r.player.id}>
-									{i > 0 && "; "}
-									<b>{r.player.name}</b>
-									{s && s.published > 0 ?
-										` — ${s.published} ${s.published === 1 ? "start" : "starts"} vs ${s.names.join(" and ")}`
-									: s ?
-										` — about ${s.expected.toFixed(1)} starts, none announced yet`
-									:	""}
-									{`, ${r.points.toFixed(1)} pts`}
-								</Fragment>
-							)
-						})}
-						.{" "}
-						{/* Against the floor the line above states. An ESTIMATE, and labelled
-						    one: it is each pitcher's own innings-per-start this season across
-						    his expected turns, and MLB has not named every one of those turns.
-						    Only shown where the league states a floor, because without one the
-						    number answers nothing, and only where every pick could be
-						    estimated — a partial sum read against a floor is worse than no
-						    sum, since it looks like a shortfall. */}
-						{leagueRules.innings !== null &&
-							(() => {
-								const each = rows.slice(0, moves).map(inningsFor)
-								if (each.some(x => x === null)) return null
-								const ip = each.reduce((a, b) => a! + b!, 0)!
-								return (
-									<em className="ip-estimate">
-										About <b>{ip.toFixed(1)} innings</b> from them, against your
-										league&rsquo;s {leagueRules.innings} — an estimate from each
-										pitcher&rsquo;s own innings per start.{" "}
-									</em>
-								)
-							})()}
-						{/* The claim is only as strong as its source, and it is never
-						    stronger than "probably" without the league's own wire.
+				{/* A "Moves left" box, a line of the league's per-period rules, and a "Your
+				    N moves" answer all lived here. They are gone because they were a SECOND
+				    recommendation: the decision card above this board names both sides of
+				    every move and stops at the two a week that measured best, while this
+				    said "Your 6 moves" — six, because the box was seeded from the league's
+				    cap — listed six pitchers, and named a drop for none of them.
 
-						    It is also never stronger than the LIST it describes. This read
-						    `availability.basis` alone, which says what the page COULD find
-						    out about the wire — not whether the rows above were actually
-						    filtered by it. With the pool loaded and "Only players I can add"
-						    unticked, the sentence named Parker Messick and Chris Sale, both
-						    printed "not listed" two lines below, and told the reader they
-						    were "Free in your league, read off its own list". Both are
-						    rostered; the wire had been read and had excluded them. That is
-						    an estimate dressed as a read, and worse — a read quoted about
-						    men the read ruled out. So the provenance clause is now gated on
-						    the filter that earns it, and when the filter is off the sentence
-						    says what the list actually is. */}
-						<em>
-							{!availableOnly ?
-								"Best of the whole field — “Only players I can add” is off, so these are not filtered by whether you can get them."
-							: availability.basis === "pool" ?
-								"Free in your league, read off its own list."
-							: availability.basis === "ownership" ?
-								// the arithmetic is stated in full one line above; repeating it
-								// here made the answer twice as long as the answer
-								`Estimated as gettable: rostered in ${availability.cut!.cut}% of leagues or fewer.`
-							:	"Availability unknown, so this is the best of the whole pool rather than of the wire."}
-						</em>
-					</p>
-				)}
+				    The row marking went with them. Highlighting "your top N" is the same
+				    recommendation wearing a border, and it is what pulled the answer down
+				    here in the first place. The board ranks; the card decides. */}
 				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
 				    uscore column back on a phone when the board is ranked by it. */}
 				<div className="board" data-sort={filters.sort} data-mode={filters.mode}>
@@ -1365,7 +1223,6 @@ export const Board = ({
 							starts={startsFor(r)}
 							/* the reader's budget, counted down the ranking he is actually
 							   looking at — his filters have already decided who is on it */
-							moves={moves}
 							open={open === r.player.id}
 							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)}
 						/>
@@ -1821,16 +1678,12 @@ const rowLabel = (
 	rank: number,
 	r: BoardRow,
 	starts: Starts | null,
-	moves: number,
 	stream: boolean
 ) =>
 	[
 		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
 		// The move marker is drawn as a rail and a rule, which a screen reader gets
 		// nothing from, so the boundary is spoken on the rows it falls on.
-		...(moves > 0 && rank <= moves ?
-			[rank === moves ? `within your ${moves} moves, and the last one` : `within your ${moves} moves`]
-		:	[]),
 		// The two facts a streaming pick turns on, spoken with the same separation
 		// the row draws: what MLB announced, and what the model added to it.
 		...(starts ?
@@ -1932,7 +1785,6 @@ const Row = ({
 	r,
 	stream,
 	starts,
-	moves,
 	open,
 	onToggle
 }: {
@@ -1943,9 +1795,6 @@ const Row = ({
 	stream: boolean
 	/** His schedule in this window, on the streaming tab. Null everywhere else. */
 	starts: Starts | null
-	/** How many moves the reader said he has left. The first `moves` rows carry the
-	 *  marker; the last of them carries the rule the list stops at. */
-	moves: number
 	open: boolean
 	onToggle: () => void
 }) => (
@@ -1956,8 +1805,7 @@ const Row = ({
 			type="button"
 			aria-expanded={open}
 			aria-controls={detailId(r)}
-			data-pick={moves > 0 && rank <= moves ? (rank === moves ? "last" : "yes") : undefined}
-			aria-label={rowLabel(rank, r, starts, moves, stream)}
+			aria-label={rowLabel(rank, r, starts, stream)}
 		>
 			<span className="rank" data-col="rank">{rank}</span>
 			<span className="who" data-col="who">

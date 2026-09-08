@@ -98,7 +98,11 @@ export const wireBySlot = (
  *
  * WITH a `gettable` predicate — your league's own free-agent list — the bar is the
  * best man on that wire at the slot. That is the definition the board has always
- * printed above itself ("minus the best free agent at the same slot") and it is
+ * printed above itself — and that sentence was wrong in its own right, since the bar
+ * for a BOARD is the (teams x seats)-th gettable man rather than the first. What is
+ * right for a LINEUP card is the first: the question there is whether your own man
+ * beats the thing you would have instead, and the thing you would have instead is
+ * the best one on the wire. Both are now what they say they are. This is
  * what a reader means when he asks what his own player is worth: the thing he
  * would have instead.
  *

@@ -794,14 +794,22 @@ export const BoardPrimer = ({ mode }: { mode?: string }) => {
 	 * reading the column beside the one the list is ordered by. A primer that is
 	 * inaccurate on the view it appears above is worse than no primer.
 	 */
+	/**
+	 * "minus the best free agent at the same slot" is what this said, and it is not
+	 * what the engine does. The bar is drawn from the men you could actually get —
+	 * your league's own wire where it has been read, an ownership cut otherwise —
+	 * but at the (teams x seats)-th of them, not the first. The best free agent is a
+	 * higher bar than replacement level and always was; that sentence described a
+	 * number nothing computed.
+	 */
 	if (mode === "stream") return null
 	return (
 		<p className="primer">
 			Every row is a player, ranked on <b>points above a free replacement</b>: what this
-			league scores with him in a slot, minus the best free agent at the same slot, over
-			the window you pick below. That is a <b>bscore</b>; <b>uscore</b> discounts it by
-			how widely he is already rostered. Full definitions are on each column header, and
-			under the table.
+			league scores with him in a slot, minus what a man you could still pick up at that
+			slot is worth, over the window you pick below. That is a <b>bscore</b>;{" "}
+			<b>uscore</b> discounts it by how widely he is already rostered. Full definitions
+			are on each column header, and under the table.
 		</p>
 	)
 }

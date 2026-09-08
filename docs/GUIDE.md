@@ -41,8 +41,12 @@ The board below is the second screen: a ranking, for looking things up. Two sent
 of vocabulary, and the rest of this page is elaboration on them:
 
 - A **bscore** is *points above a free replacement* — what your league scores with a
-  player in a roster slot, minus what it scores with the best free agent at the same
-  slot, over the horizon you picked. It is the column the board is ranked on.
+  player in a roster slot, minus what it scores with a man you could still pick up
+  at that slot, over the horizon you picked. It is the column the board is ranked on.
+  "Could still pick up" is your league's own free-agent list where that has been
+  read, and an ownership cut calibrated to your league's size where it has not — and
+  the bar is the *(teams × seats)*-th of those men, not the first, because
+  replacement level is who is left once every team has filled the slot.
 - A **uscore** is that same figure discounted by how widely he is already rostered:
   bscore asks who is best, uscore asks who is the best you can actually get.
 

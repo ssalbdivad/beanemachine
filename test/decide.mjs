@@ -74,11 +74,11 @@ const seedPool = {
 const open = async (seeds, opts = {}) => {
 	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
 	if (opts.offline) await page.route("**/api/available", r => r.abort())
-	await page.addInitScript(([l, p, cfgLeague]) => {
+	await page.addInitScript(([l, p, cfg]) => {
 		if (l) localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
 		if (p) localStorage.setItem("beanemachine:pool", JSON.stringify(p))
-		void cfgLeague
-	}, [seeds.lineup ?? null, seeds.pool ?? null, league])
+		if (cfg) localStorage.setItem("beanemachine:config", JSON.stringify(cfg))
+	}, [seeds.lineup ?? null, seeds.pool ?? null, seeds.config ?? null])
 	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
 	await page.waitForSelector(".decide", { timeout: 30000 })
 	await page.waitForTimeout(1500)
@@ -257,6 +257,31 @@ const open = async (seeds, opts = {}) => {
 		text.slice(0, 160))
 	t("and the moves half says why it cannot, naming CORS rather than shrugging",
 		/free-agent list/.test(text) && /CORS/.test(text), text)
+	await page.close()
+}
+
+/**
+ * A league that locks weekly is not shown a daily lineup.
+ *
+ * The "Today" section exists because this league's settings say "Weekly Deadline:
+ * Daily", and for a league that locks once a week there is no daily decision to
+ * make — a card offering one would be inventing a choice the platform does not
+ * give you. The branch had no coverage, which for a branch whose whole content is
+ * "say nothing" is the easiest kind to get wrong without noticing.
+ */
+{
+	// the committed config, with ONE field changed — anything hand-built here would
+	// be a second schema to keep in step with the real one
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	cfg.leagues[KEY].scoring_period.lineup_lock = "period"
+	cfg.leagues[KEY].scoring_period.source = "rewritten by test/decide.mjs to lock once a period"
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a weekly-lock league is shown no daily lineup at all",
+		!/\bToday\b/.test(text) && !(await page.$(".decide-changes")),
+		text.slice(0, 200))
+	t("and it still answers the question it does have — the period",
+		/Set your lineup/.test(text), text.slice(0, 200))
 	await page.close()
 }
 

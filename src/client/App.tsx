@@ -10,6 +10,7 @@ import { Billy } from "./Billy.tsx"
 import { Board } from "./Board.tsx"
 import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
+import { Decide } from "./Decide.tsx"
 import { leagues } from "./leagues.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
@@ -616,6 +617,13 @@ export const App = () => {
 
 			{view === "board" ?
 				<>
+					{/* The answer first, the ranking under it. `Decide` names both sides of
+					    every move and can be carried out without reading anything else; the
+					    board below it is for looking things up. A reader who wants only to be
+					    told what to do should never have to scroll to be told. */}
+					<div className="grid">
+						<Decide snapshot={snapshot} league={league ?? null} leagueKey={key} />
+					</div>
 					{/* The primer moved into Board, which is the only place that knows which
 					    ranking is on screen — it defines bscore, and the streaming list is
 					    ordered by projected points. */}

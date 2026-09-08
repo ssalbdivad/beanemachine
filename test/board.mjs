@@ -314,6 +314,13 @@ t("and a streaming list holds no hitters, because a hitter cannot be streamed fo
 const availTier = () => page.$eval(".stream-strip .toggle[data-avail]", e => e.dataset.avail)
 const availNote = () =>
   page.$eval("#horizon-panel .avail-note", e => e.textContent.replace(/\s+/g, " ").trim())
+/** The DERIVATION, which Board.tsx deliberately keeps in the tooltip rather than in
+ *  the line — 109px of audit trail on a 390px screen, in front of the answer, was
+ *  the reason it moved. It is still asserted, because a number the reader is asked
+ *  to trust has to be traceable; it is just asserted where it actually lives. This
+ *  read `textContent` and so could never match it once it moved. */
+const availDerivation = () =>
+  page.$eval("#horizon-panel .avail-note span[title]", e => e.getAttribute("title"))
 t("Streaming opens filtered to players the reader can add, with no click at all",
   await page.$eval(".stream-strip .toggle[data-avail] input", e => e.checked))
 const tierOnOpen = await availTier()
@@ -335,9 +342,16 @@ t("and it says which of the three answers it is giving rather than implying one"
  */
 if (tierOnOpen === "ownership") {
   const note = await availNote()
-  const cut = Number((note.match(/above (\d+)% is treated as taken/) ?? [])[1])
+  // the line reads "above 35% rostered is treated as taken"; this pattern omitted
+  // "rostered", so `cut` was NaN and every assertion resting on it failed silently
+  // in the one way a number-check can: by comparing against NaN
+  const cut = Number((note.match(/above (\d+)% rostered is treated as taken/) ?? [])[1])
+  const derivation = await availDerivation()
   t("the estimated bar is derived from the league's own size, not a constant",
-    /\d+-team league with \d+ seats holds \d+ players/.test(note) && Number.isFinite(cut), note)
+    /\d+-team league with \d+ seats holds \d+ players/.test(derivation) && Number.isFinite(cut),
+    derivation)
+  t("and the line the reader actually sees states the cut it derived",
+    new RegExp(`above ${cut}% rostered is treated as taken`).test(note), note)
   const owned = await page.$$eval(".board-row .who .own", n => n.map(e => e.textContent.trim()))
   t("and nobody above that bar is on the list",
     owned.length > 0 &&
@@ -427,14 +441,34 @@ t("and it names itself by its length rather than by the period it was cut from",
 // past it, and points scored after the reset are the NEXT matchup's.
 t("a window running past the reset says the extra games score for the next matchup",
   /runs past 2026-\d\d-\d\d/.test(sevenNote) && /next matchup/.test(sevenNote), sevenNote)
-// Probables stop about three days past a capture, so a seven-day window on this
-// fixture has not one fully-named club in it. The page says so where the reader can
-// act on it — and says nothing of the kind on a window where it is not true, because
-// a warning that is always on is furniture rather than information.
-t("a window past where probables reach points back at the shorter one",
-  /shorter window is where this data is strongest/.test(sevenNote) &&
-    !/shorter window/.test(periodNote),
-  `seven: ${/shorter window/.test(sevenNote)}, period: ${/shorter window/.test(periodNote)}`)
+/**
+ * The warning tracks COVERAGE, not the window's name.
+ *
+ * This used to assert the seven-day window carries the warning and the period does
+ * not. That held only while the period happened to be short enough to be fully
+ * named: probables reach about three days past a capture, and this league's period
+ * runs six, so on a capture taken mid-period BOTH windows are short of full
+ * coverage and both warnings are true. The old form failed for a page telling the
+ * truth.
+ *
+ * What must actually hold is the thing the warning is for: it is present exactly
+ * when the window is not fully named, and absent when it is — a warning that is
+ * always on is furniture rather than information, and one that is off when the data
+ * is thin is worse. Read off the counts the page itself prints, so it holds on any
+ * capture of any age.
+ */
+const clubsNamed = note => (note.match(/(\d+) of (\d+) clubs completely/) ?? []).slice(1).map(Number)
+const warns = note => /shorter window is where this data is strongest/.test(note)
+for (const [label, note] of [["the period", periodNote], ["seven days", sevenNote]]) {
+  const [done, all] = clubsNamed(note)
+  if (!Number.isFinite(done) || !Number.isFinite(all)) continue
+  t(`${label}: the thin-data warning is on exactly when the window is not fully named`,
+    warns(note) === done < all, `${done}/${all} clubs named, warning ${warns(note)}`)
+}
+t("and the longer window is never better covered than the shorter one",
+  (clubsNamed(sevenNote)[0] ?? 0) <= (clubsNamed(periodNote)[0] ?? 0) ||
+    clubsNamed(sevenNote)[1] > clubsNamed(periodNote)[1],
+  `${sevenNote.slice(0, 90)} || ${periodNote.slice(0, 90)}`)
 
 /**
  * Coverage is MEASURED off the window on screen, not quoted from a table.
@@ -1256,13 +1290,28 @@ await phone.close()
  *
  * The bars are set above where it sits now, not at it, so ordinary work has room
  * and only a slide back toward the old shape trips them.
+ *
+ * WHAT IS MEASURED CHANGED, so this is rewritten rather than relaxed. The answer
+ * used to BE the ranked list, so the ranked list is what was pinned. It is not the
+ * answer any more: `Decide` sits above it and states both sides of every move, and
+ * the board underneath is for looking things up. Pinning the board now would be
+ * pinning the wrong thing — it would fail for the one change that made the page
+ * better, and pass for a page that pushed the actual answer off the screen.
+ *
+ * So the tight bar moved onto `.decide`, where it is tighter than the old one ever
+ * was (418px desktop, 563px phone, against 1,350 and 1,900), and the board keeps a
+ * looser bar of its own that still catches paragraphs accreting above it.
  */
 {
   await page.click(".modes .mode:has-text('Streaming')")
   await page.waitForTimeout(900)
-  const deskTop = await page.$eval(".board-row", e => Math.round(e.getBoundingClientRect().top + scrollY))
-  t("the streaming answer starts within a screen and a half on a desktop",
-    deskTop < 1350, `first ranked row at y=${deskTop}`)
+  const top = s => page.$eval(s, e => Math.round(e.getBoundingClientRect().top + scrollY))
+  const deskDecide = await top(".decide")
+  t("the answer is on the first screen on a desktop, without scrolling",
+    deskDecide < 700, `decision card at y=${deskDecide}`)
+  const deskTop = await top(".board-row")
+  t("and the board under it still starts within two screens",
+    deskTop < 1800, `first ranked row at y=${deskTop}`)
 
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await phone.goto(BASE, { waitUntil: "domcontentloaded" })
@@ -1270,8 +1319,13 @@ await phone.close()
   await phone.waitForTimeout(1200)
   await phone.click(".modes .mode:has-text('Streaming')")
   await phone.waitForTimeout(1200)
-  const phoneTop = await phone.$eval(".board-row", e => Math.round(e.getBoundingClientRect().top + scrollY))
-  t("and within two screens on a phone", phoneTop < 1900, `first ranked row at y=${phoneTop}`)
+  const phoneTop = s => phone.$eval(s, e => Math.round(e.getBoundingClientRect().top + scrollY))
+  const phoneDecide = await phoneTop(".decide")
+  t("the answer is within one screen on a phone", phoneDecide < 900,
+    `decision card at y=${phoneDecide}`)
+  const phoneBoard = await phoneTop(".board-row")
+  t("and the board under it within three", phoneBoard < 2400,
+    `first ranked row at y=${phoneBoard}`)
   t("with nothing spilling sideways on a phone",
     (await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0)
   await phone.close()

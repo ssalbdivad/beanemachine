@@ -92,6 +92,18 @@ export interface PlanInput {
 	rated: Rated[]
 	/** Normalised names of the free agents you could actually add. */
 	availableNames: Set<string>
+	/**
+	 * Those same free agents WITH the eligibility your league prints beside each
+	 * name, where it could be read.
+	 *
+	 * A name is enough to rank a man and not enough to seat him. `planSwaps` scores
+	 * an add by what your lineup projects once he is in it, and that requires
+	 * knowing which seats will take him — which only the platform's own eligibility
+	 * says. Optional, because the older `planMoves` needs only the names, and a
+	 * caller that cannot supply this gets that planner's like-for-like rule instead
+	 * of a guess at where a man may play.
+	 */
+	available?: { name: string; positions: string[] }[]
 	shape: RosterShape
 	options?: PlanOptions
 }
@@ -162,7 +174,7 @@ export const resolveRoster = (input: PlanInput): Resolved[] => {
 		// projection knows neither: it assumes everyone plays the whole horizon.
 		const unavailable =
 			rated?.injury ? `MLB lists him ${rated.injury}`
-			: /^IL/i.test(spot.status.trim()) && spot.status.trim() ? `Yahoo flags him ${spot.status}`
+			: /^IL/i.test((spot.status ?? "").trim()) && (spot.status ?? "").trim() ? `Yahoo flags him ${spot.status}`
 			: null
 		return { spot, rated, legal, unavailable, blocked }
 	})
@@ -702,4 +714,183 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 				`${options.lineupMinGain}-point lineup bar`
 		)
 	return out
+}
+
+/**
+ * Add/drop planned on what your LINEUP is worth afterwards, not on a bscore gap.
+ *
+ * `planMoves` above scores a swap as `add.bscore - drop.bscore`, and that is wrong
+ * in three ways that all point the same direction — it under-recommends, and it
+ * under-recommends exactly the moves worth making.
+ *
+ *  1. It refuses to drop anyone the lineup is starting, because the lineup was
+ *     computed BEFORE the move and nothing would seat the man arriving. So the
+ *     upgrades it declines are precisely the ones at positions you actually play.
+ *     On the shipped league it wrote, in its own notes, that Ryan Jeffers "would be
+ *     worth 44.12 more" at catcher and then did not offer him — while the two moves
+ *     it did offer were worth 16.5 and 14.2.
+ *  2. A bscore gap is not what your team gains. A man you add and then bench gains
+ *     you nothing, and bscore cannot tell the difference.
+ *  3. Its like-for-like slot rule (the add must be eligible somewhere the drop was)
+ *     is a proxy for keeping the roster legal. Roster spots are fungible; what has
+ *     to stay legal is the LINEUP, and the lineup solver already enforces that.
+ *
+ * All three dissolve in the same change: score a swap by actually building the
+ * lineup that follows it. `gain` is then denominated in the league's own points and
+ * means what a reader assumes it means — how many more points this team projects
+ * this period if you make this move.
+ *
+ * Moves are chosen one at a time, each against the roster the previous ones leave,
+ * because two swaps that both fill the same hole are not worth the sum of their
+ * separate gains.
+ *
+ * What it keeps from `planMoves`: the keep floor, so a star is never dropped for a
+ * hot week; the injured-free-agent exclusion; and the refusal to add a man already
+ * on the roster. What it drops is the protection of started players, which existed
+ * only to paper over (1).
+ *
+ * NOT YET RE-MEASURED. `DEFAULTS.maxMoves = 2` is the optimum measured over 111
+ * weeks against the OLD scoring, and every run in `data/results/` is evidence about
+ * that planner, not this one. This function does not change any of them; it is a
+ * separate export and `planMoves` is untouched and still tested. Until a backtest
+ * is run against this scoring, treat the cap as inherited rather than established.
+ */
+export const planSwaps = (
+	input: PlanInput,
+	/** Candidate adds considered per round. The wire is sorted by projected points
+	 *  and a man below your worst starter cannot improve any seat, so this bounds
+	 *  the search without bounding the answer. Reported in `notes` when it bites. */
+	widthPerRound = 60
+): { moves: Move[]; skipped: string[]; notes: string[] } => {
+	const options = input.options ?? DEFAULTS
+	const notes: string[] = []
+	const skipped: string[] = []
+	const accepts = input.shape.slot_accepts
+	if (!accepts) {
+		notes.push(
+			"the league's slot_accepts table is absent from scoring.json, so nothing can be " +
+				"seated and no swap can be priced — read the league again to fill it in"
+		)
+		return { moves: [], skipped, notes }
+	}
+	if (!input.available?.length) {
+		notes.push(
+			input.availableNames.size ?
+				"the free agents arrived as names only, with no eligibility beside them, so a " +
+					"man who was added could not be placed in a seat and no swap could be priced"
+			:	"the free-agent pool is empty, so no add was possible"
+		)
+		return { moves: [], skipped, notes }
+	}
+
+	const byName = new Map(input.rated.map(r => [normalizeName(r.player.name), r]))
+	const onRoster = new Set(input.roster.map(sp => normalizeName(sp.name)))
+
+	/** The wire, joined to the board and to the eligibility the league prints. */
+	const candidates = input.available
+		.flatMap(a => {
+			const rated = byName.get(normalizeName(a.name))
+			return rated?.rateable && !onRoster.has(normalizeName(a.name)) ?
+					[{ rated, positions: a.positions }]
+				:	[]
+		})
+		.filter(c => {
+			if (!c.rated.injury) return true
+			skipped.push(`${c.rated.player.name}: MLB lists him ${c.rated.injury}`)
+			return false
+		})
+		.sort((a, b) => b.rated.points - a.rated.points)
+
+	if (!candidates.length) {
+		notes.push("no free agent on the wire could be joined to the projection board")
+		return { moves: [], skipped, notes }
+	}
+
+	const moves: Move[] = []
+	let roster = input.roster
+	let base = planLineup({ ...input, roster }).pointsPlanned
+
+	for (let round = 0; round < options.maxMoves; round++) {
+		const resolved = resolveRoster({ ...input, roster })
+		// A star is never offered up, whatever this week's arithmetic says. This is
+		// the one rail carried over unchanged, and it is a rail rather than a
+		// preference: a season is longer than a horizon.
+		const droppable = resolved.filter(
+			r => !isReserve(r.spot.slot) && r.rated?.rateable && r.rated.bscore < options.keepFloor
+		)
+		if (!droppable.length) {
+			notes.push(
+				`nobody left on the roster is below the ${options.keepFloor} keep floor, so nothing ` +
+					`further was offered up`
+			)
+			break
+		}
+
+		const width = Math.min(widthPerRound, candidates.length)
+		if (width < candidates.length && round === 0)
+			notes.push(
+				`the ${candidates.length} free agents were searched ${width} deep by projected ` +
+					`points; a man below that cannot outscore anyone already starting`
+			)
+
+		let best: { gain: number; add: (typeof candidates)[number]; drop: Resolved } | null = null
+		for (const add of candidates.slice(0, width)) {
+			if (moves.some(m => normalizeName(m.add) === normalizeName(add.rated.player.name)))
+				continue
+			for (const drop of droppable) {
+				const after = [
+					...roster.filter(sp => normalizeName(sp.name) !== normalizeName(drop.spot.name)),
+					{
+						slot: "BN",
+						name: add.rated.player.name,
+						positions: add.positions,
+						team: add.rated.player.team ?? null,
+						status: ""
+					}
+				]
+				const gain = r2(planLineup({ ...input, roster: after }).pointsPlanned - base)
+				if (!best || gain > best.gain) best = { gain, add, drop }
+			}
+		}
+
+		if (!best) break
+		if (best.gain < options.minGain) {
+			notes.push(
+				`the best remaining swap, ${best.add.rated.player.name} for ${best.drop.spot.name}, ` +
+					`is worth ${best.gain} points — below the ${options.minGain}-point bar`
+			)
+			break
+		}
+
+		const seats = legalSlotsFor(best.add.positions, accepts)
+		moves.push({
+			kind: "add-drop",
+			add: best.add.rated.player.name,
+			addScore: best.add.rated.points,
+			drop: best.drop.spot.name,
+			dropScore: best.drop.rated!.points,
+			gain: best.gain,
+			reason:
+				`Your lineup projects ${best.gain} more points this period with ` +
+				`${best.add.rated.player.name} on the roster and ${best.drop.spot.name} off it. ` +
+				(seats.length ?
+					`He can be seated at ${[...new Set(seats)].join(", ")}. `
+				:	`Your league prints no startable position for him, so he would sit. `) +
+				`${best.drop.spot.name} is at bscore ${best.drop.rated!.bscore}, below the ` +
+				`${options.keepFloor} keep floor.`
+		})
+		roster = [
+			...roster.filter(sp => normalizeName(sp.name) !== normalizeName(best.drop.spot.name)),
+			{
+				slot: "BN",
+				name: best.add.rated.player.name,
+				positions: best.add.positions,
+				team: best.add.rated.player.team ?? null,
+				status: ""
+			}
+		]
+		base = planLineup({ ...input, roster }).pointsPlanned
+	}
+
+	return { moves, skipped, notes }
 }

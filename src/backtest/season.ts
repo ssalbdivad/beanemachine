@@ -1,7 +1,7 @@
 import { scoreStats } from "../engine/points.ts"
 import { matchupIndexFor, teamStrength, type TeamStrength } from "../engine/matchup.ts"
 import { MODEL } from "../engine/weights.ts"
-import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS } from "../engine/project.ts"
+import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import type { League } from "../schema.ts"
 import type { PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
@@ -249,6 +249,7 @@ export const makeBscoreStrategy = (
 		 * does.
 		 */
 		mirage?: number | null
+		volumeModel?: "blend" | "state"
 	} = {}
 ): Strategy => ({
 	name,
@@ -278,6 +279,8 @@ export const makeBscoreStrategy = (
 					matchupWeight: opts.matchupWeight ?? MODEL.matchup.weight,
 					matchupIndex: matchupIndexFor(p, ctx.oppAhead, ctx.strength),
 					recentVolumePerGame: blendWindows(perWindow, RECENT_WINDOW_WEIGHTS[p.group]),
+					recentShortPerGame: blendWindows(perWindow, SHORT_WINDOW_WEIGHTS[p.group]),
+					volumeModel: opts.volumeModel ?? "blend",
 					recentWeight: opts.recentWeight ?? RECENT_BLEND_WEIGHT[p.group],
 					recentStats: ctx.recent[21]?.find(r => r.id === p.id)?.stats ?? null,
 					recentRateWeight: opts.rateWeight ?? RECENT_RATE_WEIGHT[p.group],
@@ -432,6 +435,22 @@ const vorpVariant = (name: string, opts: VariantOpts): Strategy => ({
 	name,
 	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league)
 })
+
+/**
+ * The playing-time question, asked as a season rather than as a correlation.
+ *
+ * `state` splits volume into role x availability so a returning regular stops being
+ * priced on the weeks he was hurt — see `volumeModel` in src/engine/project.ts. It
+ * moves 245 of 645 hitters by five points or more on the committed capture, which
+ * is far too large a change to ship on the argument alone.
+ */
+export const VOLUME_SWEEP: Strategy[] = [
+	makeBscoreStrategy("bscore_blend", {}),
+	makeBscoreStrategy("bscore_state", { volumeModel: "state" }),
+	seasonToDateStrategy,
+	hotHandStrategy,
+	humanStrategy
+]
 
 /** Variants under test, to find where the season disagrees with the correlation. */
 export const SWEEP: Strategy[] = [

@@ -4,7 +4,7 @@
 // asserting the planner does not do it, and once by handing railViolations a plan
 // that does it and asserting the audit catches it.
 import {
-	activeSlots, DEFAULTS, plan, planLineup, planMoves, railViolations, resolveRoster
+	activeSlots, DEFAULTS, plan, planLineup, planMoves, planSwaps, railViolations, resolveRoster
 } from "../src/auto/plan.ts"
 import { normalizeName } from "../src/data/yahoo-pool.ts"
 
@@ -528,6 +528,84 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
 	normalizeName("Ronald Acu\u00f1a Jr.") === "ronald acuna" &&
 	normalizeName("  Travis  d\u2019Arnaud  ") === "travis darnaud",
 	`${normalizeName("Ronald Acu\u00f1a Jr.")} | ${normalizeName("  Travis  d\u2019Arnaud  ")}`)
+
+/**
+ * `planSwaps` — an add is worth what your LINEUP is worth afterwards.
+ *
+ * `planMoves` scores `add.bscore - drop.bscore` and will not drop anyone it is
+ * starting, because it decided the lineup before the move and nothing would seat
+ * the arriving man. Both of those are wrong, and they are wrong together: the
+ * upgrades it declines are exactly the ones at positions you play.
+ */
+{
+  const board = [
+    rated("My Catcher", { points: 10, bscore: -30, slots: ["C"] }),
+    rated("My First", { points: 40, bscore: -5, slots: ["1B"] }),
+    rated("Free Catcher", { points: 60, bscore: 10, slots: ["C"] }),
+    rated("Free Bench Bat", { points: 5, bscore: -50, slots: ["1B"] })
+  ]
+  const input = {
+    roster: [spot("C", "My Catcher", ["C"]), spot("1B", "My First", ["1B"])],
+    rated: board,
+    availableNames: new Set(["free catcher", "free bench bat"].map(normalizeName)),
+    available: [
+      { name: "Free Catcher", positions: ["C"] },
+      { name: "Free Bench Bat", positions: ["1B"] }
+    ],
+    shape: shape({ C: 1, "1B": 1, BN: 2 }, { C: ["C"], "1B": ["1B"], BN: "any" },
+      ["C", "1B", "BN", "BN"]),
+    options: { ...DEFAULTS, maxMoves: 1 }
+  }
+
+  const r = planSwaps(input)
+  t("it drops a man it is STARTING when the arrival fills his seat better",
+    r.moves[0]?.drop === "My Catcher" && r.moves[0]?.add === "Free Catcher",
+    JSON.stringify(r.moves))
+  t("and the gain is the lineup's, in points, not a bscore gap",
+    Math.abs(r.moves[0].gain - 50) < 0.01, String(r.moves[0]?.gain))
+
+  // planMoves, on the same input, declines it and says so
+  const old = planMoves(input, new Set([normalizeName("My Catcher")]))
+  t("the older planner declines that same swap because it is starting him",
+    !old.moves.length && old.notes.some(n => /starting him/.test(n)),
+    JSON.stringify(old.notes))
+
+  // a man who would ride the bench is worth nothing, and bscore cannot see that
+  const benchOnly = planSwaps({
+    ...input,
+    availableNames: new Set([normalizeName("Free Bench Bat")]),
+    available: [{ name: "Free Bench Bat", positions: ["1B"] }]
+  })
+  t("a free agent who would not crack the lineup is worth nothing and is refused",
+    !benchOnly.moves.length, JSON.stringify(benchOnly.moves))
+
+  // the keep floor is the one rail carried over from planMoves unchanged
+  const starRoster = {
+    ...input,
+    rated: [
+      rated("My Star", { points: 10, bscore: 99, slots: ["C"] }),
+      rated("Free Catcher", { points: 60, bscore: 10, slots: ["C"] })
+    ],
+    roster: [spot("C", "My Star", ["C"])]
+  }
+  t("a man above the keep floor is never offered up, whatever the arithmetic says",
+    !planSwaps(starRoster).moves.length, JSON.stringify(planSwaps(starRoster).moves))
+
+  // names alone cannot seat anyone, so they cannot price a swap either
+  const noEligibility = planSwaps({ ...input, available: undefined })
+  t("with no eligibility beside the names it refuses rather than guessing a seat",
+    !noEligibility.moves.length && noEligibility.notes.some(n => /names only/.test(n)),
+    JSON.stringify(noEligibility.notes))
+
+  // a man already yours is not an add
+  const dupe = planSwaps({
+    ...input,
+    availableNames: new Set([normalizeName("My First")]),
+    available: [{ name: "My First", positions: ["1B"] }]
+  })
+  t("a player already on the roster is never proposed as an add",
+    !dupe.moves.length, JSON.stringify(dupe.moves))
+}
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

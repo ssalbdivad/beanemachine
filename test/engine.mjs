@@ -523,9 +523,27 @@ const boardLive = board.filter(r => r.rateable)
 const boardNeg = boardLive.filter(r => r.bscore < 0)
 const deepest = boardLive[boardLive.length - 1]
 
-t("the deepest bscore is exactly minus the bar, because he projects for zero points",
-  deepest.points === 0 && Math.abs(deepest.bscore + deepest.replacement) < 0.02,
+/*
+ * The identity, rather than one capture's instance of it.
+ *
+ * This asserted the deepest man projects for exactly ZERO, so that his bscore is
+ * minus the bar. That held while the worst rateable player in the capture was
+ * someone who would not play. It is not a property of the metric: in a points
+ * league a pitcher is DOCKED for hits, walks and earned runs, so a bad arm over a
+ * fortnight projects below zero and sits below the man who projects for nothing.
+ * On the 2026-09-08 capture that is Hancel Rincon at -58.55, and his bscore is
+ * -112.34 — further below the bar than a zero ever reaches.
+ *
+ * What is actually invariant is the subtraction, so that is what is checked, plus
+ * the floor's real shape: nobody can sit further below the bar than a man whose
+ * points are the lowest in the pool.
+ */
+t("the deepest bscore is exactly his points less his bar",
+  Math.abs(deepest.bscore - (deepest.points - deepest.replacement)) < 0.02,
   `${deepest.player.name}: ${deepest.points} − ${deepest.replacement} = ${deepest.bscore}`)
+t("and he is the deepest because his points are the lowest, not because they are zero",
+  boardLive.every(r => r.points >= deepest.points - 0.001),
+  `${deepest.player.name} at ${deepest.points}`)
 t("most of the pool sits below replacement, which is the metric working",
   boardNeg.length / boardLive.length > 0.8,
   `${boardNeg.length} of ${boardLive.length} rateable below 0`)

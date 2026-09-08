@@ -15,8 +15,16 @@ export interface RosterSpot {
 	 */
 	positions: string[]
 	team: string | null
-	/** Yahoo's own status text, e.g. "IL", "DTD", "" */
-	status: string
+	/**
+	 * Yahoo's own status text, e.g. "IL", "DTD", "".
+	 *
+	 * Optional because the browser reads this too, and the seats it stores come off
+	 * `src/client/lineup.ts`, whose schema has never carried it. Required here, this
+	 * field is why the planner could not be run from the page at all: `resolveRoster`
+	 * read `.trim()` off it and threw on the first spot. MLB's own injury list is
+	 * consulted independently, so an absent status costs a warning, not a wrong plan.
+	 */
+	status?: string
 }
 
 export interface RosterRead {

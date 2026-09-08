@@ -10,6 +10,7 @@ import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
 import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
 import "./trade.css"
+import { tradesClosed } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 
 /**
@@ -86,22 +87,54 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		[rated]
 	)
 
-	// Every startable slot's waiver bar, read off the same pool the board ranks.
-	// Rebuilt only when the pool or the league does, not on every keystroke.
+	/**
+	 * The free agents you could actually add.
+	 *
+	 * The board has fetched this for a while to power its "free agents only" filter;
+	 * this page never had it, which is why it could price a trade but not propose a
+	 * pickup. An add/drop plan is meaningless without it — every candidate would be
+	 * somebody already on a roster.
+	 */
+	const [pool, setPool] = useState<Set<string> | null>(null)
+	/**
+	 * Your league's own wire, as a test the engine can apply to any rated player.
+	 *
+	 * `pool` is the free-agent list read off your platform, keyed by normalised name
+	 * because platform ids are each platform's own. Null until it loads, and null
+	 * forever on a platform no browser can read — and null is the signal that puts
+	 * the two functions below back on their estimate.
+	 */
+	/** Whether this league still takes trades — see `tradesClosed`. */
+	const [showClosedDeal, setShowClosedDeal] = useState(false)
+	const tradeWindow = useMemo(
+		() => tradesClosed(league, new Date().toISOString().slice(0, 10)),
+		[league]
+	)
+	const gettable = useMemo(
+		() =>
+			pool?.size ?
+				(r: { player: { name: string } }) => pool.has(normalizeName(r.player.name))
+			:	undefined,
+		[pool]
+	)
+	// Every startable slot's bar. With the wire loaded this is the best man actually
+	// on it; without, the (teams x seats)-th best player anywhere, which is a guess
+	// at who would be left. Rebuilt only when the pool or the league does.
 	const bars = useMemo(
 		() =>
 			league && league.meta.max_teams !== null ?
-				replacementBySlot(league, rated, league.meta.max_teams)
+				replacementBySlot(league, rated, league.meta.max_teams, gettable)
 			:	null,
-		[league, rated]
+		[league, rated, gettable]
 	)
-	// and WHO each of those bars is, so a spot the wire covers can name him
+	// and WHO those men are, best first, so two seats covered off the wire name two
+	// different people rather than printing one man twice
 	const barMen = useMemo(
 		() =>
 			league && league.meta.max_teams !== null ?
-				replacementPlayerBySlot(league, rated, league.meta.max_teams)
+				replacementPlayerBySlot(league, rated, league.meta.max_teams, gettable)
 			:	null,
-		[league, rated]
+		[league, rated, gettable]
 	)
 
 	const mine = useMemo(
@@ -120,9 +153,12 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			out: give.flatMap(k => (byKey.has(k) ? [byKey.get(k)!] : [])),
 			in: take.flatMap(k => (byKey.has(k) ? [byKey.get(k)!] : [])),
 			pool: rated,
-			teams: league.meta.max_teams
+			teams: league.meta.max_teams,
+			// the same wire the lineup card was priced against, or the verdict's "before"
+			// is a different team from the one on screen
+			gettable
 		})
-	}, [league, mine, give, take, byKey, rated])
+	}, [league, mine, give, take, byKey, rated, gettable])
 
 	/**
 	 * Read the roster off the league's own Yahoo page instead of typing it.
@@ -139,15 +175,6 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 * would misprice every lineup below it.
 	 */
 	const [seats, setSeats] = useState<StoredLineup | null>(null)
-	/**
-	 * The free agents you could actually add.
-	 *
-	 * The board has fetched this for a while to power its "free agents only" filter;
-	 * this page never had it, which is why it could price a trade but not propose a
-	 * pickup. An add/drop plan is meaningless without it — every candidate would be
-	 * somebody already on a roster.
-	 */
-	const [pool, setPool] = useState<Set<string> | null>(null)
 	const [pulling, setPulling] = useState(false)
 	const [pullNote, setPullNote] = useState<string | null>(null)
 	const leagueId = league?.meta.league_id ?? null
@@ -604,7 +631,13 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			 * Ordered by what each card answers without being asked, it goes first.
 			 */}
 			<AdviceCard advice={advice} seats={seats} pool={pool} platform={league.meta.platform ?? null} />
-			<LineupCard league={league} lineup={lineup} count={mine.length} barMen={barMen} />
+			<LineupCard
+				league={league}
+				lineup={lineup}
+				count={mine.length}
+				barMen={barMen}
+				wireRead={!!gettable}
+			/>
 
 			{/* The two sides are symmetric now. The right has always been a search box;
 			    the left was every player you own rendered at once — 24 name-only chips
@@ -612,7 +645,25 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			    of them to tell you which one you could stand to lose. Same set, still
 			    all reachable, but filterable and carrying the number the choice turns
 			    on. */}
-			<section className="card full trade-deal">
+			{/* Retired rather than removed once the league's own deadline has passed. The
+			    evaluator still works and the code is still here; what is gone is the
+			    invitation to use it on a league that will not accept the deal. */}
+			{tradeWindow.closed && !showClosedDeal ?
+				<section className="card full trade-deal trade-closed">
+					<h2>The deal</h2>
+					<p className="sub">
+						Your league stopped taking trades on <b>{tradeWindow.on}</b>, so a deal priced
+						here could not be made. Your roster and lineup above are still live, and adds
+						and drops are on <b>Recommendations</b>.
+					</p>
+					{/* A disclosure, not a wall. The default is clean because the deadline has
+					    passed; the evaluator still works and a reader with a reason to run it
+					    — a keeper league, a dynasty, a what-if — is one click from it. */}
+					<button type="button" className="chip-btn" onClick={() => setShowClosedDeal(true)}>
+						Price one anyway
+					</button>
+				</section>
+			:	<section className="card full trade-deal">
 				<h2>The deal</h2>
 				<p className="sub">
 					Pick who leaves and who arrives. The verdict is what your starting lineup
@@ -729,6 +780,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 					</div>
 				</div>
 			</section>
+			}
 
 			{verdict && (
 				<Verdict
@@ -922,14 +974,20 @@ const LineupCard = ({
 	league,
 	lineup,
 	count,
-	barMen
+	barMen,
+	wireRead
 }: {
 	league: League
 	lineup: Lineup
 	count: number
-	/** Who each slot's replacement bar actually is, so a spot the wire covers can
-	 *  name him instead of leaving the reader to guess. */
-	barMen: Map<string, { player: { name: string } }> | null
+	/** Who each slot's replacement bar actually is, best first, so a spot the wire
+	 *  covers can name him instead of leaving the reader to guess — and so two seats
+	 *  of the same slot name two different men. */
+	barMen: Map<string, { player: { name: string } }[]> | null
+	/** True when `barMen` came from the league's own free-agent list rather than
+	 *  from the whole-pool estimate. It decides whether this card may call these men
+	 *  free agents, which is the one thing the estimate can never support. */
+	wireRead: boolean
 }) => (
 	<section className="card full trade-lineup">
 		<h2>Your starting lineup</h2>
@@ -949,29 +1007,40 @@ const LineupCard = ({
 						{lineup.starters.length} spots filled by your own players
 					</span>
 				</div>
+				{/* Seat number WITHIN its slot, so the second Util spot names the second
+				    man on the wire. The card used to read one name per slot and print
+				    it in every seat of that slot, which put the same player in both
+				    Util spots — a lineup no league would accept. */}
 				<div className="lineup">
-					{lineup.starters.map((s, i) => (
+					{lineup.starters.map((s, i) => {
+						const nth = lineup.starters.slice(0, i).filter(x => x.slot === s.slot).length
+						const bar = barMen?.get(s.slot)?.[nth]
+						return (
 						<div className={`lineup-row ${SOURCE_CLASS[s.source]}`} key={`${s.slot}-${i}`}>
 							<span className="code">{s.slot}</span>
 							<span className="lineup-who">
 								{s.player ?
 									s.player.player.name
 								: s.source === "replacement" ?
-									/* This said "best free agent at OF", which nothing had checked: the
-									   bar is the (teams x seats)-th best eligible player in the whole
-									   pool and he may well be on somebody's roster. It also raised the
-									   one question the card could not answer — WHICH free agent — so it
-									   names him and claims only what is true of him. */
+									/* Two different claims, and the card may only make the one its data
+									   supports. With the league's wire read, this man IS free and the
+									   card says so. Without it he is the (teams x seats)-th best
+									   eligible player anywhere — an estimate of who would be left — and
+									   he may well be on somebody's roster, which is what the card said
+									   about every spot before the wire was ever consulted. */
 									<em
 										title={
-											`This spot is priced at replacement level for ${s.slot}: what the ` +
-											`${league.meta.max_teams}-team-deep best eligible ${s.slot} projects. ` +
-											`Nobody you own beats that here. He is not checked against your ` +
-											`league's wire, so he may already be rostered.`
+											wireRead ?
+												`Free in your league right now, read off its own free-agent list: ` +
+												`the best ${s.slot} on the wire. Nobody you own beats him here.`
+											:	`This spot is priced at replacement level for ${s.slot}: what the ` +
+												`${league.meta.max_teams}-team-deep best eligible ${s.slot} projects. ` +
+												`Nobody you own beats that here. He is not checked against your ` +
+												`league's wire, so he may already be rostered.`
 										}
 									>
-										replacement {s.slot}
-										{barMen?.get(s.slot) && ` · ${barMen.get(s.slot)!.player.name}`}
+										{wireRead ? "free agent" : "replacement"} {s.slot}
+										{bar && ` · ${bar.player.name}`}
 									</em>
 								:	<em className="hole-name" title="No price is known for this spot — nobody in the whole pool is eligible here, so there is no freely available body to price it at.">
 										nothing can fill this
@@ -980,7 +1049,8 @@ const LineupCard = ({
 							</span>
 							<span className="lineup-pts">{s.source === "empty" ? "—" : pts(s.points)}</span>
 						</div>
-					))}
+					)
+					})}
 				</div>
 				<div className="lineup-holes">
 					{lineup.holes.length ?

@@ -60,12 +60,74 @@ export const activeSlots = (league: League): string[] => {
  * `teams` is required and never defaulted, for the reason bscore.ts gives: a
  * guessed team count moves every bar and therefore every number on this page.
  */
+/**
+ * The men actually on the wire at each startable slot, best first.
+ *
+ * `gettable` is the league's own answer to "could I have him tomorrow" — the
+ * free-agent list read off the platform. Given it, replacement level stops being a
+ * simulation and becomes a read: the depth arithmetic below exists only to GUESS
+ * who is left once every team has filled its seats, and a real free-agent list is
+ * that answer already, without the guess.
+ *
+ * Ranked rather than reduced to one man because a slot with two seats filled off
+ * the wire takes two different people. The old code named one man and printed him
+ * in both seats, which is a roster no league would accept.
+ */
+export const wireBySlot = (
+	league: League,
+	pool: Rated[],
+	gettable: (r: { player: { name: string } }) => boolean
+): Map<string, Rated[]> => {
+	const out = new Map<string, Rated[]>()
+	for (const slot of Object.keys(league.roster.slots)) {
+		if (UNSTARTABLE.has(slot)) continue
+		out.set(
+			slot,
+			pool
+				.filter(r => r.rateable && r.slots.includes(slot) && gettable(r))
+				.sort((a, b) => b.points - a.points || a.player.id - b.player.id)
+		)
+	}
+	return out
+}
+
+/**
+ * What a spot is worth if you do not fill it yourself.
+ *
+ * Two regimes, and the difference between them is the whole point of this change.
+ *
+ * WITH a `gettable` predicate — your league's own free-agent list — the bar is the
+ * best man on that wire at the slot. That is the definition the board has always
+ * printed above itself ("minus the best free agent at the same slot") and it is
+ * what a reader means when he asks what his own player is worth: the thing he
+ * would have instead.
+ *
+ * WITHOUT one, the bar falls back to the (teams x seats)-th best player in the
+ * whole rated pool. That is a SIMULATION of the wire, for a page that cannot read
+ * it — beanemachine.com cannot see a Yahoo league. It is a defensible estimate and
+ * a bad answer when the real list is sitting right there: on the shipped league it
+ * put Freddie Freeman and Bobby Witt Jr, both 99% rostered, forward as men you
+ * could pick up, and priced every one of your own players against them.
+ *
+ * A slot with nothing free at it is priced at zero rather than dropped. Dropping it
+ * would report a structural hole ("nobody in the pool is eligible here"), and that
+ * is a different and much rarer fact than "the wire is bare at catcher today".
+ *
+ * `teams` is required and never defaulted, for the reason bscore.ts gives: a
+ * guessed team count moves every bar and therefore every number on this page.
+ */
 export const replacementBySlot = (
 	league: League,
 	pool: Rated[],
-	teams: number
+	teams: number,
+	gettable?: (r: { player: { name: string } }) => boolean
 ): Map<string, number> => {
 	const bars = new Map<string, number>()
+	if (gettable) {
+		for (const [slot, men] of wireBySlot(league, pool, gettable))
+			bars.set(slot, Number((men[0]?.points ?? 0).toFixed(2)))
+		return bars
+	}
 	for (const [slot, count] of Object.entries(league.roster.slots)) {
 		if (UNSTARTABLE.has(slot)) continue
 		const eligible = pool
@@ -90,26 +152,35 @@ export const replacementBySlot = (
  * because six call sites and four suites depend on that signature and only one
  * of them wants a name.
  *
- * Note what this man IS: the (teams x seats)-th best eligible player in the whole
- * rated pool, which is the definition of replacement level. He is not verified to
- * be a free agent in your league — nothing here reads your league's wire — so the
- * caller must not describe him as one.
+ * Returns a LIST per slot, best first, because a slot with two seats covered off
+ * the wire takes two different men — naming one and printing him in both seats is
+ * a lineup no league would accept, and the card did exactly that.
+ *
+ * Who these men ARE depends on `gettable`, exactly as in `replacementBySlot`. With
+ * it they are the free agents your league actually lists, and a caller may say so.
+ * Without it they are the (teams x seats)-th best eligible players in the whole
+ * rated pool — an estimate of who would be left, NOT verified to be free, and a
+ * caller must not describe them as free agents.
  */
 export const replacementPlayerBySlot = (
 	league: League,
 	pool: Rated[],
-	teams: number
-): Map<string, Rated> => {
-	const out = new Map<string, Rated>()
+	teams: number,
+	gettable?: (r: { player: { name: string } }) => boolean
+): Map<string, Rated[]> => {
+	if (gettable) return wireBySlot(league, pool, gettable)
+	const out = new Map<string, Rated[]>()
 	for (const [slot, count] of Object.entries(league.roster.slots)) {
 		if (UNSTARTABLE.has(slot)) continue
 		const eligible = pool
 			.filter(r => r.rateable && r.slots.includes(slot))
 			.sort((a, b) => b.points - a.points)
 		if (!eligible.length) continue
+		// the estimate names one man per slot; the seats below him are unpriced,
+		// which is why this regime cannot fill a second seat with a second body
 		const depth = Math.min(teams * count, eligible.length - 1)
 		const man = eligible[depth]
-		if (man) out.set(slot, man)
+		if (man) out.set(slot, [man])
 	}
 	return out
 }
@@ -353,6 +424,15 @@ export interface TradeProposal {
 	/** The whole rated pool — what the replacement bars are read off. */
 	pool: Rated[]
 	teams: number
+	/**
+	 * Who the reader can actually get, if the league's wire has been read.
+	 *
+	 * Must be the SAME test the lineup card used, or the verdict's "before" is a
+	 * different lineup from the one on screen — it read 1507.87 against a card
+	 * showing 1594.78, which is the page disagreeing with itself about a team
+	 * nothing had changed yet.
+	 */
+	gettable?: (r: { player: { name: string } }) => boolean
 }
 
 export interface SlotChange {
@@ -442,7 +522,7 @@ export const evaluateTrade = (proposal: TradeProposal): TradeVerdict => {
 			missing.push(`${r.player.name} is already on this roster`)
 
 	const after = [...roster.filter(r => !leaving.has(keyOf(r))), ...incoming]
-	const bars = replacementBySlot(league, pool, teams)
+	const bars = replacementBySlot(league, pool, teams, proposal.gettable)
 	const lineups = {
 		before: startingLineup(league, roster, bars),
 		after: startingLineup(league, after, bars)

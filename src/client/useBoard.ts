@@ -327,6 +327,90 @@ export const useBoard = (
 		[snapshot, league?.meta.platform, poolEligibility]
 	)
 
+	/**
+	 * The two long horizons, measured from TODAY rather than from the capture.
+	 *
+	 * `hydrate` precomputes `gamesByTeam` and `gamesRemaining` over `snapshot.horizon`,
+	 * which is the fortnight that started the day the snapshot was TAKEN. A capture is
+	 * only refreshed when the site deploys, so by the time anyone reads it that window
+	 * has a past in it: on the committed capture, taken 2026-09-04 and read on
+	 * 2026-09-08, the fortnight board was counting 57 games that had already been
+	 * played — 44% of its own window — and projecting every player across them.
+	 *
+	 * The slate itself runs to the end of the season, so the window can simply be
+	 * rebuilt at read time. Only the WINDOW moves; the stats behind it are still as
+	 * old as the capture, which is what the "player data · Nh ago" chip already says.
+	 */
+	const longWindows = useMemo(() => {
+		if (!snapshot) return null
+		const slate = snapshot.slate ?? []
+		const today = new Date().toISOString().slice(0, 10)
+		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
+		const days = (d: string, n: number) =>
+			new Date(Date.parse(d) + n * 86400_000).toISOString().slice(0, 10)
+		return {
+			fortnight: windowFrom(slate, today, days(today, 14)),
+			rest: windowFrom(slate, today, seasonEnd)
+		}
+	}, [snapshot])
+
+	const availability = useMemo(() => {
+		if (availableNames && availableNames.size > 0)
+			return {
+				basis: "pool" as const,
+				exact: true,
+				cut: null as OwnershipCut | null,
+				size: availableNames.size,
+				basisText: `read off your league's own free-agent list: ${availableNames.size} players are actually free`
+			}
+		// the same map `hydrate` builds, without re-hydrating a 2.1 MB snapshot to
+		// read one field of it
+		const owned = new Map(
+			Object.entries(snapshot?.ownership ?? {}).map(([k, v]) => [Number(k), v])
+		)
+		const cut = league ? ownershipCut(league, owned) : null
+		if (cut?.usable)
+			return { basis: "ownership" as const, exact: false, cut, size: null, basisText: cut.basis }
+		return {
+			basis: "none" as const,
+			exact: false,
+			cut,
+			size: null,
+			basisText:
+				cut?.basis ??
+				"nothing this page can read says who is on the wire in your league, so nobody is filtered out for it"
+		}
+	}, [availableNames, league, snapshot])
+
+	/**
+	 * Who the reader can actually get, as one test, drawn from whichever rung of the
+	 * availability ladder this page has reached.
+	 *
+	 * The ladder already decides which rows to SHOW. Until now it had no say in what
+	 * those rows were measured AGAINST, so a board filtered to men you can add priced
+	 * every one of them against a bar set by men you cannot — and on a catcher-only
+	 * board that made the card say "Nobody" about a list it had just ranked. Same
+	 * answer, now used for both halves of the question.
+	 *
+	 * Undefined on the bottom rung, which is the honest thing: where nothing is known
+	 * about the wire, the whole-pool simulation is still the best bar available.
+	 */
+	const gettable = useMemo(() => {
+		if (availability.basis === "pool" && availableNames)
+			return (r: { player: { name: string } }) => availableNames.has(normalizeName(r.player.name))
+		const cut = availability.cut
+		if (availability.basis === "ownership" && cut?.usable) {
+			const owned = new Map(
+				Object.entries(snapshot?.ownership ?? {}).map(([k, v]) => [Number(k), Number(v)])
+			)
+			return (r: { player: { id: number } }) => {
+				const pct = owned.get(r.player.id)
+				return pct === undefined || pct <= cut.cut
+			}
+		}
+		return undefined
+	}, [availability, availableNames, snapshot])
+
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
 		// Replacement depth is teams × slots. Without a real team count there is no
@@ -337,19 +421,25 @@ export const useBoard = (
 		// week that starts after its last captured game — and zero games would rank
 		// everyone at zero. Fall back to the fortnight rather than invent a number.
 		const usingWeek = filters.mode === "stream" && !!week && week.games.size > 0
-		const usingRest = filters.mode === "stash" && h.gamesRemaining.size > 0
+		const usingRest = filters.mode === "stash" && !!longWindows && longWindows.rest.games.size > 0
+		const long = longWindows?.fortnight
 		const horizon =
 			usingWeek ? { games: week!.games, opponents: week!.opponents }
-			: usingRest ? { games: h.gamesRemaining, opponents: h.opponentsRemaining }
+			: usingRest ? { games: longWindows!.rest.games, opponents: longWindows!.rest.opponents }
+			: long ? { games: long.games, opponents: long.opponents }
 			: { games: h.gamesByTeam, opponents: h.opponentsByTeam }
 		// Probables reach about a week out, so the rest of a season has none — and an
 		// absent count must fall back to the team-games estimate, not project zero.
 		const probableStarts =
-			usingWeek ? week!.probableStarts : usingRest ? undefined : h.probableStarts
+			usingWeek ? week!.probableStarts
+			: usingRest ? undefined
+			: (long?.probableStarts ?? h.probableStarts)
 		const probableCoverage =
-			usingWeek ? week!.coverage : usingRest ? undefined : h.probableCoverage
+			usingWeek ? week!.coverage : usingRest ? undefined : (long?.coverage ?? h.probableCoverage)
 		const opposingStarters =
-			usingWeek ? week!.opposingStarters : usingRest ? undefined : h.opposingStarters
+			usingWeek ? week!.opposingStarters
+			: usingRest ? undefined
+			: (long?.opposingStarters ?? h.opposingStarters)
 		// which lineup each announced starter actually faces — only meaningful where
 		// probables exist, so the rest-of-season view has none by construction
 		const startOpponents =
@@ -358,6 +448,7 @@ export const useBoard = (
 			withUndervaluation(
 				rateAll({
 				league,
+				available: gettable,
 				players: h.players,
 				underlying: h.underlying,
 				injuries: h.injuries,
@@ -379,7 +470,7 @@ export const useBoard = (
 			),
 			h.ownership
 		)
-	}, [snapshot, league, filters.mode, week])
+	}, [snapshot, league, filters.mode, week, longWindows, gettable])
 
 	/**
 	 * Can the reader actually add this man — and how sure is the answer.
@@ -413,33 +504,6 @@ export const useBoard = (
 		return new Map(order.map((r, i) => [r.player.id, i]))
 	}, [rated])
 
-	const availability = useMemo(() => {
-		if (availableNames && availableNames.size > 0)
-			return {
-				basis: "pool" as const,
-				exact: true,
-				cut: null as OwnershipCut | null,
-				size: availableNames.size,
-				basisText: `read off your league's own free-agent list: ${availableNames.size} players are actually free`
-			}
-		// the same map `hydrate` builds, without re-hydrating a 2.1 MB snapshot to
-		// read one field of it
-		const owned = new Map(
-			Object.entries(snapshot?.ownership ?? {}).map(([k, v]) => [Number(k), v])
-		)
-		const cut = league ? ownershipCut(league, owned) : null
-		if (cut?.usable)
-			return { basis: "ownership" as const, exact: false, cut, size: null, basisText: cut.basis }
-		return {
-			basis: "none" as const,
-			exact: false,
-			cut,
-			size: null,
-			basisText:
-				cut?.basis ??
-				"nothing this page can read says who is on the wire in your league, so nobody is filtered out for it"
-		}
-	}, [availableNames, league, snapshot])
 
 	/**
 	 * The ranking with that answer attached to every row.

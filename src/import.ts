@@ -912,3 +912,28 @@ export const deriveInningsMinimum = (
 	if (!Number.isFinite(n) || n <= 0) return { perPeriod: null, source: quoted }
 	return { perPeriod: n, source: quoted }
 }
+
+/**
+ * The date after which this league takes no more trades.
+ *
+ * Yahoo prints it as "Trade End Date" and the import already harvests the row. The
+ * app ships a 1,132-line trade evaluator and has never read it, so on 2026-09-08 it
+ * was still offering to price deals for a league whose trade window shut on
+ * 2026-08-06 — a whole surface answering a question the reader is no longer allowed
+ * to ask.
+ *
+ * Returned as an ISO date so a caller can compare it to today without re-parsing
+ * prose. Yahoo writes it as "August 6, 2026", which `Date.parse` handles; anything
+ * it does not parse to a real date returns null and quotes itself, because a
+ * deadline guessed wrong either hides a working feature or leaves a dead one up.
+ */
+export const deriveTradeDeadline = (
+	settings: Record<string, string>
+): { date: string | null; source: string | null } => {
+	const row = settings["Trade End Date"]
+	if (row === undefined) return { date: null, source: null }
+	const quoted = `Trade End Date "${row}"`
+	const t = Date.parse(row.trim())
+	if (!Number.isFinite(t)) return { date: null, source: quoted }
+	return { date: new Date(t).toISOString().slice(0, 10), source: quoted }
+}

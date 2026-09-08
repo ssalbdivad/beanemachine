@@ -112,6 +112,66 @@ export interface ProjectOptions {
 	 * gone and the default is now the shipped value.
 	 */
 	recentWeight?: number
+	/**
+	 * How a hitter's playing time is estimated. "blend" is the shipped model;
+	 * "state" is the candidate.
+	 *
+	 * "blend" mixes his season rate with his recent rate. Both terms count team games
+	 * he was NOT AVAILABLE FOR — a man who missed six weeks is charged for those
+	 * weeks in the season term and, until they age out, in the 21-day term too. The
+	 * result is that a returning regular is priced as a part-timer for about a month
+	 * after he is back and playing every day.
+	 *
+	 * The codebase has already found and fixed this exact shape once, for pitchers:
+	 * "his starts accrue only over the part of the season he was actually in a
+	 * rotation; his club's games count the whole of it. So every pitcher who missed
+	 * time reads as a man who rarely starts." That fix has never been applied to
+	 * hitters, and this is it.
+	 *
+	 * "state" splits the estimate into the two independent things it confuses:
+	 *   ROLE — plate appearances per game he actually PLAYED. Immune to missed time,
+	 *   and it is what "leadoff regular" versus "short side of a platoon" means.
+	 *   AVAILABILITY — whether he is in the lineup NOW. A state, not a rate, so it is
+	 *   read off the SHORT windows; the fortnight before an activation says nothing
+	 *   about tonight.
+	 * Volume is their product, capped at his own role because a man cannot bat more
+	 * often than he bats when he plays.
+	 *
+	 * Hitters only. Pitchers already reach their volume through `projectedStarts`,
+	 * which had this corrected separately and for the same reason.
+	 *
+	 * MEASURED, AND IT LOSES. Default stays "blend". Over 111 weeks and five seasons
+	 * of actual weekly roster decisions:
+	 *
+	 *     blend  77,464 pts   vs season-to-date 72/111   vs a thoughtful human 45/111
+	 *     state  77,375 pts   vs season-to-date 65/111   vs a thoughtful human 48/111
+	 *
+	 * and narrowing it to fire in one direction only — the version below, which is
+	 * strictly more targeted and leaves 81 more hitters untouched — measured WORSE
+	 * again at 77,131 and 65/111. Two variants, both behind.
+	 *
+	 * The argument for it was good and the case that motivated it was vivid: on the
+	 * committed capture the board rated Juan Soto, .944 OPS and freshly back, below a
+	 * replacement outfielder purely on the weeks he had missed. The likeliest reading
+	 * of the result is that the premise was wrong rather than the arithmetic — a man
+	 * back from six weeks out really is eased in, with rest days and a ramp, so
+	 * discounting him is not the error it looks like. The vivid case was mine, and it
+	 * did not survive contact with five seasons.
+	 *
+	 * Kept, off, and tested, so that the next person to notice Juan Soto finds this
+	 * comment and the two runs in data/results/ instead of writing it again.
+	 */
+	volumeModel?: "blend" | "state"
+	/**
+	 * His volume per team game over the SHORT windows only — the last series, not the
+	 * last three weeks.
+	 *
+	 * The state model needs this separately because `recentVolumePerGame` arrives
+	 * pre-blended across 3, 7 and 21 days, and the 21-day term is precisely the one
+	 * that still contains the absence. Availability is a state; it is read off the
+	 * shortest evidence there is.
+	 */
+	recentShortPerGame?: number | null
 	/** The player's own line over the recent window, if known. */
 	recentStats?: StatLine | null
 	/**
@@ -163,6 +223,21 @@ export interface ProjectOptions {
 export const RECENT_WINDOW_WEIGHTS: Record<"hitting" | "pitching", Record<number, number>> = {
 	hitting: windowsFor("hitting"),
 	pitching: windowsFor("pitching")
+}
+
+/**
+ * The windows that speak to whether a man is playing TONIGHT.
+ *
+ * The full set above answers "how much has he been playing lately", which is a rate
+ * and wants three weeks of evidence. Availability is a state — activated, benched,
+ * demoted, hurt — and a state is read off the newest evidence, because the whole
+ * point is that it changed. The 21-day window is excluded rather than
+ * down-weighted: a man activated eight days ago has an accurate 3- and 7-day
+ * record and a 21-day record that is mostly a description of the injured list.
+ */
+export const SHORT_WINDOW_WEIGHTS: Record<"hitting" | "pitching", Record<number, number>> = {
+	hitting: { 3: 2, 7: 1 },
+	pitching: { 5: 1 }
 }
 
 /**
@@ -239,7 +314,9 @@ export const project = (
 		matchupIndex = null,
 		matchupWeight = MODEL.matchup.weight,
 		projectedStarts = null,
-		reliefRateWeight = null
+		reliefRateWeight = null,
+		volumeModel = "blend",
+		recentShortPerGame = null
 	} = options
 	const modelled: string[] = []
 	const missing: string[] = []
@@ -255,8 +332,43 @@ export const project = (
 		volume !== undefined && teamGamesPlayed ? volume / teamGamesPlayed : null
 	// Blend season-long and recent playing time. Backtested: this is the single
 	// largest improvement available, worth ~20% relative Spearman over naive.
+	/**
+	 * ROLE x AVAILABILITY, for hitters, when the state model is asked for.
+	 *
+	 * `role` needs his own games played; without it there is nothing to divide by and
+	 * this falls through to the blend rather than guessing. `available` is capped at
+	 * 1: a short window can read above his own role (three games batting leadoff in a
+	 * high-scoring series), and that is noise, not a man playing more than every day.
+	 */
+	const gamesPlayed = s.gamesPlayed
+	const role =
+		isHitter && volume !== undefined && gamesPlayed ? volume / gamesPlayed : null
+	/**
+	 * ...and it fires in ONE direction only, for a reason the first version got wrong.
+	 *
+	 * Applied to everybody this moved 245 of 645 hitters by five points or more and
+	 * measured WORSE — 77,375 against the blend's 77,464 over 111 weeks, and 65/111
+	 * against a season-to-date manager where the blend takes 72. It was not the
+	 * targeted correction it was described as. Jonathan Aranda, who had played 136 of
+	 * 141 team games, lost 17 points for two quiet days, and there are far more
+	 * Arandas than there are men coming off the injured list.
+	 *
+	 * The case this exists for is asymmetric: an absence that is OVER shows up as a
+	 * short window running AHEAD of the season rate. A short window running behind it
+	 * is not a returning player, it is a rest day or a slump, and the blend already
+	 * handles that — with three weeks of evidence instead of three days. So the state
+	 * model may only raise a man toward his own role, never cut him.
+	 */
+	const stateVolume =
+		role !== null &&
+		recentShortPerGame !== null &&
+		seasonPerTeamGame !== null &&
+		recentShortPerGame > seasonPerTeamGame ?
+			role * Math.min(1, recentShortPerGame / role)
+		:	null
 	const volumePerTeamGame =
-		seasonPerTeamGame === null ? null
+		volumeModel === "state" && stateVolume !== null ? stateVolume
+		: seasonPerTeamGame === null ? null
 		: recentVolumePerGame === null ?
 			seasonPerTeamGame
 		:	(1 - recentWeight) * seasonPerTeamGame + recentWeight * recentVolumePerGame

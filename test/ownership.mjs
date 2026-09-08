@@ -163,8 +163,14 @@ for (const [id, pct] of Object.entries(own)) {
 const constant = [...byTeam.values()].filter(vals => {
   if (vals.length < 10) return false
   const counts = new Map()
-  for (const v of vals) counts.set(v, (counts.get(v) ?? 0) + 1)
-  return Math.max(...counts.values()) / vals.length > 0.5
+  // Zero is excluded, and only zero. The leak this guards against stamped a real
+  // percentage — a weather figure — across a whole club, and any such value repeating
+  // over half a roster is evidence of a carried variable. Zero is different in kind:
+  // it is the floor, it is what "nobody has rostered him" reads as, and on the
+  // 2026-09-08 capture 15 of 29 Angels honestly sit there. Counting it made the guard
+  // fire on a bad team rather than on a bug.
+  for (const v of vals) if (v !== 0) counts.set(v, (counts.get(v) ?? 0) + 1)
+  return counts.size > 0 && Math.max(...counts.values()) / vals.length > 0.5
 })
 /**
  * This used to assert the committed capture WAS the diseased one — 20 of 30 clubs

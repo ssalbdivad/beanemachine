@@ -42,9 +42,50 @@ const openTrade = async () => {
 	const tab = page.locator(".views button", { hasText: /trade/i }).first()
 	if (!(await tab.count())) return false
 	await tab.click()
-	return await page
+	const ok = await page
 		.waitForSelector(".trade-team", { timeout: 30000 })
 		.then(() => true, () => false)
+	if (ok) await openClosedDeal()
+	return ok
+}
+
+/**
+ * The shipped league's trade window shut on 2026-08-06, so the deal is retired
+ * behind a disclosure — see `tradesClosed`. The evaluator itself is unchanged and
+ * everything below still has to hold, so the tests open it. That the DEFAULT is
+ * closed is asserted separately, once, rather than fought here four times.
+ */
+const openClosedDeal = async () => {
+	const button = page.locator(".trade-closed button:text-is('Price one anyway')")
+	if (await button.count()) {
+		await button.click()
+		await page.waitForSelector(".deal", { timeout: 15000 })
+	}
+}
+
+/**
+ * A league that cannot trade is not offered a trade form.
+ *
+ * Asserted before anything opens it: the app shipped a 1,132-line evaluator and
+ * had never read the "Trade End Date" its own import harvests, so it spent a month
+ * offering to price deals this league would refuse. Retired by default, one click
+ * away, because the evaluator still works and a keeper league has reasons.
+ */
+{
+	await page.goto(BASE, { waitUntil: "networkidle" })
+	await identify()
+	const tab = page.locator(".views button", { hasText: /trade/i }).first()
+	if (await tab.count()) {
+		await tab.click()
+		await page.waitForSelector(".trade-team", { timeout: 30000 })
+		const closed = await page.$(".trade-closed")
+		t("a league past its own trade deadline is not shown a deal form",
+			!!closed, closed ? "" : "the deal form rendered for a league that closed 2026-08-06")
+		if (closed)
+			t("and it says when trades closed, so the reader is told rather than left to wonder",
+				/stopped taking trades on/.test(await closed.innerText()),
+				await closed.innerText())
+	}
 }
 
 if (!(await openTrade())) {

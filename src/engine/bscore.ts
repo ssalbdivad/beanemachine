@@ -7,7 +7,7 @@ import {
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
 import {
 	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
-	RECENT_WINDOW_WEIGHTS, type Projection
+	RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS, type Projection
 } from "./project.ts"
 import { MODEL } from "./weights.ts"
 
@@ -93,10 +93,12 @@ export interface Rated {
 	 *
 	 * bscore is a difference of two point totals, and points are bounded below by
 	 * zero while the replacement bar is not, so the range is asymmetric by
-	 * construction: on the committed capture it runs [-111.06, +59.83], and the floor
-	 * is exactly minus the Util bar because a man projected for 0 points is the whole
-	 * bar below it. That is arithmetic, not a defect, and 89.3% of the 1,233 rateable
-	 * players sit below zero.
+	 * construction. The floor is NOT simply minus the bar, which this comment used to
+	 * claim: a pitcher is docked for hits, walks and earned runs, so a bad arm over a
+	 * fortnight projects BELOW zero and sits further under the bar than a man who
+	 * projects for nothing ever could. On the 2026-09-08 capture the deepest is
+	 * -112.34, against a bar of 53.79, on -58.55 projected points. That is arithmetic,
+	 * not a defect, and the great majority of rateable players sit below zero.
 	 *
 	 * It is still the wrong number to PRINT against an add. Below the bar every
 	 * candidate is the same decision — you take the free replacement instead — so the
@@ -174,6 +176,18 @@ export interface RateOptions {
 	 * may be the best thing on your bench.
 	 */
 	injuryPolicy?: "exclude" | "keep"
+	/**
+	 * Which playing-time model the projection uses. Defaults to the shipped "blend".
+	 * Passed through rather than read from MODEL so a backtest can race the two, and
+	 * so no caller silently changes what every stored result is denominated in.
+	 */
+	volumeModel?: "blend" | "state"
+	/**
+	 * Who the reader could actually get, as a test the engine can apply to any rated
+	 * player. Absent means the wire is unknown and replacement level is simulated
+	 * from the whole pool — see the comment where it is used.
+	 */
+	available?: (r: { player: { id: number; name: string } }) => boolean
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -272,10 +286,11 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 * The recency-blended playing time, hoisted because two things need it: the
 		 * projection itself, and the start count below.
 		 */
-		const recentVolumePerGame = blendWindows(
-			o.recentVolumeByWindow?.[`${player.id}:${player.group}`] ?? {},
-			RECENT_WINDOW_WEIGHTS[player.group]
-		)
+		const windows = o.recentVolumeByWindow?.[`${player.id}:${player.group}`] ?? {}
+		const recentVolumePerGame = blendWindows(windows, RECENT_WINDOW_WEIGHTS[player.group])
+		// the same evidence cut to the newest windows only — what the state volume
+		// model reads availability off. See `SHORT_WINDOW_WEIGHTS`.
+		const recentShortPerGame = blendWindows(windows, SHORT_WINDOW_WEIGHTS[player.group])
 		/**
 		 * His own rate of starting, for the games MLB has NOT named yet.
 		 *
@@ -350,6 +365,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			horizonGames,
 			{
 				recentVolumePerGame,
+				recentShortPerGame,
+				volumeModel: o.volumeModel ?? "blend",
 				recentWeight: RECENT_BLEND_WEIGHT[player.group],
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
@@ -434,9 +451,36 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	const replacementBySlot = new Map<string, number>()
 	for (const [slot, count] of Object.entries(slotCounts)) {
 		if (RESERVE_SLOTS.has(slot)) continue
-		const eligible = rated
-			.filter(r => r.rateable && r.slots.includes(slot))
-			.sort((a, b) => b.points - a.points)
+		const all = rated.filter(r => r.rateable && r.slots.includes(slot))
+		/**
+		 * Whom the bar is drawn from.
+		 *
+		 * The depth arithmetic below is a SIMULATION of the wire: take everybody, walk
+		 * down to where the rosters run out, and call the next man replacement level.
+		 * It is the right answer for a page that cannot see your league. It is the
+		 * wrong one when your league's own free-agent list is loaded, and wrong in a
+		 * way that shows: with "only players I can add" ticked and the board filtered
+		 * to catchers, every gettable catcher sat below a bar set by the eleventh-best
+		 * catcher in baseball — a man on somebody's roster — so the card said "Nobody"
+		 * about a list it had just finished ranking.
+		 *
+		 * Given the wire, the same depth is walked down the wire instead, and clamped
+		 * to it. Where the wire is shorter than the depth the bar is its last man,
+		 * which is the honest reading: if you do not take this one, you take the worst
+		 * thing still out there.
+		 *
+		 * Opt-in, and off by default. `bscore` is the unit every run in data/results/
+		 * is denominated in and the quantity src/auto/plan.ts sorts by, so the CLI and
+		 * the backtests keep the number they were measured on; only a page that has
+		 * actually read a wire passes this.
+		 */
+		const eligible = (o.available ? all.filter(r => o.available!(r)) : all).sort(
+			(a, b) => b.points - a.points
+		)
+		if (!eligible.length) {
+			replacementBySlot.set(slot, 0)
+			continue
+		}
 		const depth = Math.min(o.teams * count, Math.max(eligible.length - 1, 0))
 		replacementBySlot.set(slot, eligible[depth]?.points ?? 0)
 	}

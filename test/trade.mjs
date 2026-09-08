@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs"
 import { hydrate } from "../src/data/snapshot.ts"
 import { rateAll } from "../src/engine/bscore.ts"
-import { activeSlots, replacementBySlot, startingLineup, evaluateTrade } from "../src/engine/trade.ts"
+import { activeSlots, replacementBySlot, replacementPlayerBySlot, wireBySlot, startingLineup, evaluateTrade } from "../src/engine/trade.ts"
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
 const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
@@ -357,6 +357,56 @@ if (weakC && strongC) {
 	t("it says why the spot is priced that way instead",
 		verdict.explanation.includes("worth seating there") || cSpot?.source !== "replacement",
 		verdict.explanation)
+}
+
+
+/**
+ * Replacement level read off the league's own wire, rather than guessed at.
+ *
+ * The estimate is the (teams x seats)-th best eligible player in the whole pool,
+ * which on this capture puts 99%-rostered men forward as bodies you could pick up.
+ * Given the league's real free-agent list the bar becomes the best man actually on
+ * it, and the men it names are all gettable by construction.
+ */
+{
+  // a wire of exactly three men, so what the bar SHOULD be is not in doubt
+  const byPoints = pool.filter(r => r.rateable && r.slots.includes("OF")).sort((a, b) => b.points - a.points)
+  const three = byPoints.slice(5, 8)
+  const names = new Set(three.map(r => r.player.name))
+  const gettable = r => names.has(r.player.name)
+
+  const wire = wireBySlot(league, pool, gettable)
+  t("the wire holds only men the predicate admits",
+    wire.get("OF").every(r => names.has(r.player.name)), JSON.stringify(wire.get("OF")?.map(r => r.player.name)))
+  t("and it is ranked best first",
+    wire.get("OF")[0].points >= wire.get("OF")[1].points)
+
+  const barred = replacementBySlot(league, pool, teams, gettable)
+  t("the bar with a wire is the best man ON the wire",
+    Math.abs(barred.get("OF") - three[0].points) < 0.01,
+    `${barred.get("OF")} vs ${three[0].points}`)
+  t("which is a DIFFERENT number from the whole-pool estimate",
+    barred.get("OF") !== bars.get("OF"), `${barred.get("OF")} vs ${bars.get("OF")}`)
+
+  const men = replacementPlayerBySlot(league, pool, teams, gettable)
+  t("two seats of one slot name two different men",
+    men.get("OF")[0].player.id !== men.get("OF")[1].player.id,
+    JSON.stringify(men.get("OF").slice(0, 2).map(r => r.player.name)))
+
+  // the estimate is unchanged and still names one man per slot, because it cannot
+  // honestly name a second: it knows a depth, not a wire
+  const est = replacementPlayerBySlot(league, pool, teams)
+  t("without a wire the estimate still answers, with one man per slot",
+    est.get("OF").length === 1)
+  t("and he is the same man the old signature returned, at the same depth",
+    Math.abs(est.get("OF")[0].points - bars.get("OF")) < 0.01,
+    `${est.get("OF")[0].points} vs ${bars.get("OF")}`)
+
+  // a slot with nothing free is priced at zero, NOT dropped: "the wire is bare at
+  // catcher" and "nobody in baseball can play catcher" are different facts
+  const bare = replacementBySlot(league, pool, teams, () => false)
+  t("a slot with nothing free is priced at zero rather than reported as a hole",
+    bare.get("OF") === 0 && bare.has("C"), JSON.stringify([...bare]).slice(0, 80))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

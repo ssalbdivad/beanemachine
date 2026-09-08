@@ -422,7 +422,19 @@ await page.waitForFunction(() => document.querySelectorAll(".trade-own").length 
 const lineupTotal = num(await page.textContent(".lineup-total"))
 t("a two-man team produces a real lineup total", Number.isFinite(lineupTotal) && lineupTotal > 0, String(lineupTotal))
 
+/*
+ * This league's trade window shut on 2026-08-06, so the deal form is retired behind
+ * a disclosure — see `tradesClosed`. The journey opens it deliberately: the point of
+ * this section is that the EVALUATOR still prices a deal correctly, and the separate
+ * claim that a closed league is not offered the form is asserted in test/trade-ui.mjs
+ * rather than a second time here.
+ */
 at("offering a player produces a verdict")
+const priceAnyway = page.locator(".trade-closed button:text-is('Price one anyway')")
+if (await priceAnyway.count()) {
+	await priceAnyway.click()
+	await page.waitForSelector(".deal", { timeout: 15000 })
+}
 await page.locator(".deal-side .picks .chip-btn").first().click()
 await page.waitForSelector(".trade-verdict", { timeout: 15000 })
 await page.fill("[data-ctl=get-search]", "a")

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
+import { deriveTradeDeadline } from "../import.ts"
 
 type Num = (value: number) => void
 
@@ -649,6 +650,30 @@ export type View = "board" | "league" | "trade" | "draft"
  * here called the board "The weekly one", but the tab opens on the fortnight —
  * `useBoard.ts` defaults `mode: "board"`, which is the 14-day horizon.
  */
+/**
+ * Whether this league still takes trades.
+ *
+ * Yahoo prints "Trade End Date" and the import already harvests it. The app ships a
+ * 1,132-line trade evaluator and had never read it, so on 2026-09-08 it was still
+ * offering to price deals for a league whose trade window shut on 2026-08-06 — a
+ * surface answering a question the reader is not allowed to ask, which is worse
+ * than a missing one because it looks live.
+ *
+ * What is retired is the DEAL, not the tab: the same screen holds the roster reader
+ * that everything else depends on, so it stays and loses its dead half. A league
+ * that states no deadline keeps everything, because "the settings page did not say"
+ * is not "it has passed".
+ */
+export const tradesClosed = (
+	league: League | null,
+	today: string
+): { closed: boolean; on: string | null } => {
+	const raw = ((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
+		?.raw_settings ?? {}) as Record<string, string>
+	const on = deriveTradeDeadline(raw).date
+	return { closed: !!on && today > on, on }
+}
+
 export const VIEWS: { id: View; label: string; purpose: string; season: number }[] = [
 	{
 		id: "board",

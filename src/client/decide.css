@@ -31,3 +31,5 @@
 	background:var(--sunk);border:1px solid var(--line);border-radius:6px;
 	padding:var(--sp-2) var(--sp-3);overflow-x:auto;font-size:var(--fs-2);margin:0;
 }
+.decide-changes .decide-slot{color:var(--accent)}
+.decide-rest,.decide-read{margin:var(--sp-2) 0 0;color:var(--muted)}

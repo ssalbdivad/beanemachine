@@ -154,6 +154,33 @@ const open = async seeds => {
 	)
 	const clubOf = new Map(snap.players.map(p => [p.name, p.teamId]))
 	const seated = rows.filter(r => r.who).map(r => r.who)
+	/*
+	 * The card leads with the DIFFERENCE, not the lineup.
+	 *
+	 * He already has a lineup in Yahoo; what he needs is the handful of seats that
+	 * should change. Every row it asks him to change has to be a real change against
+	 * the seats it was given, or he is being sent to move a man who is already there.
+	 */
+	const changes = await page.$$eval(".decide-changes li", ns =>
+		ns.map(e => ({
+			// `textContent` runs the spans together as "SPBench Cristopher …", so there
+			// is no word boundary before the verb — \bBench\b never matches and every
+			// row read as a start. Matched on the trailing space instead.
+			verb: /Bench /.test(e.textContent) ? "bench" : "start",
+			who: e.querySelector("b")?.textContent?.trim()
+		})))
+	const activeSeated = new Set(
+		seedLineup[KEY].spots.filter(sp => !/^(BN|IL|NA)/i.test(sp.slot)).map(sp => sp.name)
+	)
+	t("everyone it says to bench is currently in an active seat",
+		changes.filter(c => c.verb === "bench").every(c => activeSeated.has(c.who)),
+		JSON.stringify(changes.filter(c => c.verb === "bench" && !activeSeated.has(c.who))))
+	t("everyone it says to start is not already in one",
+		changes.filter(c => c.verb === "start").every(c => !activeSeated.has(c.who)),
+		JSON.stringify(changes.filter(c => c.verb === "start" && activeSeated.has(c.who))))
+	t("and it says how old the seats it compared against are",
+		/as read .* (hour|day|in the last hour)/.test(text), text.slice(-400))
+
 	t("nobody is seated whose club has no game today",
 		seated.every(n => !clubOf.has(n) || playingClubs.has(clubOf.get(n))),
 		seated.filter(n => clubOf.has(n) && !playingClubs.has(clubOf.get(n))).join(", ") ||

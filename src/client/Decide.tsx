@@ -35,6 +35,21 @@ import "./decide.css"
  * decision, on the page.
  */
 /** What the resolved period IS, in the reader's words rather than the type's. */
+/**
+ * How old the read is, in the reader's terms.
+ *
+ * The card diffs against the seats as they were READ, and a seat is only true until
+ * he next changes his lineup. Saying when makes a stale baseline visible instead of
+ * silently authoritative — the same rule `src/client/lineup.ts` was written under.
+ */
+const readAgo = (at: string): string => {
+	const hours = (Date.now() - Date.parse(at)) / 3_600_000
+	if (!Number.isFinite(hours)) return "at an unknown time"
+	if (hours < 1) return "in the last hour"
+	if (hours < 36) return `${Math.round(hours)} hours ago`
+	return `${Math.round(hours / 24)} days ago`
+}
+
 /** Yahoo writes its non-playing seats as BN, IL, IL+ and NA. */
 const RESERVE = /^(BN|IL|NA)/i
 
@@ -181,7 +196,36 @@ export const Decide = ({
 			if (left > 0) used.set(slot, left - 1)
 			else unfilled.push(slot)
 		}
-		return { day, lineup, idle, unfilled, playing: playing.size }
+		/**
+		 * What to CHANGE, not what the lineup is.
+		 *
+		 * He already has a lineup in Yahoo; `src/client/lineup.ts` stored it, seat by
+		 * seat, when it was read. Printing all eighteen rows asks him to check every
+		 * one against a screen in another tab. What he needs is the difference, which
+		 * here is four men: the pitchers who are not pitching today.
+		 *
+		 * Diffed by NAME against the seats as read. A man in an active seat who is not
+		 * in today's lineup comes out; one in today's lineup who is not in an active
+		 * seat goes in. Paired only where the counts allow — a bench with no
+		 * replacement is still a change he has to make.
+		 */
+		const seated = new Set(lineup.starters.map(st => normalizeName(st.name)))
+		const activeNow = seats.spots.filter(sp => !RESERVE.test(sp.slot))
+		const bench = activeNow.filter(sp => !seated.has(normalizeName(sp.name)))
+		const nowActive = new Set(activeNow.map(sp => normalizeName(sp.name)))
+		const start = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
+		return {
+			day, lineup, idle, unfilled, playing: playing.size,
+			readAt: seats.at,
+			bench: bench.map(sp => ({
+				name: sp.name,
+				slot: sp.slot,
+				why:
+					idle.includes(sp.name) ? "his club is not playing today"
+					:	"he is not projected to play today"
+			})),
+			start: start.map(st => ({ name: st.name, slot: st.slot, points: st.points }))
+		}
 	}, [snapshot, league, seats])
 
 	const plan = useMemo(() => {
@@ -328,7 +372,38 @@ export const Decide = ({
 							{today.playing} of your men have a game · {today.lineup.pointsPlanned} projected
 						</span>
 					</h3>
-					{today.lineup.starters.length ?
+					{today.bench.length || today.start.length ?
+						<>
+							<ul className="decide-list decide-changes">
+								{today.start.map(st => (
+									<li key={`in-${st.name}`}>
+										<span className="decide-slot">{st.slot}</span>
+										<span>
+											Start <b>{st.name}</b>{" "}
+											<em className="decide-why">{st.points} projected today</em>
+										</span>
+									</li>
+								))}
+								{today.bench.map(b => (
+									<li key={`out-${b.name}`}>
+										<span className="decide-slot">{b.slot}</span>
+										<span>
+											Bench <b>{b.name}</b> <em className="decide-why">{b.why}</em>
+										</span>
+									</li>
+								))}
+							</ul>
+							<p className="sub decide-rest">
+								Your other {today.lineup.starters.length - today.start.length} seats are
+								already right.
+							</p>
+						</>
+					:	<p className="sub">
+							Nothing to change — every seat already holds the right man for today.
+						</p>
+					}
+					<details className="decide-notes">
+						<summary>The whole lineup, seat by seat</summary>
 						<ul className="decide-list decide-today">
 							{today.lineup.starters.map((st, i) => (
 								<li key={`${st.slot}-${i}`}>
@@ -349,13 +424,11 @@ export const Decide = ({
 								</li>
 							))}
 						</ul>
-					:	<p className="sub">None of your players has a game today.</p>}
-					{today.idle.length > 0 && (
-						<p className="sub decide-idle">
-							<b>Sit {today.idle.length}:</b> {today.idle.join(", ")} — their clubs are not
-							playing today, so they score nothing in a seat.
-						</p>
-					)}
+					</details>
+					<p className="sub decide-read">
+						Compared against your seats as read {readAgo(today.readAt)}. Change your lineup
+						in Yahoo since then and this list is against the old one.
+					</p>
 				</>
 			)}
 

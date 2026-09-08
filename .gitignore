@@ -13,3 +13,6 @@ logo/sheet*.html
 logo/sheet*.png
 node_modules/
 public/snapshot.json
+
+# scratch screenshots taken while working on the UI
+crop.png

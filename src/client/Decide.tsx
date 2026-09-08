@@ -610,13 +610,19 @@ export const Decide = ({
 				{plan && (
 					<span className="decide-gain">
 						{/* "2 worth making" would claim a third was weighed and rejected. It was
-						    not: the planner stops at two because two is what measured best —
-						    two moves a week beat one and beat three over 111 weeks and five
-						    seasons. Below the cap the sentence is the other one, and true. */}
+						    not: the planner stops at two because two is the cap, and two is
+						    what measured best — beating one and beating three over 111 weeks and
+						    five seasons.
+
+						    "is what measured best" was too strong even so, and the fold below
+						    says why: that sweep was run against the OLD scoring, before swaps
+						    were priced on the lineup that follows them. The cap is inherited
+						    from a measurement of a different planner, which is a real thing to
+						    know and not a thing to bury. */}
 						{plan.swaps.moves.length === 0 ? "none clear the bar"
 						: plan.swaps.moves.length < DEFAULTS.maxMoves ?
 							`${plan.swaps.moves.length} clear${plan.swaps.moves.length === 1 ? "s" : ""} the bar`
-						:	`${plan.swaps.moves.length} a week is what measured best`}
+						:	`stopping at ${plan.swaps.moves.length}, the cap that measured best`}
 						{rules.cap !== null && ` · your league allows ${rules.cap}`}
 					</span>
 				)}
@@ -745,6 +751,13 @@ export const Decide = ({
 						{plan.swaps.notes.map(n => (
 							<li key={n}>{n}</li>
 						))}
+						<li>
+							Stopping at {DEFAULTS.maxMoves} a week is inherited rather than
+							established: {DEFAULTS.maxMoves} beat one and beat three across 111 weeks
+							and five seasons, but that sweep scored a swap as a difference of two
+							bscores, and these are scored on what your lineup projects afterwards. No
+							season has been played against this scoring yet.
+						</li>
 					</ul>
 				</details>
 			)}

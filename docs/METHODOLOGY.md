@@ -662,6 +662,25 @@ It is opt-in (`RateOptions.available`) and off by default, so the CLI and every 
 in `data/results/` keep the unit they were measured on; only a page that has actually
 read a wire passes it.
 
+**A known distortion, stated rather than hidden.** `depth = min(teams × count,
+wireLen − 1)` walked down a real 133-man wire clamps at some slots and not others,
+and the bars stop being comparable across slots. Measured on the shipped league: the
+OF bar is **10.66** — the 31st of 32 free outfielders, effectively the last man —
+while the Util bar is **30.70**, the 21st of 104. A slot the wire is thin at gets a
+floor-level bar; a deep one gets a real one. So a bscore comparison ACROSS slots,
+with a wire loaded, compares two different baselines.
+
+That is why `planSwaps` breaks ties on projected POINTS rather than on bscore: points
+over one horizon are a single scale for everybody. On his roster the bscore tie-break
+gave up Roman Anthony at 21.5 projected points and kept Sean Manaea at 13.0, purely
+because Anthony's bar was 23 points higher.
+
+The clamp is not fixed here, and the honest reason is that the two questions want
+different depths: a board wants a bar deep enough that free agents rank above it, and
+a lineup card wants the best man on the wire. Picking one depth for both is what
+produced this. It is written down so the next person to compare two bscores across
+slots knows what he is comparing.
+
 Note what the bar is NOT, because the app said it was for a long time: it is not the
 BEST free agent at the slot. It is the `(teams × seats)`-th of them. The best free
 agent is a higher bar than replacement level, and a board measured against him would

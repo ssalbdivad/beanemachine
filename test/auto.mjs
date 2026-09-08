@@ -622,8 +622,10 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
     const tie = {
       ...input,
       rated: [
-        rated("Keeper", { points: 5, bscore: -1, slots: ["1B"] }),
-        rated("Scrub", { points: 5, bscore: -40, slots: ["1B"] }),
+        // the two differ on POINTS, which is the one scale shared across slots;
+        // bscore is points minus a per-slot bar and those bars are not comparable
+        rated("Keeper", { points: 9, bscore: -40, slots: ["1B"] }),
+        rated("Scrub", { points: 5, bscore: -1, slots: ["1B"] }),
         rated("Starter", { points: 50, bscore: 20, slots: ["C"] }),
         rated("Free Catcher", { points: 60, bscore: 10, slots: ["C"] })
       ],

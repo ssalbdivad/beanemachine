@@ -940,17 +940,24 @@ export const planSwaps = (
 			/**
 			 * Ties go to the man worth least, and ties are common.
 			 *
-			 * Two men who are both out of the lineup cost the same to lose — nothing —
-			 * so the swap gains the same either way and the search was picking whichever
-			 * it reached first. That put Gage Jump and Roman Anthony on opposite sides of
-			 * an arbitrary choice at identical gain. They are not interchangeable: the
-			 * gain is a claim about this week and bscore is the only ordering here that
-			 * says anything about which of them you would rather still own.
+			 * Two men both out of the lineup cost the same to lose — nothing — so the
+			 * swap gains the same either way and the search was picking whichever it
+			 * reached first, which put two players on opposite sides of an arbitrary
+			 * choice at identical gain.
+			 *
+			 * Broken on POINTS, not bscore, and the difference matters. bscore is points
+			 * minus a per-slot bar, and once the bar is drawn from a real wire those bars
+			 * stop being comparable: a slot the wire is thin at clamps to its last man
+			 * (an outfield bar of 10.7 on the shipped league) while a deep slot does not
+			 * (a Util bar of 30.7). Comparing two men's bscores across slots then compares
+			 * two different baselines — it gave up Roman Anthony at 21.5 projected points
+			 * and kept Sean Manaea at 13.0, because Anthony's bar happened to be 23 points
+			 * higher. Points over the same horizon are one scale for everybody.
 			 */
 			if (
 				!best ||
 				gain > best.gain ||
-				(gain === best.gain && (d.rated?.bscore ?? 0) < (best.drop.rated?.bscore ?? 0))
+				(gain === best.gain && (d.rated?.points ?? 0) < (best.drop.rated?.points ?? 0))
 			)
 				best = { gain, add: a, drop: d }
 		}

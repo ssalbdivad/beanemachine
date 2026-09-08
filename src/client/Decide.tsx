@@ -746,8 +746,23 @@ export const Decide = ({
 				</>
 			)}
 
+			{/**
+			  * The period lineup, for leagues that set one.
+			  *
+			  * Hidden entirely where TODAY is answered above, and not to save space: the
+			  * two contradict each other. A daily-lock league does not set a lineup for
+			  * the week — it sets one every day — so a second list rearranging the same
+			  * seats over six days is not a plan he can carry out, and it disagreed with
+			  * the one he can. Today said bench Nolan McLean; this said move him from SP
+			  * to P. Two answers to "who starts", on one card, for one team.
+			  *
+			  * The period still decides the MOVES below, because an add accrues over all
+			  * of it. Only the lineup half is a daily question here.
+			  */}
+			{!today && (
+				<>
 			<h3 className="decide-head">
-				{today ? "Over the rest of the period" : "Set your lineup"}
+				Set your lineup
 				{plan?.lineup && plan.lineup.gain > 0 && (
 					<span className="decide-gain">+{plan.lineup.gain} pts, and it costs nothing</span>
 				)}
@@ -782,6 +797,9 @@ export const Decide = ({
 					))}
 				</ul>
 			}
+
+				</>
+			)}
 
 			<h3 className="decide-head">
 				Make these moves

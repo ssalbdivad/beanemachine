@@ -300,11 +300,11 @@ const open = async (seeds, opts = {}) => {
 {
 	const page = await open({ lineup: seedLineup }, { offline: true })
 	const text = await page.$eval(".decide", e => e.innerText)
-	// The heading is "Set your lineup" on its own, and "Over the rest of the period"
-	// once a daily-lock league has been answered for today above it — the same
-	// section, named for what distinguishes it.
+	// A daily-lock league is answered under "Today" and shown no period lineup at
+	// all — the two contradicted each other over the same seats. Either heading is a
+	// lineup answer; what matters here is that one of them arrived without a wire.
 	t("the lineup half answers without any free-agent list",
-		/Set your lineup|Over the rest of the period/.test(text) &&
+		/Set your lineup|\bToday\b/.test(text) &&
 			!/not been told which players are yours/.test(text),
 		text.slice(0, 160))
 	t("and the moves half says why it cannot, naming CORS rather than shrugging",
@@ -435,6 +435,26 @@ const open = async (seeds, opts = {}) => {
 	const fold = await page.$$eval(".decide-today li", ns => ns.map(e => e.textContent))
 	t("nor does the fold beneath it advise emptying every seat",
 		!fold.some(x => /leave empty/.test(x)), JSON.stringify(fold.slice(0, 3)))
+	await page.close()
+}
+
+/**
+ * One lineup answer per card.
+ *
+ * A daily-lock league does not set a lineup for the week, it sets one every day, so
+ * a second list rearranging the same seats over six days is not a plan it can carry
+ * out — and it disagreed with the one it can. Today said bench Nolan McLean; the
+ * period list said move him from SP to P. Two answers to "who starts", on one card,
+ * for one team.
+ */
+{
+	const page = await open({ lineup: seedLineup, pool: seedPool })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a daily-lock league is given exactly one lineup answer",
+		/\bToday\b/.test(text) && !/Over the rest of the period/.test(text),
+		text.slice(0, 300))
+	t("and the moves are still priced over the period, which is what an add accrues over",
+		/Make these moves/.test(text), text.slice(0, 300))
 	await page.close()
 }
 

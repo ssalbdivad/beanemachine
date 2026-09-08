@@ -193,7 +193,13 @@ export const Decide = ({
 				teams: league.meta.max_teams
 			})
 		}
-	}, [snapshot, league])
+		// `wireTest` belongs here: the bar every recommendation is measured against is
+		// drawn from it, and it changes when the live pool read lands after mount. Left
+		// out, the board stayed priced against the previous wire — or against the
+		// whole-pool simulation, if none had loaded at first render — while `plan` and
+		// `keepForSeason` moved on. That is the exact defect the memo above says it
+		// exists to end, one memo up.
+	}, [snapshot, league, wireTest])
 
 	/**
 	 * TODAY — the decision this league actually forces every day.
@@ -237,9 +243,20 @@ export const Decide = ({
 		const byName = new Map(rows.map(r => [normalizeName(r.player.name), r]))
 		const playing = new Set<string>()
 		const idle: string[] = []
+		/** Men the board has no row for at all — a capture that predates a call-up, a
+		 *  spelling Yahoo and MLB disagree on. Not the same as a man with no game, and
+		 *  it must not be reported as one. */
+		const unmatched: string[] = []
 		for (const sp of seats.spots) {
 			const r = byName.get(normalizeName(sp.name))
-			const plays = r?.player.teamId != null && w.games.has(r.player.teamId)
+			if (!r) {
+				if (!RESERVE.test(sp.slot)) unmatched.push(sp.name)
+				continue
+			}
+			// "has a game" is a claim about a man who can play it. Counting everyone whose
+			// club is on today put his whole 24 in the total, two of them on the injured
+			// list — `injuryPolicy: "exclude"` had already made them unrateable.
+			const plays = r.rateable && r.player.teamId != null && w.games.has(r.player.teamId)
 			if (plays) playing.add(normalizeName(sp.name))
 			else if (!RESERVE.test(sp.slot)) idle.push(sp.name)
 		}
@@ -298,15 +315,38 @@ export const Decide = ({
 		const nowActive = new Set(activeNow.map(sp => normalizeName(sp.name)))
 		const start = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
 		return {
-			day, lineup, idle, unfilled, playing: playing.size,
+			day, lineup, idle, unmatched, unfilled, playing: playing.size,
 			readAt: seats.at,
-			bench: bench.map(sp => ({
-				name: sp.name,
-				slot: sp.slot,
-				why:
-					idle.includes(sp.name) ? "his club is not playing today"
-					:	"he is not projected to play today"
-			})),
+			/**
+			 * Three reasons a man comes out, and they are different claims.
+			 *
+			 * This was a two-way ternary — club idle, else "not projected to play" — and
+			 * the third is the commonest: he is projected to play, and lost the seat to
+			 * somebody better. On 2026-09-08 it printed "Roman Anthony — he is not
+			 * projected to play today" about a man rateable at 4.14 points with Boston
+			 * playing, who had simply been outranked for the last outfield seat. A
+			 * ranking reported as a fact about availability is a claim the code cannot
+			 * support, and a reader who checks it finds the app wrong about the schedule.
+			 *
+			 * The fourth case is a name the board never matched, which used to fall
+			 * through `idle` and come out as "his club is not playing today" — the one
+			 * state that should reach the reader as "we could not find him".
+			 */
+			bench: bench.map(sp => {
+				const r = byName.get(normalizeName(sp.name))
+				return {
+					name: sp.name,
+					slot: sp.slot,
+					why:
+						!r ? "he is not on the board — no projection exists for that name"
+						: unmatched.includes(sp.name) ?
+							"he is not on the board — no projection exists for that name"
+						: idle.includes(sp.name) && !r.rateable ?
+							"he is not projected to play today"
+						: idle.includes(sp.name) ? "his club is not playing today"
+						:	"a better man is projected for that seat today"
+				}
+			}),
 			start: start.map(st => ({ name: st.name, slot: st.slot, points: st.points }))
 		}
 	}, [snapshot, league, seats])
@@ -615,7 +655,7 @@ export const Decide = ({
 							{today.bench.length} {today.bench.length === 1 ? "man is" : "men are"} in
 							your active seats.
 						</p>
-					: today.bench.length || today.start.length ?
+					: today.bench.length || today.start.length || today.lineup.shifts.length ?
 						<>
 							<ul className="decide-list decide-changes">
 								{today.start.map(st => (
@@ -635,10 +675,30 @@ export const Decide = ({
 										</span>
 									</li>
 								))}
+								{/* A man who stays in the lineup but changes seat is a change he has
+								    to make, and leaving it out made the rest impossible to follow:
+								    "Start Jac Caglianone at 1B" cannot be done while Aranda is in
+								    that seat, and the card never mentioned Aranda. `planLineup`
+								    reports these separately and they were dropped on the floor. */}
+								{today.lineup.shifts.map(sh => (
+									<li key={`shift-${sh.name}`}>
+										<span className="decide-slot">{sh.to}</span>
+										<span>
+											Move <b>{sh.name}</b>{" "}
+											<em className="decide-why">
+												from {sh.from} to {sh.to}, to free the seat above
+											</em>
+										</span>
+									</li>
+								))}
 							</ul>
 							<p className="sub decide-rest">
-								Your other {today.lineup.starters.length - today.start.length} seats are
-								already right.
+								Your other{" "}
+								{Math.max(
+									today.lineup.starters.length - today.start.length - today.lineup.shifts.length,
+									0
+								)}{" "}
+								seats are already right.
 							</p>
 						</>
 					:	<p className="sub">
@@ -699,7 +759,10 @@ export const Decide = ({
 			:	<ul className="decide-list">
 					{plan.lineup.swaps.map(s => (
 						<li key={`${s.start}-${s.sit}`}>
-							<span className="decide-delta">+{s.gain}</span>
+							{/* signed, not prefixed. The paired swaps come out of an index match and
+							    the pairing can put a small loss beside a larger gain, which rendered
+							    as "+-0.33". */}
+							<span className="decide-delta">{s.gain > 0 ? `+${s.gain}` : s.gain}</span>
 							<span>
 								Start <b>{s.start}</b> at {s.startSlot}, sit <b>{s.sit}</b>
 							</span>
@@ -775,8 +838,9 @@ export const Decide = ({
 					    are on the row. */}
 					<p className="sub decide-rest">
 						Each figure is what your starting lineup projects over this period with the
-						move made. The men leaving are all well below what a free agent at their own
-						slot is worth, so losing them costs you nothing you cannot replace.
+						move made. The men leaving are all under the keep floor — none is more than{" "}
+						{DEFAULTS.keepFloor} points clear of what the wire still offers at his own
+						slot — and none is worth holding over the rest of the season either.
 						{wireAge && (
 							<>
 								{" "}
@@ -792,23 +856,21 @@ export const Decide = ({
 				<>
 					<h3 className="decide-head">Watch</h3>
 					<ul className="decide-list decide-watch">
+						{/* Two numbers that are NOT comparable, and used to be compared. The floor
+						    is "min innings pitched per team per WEEK"; the projection is rated over
+						    `resolvePeriod`, which starts TODAY, so it is what is LEFT of the week
+						    and counts nothing already thrown. Set against each other they made a
+						    verdict that decayed through the week for no reason — 34.6 innings on
+						    the Friday, 20.1 on the Saturday, 10.1 on the Sunday against a fixed 20,
+						    so the card read SHORT after six of seven days had been pitched.
+						    Innings already thrown are on his team page, which nothing here opens,
+						    so the verdict is gone and the two facts stand as what they are. */}
 						{rules.floor !== null && rules.projected !== null && (
 							<li>
-								{/* The number that matters is the one AFTER the advice, where there is
-								    advice: two of the swaps above can take a pitcher off the roster,
-								    and this league forfeits its pitching side under the floor. */}
-								<span
-									className={
-										(rules.after ?? rules.projected) >= rules.floor ?
-											"decide-ok"
-										:	"decide-warn"
-									}
-								>
-									{(rules.after ?? rules.projected) >= rules.floor ? "OK" : "SHORT"}
-								</span>
+								<span className="decide-note">·</span>
 								<span>
-									Your league requires <b>{rules.floor} innings</b> this period and your
-									pitchers project <b>{rules.projected}</b>
+									Your league requires <b>{rules.floor} innings a week</b>. Your pitchers
+									project <b>{rules.projected} more</b> over what is left of this period
 									{rules.after !== null && rules.after !== rules.projected && (
 										<>
 											{" "}
@@ -817,7 +879,10 @@ export const Decide = ({
 									)}
 									.{" "}
 									<em className="decide-why">
-										An estimate from their scheduled turns, not an announcement.
+										An estimate from their scheduled turns, not an announcement — and it
+										does not count innings already thrown this period, which nothing this
+										page reads carries. It can tell you what is still to come, not
+										whether you will clear the floor.
 									</em>
 								</span>
 							</li>
@@ -844,16 +909,21 @@ export const Decide = ({
 								</span>
 							</li>
 						)}
+						{/* A DIFFERENCE of two projections needs no baseline, so this is the one
+						    thing that can honestly be said about the moves and the floor together.
+						    The old form compared each projection against the floor and could
+						    therefore block a correct move on the same artefact as the line above. */}
 						{rules.floor !== null &&
 							rules.after !== null &&
-							rules.after < rules.floor &&
-							(rules.projected ?? 0) >= rules.floor && (
+							rules.projected !== null &&
+							rules.after < rules.projected && (
 								<li>
-									<span className="decide-warn">STOP</span>
+									<span className="decide-warn">COSTS</span>
 									<span>
-										Those moves would take you <b>under the innings floor</b> — you
-										project {rules.projected} now and {rules.after} after them. Make the
-										hitter first and watch the arms, or skip the pitcher you would drop.
+										Those moves give up{" "}
+										<b>{Number((rules.projected - rules.after).toFixed(1))} innings</b> of
+										what is still to come, and this league sets a floor. That is a real
+										cost even where the line above cannot say where you stand against it.
 									</span>
 								</li>
 							)}

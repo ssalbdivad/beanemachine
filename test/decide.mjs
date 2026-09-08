@@ -174,7 +174,11 @@ const open = async (seeds, opts = {}) => {
 			// `textContent` runs the spans together as "SPBench Cristopher …", so there
 			// is no word boundary before the verb — \bBench\b never matches and every
 			// row read as a start. Matched on the trailing space instead.
-			verb: /Bench /.test(e.textContent) ? "bench" : "start",
+			// three verbs now: Bench, Move (a seat change for a man who stays in), Start
+			verb:
+				/Bench /.test(e.textContent) ? "bench"
+				: /Move /.test(e.textContent) ? "move"
+				: "start",
 			who: e.querySelector("b")?.textContent?.trim()
 		})))
 	const activeSeated = new Set(
@@ -186,6 +190,12 @@ const open = async (seeds, opts = {}) => {
 	t("everyone it says to start is not already in one",
 		changes.filter(c => c.verb === "start").every(c => !activeSeated.has(c.who)),
 		JSON.stringify(changes.filter(c => c.verb === "start" && activeSeated.has(c.who))))
+	// a man asked to change seat must be one who is already in the lineup — the row
+	// exists to free a seat for somebody else, and moving a man who is not there
+	// would be an instruction that cannot be followed
+	t("everyone it says to move seats is already in the lineup",
+		changes.filter(c => c.verb === "move").every(c => activeSeated.has(c.who)),
+		JSON.stringify(changes.filter(c => c.verb === "move" && !activeSeated.has(c.who))))
 	t("and it says how old the seats it compared against are",
 		/as read .* (hour|day|in the last hour)/.test(text), text.slice(-400))
 

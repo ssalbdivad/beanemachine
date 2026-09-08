@@ -983,9 +983,13 @@ export const planSwaps = (
 				(seats.length ?
 					`He can fill your ${[...new Set(seats)].join(" or ")} seat. `
 				:	`Your league prints no startable position for him, so he would sit. `) +
-				`${best.drop.spot.name} is the man to give up for him: he is well below ` +
-				`what a free agent at his own slot is worth, so losing him costs you nothing ` +
-				`you cannot replace.`
+				// What the code actually checks is `bscore < keepFloor` — not far enough
+				// clear of the slot's bar — plus the season-long protect set. "Well below
+				// what a free agent is worth" claimed the first without the qualifier, and
+				// on the shipped roster it said so about a man whose bscore was +5.61.
+				`${best.drop.spot.name} is the man to give up for him: he is within ` +
+				`${options.keepFloor} points of what the wire offers at his own slot over this ` +
+				`window, and is not worth holding over the rest of the season either.`
 		})
 		roster = [
 			...roster.filter(sp => normalizeName(sp.name) !== normalizeName(best.drop.spot.name)),

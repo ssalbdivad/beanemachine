@@ -106,19 +106,6 @@ export interface Filters {
 	 * the top 10 rows were hitters, who cannot be streamed for a start at all.
 	 */
 	startersOnly: boolean
-	/**
-	 * How many roster moves the reader has left this period. Zero marks nothing.
-	 *
-	 * This is an INPUT rather than a model output because nothing the app reads
-	 * knows it. No source in the snapshot carries a transaction count, a waiver
-	 * position, a FAAB balance or a weekly add limit, and those are the four things
-	 * that decide it; a league can also cap games started per period, which caps
-	 * adds for a completely different reason. Guessing a number here would be the
-	 * exact failure this project refuses — a figure that looks read off the league
-	 * and was not. So the reader types the one fact he has and the board does the
-	 * arithmetic he does not: which N of the ranking those moves should buy.
-	 */
-	moves: number
 	/** Null until the reader picks one, so each view can open on the ranking its own
 	 *  question wants — see `SORT_DEFAULT`. Same shape as `availableOnly`. */
 	sort:
@@ -151,7 +138,6 @@ export const DEFAULT_FILTERS: Filters = {
 	// before the reset. It is a visible toggle and it is scoped to `stream` below,
 	// so it can neither be left on invisibly nor strand a board it emptied.
 	startersOnly: true,
-	moves: 0,
 	/**
 	 * bscore, because the field's price is not currently readable.
 	 *
@@ -194,7 +180,7 @@ export const AVAILABLE_ONLY_DEFAULT: Record<Filters["mode"], boolean> = {
  *
  * Streaming ranks by POINTS, not bscore, and it is the only view that does.
  *
- * bscore is points minus the best freely available player AT THE SAME SLOT, which
+ * bscore is points minus a man you could still pick up AT THE SAME SLOT, which
  * is the right question for a roster you hold all season: a catcher who beats
  * catchers is worth more than an outfielder who ties outfielders. A streamer is not
  * asking that. He is filling ONE seat for a few days, and comparing a reliever's

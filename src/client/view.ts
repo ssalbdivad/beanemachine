@@ -14,7 +14,7 @@ import type { Filters } from "./useBoard.ts"
  * direction: hardcoding "stream" would be wrong for somebody who uses the fortnight
  * board, and there is no way to know which he is until he tells you by clicking.
  *
- * Only the QUESTION is remembered — mode, window, and how many moves he has. Not
+ * Only the QUESTION is remembered — which view, and over what window. Not
  * the filters: a search string or a position chip left over from last week is a
  * board that opens narrowed for a reason the reader cannot see, which is the same
  * defect as a hidden filter and this project has already been bitten by it once.
@@ -23,8 +23,7 @@ const STORE_KEY = "beanemachine:view"
 
 const Stored = type({
 	"mode?": "'stream' | 'board' | 'stash'",
-	"days?": "number | null",
-	"moves?": "number"
+	"days?": "number | null"
 })
 type Stored = typeof Stored.infer
 
@@ -42,11 +41,11 @@ export const readView = (): Stored => {
 	}
 }
 
-export const writeView = (f: Pick<Filters, "mode" | "days" | "moves">): void => {
+export const writeView = (f: Pick<Filters, "mode" | "days">): void => {
 	try {
 		window.localStorage.setItem(
 			STORE_KEY,
-			JSON.stringify({ mode: f.mode, days: f.days, moves: f.moves })
+			JSON.stringify({ mode: f.mode, days: f.days })
 		)
 	} catch {
 		// a browser that refuses storage still gets a working board; this is the one

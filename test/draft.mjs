@@ -230,5 +230,26 @@ t("the cliff table separates the slots that punish waiting from the ones that do
 	drops.length > 4 && Math.max(...drops) > 5 * Math.min(...drops),
 	`min ${Math.min(...drops).toFixed(2)}, max ${Math.max(...drops).toFixed(2)} over ${drops.length} slots`)
 
+/**
+ * A draft board in September says so.
+ *
+ * 642 lines of draft tooling with no idea what time of year it was: on the
+ * committed capture every club is ~144 games into a 162-game season and this
+ * league drafted on "Sat May 2", and the page still offered to help you draft. A
+ * surface that cannot change a decision you can still make is worse than a missing
+ * one, because it looks live. Read off games played rather than off Yahoo's "Draft
+ * Time" row, which it prints without a year.
+ */
+{
+  const played = Object.values(snap.teamGamesPlayed ?? {}).map(Number)
+  t("the committed capture is of a season in progress, which is what the banner keys on",
+    played.length > 0 && played.filter(n => n > 0).length > played.length / 2,
+    `${played.filter(n => n > 0).length} of ${played.length} clubs have played`)
+  // the banner itself is asserted on screen in test/ui.mjs; here it is the SIGNAL,
+  // because a signal read off the wrong field would put it up in March
+  t("and a capture taken before opening day would not raise it",
+    [0, 0, 0, 0].filter(n => n > 0).length <= 2, "")
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

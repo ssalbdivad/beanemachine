@@ -228,6 +228,24 @@ export const Draft = ({ snapshot, league, leagueKey, error }: DraftProps) => {
 				</p>
 			</section>
 		)
+	/**
+	 * A draft board in September.
+	 *
+	 * This app ships 642 lines of draft tooling and had no idea what time of year it
+	 * was: on 2026-09-08, with every club 140 games into a 162-game season and this
+	 * league's own settings recording a draft on "Sat May 2", it still offered to
+	 * help you draft. A surface that cannot change a decision you can still make is
+	 * worse than a missing one, because it looks live.
+	 *
+	 * Read off the season itself rather than off the "Draft Time" row, which Yahoo
+	 * prints without a year — games played is the fact, and it needs no parsing. Not
+	 * hidden: a mock, a keeper league's own draft, and next March are all real
+	 * reasons to open this, and the board below still works. It just stops pretending
+	 * to be the thing you came for.
+	 */
+	const played = [...(snapshot?.teamGamesPlayed ? Object.values(snapshot.teamGamesPlayed) : [])]
+	const underway = played.length > 0 && played.filter(n => Number(n) > 0).length > played.length / 2
+
 	// An unconfigured template has a roster shape but no scoring, so every player
 	// projects exactly zero and every pick would look identical. Same refusal the
 	// board and the trade page make.
@@ -268,6 +286,21 @@ export const Draft = ({ snapshot, league, leagueKey, error }: DraftProps) => {
 
 	return (
 		<>
+			{underway && (
+				<section className="card full draft-underway">
+					<h2>Your season is already running</h2>
+					<p className="sub">
+						Clubs are {Math.round(played.reduce((a, b) => a + Number(b), 0) / played.length)}{" "}
+						games into this one, so nothing on this page can change a decision you are
+						still able to make. Adds and drops are on <b>Recommendations</b>.
+					</p>
+					<p className="sub">
+						The board below still works, and still prices a pick against the slots this
+						league makes you fill — for a mock, a keeper league&rsquo;s own draft, or next
+						March.
+					</p>
+				</section>
+			)}
 			<section className="card full draft-pick">
 				<h2>Your pick</h2>
 				<p className="sub">

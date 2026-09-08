@@ -478,6 +478,30 @@ t("no card overflows its own width at 390px", wide.length === 0, wide.join(" "))
 
 await dp.screenshot({ path: "/tmp/bc-dark.png", fullPage: true })
 await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
+/**
+ * The Draft tab, in September, says the season is already running.
+ *
+ * Asserted on screen rather than only in the data, because the failure this
+ * guards is a reader opening a draft board mid-season and taking it seriously.
+ */
+{
+  const tab = page.locator(".views button", { hasText: /draft/i }).first()
+  if (await tab.count()) {
+    await tab.click()
+    await page.waitForSelector(".draft-pick, .draft-underway", { timeout: 30000 })
+    const banner = await page.$(".draft-underway")
+    t("a draft board opened mid-season says so before anything else",
+      !!banner, "no season-underway banner on a capture 144 games deep")
+    if (banner) {
+      const text = await banner.innerText()
+      t("it says how far in, and points at the page that can still help",
+        /\d+ games into/.test(text) && /Recommendations/.test(text), text.replace(/\n/g, " "))
+      t("and it does not remove the board underneath it",
+        !!(await page.$(".draft-pick")), "the draft board itself vanished")
+    }
+  }
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

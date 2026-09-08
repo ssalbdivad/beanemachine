@@ -353,6 +353,24 @@ const open = async (seeds, opts = {}) => {
 	await page.close()
 }
 
+/**
+ * Nor does a league that does not say how many teams are in it.
+ *
+ * Replacement level is the (teams x seats)-th man deep, so without a team count
+ * there is no honest bar. The card would have fallen through to "no projection could
+ * be made for this period" — the symptom, not the missing input, and no way to act
+ * on it.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	cfg.leagues[KEY].meta.max_teams = null
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a league with no team count is told that, and where to set it",
+		/how many teams are in it/.test(text) && /League setup/.test(text), text.slice(0, 240))
+	await page.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

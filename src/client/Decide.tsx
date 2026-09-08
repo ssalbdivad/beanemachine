@@ -452,6 +452,29 @@ export const Decide = ({
 	 * make this refusal; the surface that gives instructions is the last one that
 	 * should skip it.
 	 */
+	/**
+	 * ...and one that does not say how many teams are in it gets the same.
+	 *
+	 * Replacement level is the (teams x seats)-th man deep, so without a team count
+	 * there is no honest bar and `rateAll` refuses. The card would have fallen through
+	 * to "no projection could be made for this period", which names the symptom and
+	 * not the missing input, and sends nobody anywhere.
+	 */
+	if (league.meta.max_teams === null)
+		return (
+			<section className="card full decide decide-blocked">
+				<h2>What should I do?</h2>
+				<p>
+					Nothing yet — <b>{league.meta.league_name ?? "this league"}</b> does not say how
+					many teams are in it, and how deep the wire runs before it reaches replacement
+					level depends on that. Without it no move has an honest price.
+				</p>
+				<p className="sub">
+					Open <b>League setup</b> and set the team count.
+				</p>
+			</section>
+		)
+
 	const scores =
 		Object.values(league.scoring.batting).some(v => v !== 0) ||
 		Object.values(league.scoring.pitching).some(v => v !== 0)

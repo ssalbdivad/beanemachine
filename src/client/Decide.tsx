@@ -603,7 +603,19 @@ export const Decide = ({
 							{today.lineup.pointsPlanned}
 						</span>
 					</h3>
-					{today.bench.length || today.start.length ?
+					{/* Everyone unpriceable is not "bench everyone". A roster whose names none
+					    of the board recognises — a capture that predates a call-up, a read that
+					    caught a different league — produces a lineup nobody is in, and the diff
+					    renders that as eighteen rows saying Bench. There is no lineup to
+					    compare against, so there is no diff, and saying so is the answer. */}
+					{!today.lineup.starters.length && today.bench.length ?
+						<p className="sub">
+							None of your players could be priced for today, so there is nothing to
+							compare against — this is not a recommendation to bench them.{" "}
+							{today.bench.length} {today.bench.length === 1 ? "man is" : "men are"} in
+							your active seats.
+						</p>
+					: today.bench.length || today.start.length ?
 						<>
 							<ul className="decide-list decide-changes">
 								{today.start.map(st => (

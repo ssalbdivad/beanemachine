@@ -394,6 +394,35 @@ const open = async (seeds, opts = {}) => {
 	await page.close()
 }
 
+/**
+ * Everyone unpriceable is not "bench everyone".
+ *
+ * A roster whose names the board does not recognise — a capture that predates a
+ * call-up, a read that caught a different league — produces a lineup nobody is in,
+ * and the diff renders that as eighteen rows saying Bench. There is no lineup to
+ * compare against, so there is no diff.
+ */
+{
+	const nobody = {
+		[KEY]: {
+			at: new Date().toISOString(),
+			spots: ["C", "1B", "2B", "OF", "SP"].map((slot, i) => ({
+				slot,
+				name: `Nonexistent Player ${i}`,
+				positions: [slot === "SP" ? "SP" : slot],
+				team: null
+			}))
+		}
+	}
+	const page = await open({ lineup: nobody, pool: seedPool })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a roster the board cannot price is not told to bench itself",
+		!/Bench /.test(text), text.slice(0, 300))
+	t("and it is told why there is nothing to compare against",
+		/could be priced|could not be priced/.test(text), text.slice(0, 300))
+	await page.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

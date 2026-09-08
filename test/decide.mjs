@@ -458,6 +458,27 @@ const open = async (seeds, opts = {}) => {
 	await page.close()
 }
 
+/**
+ * An ESPN league is given the instruction that can work for IT.
+ *
+ * ESPN answers a browser directly, so "read your roster on My team" is a real
+ * route there and the command line is not the only one. Yahoo sends no CORS
+ * headers and the command is the only route. The card used to give every reader
+ * the ESPN sentence; this asserts it now gives each the right one, which is a
+ * branch nothing else covers.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	cfg.leagues[KEY].meta.platform = "espn"
+	const page = await open({ config: cfg }, { offline: true })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("an ESPN league is pointed at the button that works for it",
+		/Read your roster on/.test(text) && !/CORS/.test(text), text.slice(0, 260))
+	t("and is not handed a command line it does not need",
+		!(await page.$(".decide-cmd")), text.slice(0, 260))
+	await page.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

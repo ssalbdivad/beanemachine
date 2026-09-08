@@ -883,24 +883,76 @@ export const planSwaps = (
 					`points; a man below that cannot outscore anyone already starting`
 			)
 
-		let best: { gain: number; add: (typeof candidates)[number]; drop: Resolved } | null = null
-		for (const add of candidates.slice(0, width)) {
-			if (moves.some(m => normalizeName(m.add) === normalizeName(add.rated.player.name)))
-				continue
-			for (const drop of droppable) {
-				const after = [
-					...roster.filter(sp => normalizeName(sp.name) !== normalizeName(drop.spot.name)),
-					{
-						slot: "BN",
-						name: add.rated.player.name,
-						positions: add.positions,
-						team: add.rated.player.team ?? null,
-						status: ""
-					}
-				]
-				const gain = r2(planLineup({ ...input, roster: after }).pointsPlanned - base)
-				if (!best || gain > best.gain) best = { gain, add, drop }
+		/**
+		 * Two cheap passes and an exact check on the finalists, rather than a lineup
+		 * solve for every pair.
+		 *
+		 * Scoring every (add, drop) pair exactly is |candidates| x |droppable| lineup
+		 * solves a round, and on the shipped roster that measured 1,919 ms of the
+		 * card's 2,600 — the whole page blocked on it. But the two halves of a swap are
+		 * very nearly separable: what a man is worth to your lineup barely depends on
+		 * which OTHER man you gave up, because they rarely compete for the same seat.
+		 *
+		 * So: what each arrival is worth on its own, what each departure costs on its
+		 * own, and their difference as an ESTIMATE to rank by. Estimates do not decide
+		 * anything — the top few pairs are then scored exactly, the way every pair used
+		 * to be, and the exact number is what is reported and compared. Separable
+		 * enough to rank on, never trusted to answer.
+		 */
+		const usable = candidates
+			.slice(0, width)
+			.filter(a => !moves.some(m => normalizeName(m.add) === normalizeName(a.rated.player.name)))
+		const withAdd = (a: (typeof candidates)[number]) => [
+			...roster,
+			{
+				slot: "BN",
+				name: a.rated.player.name,
+				positions: a.positions,
+				team: a.rated.player.team ?? null,
+				status: ""
 			}
+		]
+		const withoutDrop = (d: Resolved) =>
+			roster.filter(sp => normalizeName(sp.name) !== normalizeName(d.spot.name))
+		const points = (r: RosterSpot[]) => planLineup({ ...input, roster: r }).pointsPlanned
+
+		const addValue = new Map(usable.map(a => [a, points(withAdd(a)) - base]))
+		const dropCost = new Map(droppable.map(d => [d, base - points(withoutDrop(d))]))
+
+		const shortlist = usable
+			.flatMap(a => droppable.map(d => ({ a, d, est: addValue.get(a)! - dropCost.get(d)! })))
+			.sort((x, y) => y.est - x.est)
+			.slice(0, 12)
+
+		let best: { gain: number; add: (typeof candidates)[number]; drop: Resolved } | null = null
+		for (const { a, d } of shortlist) {
+			const after = [
+				...roster.filter(sp => normalizeName(sp.name) !== normalizeName(d.spot.name)),
+				{
+					slot: "BN",
+					name: a.rated.player.name,
+					positions: a.positions,
+					team: a.rated.player.team ?? null,
+					status: ""
+				}
+			]
+			const gain = r2(points(after) - base)
+			/**
+			 * Ties go to the man worth least, and ties are common.
+			 *
+			 * Two men who are both out of the lineup cost the same to lose — nothing —
+			 * so the swap gains the same either way and the search was picking whichever
+			 * it reached first. That put Gage Jump and Roman Anthony on opposite sides of
+			 * an arbitrary choice at identical gain. They are not interchangeable: the
+			 * gain is a claim about this week and bscore is the only ordering here that
+			 * says anything about which of them you would rather still own.
+			 */
+			if (
+				!best ||
+				gain > best.gain ||
+				(gain === best.gain && (d.rated?.bscore ?? 0) < (best.drop.rated?.bscore ?? 0))
+			)
+				best = { gain, add: a, drop: d }
 		}
 
 		if (!best) break

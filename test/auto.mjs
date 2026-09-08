@@ -612,6 +612,35 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
     protectedRun.notes.filter(n => /keep floor over this window/.test(n)).length === 1,
     JSON.stringify(protectedRun.notes))
 
+  /*
+   * Ties go to the man worth least, and ties are the common case: two men both out
+   * of the lineup cost the same to lose — nothing — so the swap gains the same
+   * either way. The search used to take whichever it reached first, which put two
+   * players on opposite sides of an arbitrary choice at identical gain.
+   */
+  {
+    const tie = {
+      ...input,
+      rated: [
+        rated("Keeper", { points: 5, bscore: -1, slots: ["1B"] }),
+        rated("Scrub", { points: 5, bscore: -40, slots: ["1B"] }),
+        rated("Starter", { points: 50, bscore: 20, slots: ["C"] }),
+        rated("Free Catcher", { points: 60, bscore: 10, slots: ["C"] })
+      ],
+      roster: [
+        spot("C", "Starter", ["C"]),
+        spot("BN", "Keeper", ["1B"]),
+        spot("BN", "Scrub", ["1B"])
+      ],
+      availableNames: new Set([normalizeName("Free Catcher")]),
+      available: [{ name: "Free Catcher", positions: ["C"] }],
+      shape: shape({ C: 1, BN: 2 }, { C: ["C"], BN: "any" }, ["C", "BN", "BN"])
+    }
+    const r = planSwaps(tie)
+    t("at equal gain it gives up the man worth least, not whichever it reached first",
+      r.moves[0]?.drop === "Scrub", JSON.stringify(r.moves))
+  }
+
   // names alone cannot seat anyone, so they cannot price a swap either
   const noEligibility = planSwaps({ ...input, available: undefined })
   t("with no eligibility beside the names it refuses rather than guessing a seat",

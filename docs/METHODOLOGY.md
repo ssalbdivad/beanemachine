@@ -1133,7 +1133,50 @@ weight was not reaching the projection. Both runs are in `data/results/` and the
 later supersedes the earlier on the same configuration key. Four identical numbers
 should always be read as a broken measurement.
 
-### 7.5 Why these are reported rather than buried
+### 7.5 A role x availability playing-time model — twice, both worse
+
+Volume is blended season-with-recent (3.3), and both terms count team games the
+player was NOT AVAILABLE FOR. A man who missed six weeks is charged for them in the
+season term and, until they age out, in the 21-day term too, so a returning regular
+is priced as a part-timer for about a month after he is back and playing every day.
+
+The codebase has already found and fixed exactly this shape once, for pitchers (3.5):
+*"his starts accrue only over the part of the season he was actually in a rotation;
+his club's games count the whole of it."* The hitters' version splits volume into the
+two independent things it confuses — **role**, plate appearances per game he actually
+PLAYED, immune to missed time; and **availability**, whether he is in the lineup now,
+which is a state and so is read off the short windows only.
+
+The motivating case was vivid. On the 2026-09-04 capture the board rated **Juan Soto**
+— .944 OPS, freshly back — *below a replacement outfielder*, purely on the weeks he
+had missed, and the lineup card benched him. Under the state model he goes from 84.3
+projected points to 113.4.
+
+It loses. Over 111 weeks and five seasons of actual weekly roster decisions:
+
+| model | points | vs season-to-date | vs a thoughtful human |
+|---|---|---|---|
+| blend (shipped) | 77,464 | 72/111 | 45/111 |
+| state | 77,375 | 65/111 | 48/111 |
+| state, one-directional | 77,131 | 65/111 | 42/111 |
+
+The first version moved 245 of 645 hitters by five points or more, which is not the
+targeted correction it was described as — Jonathan Aranda, who had played 136 of 141
+team games, lost 17 points for two quiet days, and there are far more Arandas than
+men coming off the injured list. Narrowing it to fire in one direction only, so it
+can raise a man toward his own role and never cut him, leaves 81 more hitters
+untouched and measured **worse again**.
+
+The likeliest reading is that the premise was wrong rather than the arithmetic: a man
+back from six weeks out really is eased in, with rest days and a ramp, so discounting
+him is not the error it looks like. The vivid case was the author's and it did not
+survive contact with five seasons.
+
+Kept as `volumeModel`, defaulted off, and tested — so that the next person to notice
+Juan Soto finds this section and the two runs in `data/results/` instead of writing
+it again.
+
+### 7.6 Why these are reported rather than buried
 
 The product's core principle is that nothing is inferred or silently defaulted. A
 projection is an inference, so the rule adapts: every number exposes what it is
@@ -1368,9 +1411,11 @@ Each was implemented in full, measured, and then either shipped or left off.
 | Statcast xwOBA *gap* as a residual signal | **shipped**, as a ranking and discovery signal | partial ρ +0.0944 against next-week production controlling for wOBA, z 6.79, n 5,151 — real, and still not a lever that moves a roster |
 | xwOBA as a direct predictor | **shipped**, displayed | ρ 0.1019 against next-week production versus 0.0581 for actual wOBA, monotone in how much of it you use |
 | rolling 21-day Statcast window instead of season-long | **shipped** | gap-to-wOBA is -0.61 over three weeks against -0.36 across a season; the divergence is the signal |
+| role x availability volume, for hitters returning from absence | **rejected**, implemented and off | 111 weeks: 77,375 against the blend's 77,464, and 65/111 against a season-to-date manager where the blend takes 72. Narrowed to fire one-directionally it measures worse again at 77,131. See 7.5 |
 | empirical-Bayes rate shrinkage | **rejected** | worse than the stat-specific constants |
 | stat-specific rate shrinkage | **rejected**, implemented and off | double-penalises a part-time player the volume model already docked |
 | opponent schedule strength | **shipped** at 0.5, flagged | positive and monotone at every dose; no dose significant |
+| add/drop scored on the post-swap LINEUP rather than a bscore gap | **shipped**, unmeasured in the season harness | fixes three defects at once (12.2); `planMoves` and every stored run are untouched, so `maxMoves = 2` is inherited rather than re-established |
 | park factors | **removed** | the Savant park-factor endpoint returns HTML and ignores `csv=true`; the parser produced 1,852 rows of nulls that nothing consumed. No readable source found, so the projection carries no park term rather than an empty one |
 | scheduled starts from published probables | **shipped** | replaces an average with an observation; cannot be backtested, and that is stated, as is the coverage gap in §3.5 |
 | reliever-specific recent-rate weight | **rejected** | 111 weeks: -1.2, -2.2 and -5.9 points a week at 0.3/0.5/0.7, and 31W-45L at the top weight |
@@ -1598,8 +1643,9 @@ Fixing it surfaced a second, smaller lie: with every sub-floor player protected,
 move half fell through to "nobody on the roster is below the keep floor", which was
 false — two men were, and both were starting. It now says that instead.
 
-The seam itself is still there and is stated rather than closed: an add is not seated
-until the next run, because the lineup was computed against the pre-move roster.
+The seam itself is closed in `planSwaps`, and 12.2 is that story. It is left standing
+in `planMoves`, which is untouched and still tested, because every stored measurement
+was taken against it.
 
 The board itself was never affected — a bscore takes the maximum over a player's
 eligible slots and never assigns a whole lineup — and neither is the backtest, which
@@ -1607,6 +1653,61 @@ fills its weekly roster with its own greedy pass. Changing that one would invali
 every stored measurement in `data/results`, so it stays as it was measured; the
 gap between the two is the same 4-point order as above, and is stated here rather
 than quietly closed.
+
+### 12.2 Scoring a swap on the lineup that follows it
+
+`planMoves` scores an add/drop as `add.bscore - drop.bscore`. That is wrong in three
+ways which all push the same direction — it under-recommends, and it under-recommends
+exactly the moves worth making.
+
+1. It will not drop anyone the lineup is starting, because the lineup was decided
+   first (12.1) and nothing would seat the man arriving. So the upgrades it declines
+   are precisely the ones at positions you actually play. On the shipped league it
+   wrote, in its own notes, that Ryan Jeffers *"would be worth 44.12 more"* at catcher
+   and then did not offer him — while the two moves it did offer were worth 16.5 and
+   14.2.
+2. A bscore gap is not what your team gains. A man you add and then bench gains you
+   nothing, and bscore cannot tell the difference.
+3. Its like-for-like slot rule — the arrival must be eligible somewhere the departure
+   was — is a proxy for keeping the roster legal. Roster spots are fungible; what has
+   to stay legal is the LINEUP, and the lineup solver already enforces that.
+
+All three dissolve in one change: build the lineup that follows the swap and score
+the difference. `gain` is then denominated in the league's own points and means what
+a reader assumes it means.
+
+**Cost, and how it was paid.** Scoring every (add, drop) pair exactly is
+`|candidates| x |droppable|` lineup solves per round, and on the shipped roster that
+measured **1,919 ms** of the card's 2,600 — the page blocked on it. The two halves of
+a swap are very nearly separable, because the arriving and departing men rarely
+compete for the same seat, so what each is worth is now measured **once** and their
+difference used to RANK. Estimates decide nothing: the top twelve pairs are then
+scored exactly, and the exact number is what is reported. **1,919 ms to 246**, same
+two gains.
+
+A bound tried first and discarded: `gain <= the arriving man's points` is airtight —
+a swap adds exactly one man and removes one — and pruned nothing, because over a
+six-day window the candidates outscore the best gain. 2,606 ms against 2,600.
+
+**Ties.** Two men both out of the lineup cost the same to lose, so a swap gains the
+same either way and the search was taking whichever pair it reached first. Ties now go
+to the lowest bscore — the only ordering here that says anything about which of them
+you would rather still own.
+
+**The keep floor is horizon-dependent, and that is a hazard.** `keepFloor` is a
+bscore, and bscore is denominated in the window it was rated over. On the shipped
+roster, 5 of 21 men sit below 25 over a fortnight and **12 do over the league's own
+six-day period** — Juan Soto among them. A short week is otherwise enough to offer up
+one of the best hitters in baseball, and the week cannot see that, because within the
+week it is true that he is not worth much. So the same floor is asked of the rest of
+the season as well, and a man safe on either horizon is safe. On his real team that
+holds eight men and changes neither recommendation.
+
+**Not re-measured in the season harness.** `DEFAULTS.maxMoves = 2` is the optimum
+measured against `planMoves` scoring (9), and every run in `data/results/` is evidence
+about that planner. `planSwaps` is a separate export, `planMoves` is unchanged, and no
+stored result moves. Until a season is played against this scoring, treat the cap as
+inherited rather than established.
 
 ## 13. Speed, and how it was measured
 

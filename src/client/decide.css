@@ -27,3 +27,7 @@
 .decide-notes{margin:var(--sp-3) 0 0;font-size:var(--fs-2);color:var(--muted)}
 .decide-notes summary{cursor:pointer}
 .decide-notes ul{margin:var(--sp-2) 0 0;padding-left:var(--sp-4);display:flex;flex-direction:column;gap:4px}
+.decide-cmd{
+	background:var(--sunk);border:1px solid var(--line);border-radius:6px;
+	padding:var(--sp-2) var(--sp-3);overflow-x:auto;font-size:var(--fs-2);margin:0;
+}

@@ -246,21 +246,66 @@ export const Decide = ({
 
 	// Each of these is a different missing thing with a different fix, and naming the
 	// wrong one sends the reader to the wrong button.
-	if (!seats?.spots.length)
+	if (!seats?.spots.length) {
+		/**
+		 * How to fix it depends on the platform, and getting that wrong sends the
+		 * reader somewhere that cannot work.
+		 *
+		 * ESPN answers a browser directly, so "read it on My team" is a real
+		 * instruction. Yahoo sends no CORS headers at all — no page can ever read a
+		 * Yahoo league, this one included — so for a Yahoo league that same sentence
+		 * is a dead end, and the only route is the command line and this file. The
+		 * card used to give both readers the ESPN instruction.
+		 */
+		const yahoo = league.meta.platform === "yahoo"
+		/**
+		 * The TEAM url, not the league url.
+		 *
+		 * `src/cli.ts` reads the roster off team 8's own page, and the stored
+		 * `league_url` stops at the league. Printing that would give a command that
+		 * silently returns settings and free agents and no roster — which is the one
+		 * thing this card is blocked on.
+		 */
+		const base = league.meta.league_url
+		const url =
+			base && league.meta.team_id ?
+				`${base.replace(/\/+$/, "")}/${league.meta.team_id}`
+			:	(base ?? "<your league URL>")
 		return (
 			<section className="card full decide decide-blocked">
 				<h2>What should I do?</h2>
 				<p>
-					Nothing yet — this page has not been told which players are yours. Read your
-					roster on <b>My team</b>, or drop a <code>scoring.json</code> written by the
-					command line anywhere on this page.
+					Nothing yet — this page has not been told which players are yours, so it
+					cannot tell you who to start or who to add.
 				</p>
+				{yahoo ?
+					<>
+						<p>
+							Yahoo sends no CORS headers, so no web page is ever handed your league —
+							not this one, not any. Run this once on your own machine and drop the
+							file it writes anywhere on this page:
+						</p>
+						<pre className="decide-cmd">
+							node --experimental-strip-types src/cli.ts {url}
+						</pre>
+						<p className="sub">
+							It reads three things: your league&rsquo;s settings, the free agents in
+							it, and your roster with the seat each man is in. The middle one is why
+							this route exists — without it nothing here knows who you could get.
+						</p>
+					</>
+				:	<p>
+						Read your roster on <b>My team</b> — your platform answers a browser
+						directly, so this page can do it itself.
+					</p>
+				}
 				<p className="sub">
 					Until then the board below ranks every player in baseball, which is a
 					leaderboard rather than an answer.
 				</p>
 			</section>
 		)
+	}
 
 	return (
 		<section className="card full decide">

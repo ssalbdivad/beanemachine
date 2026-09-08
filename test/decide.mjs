@@ -174,6 +174,25 @@ const open = async seeds => {
 		/not been told which players are yours/.test(text), text.slice(0, 160))
 	t("and it proposes no moves at all",
 		!/Add .+, drop /.test(text), text.slice(0, 200))
+
+	/*
+	 * The way OUT of that state has to be one the reader can actually take.
+	 *
+	 * For a Yahoo league it is the command line and nothing else — Yahoo sends no
+	 * CORS headers, so no page will ever read it — and the command has to carry the
+	 * TEAM in its url. The stored `league_url` stops at the league, and that command
+	 * returns settings and free agents and no roster, which is the one thing this
+	 * card is blocked on. Telling a Yahoo reader to "read it on My team", as this
+	 * card used to, sends him to a button that cannot work.
+	 */
+	if (league.meta.platform === "yahoo") {
+		const cmd = await page.$eval(".decide-cmd", e => e.textContent.replace(/\s+/g, " ").trim())
+		t("it prints the one command that can work, with the team in the url",
+			cmd.includes("src/cli.ts") && cmd.includes(String(league.meta.league_id)) &&
+				new RegExp(`/${league.meta.team_id}\\b`).test(cmd), cmd)
+		t("and says why the page cannot do it itself, naming CORS",
+			/CORS/.test(text) && !/Read your roster on/.test(text), text.slice(0, 300))
+	}
 	await page.close()
 }
 

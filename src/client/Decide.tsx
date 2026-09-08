@@ -659,7 +659,7 @@ export const Decide = ({
 				</>
 			}
 
-			{rules.floor !== null && rules.projected !== null && (
+			{(rules.floor !== null || !!plan?.lineup.skipped.length) && (
 				<>
 					<h3 className="decide-head">Watch</h3>
 					<ul className="decide-list decide-watch">
@@ -689,6 +689,28 @@ export const Decide = ({
 									.{" "}
 									<em className="decide-why">
 										An estimate from their scheduled turns, not an announcement.
+									</em>
+								</span>
+							</li>
+						)}
+						{/* Men on his roster the model could not price at all. They are neither
+						    started nor offered up nor mentioned, which is the whole roster
+						    quietly shrinking: the lineup above is planned as if he owned 22
+						    players when he owns 24. An absence is stated as an absence. */}
+						{!!plan?.lineup.skipped.length && (
+							<li>
+								<span className="decide-note">·</span>
+								<span>
+									{plan.lineup.skipped.length === 1 ? "One player" : `${plan.lineup.skipped.length} players`}{" "}
+									on your roster could not be priced this period, so nothing above
+									counts them:{" "}
+									<b>{plan.lineup.skipped.map(x => x.split(":")[0]).join(", ")}</b>.
+									{/* The per-man reason is `resolveRoster`'s, written for one man
+									    ("he has no number to compare") and wrong under a list of two.
+									    The shared half is the true half. */}
+									<em className="decide-why">
+										No projection could be made for them over this window, so they
+										are neither started nor offered up.
 									</em>
 								</span>
 							</li>

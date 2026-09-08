@@ -199,6 +199,29 @@ const open = async (seeds, opts = {}) => {
 		!(await page.$(".example-note")),
 		(await page.$(".example-note").then(e => e && e.innerText())) || "")
 
+	/*
+	 * A man the model cannot price is still on his roster.
+	 *
+	 * Unpriceable players are neither started nor offered up nor mentioned, which is
+	 * the roster quietly shrinking: the lineup is planned as if he owned fewer men
+	 * than he does. On the shipped team that is two — an injured outfielder and a
+	 * pitcher with no projection — and an absence is stated as an absence.
+	 */
+	{
+		const watch = await page.$(".decide-watch")
+		const txt = watch ? await watch.innerText() : ""
+		const claimed = /(\d+) players on your roster could not be priced|One player on your roster could not be priced/.exec(txt)
+		if (claimed) {
+			const n = claimed[1] ? Number(claimed[1]) : 1
+			const named = (txt.match(/could not be priced this period, so nothing above counts them: ([^.]+)\./) ?? [])[1]
+			t("it names every player it could not price, not just a count",
+				!!named && named.split(",").length === n, `${n} claimed, named: ${named}`)
+		} else {
+			t("with every player priced, no unpriceable note is invented", true,
+				"nothing on this roster was skipped")
+		}
+	}
+
 	t("nobody is seated whose club has no game today",
 		seated.every(n => !clubOf.has(n) || playingClubs.has(clubOf.get(n))),
 		seated.filter(n => clubOf.has(n) && !playingClubs.has(clubOf.get(n))).join(", ") ||

@@ -403,7 +403,13 @@ const avail = p.locator(".toggle", { hasText: "Only players I can add" }).locato
 await avail.uncheck()
 await p.waitForTimeout(500)
 const listed = await p.$$eval(".board-row .who b", els => els.map(e => e.textContent.trim()))
-const deep = listed.slice(14, 22)
+// Chosen for the property the assertions below need — men the ESTIMATE does not
+// surface — rather than by a fixed slice that happened to have it. `listed.slice(14,
+// 22)` held for one capture and stopped holding on the next, when a player the
+// estimate calls gettable drifted into the teens: two failures about a wire that
+// were really about today's ranking. Skipping the first ten keeps them deep enough
+// to be off screen, which is the other half of the point.
+const deep = listed.slice(10).filter(n => !estimated.includes(n)).slice(0, 8)
 await avail.check()
 await p.waitForTimeout(500)
 t("the ranking runs deep enough to draw a pool from a part of it nobody would see",

@@ -36,7 +36,8 @@
 		"test:lineups": "node test/lineups.mjs",
 		"test:node": "node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/draft.mjs && node test/auto.mjs && node test/period.mjs && node test/ownership.mjs",
 		"build:cli": "vite build -c vite.cli.config.ts",
-		"prepare": "vite build -c vite.cli.config.ts"
+		"prepare": "vite build -c vite.cli.config.ts",
+		"deploy:api": "vercel --prod"
 	},
 	"dependencies": {
 		"@hono/arktype-validator": "^2.0.1",

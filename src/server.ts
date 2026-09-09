@@ -1,122 +1,17 @@
 import { serve } from "@hono/node-server"
 import { serveStatic } from "@hono/node-server/serve-static"
-import { arktypeValidator } from "@hono/arktype-validator"
-import { type } from "arktype"
-import { Hono } from "hono"
 import { existsSync } from "node:fs"
-import { ImportError, importLeague } from "./import.ts"
-import { fetchAvailable } from "./data/yahoo-pool.ts"
-import { fetchTeamRoster } from "./data/rosters.ts"
+import app from "./api.ts"
 
 /**
- * The API reads leagues off their own pages. Leagues live in the browser's storage,
- * so nothing here reads or writes scoring.json.
+ * The API, run on this machine.
  *
- * What is genuinely IMPOSSIBLE without it is narrower than this file: measured
- * 2026-09-04, ESPN reflects the requesting origin, so a page reads ESPN for itself
- * and the static build imports it with no backend at all (see `readableInBrowser`
- * in src/import.ts, and the routing in src/client/api.ts). Yahoo sends no
- * access-control headers, which leaves /available — Yahoo-only — and the Yahoo half
- * of /import and /roster as the part no browser can replace.
- *
- * That makes this process the ONLY route to a Yahoo league, which is the shape most
- * of this app's users are in. `src/cli.ts` is the other end of the same read: run it
- * once, get a scoring.json, and the file goes anywhere. The ESPN half stays served
- * here because that is what every local run and every suite uses: the client prefers
- * this server wherever one answers, and only falls back to reading for itself when
- * nothing does.
- *
- * Request bodies are still validated at the edge, so a malformed call is
- * rejected with a real error message rather than reaching a scraper.
+ * Everything that answers a request lives in `src/api.ts` and has nothing
+ * node-specific in it, so the same routes can be deployed to a serverless host —
+ * which is what turns "run a terminal command" into "paste your league URL" for the
+ * one platform no browser can read. This file is the local adapter and the static
+ * server, and nothing else.
  */
-const ImportBody = type({ url: "string > 0" })
-
-/** The free-agent pool changes slowly and Yahoo rate-limits, so cache it briefly
- *  rather than re-scraping on every page load. */
-const POOL_TTL = 10 * 60_000
-const poolCache = new Map<string, { at: number; pool: unknown }>()
-
-const app = new Hono()
-
-/** Our own errors are guidance; anything else is a bug and stays a 500. */
-app.onError((e, c) => {
-	if (e instanceof ImportError) return c.json({ error: e.message }, 400)
-	console.error(e)
-	return c.json({ error: `${e.name}: ${e.message}` }, 500)
-})
-
-const api = new Hono()
-	// how the client tells a served build from a local one: on a static host there
-	// is no JSON here, so the client reads ESPN for itself and says that Yahoo,
-	// which sends no CORS headers, is what still needs this process
-	.get("/health", c => c.json({ ok: true }))
-
-	// read from the league's own pages and handed straight back: the browser is
-	// what stores it, so nothing about this league is kept here
-	.post("/import", arktypeValidator("json", ImportBody), async c =>
-		c.json(await importLeague(c.req.valid("json").url))
-	)
-
-	.post("/available", arktypeValidator("json", type({ leagueId: "string > 0" })), async c => {
-		// Browsers can't read Yahoo directly (no CORS headers), and the pool is Yahoo
-		// only, so this endpoint has no browser-direct counterpart at all.
-		const { leagueId } = c.req.valid("json")
-		if (!/^\d+$/.test(leagueId)) throw new ImportError("A numeric Yahoo league id is required.")
-		// An empty pool is a STATE, not an error: the league may be private, or Yahoo
-		// may be rate-limiting. Returning 400 made the browser log a failed request on
-		// every load. The client shows the filter disabled with this note instead.
-		const cached = poolCache.get(leagueId)
-		if (cached && Date.now() - cached.at < POOL_TTL) return c.json(cached.pool)
-		const pool = await fetchAvailable(leagueId)
-		if (!pool.players.length)
-			return c.json({
-				players: [],
-				positionsRead: [],
-				note:
-					"Couldn't read this league's free agents. Only publicly-viewable Yahoo " +
-					"leagues can be read without signing in, and Yahoo rate-limits repeated " +
-					"requests — try again in a few minutes."
-			})
-		poolCache.set(leagueId, { at: Date.now(), pool })
-		return c.json(pool)
-	})
-
-	/**
-	 * A team's own roster, off its own Yahoo page.
-	 *
-	 * The Yahoo read here is the one a browser cannot do for itself. The ESPN read it
-	 * CAN do (`fetchTeamRoster` is the same function either side of the wire) stays
-	 * served from here for anyone running locally, because a request that already
-	 * works is not worth rerouting. Nothing is stored — the browser owns the roster,
-	 * exactly as it owns the league.
-	 */
-	.post(
-		"/roster",
-		arktypeValidator(
-			"json",
-			type({
-				platform: "string > 0",
-				leagueId: "string > 0",
-				teamId: "string > 0",
-				"sport?": "string",
-				"season?": "number"
-			})
-		),
-		async c => {
-			const body = c.req.valid("json")
-			// Yahoo and ESPN both key a league on a short alphanumeric id. The
-			// per-platform exemption this used to carry existed only for Sleeper's
-			// 18-digit ids, and Sleeper is gone (see SLEEPER_REFUSAL in src/import.ts).
-			if (!/^[\w-]{1,32}$/.test(body.leagueId))
-				throw new ImportError("That doesn't look like a league id.")
-			// An unreadable roster is a state, not an error: the league may be private
-			// or the platform may be throttling, and the client offers the manual path
-			// either way rather than logging a failed request.
-			return c.json(await fetchTeamRoster(body))
-		}
-	)
-
-app.route("/api", api)
 
 /** In dev Vite serves the client and proxies here; in prod we serve its build. */
 const DIST = "./dist"
@@ -125,16 +20,14 @@ if (existsSync(DIST)) {
 	app.get("*", serveStatic({ path: `${DIST}/index.html` }))
 }
 
-export type Api = typeof api
-export default app
-
 const port = Number(process.argv.find(a => a.startsWith("--port="))?.slice(7) ?? 8000)
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, info => {
 	console.log(`beanemachine api → http://localhost:${info.port}`)
 	console.log(`leagues           kept in your browser; this only reads them from their URL`)
 	console.log(`yahoo             the one platform no browser can read; this is its only route`)
-	console.log(`one-off import    node --experimental-strip-types src/cli.ts <league-url>`)
-	// `nub` is not a binary anyone has; naming it sent whoever followed this line to
-	// a command not found. Vite is what actually serves the client in dev.
+	console.log(`one-off import    node src/cli.ts <league-url>`)
 	if (!existsSync(DIST)) console.log(`client            run \`npx vite\` (it serves the client)`)
 })
+
+export { app }
+export default app

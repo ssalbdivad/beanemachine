@@ -45,7 +45,14 @@ jobs:
       # capture live MLB + Savant data; the browser can't call them directly
       # (neither sends CORS headers), so the snapshot is how real data ships
       - run: pnpm refresh
+      # Where the deployed API lives, if one is deployed. Unset, the client resolves
+      # /api against its own origin, finds nothing on a static host and works in the
+      # mode it has always worked in — a team entered by hand, availability estimated
+      # from ownership. Set as a repository VARIABLE (not a secret; it is a public
+      # URL baked into a public bundle), Yahoo becomes automatic. See README.
       - run: pnpm build
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

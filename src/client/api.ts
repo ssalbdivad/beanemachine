@@ -53,8 +53,37 @@ export const canImport = (url: string): boolean =>
  * happened to reach the right answer here because there is no API either way,
  * which is exactly why nothing noticed.
  */
-const resolve = (path: string): string =>
-	`${import.meta.env.BASE_URL.replace(/\/$/, "")}${path}`
+/**
+ * Where the API is, which is not always this origin.
+ *
+ * The site is static on GitHub Pages and the API cannot be — Yahoo sends no CORS
+ * headers, so reading a Yahoo league needs a server, and a static host has none.
+ * Deploying one somewhere and pointing this at it is the whole difference between
+ * "paste your league URL" and "open a terminal".
+ *
+ * `VITE_API_BASE` is that pointer, baked in at build time. Unset — which is every
+ * local run — it resolves against the deployed base as before, so `npx vite` with
+ * `node src/server.ts` behind it keeps working with no configuration at all. Set, it
+ * is an absolute origin, and the API's CORS list has to admit this site: see
+ * ALLOWED_ORIGINS in src/api.ts.
+ */
+/**
+ * Read inside the function, never at module scope.
+ *
+ * `import.meta.env` exists only under Vite. Read at import time it is `undefined` in
+ * plain node, and every suite that imports any client module — which is most of them
+ * — died on the first line with "Cannot read properties of undefined". The existing
+ * `BASE_URL` read was already inside this function for the same reason; the new one
+ * was not, and broke nine suites at once.
+ */
+const env = (): Record<string, string | undefined> =>
+	(import.meta as { env?: Record<string, string | undefined> }).env ?? {}
+
+const resolve = (path: string): string => {
+	const base = (env().VITE_API_BASE ?? "").replace(/\/$/, "")
+	if (base) return `${base}${path}`
+	return `${(env().BASE_URL ?? "/").replace(/\/$/, "")}${path}`
+}
 
 const send = async <T,>(path: string, body?: unknown): Promise<T> => {
 	const res = await fetch(resolve(path), {

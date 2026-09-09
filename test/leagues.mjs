@@ -142,9 +142,20 @@ t("the page names a command a visitor with no clone could run",
     !/\bnub\b/.test(importCommand) &&
     !/experimental-strip-types/.test(importCommand),
   importCommand || "IMPORT_COMMAND not found")
-t("and package.json makes that command real rather than aspirational",
-  JSON.parse(readFileSync("package.json", "utf8")).bin?.beanemachine === "src/cli.ts",
-  JSON.stringify(JSON.parse(readFileSync("package.json", "utf8")).bin))
+// `bin` points at a COMPILED bundle, not at src/cli.ts. Node strips types by
+// default since 22.18 but refuses to under node_modules, which is exactly where npx
+// puts a package — so a .ts bin failed on its first line with
+// ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, for everyone, always. `prepare` is
+// what builds it: npm runs that on a git-url install, which is how npx gets here.
+{
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"))
+  t("package.json makes that command real rather than aspirational",
+    pkg.bin?.beanemachine === "dist-cli/cli.js" && /vite build -c vite\.cli\.config\.ts/.test(pkg.scripts?.prepare ?? ""),
+    `bin ${JSON.stringify(pkg.bin)} prepare ${JSON.stringify(pkg.scripts?.prepare)}`)
+  t("and ships what the CLI reads at runtime",
+    (pkg.files ?? []).includes("dist-cli") && (pkg.files ?? []).includes("data/snapshot.json"),
+    JSON.stringify(pkg.files))
+}
 t("the CLI names a runner too, and neither end says `nub` or the retired flag",
   /const RUN = inClone \?/.test(cliSrc) &&
     !/\bnub\b/.test(cliSrc.split("\n").filter(l => !l.trim().startsWith("*")).join("\n")),

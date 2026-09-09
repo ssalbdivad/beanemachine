@@ -17,6 +17,37 @@ genuinely worth different amounts in different leagues and a ranking denominated
 somebody else's scoring is a ranking of somebody else's team. It is the second
 screen, not the first.
 
+## Deploying the API (the one thing that makes Yahoo automatic)
+
+Yahoo sends no CORS headers — measured 2026-09-09, HTTP 200 with no
+`access-control-allow-origin` — so **no browser can ever read a Yahoo league**. The
+site works without a server: you enter your team by hand and availability is
+estimated from how widely each player is rostered, calibrated to your league's size
+and labelled an estimate everywhere it appears. What a server adds is the exact
+free-agent list and a one-click roster read.
+
+`src/api.ts` has nothing node-specific in it, so it deploys as-is:
+
+```sh
+vercel login          # once
+pnpm deploy:api       # prints a URL
+```
+
+Then rebuild the site with that URL baked in:
+
+```sh
+VITE_API_BASE=https://<what-vercel-printed> pnpm build
+```
+
+or set `VITE_API_BASE` as a repository variable so
+`.github/workflows/pages.yml` picks it up on every deploy. The API's own CORS list
+(`ALLOWED_ORIGINS` in `src/api.ts`) must name the site, and already names
+`beanemachine.com`.
+
+It is rate-limited to 30 requests a minute per address, because an endpoint that
+scrapes somebody else's site on request is an invitation to be used as one, and that
+cost lands on Yahoo and then on this app's own access.
+
 Which platform you are on decides how you get in, and the honest answer differs — see
 **[Getting your league in](#getting-your-league-in)** before anything else.
 

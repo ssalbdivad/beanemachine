@@ -34,7 +34,9 @@
 		"test:ownership": "node test/ownership.mjs",
 		"test:period": "node test/period.mjs",
 		"test:lineups": "node test/lineups.mjs",
-		"test:node": "node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/draft.mjs && node test/auto.mjs && node test/period.mjs && node test/ownership.mjs"
+		"test:node": "node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/draft.mjs && node test/auto.mjs && node test/period.mjs && node test/ownership.mjs",
+		"build:cli": "vite build -c vite.cli.config.ts",
+		"prepare": "vite build -c vite.cli.config.ts"
 	},
 	"dependencies": {
 		"@hono/arktype-validator": "^2.0.1",
@@ -55,13 +57,15 @@
 		"vite": "^8.2.2"
 	},
 	"bin": {
-		"beanemachine": "src/cli.ts"
+		"beanemachine": "dist-cli/cli.js"
 	},
 	"files": [
+		"dist-cli",
 		"src",
 		"data/snapshot.json",
 		"scoring.json",
 		"model.json",
-		"README.md"
+		"README.md",
+		"vite.cli.config.ts"
 	]
 }

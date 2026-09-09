@@ -20,3 +20,6 @@ public/snapshot.json
 *.png
 !src/**/*.png
 !public/**/*.png
+
+# built by `prepare` on install; not a source artifact
+dist-cli/

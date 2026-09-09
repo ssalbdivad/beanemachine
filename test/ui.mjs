@@ -280,8 +280,14 @@ t("the ready-made preset is what it lands on, not the blank one",
 // and a URL field, with nothing saying which of them a Yahoo user wants.
 const routes = await fp.$$eval(".routes dt", n => n.map(e => e.textContent))
 t("the ways into your own league are named on the setup tab", routes.length >= 3, routes.join(" | "))
-t("and the file route prints a command that exists, not `nub`",
-  /^node --experimental-strip-types src\/cli\.ts /.test(await fp.locator(".routes pre").first().textContent()),
+// It must be runnable by the person READING it, which is somebody on
+// beanemachine.com with no clone. `node --experimental-strip-types src/cli.ts` was
+// neither: the flag has not been needed since node 22.18, and the path only exists
+// inside a checkout. The npx form is verified to work — `bin` in package.json points
+// at a compiled bundle, because node refuses to strip types under node_modules and
+// the .ts bin failed on its first line for everyone.
+t("and the file route prints a command a visitor could actually run",
+  /^npx --yes github:/.test(await fp.locator(".routes pre").first().textContent()),
   await fp.locator(".routes pre").first().textContent())
 
 // Route 1: one click from the picker to a ranked board.
@@ -500,6 +506,52 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
         !!(await page.$(".draft-pick")), "the draft board itself vanished")
     }
   }
+}
+
+/**
+ * When something throws, the reader gets a page rather than nothing.
+ *
+ * React unmounts the whole tree on an uncaught render error, so before this any one
+ * component could take the site down to white — and one did: `roster.of` throws on a
+ * store it cannot parse, and reading it during render turned a corrupt localStorage
+ * key into a blank screen with no way out and nothing to report. A blank page is the
+ * worst failure a site opened to make a decision can have, because it reads as "the
+ * site is gone" rather than "something went wrong".
+ *
+ * Forced with a snapshot that parses and is the wrong shape, which throws inside
+ * `hydrate` during render — a real path, not a synthetic component that throws on
+ * purpose.
+ */
+{
+	const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+	await page.route("**/snapshot.json", r =>
+		r.fulfill({
+			status: 200,
+			contentType: "application/json",
+			body: JSON.stringify({
+				season: 2026,
+				capturedAt: "2026-09-09T00:00:00Z",
+				horizon: { start: "2026-09-09", end: "2026-09-23" },
+				players: 5
+			})
+		})
+	)
+	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
+	await page.waitForTimeout(2500)
+	const shown = await page.$(".boundary")
+	t("a render error shows a page rather than a blank screen", !!shown,
+		(await page.$eval("body", e => e.innerText)).slice(0, 120) || "(the page was blank)")
+	if (shown) {
+		const text = await shown.innerText()
+		t("it says what threw, so there is something to report",
+			/TypeError|Error/.test(text) && text.length > 80, text.slice(0, 140))
+		t("it offers the recovery that actually works, and names what it deletes",
+			/Clear what this site stored/.test(text) && /your leagues, your roster/i.test(text),
+			text.slice(0, 400))
+		t("and offers a plain reload first, for a one-off",
+			/reload/i.test(text), text.slice(-160))
+	}
+	await page.close()
 }
 
 await browser.close()

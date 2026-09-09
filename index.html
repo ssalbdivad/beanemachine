@@ -3,7 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="How can you not be robotic about baseball?" />
+    <title>beanemachine — what to do with your fantasy baseball team today</title>
+
+    <!--
+      The description is what a search result and a shared link actually show, so it
+      says what the site DOES. It was the tagline, which is a joke and not an answer
+      to "should I click this".
+    -->
+    <meta
+      name="description"
+      content="Reads your fantasy baseball league's own scoring and tells you who to start today and which add is worth one of this week's moves — every recommendation naming both sides."
+    />
+    <meta name="theme-color" content="#f7f4ec" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14161a" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://beanemachine.com/" />
+
+    <!--
+      Link previews. Pasting the site into a group chat — which is how a fantasy app
+      actually spreads — produced a bare URL with no title, no summary and no image.
+      The image is Billy, who is already the favicon and is an SVG, so it is listed
+      last: several platforms will not render SVG previews and fall back to the text
+      above rather than to nothing.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://beanemachine.com/" />
+    <meta property="og:title" content="beanemachine" />
+    <meta
+      property="og:description"
+      content="Who to start today, and which add is worth one of this week's moves — in your league's own scoring, with both sides of every move named."
+    />
+    <meta property="og:image" content="https://beanemachine.com/beanbot.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="beanemachine" />
+    <meta
+      name="twitter:description"
+      content="Who to start today, and which add is worth one of this week's moves, in your league's own scoring."
+    />
+
     <link rel="icon" type="image/svg+xml" href="/beanbot.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,10 +47,28 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <title>beanemachine</title>
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Seen only when JavaScript does not run: an ad blocker, a locked-down browser, a
+      crawler. It was an empty div, which reads as a broken site rather than as one
+      that needs something switched on.
+    -->
+    <noscript>
+      <main style="max-width: 60ch; margin: 3rem auto; padding: 0 1rem; font-family: system-ui">
+        <h1>beanemachine</h1>
+        <p>
+          This page works out who to start and what to add in your fantasy baseball
+          league, and it does that arithmetic in your browser — so it needs JavaScript
+          switched on.
+        </p>
+        <p>
+          Nothing about your team is sent anywhere: your leagues and rosters are kept
+          in this browser's own storage.
+        </p>
+      </main>
+    </noscript>
     <script type="module" src="/src/client/main.tsx"></script>
   </body>
 </html>

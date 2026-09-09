@@ -901,3 +901,19 @@ pre{
 @media (prefers-reduced-motion:reduce){
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
 }
+
+/* The last thing standing when something throws — see src/client/Boundary.tsx.
+   Styled here rather than beside it because a component that renders *because*
+   the app failed cannot depend on a stylesheet the app was going to import. */
+.boundary{max-width:70ch;margin:0 auto;padding:var(--sp-6) var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+.boundary h1{margin:0}
+.boundary h2{margin:var(--sp-3) 0 0;font-size:var(--fs-1)}
+.boundary p{margin:0;max-width:66ch}
+.boundary-error{
+	background:var(--sunk);border:1px solid var(--line);border-radius:6px;
+	padding:var(--sp-3);overflow-x:auto;font-size:var(--fs-2);white-space:pre-wrap;
+	max-height:40vh;margin:0;
+}
+.boundary button.chip-btn{align-self:flex-start}
+.boundary-soft{color:var(--muted);font-size:var(--fs-2)}
+.linkish{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-decoration:underline}

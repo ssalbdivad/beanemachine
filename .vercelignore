@@ -1,0 +1,27 @@
+# What NOT to upload when deploying the API.
+#
+# Vercel uploads the working directory, not what git tracks, so a .gitignore entry
+# does nothing here. `data/backtest-cache` is 19,190 files of local measurement cache
+# and on its own it blew the platform's 15,000-file limit:
+#
+#   Error: Invalid request: `files` should NOT have more than 15000 items, received 19413.
+#
+# Only `api/` and the part of `src/` it imports actually run in production. Everything
+# below is either a local artifact, a test, or the site — which is built and deployed
+# by .github/workflows/pages.yml to GitHub Pages, not from here.
+
+# Local caches and stored measurements. The cache is regenerated on demand; the
+# results are evidence, kept in git, and of no use to a serverless function.
+data/backtest-cache/
+data/results/
+
+# Build outputs. The site's is deployed by Pages; the CLI's is built by `prepare`.
+dist/
+dist-cli/
+
+# Not part of the running API.
+test/
+docs/
+logo/
+.github/
+*.png

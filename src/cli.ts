@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -34,9 +36,33 @@ import type { League } from "./schema.ts"
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
+
+/**
+ * Where the file it writes lands, and it is not always next to this script.
+ *
+ * Run from a clone, `scoring.json` belongs in the clone: that is the file `npx vite`
+ * seeds from and the one the tests read. Run through `npx`, this script lives in
+ * npm's cache under a hashed directory, and writing there puts the ONE artifact the
+ * whole command exists to produce somewhere the reader will never find it — and
+ * deletes it with the next cache prune.
+ *
+ * The clone is recognised by the thing only a clone has: this repository's own
+ * package.json sitting beside a `src/cli.ts`. Anywhere else, the file goes to the
+ * working directory, which is where somebody who typed a command is looking.
+ */
+const inClone = existsSync(join(ROOT, "package.json")) && existsSync(join(ROOT, ".git"))
+const OUT = inClone ? ROOT : process.cwd()
+/**
+ * What to tell the reader to type, which depends on how he got here.
+ *
+ * `node --experimental-strip-types src/cli.ts` was the instruction everywhere, and
+ * two thirds of it is now wrong: node has stripped types by default since 22.18, and
+ * the path only exists if you have the repository. A visitor to beanemachine.com has
+ * neither, and the one command he can run is the published one.
+ */
 const SELF = relative(process.cwd(), join(ROOT, "src/cli.ts")) || "src/cli.ts"
-const RUN = `node --experimental-strip-types ${SELF}`
-const CONFIG = join(ROOT, "scoring.json")
+const RUN = inClone ? `node ${SELF}` : "npx --yes github:ssalbdivad/beanemachine"
+const CONFIG = join(OUT, "scoring.json")
 const SNAPSHOT = join(ROOT, "data/snapshot.json")
 
 const args = process.argv.slice(2)

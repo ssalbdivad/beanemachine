@@ -636,6 +636,7 @@ export const App = () => {
 							league={league ?? null}
 							leagueKey={key}
 							error={snapshotError}
+							onOpenTeam={() => setView("trade")}
 						/>
 					</div>
 					{/* The primer moved into Board, which is the only place that knows which

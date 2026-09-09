@@ -34,3 +34,5 @@
 .decide-changes .decide-slot{color:var(--accent)}
 .decide-rest,.decide-read{margin:var(--sp-2) 0 0;color:var(--muted)}
 .decide-seat{color:var(--muted)}
+.decide-cta{font-size:var(--fs-1);padding:6px 14px}
+.decide-blocked .decide-notes{margin-top:var(--sp-3)}

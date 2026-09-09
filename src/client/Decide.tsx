@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
-import { rateAll } from "../engine/bscore.ts"
+import { ownershipCut, rateAll } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
 import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
@@ -11,6 +11,7 @@ import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
 import { canReadPool, api, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
+import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import "./decide.css"
 
@@ -67,16 +68,77 @@ export const Decide = ({
 	snapshot,
 	league,
 	leagueKey,
-	error
+	error,
+	onOpenTeam
 }: {
 	snapshot: Snapshot | null
 	league: League | null
 	leagueKey: string | null
 	/** Why the player data could not be read, when it could not. */
 	error: string | null
+	/** Takes the reader to the one screen that always works, on every platform:
+	 *  entering his own players. A card that says "add your players" and does not
+	 *  take him there is a card that has told him to go and find something. */
+	onOpenTeam: () => void
 }) => {
-	const seats = leagueKey ? lineupStore.of(leagueKey) : null
+	const storedSeats = leagueKey ? lineupStore.of(leagueKey) : null
+	/**
+	 * An unreadable roster store must not take the page down.
+	 *
+	 * `roster.of` throws on a store it cannot parse — deliberately, because repairing
+	 * one means guessing which ids were meant and a roster guessed wrong prices every
+	 * recommendation on this card. **My team** owns that conversation: it catches the
+	 * throw, says what is wrong and offers the control that clears it.
+	 *
+	 * This card is not that screen. Called unguarded during render it turned a corrupt
+	 * localStorage key into a blank page, which is a worse answer to "your store is
+	 * broken" than the one already written two tabs away.
+	 */
+	const owned = useMemo(() => {
+		if (!leagueKey) return []
+		try {
+			return roster.of(leagueKey)
+		} catch {
+			return []
+		}
+	}, [leagueKey])
 	const carried = leagueKey ? poolStore.of(leagueKey) : null
+
+	/**
+	 * A team entered BY HAND is still a team.
+	 *
+	 * `lineupStore` holds seats — which slot each man is in — and only two things
+	 * ever write it: a `scoring.json` carried in from the command line, and a roster
+	 * read off the platform. Neither is available to somebody who opened
+	 * beanemachine.com and typed his players into **My team**, which is the only
+	 * route a Yahoo user has in a browser at all. So the surface that exists to tell
+	 * him what to do told him "this page has not been told which players are yours"
+	 * — about a team he had just finished entering.
+	 *
+	 * `roster.ts` has him: ids, per league, which is everything except the seats. The
+	 * seats are then genuinely unknown rather than assumed, and that difference is
+	 * carried through rather than papered over — `known` is false, nothing claims to
+	 * diff against a lineup nobody read, and the card says so. Eligibility comes from
+	 * the snapshot's own map, which is swept off Yahoo's player pages: a real source,
+	 * not a guess at where a man may play.
+	 */
+	const seats = useMemo(() => {
+		if (storedSeats?.spots.length) return { spots: storedSeats.spots, at: storedSeats.at, known: true }
+		if (!owned.length || !snapshot) return null
+		const byId = new Map(snapshot.players.map(p => [p.id, p]))
+		const elig = snapshot.eligibility ?? {}
+		const spots = owned.flatMap(k => {
+			const p = byId.get(Number(k.split(":")[0]))
+			if (!p) return []
+			return [{
+				slot: "BN",
+				name: p.name,
+				positions: elig[String(p.id)] ?? (p.position ? [p.position] : []),
+				team: p.team ?? null
+			}]
+		})
+		return spots.length ? { spots, at: null as string | null, known: false } : null
+	}, [storedSeats, owned, snapshot])
 
 	/**
 	 * The same wire the board reads, from the same place.
@@ -113,6 +175,45 @@ export const Decide = ({
 	}, [leagueId, league?.meta.platform, league?.meta.season])
 
 	const wire = read ?? carried
+
+	/**
+	 * Who he could get, when nobody has read his league's actual wire.
+	 *
+	 * This is the whole difference between an app and a developer tool. Reading a
+	 * Yahoo league needs a server — Yahoo sends no CORS headers, measured again
+	 * 2026-09-09 — and until one is deployed the card's answer to "what should I add"
+	 * was: run a TypeScript file from a checkout you do not have. For a website that
+	 * is not an answer, and the estimate it refused to make is one the rest of this
+	 * app has been making all along.
+	 *
+	 * The board's availability ladder already has this rung: rank everyone by how
+	 * widely he is rostered, cut at `teams × seats`, and call the men below it
+	 * probably free. It is an estimate and it is labelled one everywhere it appears —
+	 * but it is calibrated to THIS league's size, it is the same rung the board's own
+	 * filter uses, and it is enormously better than nothing.
+	 *
+	 * Never used where a real list exists: a read beats an estimate, always.
+	 * Eligibility comes from the snapshot's map, which is swept off Yahoo's player
+	 * pages, so a man is only offered for a seat his own platform grants him.
+	 */
+	const estimatedWire = useMemo(() => {
+		if (wire?.players.length || !snapshot || !league) return null
+		const ownership = new Map(
+			Object.entries(snapshot.ownership ?? {}).map(([k, v]) => [Number(k), Number(v)])
+		)
+		const cut = ownershipCut(league, ownership)
+		if (!cut?.usable) return null
+		const elig = snapshot.eligibility ?? {}
+		const mine = new Set((seats?.spots ?? []).map(sp => normalizeName(sp.name)))
+		const players = snapshot.players.flatMap(p => {
+			const pct = ownership.get(p.id)
+			if (pct === undefined || pct > cut.cut) return []
+			if (mine.has(normalizeName(p.name))) return []
+			const positions = elig[String(p.id)] ?? (p.position ? [p.position] : [])
+			return positions.length ? [{ name: p.name, positions }] : []
+		})
+		return players.length ? { players, cut } : null
+	}, [wire, snapshot, league, seats])
 	/**
 	 * How old the wire is, where that is a question worth asking.
 	 *
@@ -144,13 +245,23 @@ export const Decide = ({
 	 * ranking the next fourteen days would price half of it against a matchup that
 	 * has not started.
 	 */
+	/** The list every recommendation is drawn from: the league's own wire where one
+	 *  has been read, and the ownership estimate where none has. */
+	const candidates = useMemo(
+		() =>
+			wire?.players.length ?
+				wire.players.map(p => ({ name: p.name, positions: p.positions }))
+			:	(estimatedWire?.players ?? []),
+		[wire, estimatedWire]
+	)
+
 	/** The league's own free-agent list as a test any rated player can be put to. */
 	const wireTest = useMemo(() => {
-		const names = new Set((wire?.players ?? []).map(x => normalizeName(x.name)))
+		const names = new Set(candidates.map(x => normalizeName(x.name)))
 		return names.size ?
 				(r: { player: { name: string } }) => names.has(normalizeName(r.player.name))
 			:	undefined
-	}, [wire])
+	}, [candidates])
 
 	const rated = useMemo(() => {
 		if (!snapshot || !league || league.meta.max_teams == null) return null
@@ -397,8 +508,10 @@ export const Decide = ({
 			// club we do not know, not one with no club.
 			roster: seats.spots.map(sp => ({ ...sp, team: sp.team ?? null })),
 			rated: rated.rows,
-			availableNames: new Set((wire?.players ?? []).map(p => normalizeName(p.name))),
-			available: (wire?.players ?? []).map(p => ({ name: p.name, positions: p.positions })),
+			// a read beats an estimate, always; the estimate is only reached when nothing
+			// has read this league's wire — see `estimatedWire`
+			availableNames: new Set(candidates.map(p => normalizeName(p.name))),
+			available: candidates.map(p => ({ name: p.name, positions: p.positions })),
 			shape: {
 				slots: league.roster.slots,
 				slot_order: league.roster.slot_order,
@@ -407,7 +520,7 @@ export const Decide = ({
 			options: DEFAULTS
 		}
 		return { lineup: planLineup(input), swaps: planSwaps(input, 60, keepForSeason) }
-	}, [rated, league, seats, wire, keepForSeason])
+	}, [rated, league, seats, candidates, keepForSeason])
 	const lineup = plan?.lineup ?? null
 
 	/**
@@ -562,61 +675,74 @@ export const Decide = ({
 	// wrong one sends the reader to the wrong button.
 	if (!seats?.spots.length) {
 		/**
-		 * How to fix it depends on the platform, and getting that wrong sends the
-		 * reader somewhere that cannot work.
+		 * The first thing a stranger sees, and for a long time it was a command line.
 		 *
-		 * ESPN answers a browser directly, so "read it on My team" is a real
-		 * instruction. Yahoo sends no CORS headers at all — no page can ever read a
-		 * Yahoo league, this one included — so for a Yahoo league that same sentence
-		 * is a dead end, and the only route is the command line and this file. The
-		 * card used to give both readers the ESPN instruction.
-		 */
-		const yahoo = league.meta.platform === "yahoo"
-		/**
-		 * The TEAM url, not the league url.
+		 * beanemachine.com opened on somebody else's team and told the reader to run
+		 * `node --experimental-strip-types src/cli.ts` — from a checkout he does not
+		 * have, against a league id that was not his. That is a developer tool wearing
+		 * a domain name, and it is the single thing most likely to make a visitor
+		 * close the tab.
 		 *
-		 * `src/cli.ts` reads the roster off team 8's own page, and the stored
-		 * `league_url` stops at the league. Printing that would give a command that
-		 * silently returns settings and free agents and no roster — which is the one
-		 * thing this card is blocked on.
+		 * What is actually true: every platform can be entered BY HAND here, in the
+		 * browser, in a minute, and the recommendations that follow are real — the
+		 * availability behind them is an ownership estimate rather than a read, and it
+		 * is labelled one. ESPN can additionally be read automatically, because it
+		 * sends CORS headers. Yahoo cannot be read by any browser, which is a fact
+		 * about Yahoo and not a thing to make the reader's problem.
+		 *
+		 * So the manual route leads, because it is the one that always works. The
+		 * command line survives as a footnote for the exact answer, and only names a
+		 * league when this browser actually holds one — printing the author's own
+		 * league id at a stranger was worse than printing nothing.
 		 */
+		const espn = league.meta.platform === "espn"
 		const base = league.meta.league_url
 		const url =
 			base && league.meta.team_id ?
 				`${base.replace(/\/+$/, "")}/${league.meta.team_id}`
-			:	(base ?? "<your league URL>")
+			:	base
 		return (
 			<section className="card full decide decide-blocked">
 				<h2>What should I do?</h2>
 				<p>
-					Nothing yet — this page has not been told which players are yours, so it
-					cannot tell you who to start or who to add.
+					Tell me who is on your team and this becomes a lineup and a list of moves.
+					It takes about a minute and none of it leaves your browser.
 				</p>
-				{yahoo ?
-					<>
-						<p>
-							Yahoo sends no CORS headers, so no web page is ever handed your league —
-							not this one, not any. Run this once on your own machine and drop the
-							file it writes anywhere on this page:
+				<p>
+					<b>
+						<button
+							type="button"
+							className="chip-btn decide-cta"
+							onClick={onOpenTeam}
+						>
+							Add your players
+						</button>
+					</b>{" "}
+					on <b>My team</b> — type a name, pick him, done.
+					{espn && " Your platform also answers a browser directly, so it can read the whole roster for you in one click."}
+				</p>
+				<p className="sub">
+					Who is available to add will be <b>estimated</b> from how widely each player
+					is rostered, calibrated to your league&rsquo;s size, and every screen that
+					uses it says so.{" "}
+					{espn ?
+						"Reading your roster gets you the exact list as well."
+					:	"Yahoo sends no CORS headers, so no web page — this one included — can read your league's own free-agent list."}
+				</p>
+				{!espn && (
+					<details className="decide-notes">
+						<summary>Get the exact list instead of the estimate</summary>
+						<p className="sub">
+							If you run things on your own machine, one command reads your league&rsquo;s
+							settings, its actual free agents and your roster with the seat each man is
+							in, and writes a file you drop anywhere on this page.
 						</p>
 						<pre className="decide-cmd">
-							node --experimental-strip-types src/cli.ts {url}
+							npx --yes github:ssalbdivad/beanemachine{" "}
+							{url ?? "<your league URL>"}
 						</pre>
-						<p className="sub">
-							It reads three things: your league&rsquo;s settings, the free agents in
-							it, and your roster with the seat each man is in. The middle one is why
-							this route exists — without it nothing here knows who you could get.
-						</p>
-					</>
-				:	<p>
-						Read your roster on <b>My team</b> — your platform answers a browser
-						directly, so this page can do it itself.
-					</p>
-				}
-				<p className="sub">
-					Until then the board below ranks every player in baseball, which is a
-					leaderboard rather than an answer.
-				</p>
+					</details>
+				)}
 			</section>
 		)
 	}
@@ -696,14 +822,23 @@ export const Decide = ({
 									</li>
 								))}
 							</ul>
-							<p className="sub decide-rest">
-								Your other{" "}
-								{Math.max(
-									today.lineup.starters.length - today.start.length - today.lineup.shifts.length,
+							{/* Only where some seats ARE already right. With no seats read there is no
+							    baseline, every row is a "start", and the count is zero — "your other 0
+							    seats are already right" is a sentence about nothing. */}
+							{(() => {
+								const rest = Math.max(
+									today.lineup.starters.length -
+										today.start.length -
+										today.lineup.shifts.length,
 									0
-								)}{" "}
-								seats are already right.
-							</p>
+								)
+								return rest > 0 ?
+										<p className="sub decide-rest">
+											Your other {rest} {rest === 1 ? "seat is" : "seats are"} already
+											right.
+										</p>
+									:	null
+							})()}
 						</>
 					:	<p className="sub">
 							Nothing to change — every seat already holds the right man for today.
@@ -739,9 +874,24 @@ export const Decide = ({
 							))}
 						</ul>
 					</details>
+					{/* Two different things to say, because two different things are true. With
+					    seats read off the platform there is a baseline and the list above is a
+					    DIFF, which is only as good as the read's age. With a team entered by
+					    hand there is no baseline at all — nobody knows which seats he has them
+					    in — so the list is the lineup to set, and claiming to compare it against
+					    something would be inventing the something. */}
 					<p className="sub decide-read">
-						Compared against your seats as read {readAgo(today.readAt)}. Change your lineup
-						in Yahoo since then and this list is against the old one.
+						{today.readAt ?
+							<>
+								Compared against your seats as read {readAgo(today.readAt)}. Change your
+								lineup in Yahoo since then and this list is against the old one.
+							</>
+						:	<>
+								Nothing here knows which seats you currently have these men in, so this is
+								the lineup to <b>set</b>, not the changes to make. Read your roster off
+								your platform on <b>My team</b> and it becomes a list of changes.
+							</>
+						}
 					</p>
 				</>
 			)}
@@ -828,11 +978,16 @@ export const Decide = ({
 					</span>
 				)}
 			</h3>
-			{!wire?.players.length ?
+			{/* Gated on the CANDIDATES, not on the wire. Gated on the wire, this told a
+			    reader with a perfectly good ownership estimate behind him that no add
+			    could be judged, and sent him to a command line — which is the difference
+			    between a website and a developer tool. It only says nothing where there
+			    is genuinely nothing: no wire AND no usable ownership in the capture. */}
+			{!candidates.length ?
 				<p className="sub">
-					No add can be judged: this page has not read your league&rsquo;s free-agent list,
-					so it does not know who you could get. Yahoo sends no CORS headers, so a browser
-					never can — run the command line once and drop the file it writes onto this page.
+					No add can be judged here yet: nothing has read your league&rsquo;s free-agent
+					list, and this capture&rsquo;s ownership figures cannot locate the boundary
+					either, so there is no honest way to say who you could get.
 				</p>
 			: !plan?.swaps.moves.length ?
 				<p className="sub">
@@ -863,13 +1018,23 @@ export const Decide = ({
 						move made. The men leaving are all under the keep floor — none is more than{" "}
 						{DEFAULTS.keepFloor} points clear of what the wire still offers at his own
 						slot — and none is worth holding over the rest of the season either.
-						{wireAge && (
+						{estimatedWire ?
+							<>
+								{" "}
+								<b>Who is available is an estimate.</b> Nothing has read your
+								league&rsquo;s own free-agent list, so these are the men rostered in{" "}
+								<b>{estimatedWire.cut.cut}% of leagues or fewer</b> — the boundary a{" "}
+								{estimatedWire.cut.depth / estimatedWire.cut.seats}-team league with{" "}
+								{estimatedWire.cut.seats} seats implies. Some of them will already be
+								taken in yours.
+							</>
+						: wireAge ?
 							<>
 								{" "}
 								Read against your league&rsquo;s free-agent list as it stood{" "}
 								<b>{wireAge}</b> — anyone picked up or dropped since is not in it.
 							</>
-						)}
+						:	null}
 					</p>
 				</>
 			}

@@ -120,19 +120,35 @@ t("the preset marker in scoring.json is the one panels.tsx matches on",
   PRESET_METHOD)
 
 // The one command a Yahoo user is told to run, asserted across the two files that
-// say it. The page prints it (IMPORT_COMMAND in panels.tsx) and the tool prints it
-// for itself (RUN in src/cli.ts); the instruction they used to give was
-// `nub src/cli.ts <url>`, and `nub` is not installed on a machine that just cloned
-// this repo — so the single instruction the one required tool gave was a command
-// that does not exist. Both ends are checked, because a page telling you to run
-// something the tool does not answer to is the same failure again.
+// say it, and they no longer say the SAME thing — deliberately, because they speak
+// to different people. The page (IMPORT_COMMAND in panels.tsx) is read by somebody
+// on beanemachine.com who has no clone, so it names the published command that
+// `bin` in package.json makes real. The tool (RUN in src/cli.ts) prints whichever
+// form fits where it is actually running: `node src/cli.ts` from a clone, the npx
+// form otherwise.
+//
+// What both must still avoid is naming something that does not exist. `nub` is the
+// author's own runner and is on no machine that just cloned this; and
+// `--experimental-strip-types` is a flag node has not required since 22.18, so
+// printing it makes a one-line command look like a toolchain problem.
 const panelsSrc = readFileSync("src/client/panels.tsx", "utf8")
 const cliSrc = readFileSync("src/cli.ts", "utf8")
-t("the page and the CLI name the same runner, and it is not `nub`",
-  /export const IMPORT_COMMAND = "node --experimental-strip-types src\/cli\.ts /.test(panelsSrc) &&
-    cliSrc.includes("`node --experimental-strip-types ${SELF}`") &&
-    !/\bnub\b/.test(panelsSrc),
-  panelsSrc.match(/export const IMPORT_COMMAND = .*/)?.[0] ?? "IMPORT_COMMAND not found")
+// Asserted against the exported STRING, not the whole file: the comment above it
+// quotes the command this replaced, which is the history worth keeping and is not a
+// thing the page prints.
+const importCommand = panelsSrc.match(/export const IMPORT_COMMAND = "([^"]+)"/)?.[1] ?? ""
+t("the page names a command a visitor with no clone could run",
+  /^npx --yes github:/.test(importCommand) &&
+    !/\bnub\b/.test(importCommand) &&
+    !/experimental-strip-types/.test(importCommand),
+  importCommand || "IMPORT_COMMAND not found")
+t("and package.json makes that command real rather than aspirational",
+  JSON.parse(readFileSync("package.json", "utf8")).bin?.beanemachine === "src/cli.ts",
+  JSON.stringify(JSON.parse(readFileSync("package.json", "utf8")).bin))
+t("the CLI names a runner too, and neither end says `nub` or the retired flag",
+  /const RUN = inClone \?/.test(cliSrc) &&
+    !/\bnub\b/.test(cliSrc.split("\n").filter(l => !l.trim().startsWith("*")).join("\n")),
+  cliSrc.match(/const RUN = .*/)?.[0] ?? "RUN not found")
 
 // Sleeper runs no fantasy baseball: src/import.ts refuses a Sleeper URL by name and
 // cites the check — `/v1/state/mlb` names no season, so no MLB league can exist there. Offering it as a league

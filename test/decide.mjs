@@ -259,36 +259,46 @@ const open = async (seeds, opts = {}) => {
 }
 
 /**
- * Without a roster it says so, and does not pretend.
+ * With no team, the card asks for one — it does not send the reader to a terminal.
  *
- * The failure it must never make is answering anyway — a ranked board rendered
- * where an answer belongs reads as an answer.
+ * This is the difference between a website and a developer tool, and for a long
+ * time beanemachine.com was on the wrong side of it: a stranger was shown somebody
+ * else's league and told to run `node --experimental-strip-types src/cli.ts` from a
+ * checkout he did not have, against a league id that was not his.
+ *
+ * Every platform can be entered by hand here, in the browser, and the
+ * recommendations that follow are real. So that is what it offers, with a control
+ * that actually goes there — a card that says "add your players" and does not take
+ * you to them has told you to go and find something.
  */
 {
 	const page = await open({})
 	const text = await page.$eval(".decide", e => e.innerText)
-	t("with no roster it names what is missing rather than answering",
-		/not been told which players are yours/.test(text), text.slice(0, 160))
+	t("with no team it asks for one rather than answering",
+		/Tell me who is on your team/.test(text), text.slice(0, 200))
 	t("and it proposes no moves at all",
 		!/Add .+, drop /.test(text), text.slice(0, 200))
+	t("the way out is a control on the page, not an instruction to go elsewhere",
+		!!(await page.$(".decide-cta")), text.slice(0, 200))
+	t("and it says up front that availability will be an estimate",
+		/estimated|estimate/i.test(text), text.slice(0, 400))
 
 	/*
-	 * The way OUT of that state has to be one the reader can actually take.
-	 *
-	 * For a Yahoo league it is the command line and nothing else — Yahoo sends no
-	 * CORS headers, so no page will ever read it — and the command has to carry the
-	 * TEAM in its url. The stored `league_url` stops at the league, and that command
-	 * returns settings and free agents and no roster, which is the one thing this
-	 * card is blocked on. Telling a Yahoo reader to "read it on My team", as this
-	 * card used to, sends him to a button that cannot work.
+	 * The command line survives as a footnote for the exact list, and only for a
+	 * platform a browser cannot read. Two things must hold: it is FOLDED, so it is
+	 * not what a visitor meets first, and it names a command that exists. It used to
+	 * print `node --experimental-strip-types src/cli.ts` — a flag node has not needed
+	 * since 22.18, and a path that only exists inside a clone.
 	 */
 	if (league.meta.platform === "yahoo") {
+		t("the exact-list route is folded away, not the headline",
+			!!(await page.$(".decide-blocked details")), "the command is not behind a fold")
 		const cmd = await page.$eval(".decide-cmd", e => e.textContent.replace(/\s+/g, " ").trim())
-		t("it prints the one command that can work, with the team in the url",
-			cmd.includes("src/cli.ts") && cmd.includes(String(league.meta.league_id)) &&
+		t("and it is a command a visitor could actually run",
+			/^npx /.test(cmd) && !/experimental-strip-types/.test(cmd), cmd)
+		t("with his own league in it, and the team, which is what carries the roster",
+			cmd.includes(String(league.meta.league_id)) &&
 				new RegExp(`/${league.meta.team_id}\\b`).test(cmd), cmd)
-		t("and says why the page cannot do it itself, naming CORS",
-			/CORS/.test(text) && !/Read your roster on/.test(text), text.slice(0, 300))
 	}
 	await page.close()
 }
@@ -307,8 +317,22 @@ const open = async (seeds, opts = {}) => {
 		/Set your lineup|\bToday\b/.test(text) &&
 			!/not been told which players are yours/.test(text),
 		text.slice(0, 160))
-	t("and the moves half says why it cannot, naming CORS rather than shrugging",
-		/free-agent list/.test(text) && /CORS/.test(text), text)
+	/*
+	 * The moves half no longer refuses here, and that is the point of the change.
+	 *
+	 * It used to say "no add can be judged" and send the reader to a command line
+	 * whenever nothing had read his league's wire — which, for every Yahoo user on a
+	 * static host, is always. The board's own availability ladder has a rung for
+	 * exactly this: rank by how widely a man is rostered, cut at `teams x seats`,
+	 * call the men below it probably free. It is an estimate, it is calibrated to
+	 * this league, and it is what the board has been filtering on all along.
+	 *
+	 * So the assertion is the one that matters: an answer, and the estimate declared.
+	 */
+	t("the moves half answers from the ownership estimate rather than refusing",
+		/Add .+, drop /.test(text) || /none clear the bar/.test(text), text.slice(-600))
+	t("and it says plainly that who is available is an estimate",
+		!/Add .+, drop /.test(text) || /is an estimate/.test(text), text.slice(-600))
 	await page.close()
 }
 
@@ -472,10 +496,87 @@ const open = async (seeds, opts = {}) => {
 	cfg.leagues[KEY].meta.platform = "espn"
 	const page = await open({ config: cfg }, { offline: true })
 	const text = await page.$eval(".decide", e => e.innerText)
-	t("an ESPN league is pointed at the button that works for it",
-		/Read your roster on/.test(text) && !/CORS/.test(text), text.slice(0, 260))
+	t("an ESPN league is told its platform can read the roster for it",
+		/answers a browser directly/.test(text) && !/CORS/.test(text), text.slice(0, 400))
 	t("and is not handed a command line it does not need",
 		!(await page.$(".decide-cmd")), text.slice(0, 260))
+	await page.close()
+}
+
+/**
+ * A team entered BY HAND gets a real answer — no file, no server, no terminal.
+ *
+ * This is the path every visitor to beanemachine.com actually has. `lineupStore`
+ * holds seats and is written by exactly two things: a scoring.json carried in from
+ * the command line, and a roster read off the platform. Neither is available to
+ * somebody who opened the site and typed his players into My team, and the card
+ * told him "this page has not been told which players are yours" about a team he
+ * had just entered.
+ *
+ * `roster.ts` has him — ids, per league, everything but the seats. The seats stay
+ * genuinely unknown, so there is no diff and the card says so; everything else
+ * works, including the adds, off the ownership estimate.
+ */
+{
+	const hand = {}
+	// the same shape roster.ts stores: "<mlbamId>:<side>", nothing else
+	hand[KEY] = [
+		...snap.players
+			.filter(p => p.group === "hitting")
+			.sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+			.slice(0, 12)
+			.map(p => `${p.id}:hitting`),
+		...snap.players
+			.filter(p => p.group === "pitching")
+			.sort((a, b) => (b.stats?.outs ?? 0) - (a.stats?.outs ?? 0))
+			.slice(0, 9)
+			.map(p => `${p.id}:pitching`)
+	]
+	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	await page.addInitScript(r => localStorage.setItem("beanemachine:roster", JSON.stringify(r)), hand)
+	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
+	await page.waitForSelector(".decide", { timeout: 30000 })
+	await page.waitForTimeout(2500)
+	const text = await page.$eval(".decide", e => e.innerText)
+
+	t("a hand-entered team is not told the page has not been told about it",
+		!/has not been told which players are yours|Tell me who is on your team/.test(text),
+		text.slice(0, 240))
+	t("it produces a lineup for that team",
+		(await page.$$(".decide-changes li")).length > 0, text.slice(0, 400))
+	t("and it says the seats are unknown rather than inventing a comparison",
+		/lineup to set, not the changes to make/.test(text), text.slice(0, 900))
+	t("the adds are answered too, from the estimate",
+		/Add .+, drop |none clear the bar/.test(text), text.slice(-700))
+	t("and nothing on it claims a free-agent list was read",
+		!/read off your league|as it stood/.test(text), text.slice(-700))
+	await page.close()
+}
+
+/**
+ * A store too broken to read must not take the page down.
+ *
+ * `roster.of` throws on a store it cannot parse, deliberately: repairing one means
+ * guessing which ids were meant, and a roster guessed wrong prices every
+ * recommendation. **My team** owns that conversation and offers the control that
+ * clears it. This card is not that screen, and calling it unguarded during render
+ * turned a corrupt localStorage key into a blank page.
+ */
+{
+	const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+	const crashes = []
+	page.on("pageerror", e => crashes.push(e.message.slice(0, 120)))
+	await page.addInitScript(() =>
+		localStorage.setItem("beanemachine:roster", '{"any:league":["nope"]}')
+	)
+	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
+	const rendered = await page
+		.waitForSelector(".decide", { timeout: 30000 })
+		.then(() => true, () => false)
+	t("a roster store that cannot be parsed still renders the card",
+		rendered, crashes.join(" | ") || "the card never appeared")
+	t("and throws nothing at the page while doing it",
+		crashes.length === 0, crashes.join(" | "))
 	await page.close()
 }
 

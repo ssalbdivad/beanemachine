@@ -633,7 +633,17 @@ export const PresetNote = ({
  *  the tool cannot drift — `src/cli.ts` builds the same line for its own usage
  *  message, and test/leagues.mjs asserts the two still agree. The placeholder is
  *  spelled for a reader rather than for a shell. */
-export const IMPORT_COMMAND = "node --experimental-strip-types src/cli.ts <your league URL>"
+/**
+ * The one command a visitor could actually run.
+ *
+ * It was `node --experimental-strip-types src/cli.ts <your league URL>`, and two
+ * thirds of that is wrong for the audience this page has: node has stripped types
+ * by default since 22.18, and the path only resolves inside a clone of this
+ * repository, which nobody arriving at beanemachine.com has. `bin` in package.json
+ * is what makes this form real — see `RUN` in src/cli.ts, which prints the local
+ * form when it IS running from a clone.
+ */
+export const IMPORT_COMMAND = "npx --yes github:ssalbdivad/beanemachine <your league URL>"
 
 export type View = "board" | "league" | "trade" | "draft"
 

@@ -6,6 +6,7 @@ import {
 } from "../engine/trade.ts"
 import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
+import { pool as poolStore } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
 import { playersInText } from "../data/paste.ts"
@@ -62,6 +63,8 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 	const [give, setGive] = useState<string[]>([])
 	const [take, setTake] = useState<string[]>([])
 	const [pasted, setPasted] = useState("")
+	const [wirePasted, setWirePasted] = useState("")
+	const [wireNote, setWireNote] = useState<string | null>(null)
 	const [pasteNote, setPasteNote] = useState<string | null>(null)
 	const [ownQuery, setOwnQuery] = useState("")
 	const [takeQuery, setTakeQuery] = useState("")
@@ -277,6 +280,52 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 	 * daily diff on Recommendations work: a roster page prints the slot to the left
 	 * of each name, and `playersInText` keeps it.
 	 */
+	/**
+	 * The free-agent list, pasted.
+	 *
+	 * Without this the wire is an ownership ESTIMATE for anybody on Yahoo, because
+	 * Yahoo will not answer a browser and answers a server only when it feels like
+	 * it. Pasting the league's own free-agent page replaces the estimate with the
+	 * real list, from the one browser that is allowed to see it — and, like the
+	 * roster paste, it works on a private league.
+	 *
+	 * Stored in the same place a server read would land, with `positionsRead` left
+	 * empty and no `positionsRequested`: `poolIsPartial` reads that as "cannot tell"
+	 * rather than as a throttled sweep, which is the truth. A human pasted a page; he
+	 * knows what he copied and nothing here should second-guess him.
+	 */
+	const readWirePaste = () => {
+		if (!leagueKey || !snapshot || !leagueId) return
+		const found = playersInText(wirePasted, snapshot.players)
+		if (!found.players.length) {
+			setWireNote(
+				"No players found in that. Open your league's free-agent or players page, " +
+					"select all of it, and paste — the names are what this matches on."
+			)
+			return
+		}
+		const byId = new Map(snapshot.players.map(pl => [pl.id, pl]))
+		poolStore.set(leagueKey, {
+			at: new Date().toISOString(),
+			leagueId,
+			players: found.players.map(f => ({
+				yahooId: String(f.id),
+				name: f.name,
+				team: byId.get(f.id)?.team ?? null,
+				positions:
+					snapshot.eligibility?.[String(f.id)] ??
+					(byId.get(f.id)?.position ? [byId.get(f.id)!.position!] : [])
+			})),
+			positionsRead: [],
+			note: `Pasted from your league's own free-agent page: ${found.players.length} players.`
+		})
+		setWireNote(
+			`Found ${found.players.length} free agent${found.players.length === 1 ? "" : "s"}. ` +
+				`Recommendations will use this exact list instead of estimating who is taken.`
+		)
+		setWirePasted("")
+	}
+
 	const readPaste = () => {
 		if (!leagueKey || !snapshot) return
 		const found = playersInText(pasted, snapshot.players)
@@ -570,10 +619,26 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 				  */}
 				<div className="paste-roster">
 					<h3>Paste your roster</h3>
+					{/* Named steps, and the actual keystrokes. "Select the page" assumes the
+					    reader knows to select-all, which is the step people miss — and the page
+					    to open has a different name on every platform, so all four are said. */}
+					<ol className="paste-how">
+						<li>
+							Open your team on your fantasy site — <b>My Team</b> on Yahoo and ESPN,{" "}
+							<b>Roster</b> on Sleeper, CBS and Fantrax.
+						</li>
+						<li>
+							Select the whole page: <kbd>Ctrl</kbd>+<kbd>A</kbd> (<kbd>⌘</kbd>+
+							<kbd>A</kbd> on a Mac), then <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy.
+						</li>
+						<li>
+							Click in the box below and paste, then press <b>Read that</b>.
+						</li>
+					</ol>
 					<p className="sub">
-						Open your team on your fantasy site, select the page, copy it, and paste it
-						here. Works on any platform, works on a private league, and brings the seat
-						each man is in with it.
+						Extra columns, adverts and menus do no harm — only the names are read. It
+						works on a private league, and it brings the seat each man is in with it,
+						which is what lets Recommendations show the changes to make.
 					</p>
 					<textarea
 						data-ctl="paste-roster"
@@ -587,6 +652,36 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 						Read that
 					</button>
 					{pasteNote && <p className="sub paste-note">{pasteNote}</p>}
+				</div>
+				{/* The other half, and the one that turns an estimate into a fact. Without it
+				    "who is available" is inferred from how widely a man is rostered across all
+				    of Yahoo; with it, it is his league's own list. */}
+				<div className="paste-roster">
+					<h3>Paste your free agents</h3>
+					<p className="sub">
+						Optional, and worth a minute: without it, who is available is{" "}
+						<b>estimated</b> from how widely each player is rostered. Open your
+						league&rsquo;s <b>Players</b> or <b>Free Agents</b> page, set the filter to
+						available players, select all and paste. Do it once a week — anyone added or
+						dropped since is not in it.
+					</p>
+					<textarea
+						data-ctl="paste-wire"
+						value={wirePasted}
+						onChange={e => setWirePasted(e.currentTarget.value)}
+						placeholder={"Shea Langeliers ATH - C\nTyler Stephenson CIN - C\n…"}
+						rows={4}
+						aria-label="Paste your league's free-agent page here"
+					/>
+					<button
+						type="button"
+						className="chip-btn"
+						onClick={readWirePaste}
+						disabled={!wirePasted.trim()}
+					>
+						Read that
+					</button>
+					{wireNote && <p className="sub paste-note">{wireNote}</p>}
 				</div>
 				{leagueId && (
 					<div className="pull-roster">

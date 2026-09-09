@@ -398,6 +398,10 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	if (await tab.count()) {
 		await tab.click()
 		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		const how = (await page.textContent(".paste-how")) ?? ""
+		t("the paste route says which page to open and which keys to press",
+			/My Team/.test(how) && /Ctrl/.test(how) && /A/.test(how) && /Read that/.test(how),
+			how.replace(/\s+/g, " ").slice(0, 160))
 		t("the paste route is offered above the platform read, not below it",
 			await page.evaluate(() => {
 				const paste = document.querySelector(".paste-roster")
@@ -418,6 +422,24 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		t("the men it found really are on the team afterwards",
 			bats.every(x => owned.some(o => o.includes(x.name.split(" ").slice(-1)[0]))),
 			owned.join(", "))
+
+		// The other half: pasting the league's own free-agent page, which is what turns
+		// "who is available" from an ownership estimate into a fact. Without it a Yahoo
+		// user never gets a real wire at all, because Yahoo answers no browser and
+		// answers a server only when it feels like it.
+		const fa = snap.players.filter(x => x.group === "hitting").slice(20, 32)
+		await page.fill("[data-ctl=paste-wire]", fa.map(x => `${x.name} ${x.team ?? ""} - OF`).join("\n"))
+		await page.click("[data-ctl=paste-wire] ~ button")
+		await page.waitForTimeout(800)
+		const wireNote = (await page.$$eval(".paste-note", n => n.map(e => e.textContent.trim()))).pop() ?? ""
+		t("a pasted free-agent page is read and replaces the estimate",
+			new RegExp(`Found ${fa.length} free agents`).test(wireNote) &&
+				/instead of estimating/.test(wireNote), wireNote)
+		t("and it is stored where a server read would have landed",
+			await page.evaluate(() => {
+				const raw = JSON.parse(localStorage.getItem("beanemachine:pool") ?? "{}")
+				return Object.values(raw).some(e => e.players?.length >= 12)
+			}), "nothing reached the pool store")
 
 		// nonsense in, nothing out — and a sentence rather than a silent no-op
 		await page.fill("[data-ctl=paste-roster]", "Standings Scores Sign in Terms Privacy")

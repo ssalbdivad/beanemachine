@@ -167,3 +167,90 @@ const slotBefore = (hay: string, at: number): string | null => {
 	}
 	return best?.slot ?? null
 }
+
+/**
+ * A pasted roster page, shaped into the three things a team is stored as.
+ *
+ * `playersInText` finds the men; this decides what they mean — which store keys
+ * they are, which seats they were sitting in, and what to tell the reader about
+ * what did and did not come through. It lives here rather than in a component
+ * because two screens now take this paste (the first-run onboarding and My team),
+ * and two copies of "what does a pasted roster mean" would eventually disagree
+ * about a two-way player or an empty seat.
+ *
+ * Nothing here touches storage. The caller owns that, because the two callers
+ * handle a failed write differently and neither of them should be able to write a
+ * roster this function did not shape.
+ */
+export interface PastedRoster {
+	players: PastedPlayer[]
+	ambiguous: string[]
+	/** `id:group` keys, the form the roster store holds. */
+	keys: string[]
+	/** Seats, ready for the lineup store. Empty when the paste carried none, which
+	 *  is honest: a bare list of names has no seats. */
+	spots: { slot: string; name: string; positions: string[]; team: string | null }[]
+	/** What actually happened, in the reader's terms, for the page to print. */
+	note: string
+}
+
+export const rosterFromPaste = (
+	text: string,
+	snapshot: {
+		players: { id: number; name: string; group: string; team?: string | null; position?: string | null }[]
+		eligibility?: Record<string, string[]>
+	}
+): PastedRoster => {
+	const found = playersInText(text, snapshot.players)
+	const byId = new Map(snapshot.players.map(p => [p.id, p]))
+
+	/**
+	 * A two-way player is one man and TWO rows in the snapshot, because he is
+	 * projected as a hitter and as a pitcher separately. `playersInText` dedupes by
+	 * id and so returns him once, under one group — and rostering him under one
+	 * group would silently drop half of what he is worth. So every snapshot row
+	 * sharing his id becomes a key.
+	 */
+	const keys = [
+		...new Set(
+			found.players.flatMap(f =>
+				snapshot.players.filter(p => p.id === f.id).map(p => `${p.id}:${p.group}`)
+			)
+		)
+	]
+
+	/**
+	 * The league's own eligibility where the sweep reached him, and his primary
+	 * position where it did not.
+	 *
+	 * The map covers a few hundred players, not all of them, and an empty list means
+	 * "no slot can be proven legal for him" — so a pasted roster came back with every
+	 * man unseatable and a lineup projecting zero. The primary position is a weaker
+	 * claim and it is the same fallback the board already makes; stating it beats
+	 * seating nobody.
+	 */
+	const spots = found.players
+		.filter(f => f.slot)
+		.map(f => ({
+			slot: f.slot!,
+			name: f.name,
+			positions:
+				snapshot.eligibility?.[String(f.id)] ??
+				(byId.get(f.id)?.position ? [byId.get(f.id)!.position!] : []),
+			team: byId.get(f.id)?.team ?? null
+		}))
+
+	const note =
+		!found.players.length ?
+			"No players found in that. Select your whole roster page — the names are what " +
+			"this matches on, so extra columns and adverts do no harm."
+		:	`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
+			(spots.length ?
+				`, ${spots.length} with the seat they were in — the daily lineup on Recommendations can diff against that.`
+			:	". No seats were in that text, so Recommendations will show the lineup to set rather than the changes to make.") +
+			(found.ambiguous.length ?
+				` Two different players share ${found.ambiguous.join(" and ")}, so neither was added — search for the one you own below.`
+			:	"")
+
+	return { players: found.players, ambiguous: found.ambiguous, keys, spots, note }
+}

@@ -188,6 +188,41 @@ const STAT_CODE = /\(([A-Za-z0-9/]+)\)\s*$/
 
 const IL_SLOTS = ["IL", "NA", "IL+"]
 
+/**
+ * Which eligibility positions may fill each roster slot, derived from the slot
+ * names the league published.
+ *
+ * Yahoo expresses slot compatibility as the COLUMNS of its position-eligibility
+ * grid rather than as prose, so the only honest reconstruction is to mirror the
+ * slot names it printed: a `C` seat takes catchers, `Util` takes whichever batter
+ * positions this league actually rosters, `P` takes whichever arms it rosters,
+ * bench takes anyone and an IL seat takes only the injured.
+ *
+ * Exported because a league now arrives by two routes — fetched HTML and a
+ * settings page the reader pasted — and a slot rule that differed between them
+ * would mean the same league seats a different lineup depending on how it got
+ * here. Returns null when the league listed no slots, which is the caller's cue
+ * that there is nothing to derive from rather than that everything is ineligible.
+ */
+export const deriveSlotAccepts = (
+	slots: Record<string, number>
+): Record<string, string[] | "any" | "injured_only"> | null => {
+	if (!Object.keys(slots).length) return null
+	const batterPositions = ["C", "1B", "2B", "3B", "SS", "OF"].filter(p => p in slots)
+	const accepts: Record<string, string[] | "any" | "injured_only"> = Object.fromEntries(
+		batterPositions.map(p => [p, [p]])
+	)
+	for (const p of ["SP", "RP"]) if (p in slots) accepts[p] = [p]
+	if ("Util" in slots) accepts["Util"] = batterPositions
+	if ("P" in slots) {
+		const arms = ["SP", "RP"].filter(p => p in slots)
+		accepts["P"] = arms.length ? arms : ["SP", "RP"]
+	}
+	if ("BN" in slots) accepts["BN"] = "any"
+	for (const il of IL_SLOTS) if (il in slots) accepts[il] = "injured_only"
+	return accepts
+}
+
 /** The lock is a weekday when lineups are set for the whole period, e.g. "Monday". */
 const WEEKDAY_NAMES: readonly string[] = [
 	"sunday",
@@ -570,20 +605,8 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 	const slots: Record<string, number> = {}
 	for (const slot of slotOrder) slots[slot] = (slots[slot] ?? 0) + 1
 
-	// Yahoo expresses slot compatibility as the columns of its eligibility grid
-	// rather than as prose, so we mirror the slot names it actually published.
-	let slotAccepts: Record<string, string[] | "any" | "injured_only"> | null = null
-	if (t.sport === "mlb" && slotOrder.length) {
-		const batterPositions = ["C", "1B", "2B", "3B", "SS", "OF"].filter(p => p in slots)
-		slotAccepts = Object.fromEntries(batterPositions.map(p => [p, [p]]))
-		for (const p of ["SP", "RP"]) if (p in slots) slotAccepts[p] = [p]
-		if ("Util" in slots) slotAccepts["Util"] = batterPositions
-		if ("P" in slots) {
-			const arms = ["SP", "RP"].filter(p => p in slots)
-			slotAccepts["P"] = arms.length ? arms : ["SP", "RP"]
-		}
-		if ("BN" in slots) slotAccepts["BN"] = "any"
-		for (const il of IL_SLOTS) if (il in slots) slotAccepts[il] = "injured_only"
+	const slotAccepts = t.sport === "mlb" ? deriveSlotAccepts(slots) : null
+	if (slotAccepts) {
 		needsReview.push(
 			"slot_accepts is derived from the roster slot names plus the columns of " +
 				"Yahoo's position-eligibility grid; Yahoo does not state it as prose."

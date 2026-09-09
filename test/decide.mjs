@@ -219,14 +219,19 @@ const open = async (seeds, opts = {}) => {
 	}
 
 	/*
-	 * The shipped example league is his own, which made one sentence permanently
-	 * false for the one reader it was written for. The demo is the SEEDED copy of it,
-	 * and what distinguishes a seed is that nothing has been read into it — no roster,
-	 * no wire. Asked that way it goes quiet the moment a real team is loaded.
+	 * A league that WAS read from source must never be labelled as borrowed values.
+	 *
+	 * This used to be about the seeded example league — the site shipped one real
+	 * league and opened every first visit on it, and the notice above the board said
+	 * so. That league is gone: a first visit opens on the setup in Onboard.tsx and
+	 * this browser holds only what the reader put in it. What survives, and is what
+	 * this assertion is really about, is the rule the notice enforces — it appears
+	 * for a PRESET, whose numbers came from somebody else's league, and it must not
+	 * appear for a league whose values were read off its own pages.
 	 */
-	t("a league you have read your own roster into is not called an example",
-		!(await page.$(".example-note")),
-		(await page.$(".example-note").then(e => e && e.innerText())) || "")
+	t("a league read from its own pages is never labelled as borrowed values",
+		!(await page.$(".preset-note")),
+		(await page.$(".preset-note").then(e => e && e.innerText())) || "")
 
 	/*
 	 * A man the model cannot price is still on his roster.

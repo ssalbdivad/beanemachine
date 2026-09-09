@@ -1,22 +1,38 @@
 # beanemachine user guide
 
-## Start here — the board you are looking at is not yours yet
+## Start here — there is no board until there is a league
 
-The first time you open beanemachine with nothing stored, it seeds itself from the
-league committed to this repo: **Mrs. Met's Harem**, Yahoo head-to-head points league
-228947. That is deliberate — a bscore has no meaning without a league's scoring
-behind it, so an empty first screen would teach you nothing. The page says so, in the
-band above the board, and offers the one button that ends it.
+The first time you open beanemachine it asks for your league, because there is
+nothing honest to show before you answer. A bscore is denominated in *your* league's
+points: a home run worth 10.4 in one league and 4 in another reorders the whole
+board, so a ranked list with no league behind it would be a list of somebody else's
+answers.
 
-Until you replace it, every number on the page is denominated in *that* league's
-points. A home run is worth 10.4 there (`test/ui.mjs` pins that value against the
-committed `scoring.json`); in a league that scores it differently the same players
-rank differently. [Set up your own league](#how-do-i-set-up-my-own-league) is three
-inputs — what each stat is worth, how many teams, and the roster slots — and the band
-disappears as soon as anything has been READ into a league: your roster, or your
-league's free-agent list. It asks that rather than asking which league is active,
-because for one reader — the author, whose league *is* the example — the second
-question has the wrong answer forever.
+It used to be exactly that. The site shipped one real league — Mrs. Met's Harem,
+Yahoo head-to-head points 228947, which is the author's own — and seeded it into any
+browser with nothing stored, so your first screen was a full board in a stranger's
+scoring under a notice explaining that it was. That is gone.
+
+What you get instead is three questions:
+
+1. **Where do you play?** Yahoo, ESPN, or somewhere else.
+2. **Get its settings in.** Open your league's settings page, select the whole thing
+   (<kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd>) and paste it. That one
+   gesture carries the scoring, the roster slots, the team count and the league's own
+   id. It works on a **private** league, which is most leagues, and it is the only
+   route no platform can switch off — Yahoo sends no CORS headers to a browser and
+   answers a server with "Request denied", so your own signed-in browser is the one
+   program in the world that can read that page.
+3. **Add your players.** Optional, same gesture on your team page. It is the
+   difference between a ranked wire and "drop this man, add that one".
+
+If the paste comes up short it says exactly what it did not find rather than filling
+it in, and the other routes are under **Other ways in**: read the league from its URL
+(ESPN only, from a browser), start from a preset and check its values, carry a file
+over from a local run, or type the three inputs by hand.
+
+Already have a league and want the guided setup back? **Set up a league** in the
+toolbar on League setup reopens it.
 
 ## The first screen is the answer
 
@@ -299,9 +315,15 @@ are what turn a ranking into advice about *your* team.
 
 | | scoring, slots, period | your roster | your free agents |
 | --- | --- | --- | --- |
-| **ESPN** | in the browser | in the browser | in the browser |
-| **Yahoo** | preset, or carry a file | carry a file | carry a file |
+| **ESPN** | in the browser, or paste | in the browser, or paste | in the browser, or paste |
+| **Yahoo** | **paste**, preset, or carry a file | paste, or carry a file | paste, or carry a file |
+| **anywhere else** | paste | paste | paste |
 | **Sleeper** | refused — Sleeper runs no fantasy baseball | — | — |
+
+"Paste" means: open the page on your own fantasy site, select all of it, and paste it
+into beanemachine. It is the only column that works on a **private** league, and the
+only one no platform can take away — your browser is already signed in, and reading
+the page you are looking at is not scraping.
 
 ### If your league is on ESPN
 
@@ -338,10 +360,32 @@ built on them. The mapping is evidence-backed, not certified.
 Yahoo sends no CORS headers on any of the pages the importer reads, so a browser is
 never handed the response body. That is a fact about Yahoo, not a limitation of this
 build, and no version of the hosted site will ever be able to import a Yahoo league.
-What works instead is one local run that produces a portable file:
+Measured 2026-09-09, it is worse than that from a server too: the sweep that had been
+returning 150 free agents returned 25, then 0, then the string "Request denied".
+
+**Paste the settings page.** This is the route, and it needs nothing installed:
+
+1. Open your league's **Settings** page — **League** → **Settings**, or add
+   `/settings` to your league's URL.
+2. <kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+3. Paste it into the setup and press **Read that**.
+
+Yahoo prints everything needed on that one page — the batting and pitching stat
+tables, "Roster Positions", "Max Teams" and "League ID#" — so one paste yields
+scoring, slots, team count and the league id, and `src/data/paste-settings.ts` runs
+it through the same derivations `src/import.ts` uses on a fetched page.
+`test/settings.mjs` proves the two agree by reconstructing the settings page from the
+league this repo fetched back when the importer still worked, pasting it, and
+asserting the league that comes out is the same league. It works on a private league,
+which no import ever has.
+
+Your team page and your free-agent page paste the same way, on **My team &
+trades**.
+
+The alternative, if you would rather have the file: one local run.
 
 ```sh
-node --experimental-strip-types src/cli.ts \
+npx --yes github:ssalbdivad/beanemachine \
   https://baseball.fantasysports.yahoo.com/b1/<league-id>/<team-id>
 ```
 
@@ -353,8 +397,10 @@ roster seats, 10 teams and a Monday-to-Sunday matchup period.
 
 Then the league is a file and goes anywhere:
 
-- `npx vite` locally seeds a browser that has nothing stored from `scoring.json`, so
-  a local run opens straight on your league.
+- `npx vite` locally serves the `scoring.json` you just wrote — the dev server
+  shadows the published asset with the one at the repo root — so a local run opens
+  straight on your league, roster and free-agent list included. The deployed build
+  ships no league, which is why beanemachine.com opens on the setup instead.
 - **League setup → Download** writes the leagues in your browser to a JSON file, and
   **Load file** reads one back in on any other browser or machine — including
   beanemachine.com. That is the supported route for a Yahoo user onto the hosted
@@ -389,9 +435,9 @@ football roster slots.
 
 Your leagues live in the browser you set them up in, never on a server. **Download**
 takes the lot out as a `scoring.json`; **Load file** reads one back in, replacing what
-that browser holds. A first visit starts from a real league rather than an empty
-screen by seeding itself from the copy committed to the repo, and the page names it as
-an example so a demo is never mistaken for your own team.
+that browser holds. A first visit starts on the guided setup, not on a board: the
+published build ships no league at all, so nothing you see is ever somebody else's
+team.
 
 You can also press **New** to start from a template and type the values in by hand.
 A template is a **stated assumption, not a reading of your league**: it arrives with

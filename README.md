@@ -57,18 +57,24 @@ plausible number. It is developed against **Mrs. Met's Harem** (Yahoo H2H-points
 league 228947), which is why that league appears throughout the tests and the
 committed capture, but nothing in the engine is specific to it.
 
-That league is also what a first visit opens on. `src/client/leagues.ts` seeds
-`public/scoring.json` into a browser that has nothing stored, so the board has real
-scoring to rank in rather than showing an empty screen — and because a demo mistaken
-for your own team is worse than either, the page names it as an example, quotes one of
-its scoring values back to make the point concrete, and offers the button to League
-setup.
+That league is **not** what a first visit opens on, and for a while it was. The
+build seeded `public/scoring.json` into any browser with nothing stored, so a
+stranger's first screen was a fully ranked board denominated in somebody else's
+points, under a notice explaining that it was — which is the tell: a product that
+has to explain that its main screen is not about you is showing the wrong screen.
 
-The band is keyed on `EXAMPLE_LEAGUE_KEY` in `src/client/panels.tsx`, and it asks
-whether anything has been READ into that league rather than whether the key matches:
-the seed carries scoring and slots and no roster and no wire, so the moment you load
-your own team into the example league — which is exactly what the author of this
-project does, since the example league is his — it stops calling it an example.
+`publishSnapshot` in `vite.config.ts` now empties `leagues` on the way into the
+published asset, alongside the roster, lineup and pool it already stripped. What
+still ships is nobody's: the presets, the canonical stat list, the schema version. A
+first visit opens on `src/client/Onboard.tsx`, which asks three questions — where do
+you play, what does your league score, who is on your team — and gets the first two
+out of one paste of the league's own settings page.
+
+Running this repo is the deliberate exception. `npx vite` serves the `scoring.json`
+that `src/cli.ts` just wrote, roster and free-agent list included, because that file
+is *yours*: the dev server has a middleware that shadows the published asset with the
+one at the repo root. That is why the browser suites still open on a real league and
+`test/static.mjs`, which runs against the build, opens on the setup instead.
 
 ## Billy
 
@@ -204,10 +210,27 @@ batting stats, 0 pitching stats and slots `QB, RB, WR, TE, FLEX, DEF, BN` — un
 and unrepairable. A pasted Sleeper URL now gets that explanation instead of a league.
 The evidence is kept in `test/ownership.mjs`; the reader that produced it was deleted.
 
-**The Yahoo route, end to end.** One local run, then a file that goes anywhere:
+**The Yahoo route, end to end.** There are two, and the first needs nothing
+installed.
+
+**Paste the page.** Yahoo's settings page prints the batting and pitching stat
+tables, `Roster Positions`, `Max Teams` and `League ID#`, so selecting the whole page
+and pasting it yields the scoring, the slots, the team count and the league id in one
+gesture. `src/data/paste-settings.ts` reads it and hands it to the same
+`deriveScoringPeriod` and `deriveSlotAccepts` that `src/import.ts` uses on a fetched
+page, so the two routes cannot disagree about what a league is —
+`test/settings.mjs` proves it by reconstructing that page from the league this repo
+fetched while the importer still worked, pasting it, and asserting the league that
+comes out is identical. Your team page and free-agent page paste the same way.
+
+This is the only route that works on a **private** league, which is most leagues, and
+the only one no platform can revoke: the browser doing the reading is the reader's
+own, already signed in, and not rate-limited as a scraper because it is not one.
+
+**Or one local run, then a file that goes anywhere:**
 
 ```sh
-node --experimental-strip-types src/cli.ts \
+npx --yes github:ssalbdivad/beanemachine \
   https://baseball.fantasysports.yahoo.com/b1/<league-id>/<team-id>
 ```
 

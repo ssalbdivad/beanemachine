@@ -4,35 +4,71 @@ import { defineConfig, type Plugin } from "vite"
 
 const API = "http://127.0.0.1:8000"
 
-/** The engine is pure, so ranking runs in the browser. The build needs two assets:
- *  the observed-data snapshot, because browsers can't call MLB or Savant directly
- *  (neither sends CORS headers), and scoring.json, which seeds a browser that has
- *  no leagues stored yet so a first visit opens on a real league. */
+/**
+ * The two assets a browser cannot get for itself.
+ *
+ * The snapshot, because browsers can't call MLB or Savant directly — neither sends
+ * CORS headers — so the observed data has to ship with the site. And scoring.json,
+ * which is what a browser with nothing stored reads on its first visit.
+ *
+ * That second one carries NO LEAGUES in the deployed build, and that is the change
+ * this comment exists for. It used to ship one: a real Yahoo league belonging to a
+ * real person, with his scoring, his slots and his team count. Every stranger's
+ * first visit was therefore a fully-ranked board denominated in somebody else's
+ * points, under a notice explaining that it was — which is the tell. A first visit
+ * now opens on `src/client/Onboard.tsx`, which asks for the league instead of
+ * lending one.
+ *
+ * What still ships is `platform_templates`, `stat_keys` and the schema version:
+ * the preset a reader can deliberately choose, the canonical stat list, and the
+ * shape. None of those is anybody's league.
+ */
 const publishSnapshot = (): Plugin => ({
 	name: "publish-snapshot",
 	buildStart: () => {
 		copyFileSync("data/snapshot.json", "public/snapshot.json")
 		/**
-		 * The seed carries SCORING, and nothing that belongs to whoever ran the
-		 * importer last.
+		 * Everything that belongs to whoever ran the importer last is stripped here,
+		 * because this is the only place that knows the file is about to become
+		 * public.
 		 *
-		 * `src/cli.ts` writes the free-agent pool, the roster and the lineup into the
-		 * same scoring.json — that is the whole point of the file a Yahoo user carries
-		 * to the hosted site. But this file is ALSO the asset every first visit is
-		 * seeded from, so copying it wholesale shipped one person's roster and their
-		 * league's wire to every stranger who opened the page, presented as the demo.
-		 * Measured when it happened: 150 free agents and 24 rostered players, and the
-		 * masthead told visitors it had read a wire it had no business having.
+		 * `src/cli.ts` writes the free-agent pool, the roster, the lineup AND the
+		 * league itself into scoring.json — that is the whole point of the file a
+		 * Yahoo user carries to the hosted site. Shipping it wholesale published one
+		 * person's team to every stranger who opened the page: measured when it
+		 * happened, 150 free agents and 24 rostered players, with the masthead
+		 * claiming a wire it had no business having.
 		 *
-		 * The three carried stores are stripped here rather than in the CLI, because
-		 * the CLI is right to write them and this is the only place that knows the
-		 * file is about to become public.
+		 * `leagues` goes for the same reason the other three do, and it is the one
+		 * that was left in for months — a seeded league is somebody's league however
+		 * carefully the page labels it.
 		 */
 		const seed = JSON.parse(readFileSync("scoring.json", "utf8")) as Record<string, unknown>
 		delete seed.pools
 		delete seed.rosters
 		delete seed.lineups
+		seed.leagues = {}
+		seed.active_league = null
 		writeFileSync("public/scoring.json", JSON.stringify(seed, null, 2) + "\n")
+	},
+	/**
+	 * Running this repo IS the local route, so the dev server serves the real file.
+	 *
+	 * `src/cli.ts` reads a Yahoo league — settings, free agents, roster and seats —
+	 * and writes all of it to `scoring.json` at the repo root. `npx vite` then serves
+	 * that, and this middleware is what makes it reachable: `public/scoring.json` is
+	 * the league-less asset the deployed site ships, and without this it would shadow
+	 * the reader's own file at the same URL.
+	 *
+	 * Registered inside `configureServer`, which runs before Vite installs its own
+	 * static handler, so this wins. It is a dev-only path by construction: there is
+	 * no server in the build.
+	 */
+	configureServer(server) {
+		server.middlewares.use("/scoring.json", (_req, res) => {
+			res.setHeader("content-type", "application/json")
+			res.end(readFileSync("scoring.json"))
+		})
 	}
 })
 

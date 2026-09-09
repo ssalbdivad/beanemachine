@@ -8,11 +8,17 @@ import { roster } from "./roster.ts"
 /**
  * Where a league actually lives: this browser.
  *
- * The committed scoring.json is only a seed. It is read once, on a first visit
- * with nothing stored, so the demo opens on a real league rather than an empty
- * screen — after that it is never read again and never written. Every edit,
- * import and deletion is a write to localStorage, which is what collapses the
- * server/static split: the static build and the local dev server keep league
+ * The committed scoring.json is only a seed, and on the deployed site it seeds no
+ * LEAGUES at all — only the stat list, the schema version and the presets a reader
+ * can deliberately choose (see `publishSnapshot` in vite.config.ts). It used to
+ * seed one real league, so a stranger's first visit was a ranked board denominated
+ * in somebody else's points; a first visit now opens on the setup in Onboard.tsx.
+ * Running this repo is the exception and deliberately so: `npx vite` serves the
+ * scoring.json `src/cli.ts` just wrote, which is the reader's OWN league.
+ *
+ * After that first read the file is never read again and never written. Every
+ * edit, import and deletion is a write to localStorage, which is what collapses
+ * the server/static split: the static build and the local dev server keep league
  * config in exactly the same place, and the only thing still needing a server is
  * scraping a league the browser can't read itself.
  */
@@ -77,11 +83,16 @@ const current = (): Config => {
  * The seed path, which is also a Yahoo user's LOCAL path.
  *
  * `npx vite` serves the scoring.json that `src/cli.ts` just wrote, and a first
- * visit with nothing stored reads it here. That file now carries a roster, a
- * lineup and a free-agent pool, so this has to install them exactly as a dropped
- * file does — otherwise the two routes into the same file disagree, and the local
- * one, which is the one the reader is standing in front of when they run the
- * command, would be the one that lost the pool.
+ * visit with nothing stored reads it here. That file carries a roster, a lineup
+ * and a free-agent pool, so this has to install them exactly as a dropped file
+ * does — otherwise the two routes into the same file disagree, and the local one,
+ * which is the one the reader is standing in front of when they run the command,
+ * would be the one that lost the pool.
+ *
+ * On the deployed site the same fetch returns a file with no leagues in it, so
+ * this stores the stat list and the presets and leaves the browser league-less —
+ * which is what puts Onboard.tsx on screen. That is the intended outcome, not a
+ * failure: seeding a stranger's league is what this used to do.
  */
 const load = async (): Promise<Config> => {
 	const stored = read()

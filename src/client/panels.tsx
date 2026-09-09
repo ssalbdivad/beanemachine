@@ -577,7 +577,7 @@ export const PresetNote = ({
 		Object.keys(league.scoring.batting).length + Object.keys(league.scoring.pitching).length
 	const seats = Object.values(league.roster.slots).reduce((a, b) => a + b, 0)
 	return (
-		<div className="example-note">
+		<div className="preset-note">
 			{/* Kept to three lines on purpose: this sits between the visitor and the
 			    board they just asked for, and every line of it is a line of ranking
 			    pushed below the fold. It says the one thing that cannot be left out —
@@ -712,73 +712,6 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
 		purpose: "Who to take next, what he gains over the next man up, and where each position's cliff is."
 	}
 ]
-
-/**
- * The league committed to `public/scoring.json`, which `leagues.ts` seeds into a
- * new browser on a first visit so the page opens on a real board instead of an
- * empty screen.
- *
- * The key is hardcoded because it is the only durable signal there is. The seed
- * is written into localStorage and from then on is indistinguishable from a
- * league somebody imported — same shape, same `provenance.verified: true`,
- * because it genuinely was read off Yahoo. Deriving "is this the demo" from the
- * `store` state would only be true on the visit that seeded it, and the visitor
- * who comes back tomorrow is the one most likely to have forgotten. So it is the
- * key, and it holds for as long as this file and `public/scoring.json` agree.
- * `test/ui.mjs` already pins that agreement: it asserts the selected league is
- * `yahoo:228947` and that the chip reads "Mrs. Met's Harem".
- */
-export const EXAMPLE_LEAGUE_KEY = "yahoo:228947"
-
-/**
- * What a first-time visitor is actually looking at.
- *
- * A demo you can explore beats an empty state — nothing here means anything
- * without a league, and an empty board teaches nobody what a bscore is. But a
- * demo you mistake for YOUR team is worse than either: every number below is
- * denominated in a stranger's scoring, the ranking is ordered by it, and the
- * only thing on screen that hinted at it was a chip reading "Mrs. Met's Harem"
- * — a name a new visitor has no reason to read as somebody else's.
- *
- * So the demo stays, and it says so. It names itself, it makes the point
- * concrete with a scoring value read out of the league rather than asserted
- * here (so it stays true if the value is edited), and it offers the one move
- * that ends it. It clears itself: the moment another league is active this
- * stops rendering, with nothing to dismiss and nothing to remember.
- */
-export const ExampleNote = ({
-	league,
-	onOpenSetup
-}: {
-	league: League
-	/** Absent when League setup is already the open tab. */
-	onOpenSetup?: () => void
-}) => {
-	// Read, never asserted: the point is that scoring is per-league, so quoting a
-	// number this page can't see would be the exact mistake it is warning about.
-	const hr = league.scoring.batting.HR
-	const team = league.meta.team_name ?? league.meta.league_name ?? EXAMPLE_LEAGUE_KEY
-	return (
-		<div className="example-note">
-			{/* Four sentences and 208px on a 390px screen, permanently, above an answer
-			    that already started 2,165px down. The load-bearing half is the first
-			    clause and the button; why the demo exists is a footnote, and the HR
-			    figure — still read out of the league so it cannot drift — makes the
-			    point that scoring differs in five words rather than twenty. */}
-			<p>
-				<b>This is an example league, not yours.</b> {team}
-				{league.meta.max_teams != null && <>, {league.meta.max_teams} teams</>} — every
-				number below is in <i>its</i> points
-				{typeof hr === "number" && <>, where a home run is worth {hr}</>}.
-			</p>
-			{onOpenSetup && (
-				<button className="primary" onClick={onOpenSetup}>
-					Use my league instead
-				</button>
-			)}
-		</div>
-	)
-}
 
 /**
  * The orientation a beginner needs before the first number, and nothing more.

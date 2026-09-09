@@ -1,12 +1,19 @@
-// Verifies the GitHub Pages build: no backend, leagues seeded from the committed
-// asset into this browser's storage, editing and saving working exactly as they do
-// with a server behind them, and — measured 2026-09-04 — a real ESPN league
+// Verifies the GitHub Pages build: no backend, a first visit that asks for YOUR
+// league instead of lending somebody else's, editing and saving working exactly as
+// they do with a server behind them, and — measured 2026-09-04 — a real ESPN league
 // IMPORTING and its roster READING with no server at all, because ESPN sends CORS
 // headers that let a page read it. Yahoo sends none, and that is the case this
-// build exists to serve: the last two sections here are a Yahoo user's two routes
-// to a ranked board — the preset, and a file dropped on the page — because before
-// them the hosted site's only honest answers were a stranger's demo league or
-// seventeen point values typed in by hand.
+// build exists to serve: a Yahoo user's routes to a ranked board are pasting the
+// settings page, the preset, and a file dropped on the page.
+//
+// The first section is new and is the reason the rest of this file moved. The build
+// used to ship a league — one real Yahoo league belonging to a real person — and
+// seed it into every browser that had nothing stored, so a stranger's first screen
+// was a fully ranked board denominated in somebody else's points, under a notice
+// explaining that it was. `publishSnapshot` in vite.config.ts now strips `leagues`
+// out of the published asset, so there is no board on a first visit and there is
+// not meant to be one. Every section below that used to start from the seed now
+// starts by SETTING A LEAGUE UP, through the same onboarding a reader walks.
 import { chromium } from "playwright-core"
 import { readFileSync } from "node:fs"
 // The build's base is relative, so preview serves it at the root and the same
@@ -36,12 +43,117 @@ p.on("pageerror", e => errs.push(String(e)))
 const requested = []
 p.on("request", r => requested.push(r.url()))
 await p.goto(BASE, { waitUntil:"networkidle" })
-// The board is the default view and must render with NO server. A synchronous
-// throw in the static-mode guard once killed the whole render here.
-await p.waitForSelector(".board-row", { timeout: 25000 })
+await p.waitForSelector(".onboard", { timeout: 25000 })
 let pass=0, fail=0
 const t=(n,ok,x="")=>{ok?pass++:fail++; console.log(`${ok?"PASS":"FAIL"}  ${n}${ok?"":"  "+x}`)}
 t("no page errors", errs.length===0, errs.join(" | "))
+
+/**
+ * ── A first visit belongs to nobody ─────────────────────────────────────────────
+ *
+ * The published asset must carry no leagues, and the page must react to that by
+ * asking rather than by lending. Both halves are asserted: the file itself, because
+ * the build step is what strips it, and the screen, because a seed could also
+ * arrive from a stale localStorage or a cached asset.
+ */
+const seed = await p.evaluate(async base => {
+  const r = await fetch(new URL("scoring.json", base).href)
+  return r.json()
+}, BASE)
+t("the published seed carries no league at all",
+  Object.keys(seed.leagues).length === 0 && seed.active_league === null,
+  `${Object.keys(seed.leagues).join(",")} active=${seed.active_league}`)
+t("but it still carries the presets and the stat list, which are nobody's league",
+  Object.keys(seed.platform_templates).length > 0 && seed.stat_keys.batting.length > 0,
+  Object.keys(seed.platform_templates).join(","))
+t("a first visit shows the setup, not somebody else's ranked board",
+  (await p.$$eval(".board-row", n => n.length)) === 0,
+  String(await p.$$eval(".board-row", n => n.length)))
+t("and this browser holds no league until the visitor puts one in it",
+  await p.evaluate(() =>
+    Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length === 0))
+// The tabs are all about a league. Highlighting one and then showing the same setup
+// card reads as a broken button, so they say why instead.
+/**
+ * The route a Yahoo user can finish, asserted where importing is ATTEMPTED.
+ *
+ * The claim has not changed since it was written: a build that cannot read Yahoo
+ * must name Yahoo, and must name a route that ends somewhere rather than a blanket
+ * "importing needs the local server". What changed is where a person reads it —
+ * the first screen, where somebody with a Yahoo league is standing when they are
+ * stuck, rather than a card that only appeared while a stranger's demo league was
+ * active.
+ */
+await p.waitForSelector(".onboard .chip-btn")
+t("and the first question is which platform, with Yahoo among the answers",
+  (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).includes("Yahoo"),
+  (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).join(" | "))
+await p.click('.onboard .chip-btn:text-is("Yahoo")')
+const firstScreen = await p.$eval(".onboard", e => e.innerText)
+t("a Yahoo user is given a route they can finish, on the screen where they are stuck",
+  /settings/i.test(firstScreen) && /paste/i.test(firstScreen) && /private/i.test(firstScreen),
+  firstScreen.slice(0, 260))
+// The one thing that must not be said: that a browser can read a Yahoo league.
+t("and it does not offer Yahoo a URL import a browser cannot perform",
+  await p.evaluate(() => {
+    const alts = document.querySelector(".onboard-alts")
+    return !alts || !alts.querySelector('input[type=text]')
+  }))
+t("the tabs are disabled until there is a league, and say so",
+  await p.$$eval(".views button", n => n.every(e => e.disabled)) &&
+    /set a league up first/i.test(await p.$eval(".views button", e => e.title)),
+  await p.$eval(".views button", e => e.title))
+
+/**
+ * The route that cannot be revoked, on the build where it is the only one.
+ *
+ * Yahoo sends no `access-control-allow-origin` on any page, so nothing here will
+ * ever be handed its settings page; the reader's own signed-in browser is the one
+ * program that can see it. This pastes exactly what that page copies as — the
+ * committed league's own settings rows and stat tables, tab-separated, which is
+ * what a browser puts on the clipboard — and asserts that a whole league comes out
+ * of it with every /api/** call aborted.
+ */
+const real = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
+const SETTINGS_PASTE = [
+  "Setting\tValue",
+  ...Object.entries(real.league_rules.raw_settings).map(([k, v]) => `${k}\t${v}`),
+  "Batters Stat Category\tValue",
+  ...Object.entries(real.scoring.batting).map(([c, v]) => `Some Stat (${c})\t${v}`),
+  "Pitchers Stat Category\tValue",
+  ...Object.entries(real.scoring.pitching).map(([c, v]) => `Some Stat (${c})\t${v}`)
+].join("\n")
+
+/** A league in this browser, got the way a reader gets one. Used wherever this
+ *  suite used to be able to assume the seed had put one there. */
+const onboard = async () => {
+  await p.waitForSelector(".onboard", { timeout: 25000 })
+  await p.click('.onboard .chip-btn:text-is("Yahoo")')
+  await p.fill('textarea[data-ctl="paste-settings"]', SETTINGS_PASTE)
+  await p.click('.onboard button:text-is("Read that")')
+  await p.waitForSelector(".onboard-done button", { timeout: 15000 })
+  await p.click(".onboard-done button")
+  await p.waitForSelector(".board-row", { timeout: 25000 })
+  return p.evaluate(() => JSON.parse(localStorage.getItem("beanemachine:config")).active_league)
+}
+
+const KEY = await onboard()
+t("pasting the settings page builds a league, with no server anywhere",
+  !!KEY, String(KEY))
+const pasted = await p.evaluate(k =>
+  JSON.parse(localStorage.getItem("beanemachine:config")).leagues[k], KEY)
+t("and it holds the same scoring the fetched league holds",
+  JSON.stringify(pasted.scoring.batting) === JSON.stringify(real.scoring.batting) &&
+    JSON.stringify(pasted.scoring.pitching) === JSON.stringify(real.scoring.pitching),
+  JSON.stringify(pasted.scoring.batting))
+t("the same roster slots, in the order a lineup is set in",
+  JSON.stringify(pasted.roster.slot_order) === JSON.stringify(real.roster.slot_order))
+t("and the same team count, which is what replacement level is cut at",
+  pasted.meta.max_teams === real.meta.max_teams, String(pasted.meta.max_teams))
+// It came off the reader's screen, not off a fetch this page made and can cite.
+t("but it is not marked read-from-source, because nothing here fetched that page",
+  pasted.provenance.verified === false && /^paste:/.test(pasted.provenance.method),
+  pasted.provenance.method)
 t("the board renders with no server", (await p.$$eval(".board-row", n=>n.length)) > 50)
 /**
  * The availability toggle WORKS with no server now, which is the point of the whole
@@ -74,24 +186,15 @@ const note = await p.locator(".static-note").textContent()
 t("the static banner says your leagues live in this browser", /browser/i.test(note), note)
 t("and it does not claim the server is needed to import without naming Yahoo",
   !/server/i.test(note) || /yahoo/i.test(note), note)
-/**
- * The route a Yahoo user can finish is asserted where importing is ATTEMPTED, not
- * in the masthead.
- *
- * It was six lines in the masthead, on every page view, and measured 134px of a
- * 1,506px climb to the first recommendation — while the same explanation already
- * appeared four times in this setup panel. The claim did not change: a build that
- * raises the server must name Yahoo and must name a route that ends somewhere. It
- * is checked against the page a person reads when they are actually stuck.
- */
-const setupText = await p.$eval(".grid", e => e.innerText)
-t("and a Yahoo user is given a route they can finish, where importing is attempted",
-  /yahoo/i.test(setupText) && /(preset|drop|file)/i.test(setupText),
-  setupText.slice(0, 200))
+/* The claim "a Yahoo user is given a route they can finish" is asserted up in the
+   first-visit block now, against the onboarding, because that is where importing is
+   attempted. It used to be checked here, on League setup, where a card headed "Use
+   your own league" appeared for as long as the SEEDED example league was active —
+   and the seeded league is gone. */
 const codes = await p.$$eval(".grid section:nth-of-type(1) .code", n=>n.map(e=>e.textContent))
 const vals = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))
-t("scoring seeded from the committed asset", vals[codes.indexOf("HR")]==="10.4", vals.join(","))
-t("the seed was stored, not just rendered",
+t("the pasted scoring is what the editor renders", vals[codes.indexOf("HR")]==="10.4", vals.join(","))
+t("and it was stored, not just rendered",
   await p.evaluate(() => localStorage.getItem("beanemachine:config") !== null))
 t("roster totals render", (await p.$$eval(".tot b", n=>n.map(e=>e.textContent))).join("/")==="18/5/4/27")
 t("the config can be taken out as a file", await p.locator('.bar button:text-is("Download")').isEnabled())
@@ -103,8 +206,8 @@ t("editing works with no server", await p.locator(".savebar").evaluate(e=>e.clas
 await p.click(".savebar button.primary")
 await p.waitForSelector(".toast")
 t("saving works with no server", (await p.locator(".toast").textContent()).includes("Saved"))
-t("the save landed in browser storage", await p.evaluate(() =>
-  JSON.parse(localStorage.getItem("beanemachine:config")).leagues["yahoo:228947"].scoring.batting.HR === 9.9))
+t("the save landed in browser storage", await p.evaluate(k =>
+  JSON.parse(localStorage.getItem("beanemachine:config")).leagues[k].scoring.batting.HR === 9.9, KEY))
 await p.reload({ waitUntil:"networkidle" })
 await p.click(".views button:nth-child(2)")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
@@ -261,14 +364,14 @@ t("an unrecognized URL is told it is unrecognized, not that Yahoo needs a server
  * refusal. Nothing the assertion below is about comes from the graft: the league id,
  * the team number and the fetch are all ESPN's.
  */
-await p.evaluate(() => {
+await p.evaluate(k => {
   const c = JSON.parse(localStorage.getItem("beanemachine:config"))
-  const seeded = c.leagues["yahoo:228947"], espn = c.leagues["espn:81134470"]
-  espn.scoring = JSON.parse(JSON.stringify(seeded.scoring))
-  espn.roster = JSON.parse(JSON.stringify(seeded.roster))
+  const known = c.leagues[k], espn = c.leagues["espn:81134470"]
+  espn.scoring = JSON.parse(JSON.stringify(known.scoring))
+  espn.roster = JSON.parse(JSON.stringify(known.roster))
   c.active_league = "espn:81134470"
   localStorage.setItem("beanemachine:config", JSON.stringify(c))
-})
+}, KEY)
 await p.reload({ waitUntil:"networkidle" })
 await p.waitForSelector(".board-row", { timeout: 25000 })
 const tabs = await p.$$eval(".views button", n => n.map(e => e.textContent))
@@ -323,18 +426,27 @@ t("and anyone this capture cannot place is named rather than silently dropped",
  */
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
+// The preset is reached through the onboarding now, not through a toolbar: on a
+// first visit the toolbar is hidden, because offering New / Remove / Download /
+// Load file / a URL field to somebody who has no league is five unexplained
+// buttons where one question belongs. It is folded under "Other ways in", which
+// is the ranking this app believes: paste your own page first, borrow second.
+await p.waitForSelector(".onboard", { timeout: 25000 })
+await p.click('.onboard .chip-btn:text-is("Yahoo")')
+await p.click(".onboard-alts summary")
+await p.click('.onboard-alts button:text-is("Use the preset")')
 await p.waitForSelector(".board-row", { timeout: 25000 })
 await p.click(".views button:nth-child(2)")
 await p.waitForSelector("#tpl", { timeout: 15000 })
 t("the picker offers no Sleeper league type on the hosted build either",
   !(await p.$$eval("#tpl option", n => n.map(e => `${e.value}${e.textContent}`).join(" "))).match(/sleeper/i),
   await p.$$eval("#tpl option", n => n.map(e => e.textContent).join(" | ")))
-await p.click('.bar button:text-is("New")')
+await p.click(".views button:nth-child(1)")
 await p.waitForSelector(".board-row", { timeout: 25000 })
 t("a Yahoo preset ranks a full board with no server and no import",
   (await p.$$eval(".board-row", n => n.length)) > 50,
   String(await p.$$eval(".board-row", n => n.length)))
-const presetNote = await p.locator(".example-note").first().textContent()
+const presetNote = await p.locator(".preset-note").first().textContent()
 t("and the page says those values were not read from the visitor's league",
   /not read from your league/i.test(presetNote), presetNote.slice(0, 140))
 t("and the league it made is marked unverified, not read-from-source",
@@ -348,9 +460,13 @@ t("and the league it made is marked unverified, not read-from-source",
 // with the file dialog never opened — which is what makes this a route rather than
 // a button in a toolbar on one tab.
 const file = await p.evaluate(() => localStorage.getItem("beanemachine:config"))
+const sent = Object.keys(JSON.parse(file).leagues)
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-await p.waitForSelector(".board-row", { timeout: 25000 })
+// No board to wait for: an emptied browser opens on the setup now. The drop works
+// from there, which is the case that matters — somebody who ran the CLI locally
+// arrives here with a file and nothing else.
+await p.waitForSelector(".onboard", { timeout: 25000 })
 p.on("dialog", d => d.accept())
 const dt = await p.evaluateHandle(text => {
   const d = new DataTransfer()
@@ -365,8 +481,15 @@ await p.dispatchEvent("body", "drop", { dataTransfer: dt })
 await p.waitForSelector(".toast", { timeout: 10000 })
 t("and dropping it loads the leagues it carries, with no server",
   /Loaded \d+ league/.test(await p.textContent(".toast")), await p.textContent(".toast"))
+// Asserted as the SAME KEYS rather than as a count. The count used to be >= 2 and
+// only reached 2 because the build re-seeded a league on every reload — so the
+// assertion was partly measuring the seed. What it is about is the round trip.
 t("which is the same leagues, back in this browser",
-  await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length >= 2))
+  JSON.stringify(
+    await p.evaluate(() =>
+      Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).sort())
+  ) === JSON.stringify([...sent].sort()),
+  sent.join(","))
 
 /**
  * ── The question the hosted site could not answer ───────────────────────────────
@@ -386,7 +509,9 @@ t("which is the same leagues, back in this browser",
  */
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-await p.waitForSelector(".board-row", { timeout: 25000 })
+// A league of one's own, set up the way a reader sets one up, because there is no
+// longer a seeded one to inherit.
+const WIRE_KEY = await onboard()
 const streamHead = async (n = 6) => {
   await p.click('.modes .mode:has-text("Streaming")')
   await p.waitForTimeout(400)
@@ -432,7 +557,7 @@ t("the ranking runs deep enough to draw a pool from a part of it nobody would se
 const READ_AT = new Date(Date.now() - 3 * 3_600_000).toISOString()
 const withWire = JSON.parse(await p.evaluate(() => localStorage.getItem("beanemachine:config")))
 withWire.pools = {
-  "yahoo:228947": {
+  [WIRE_KEY]: {
     at: READ_AT,
     leagueId: "228947",
     players: deep.map((name, i) => ({ yahooId: String(9000 + i), name, team: null, positions: ["SP"] })),
@@ -442,7 +567,7 @@ withWire.pools = {
 }
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-await p.waitForSelector(".board-row", { timeout: 25000 })
+await p.waitForSelector(".onboard", { timeout: 25000 })
 const wireDt = await p.evaluateHandle(text => {
   const d = new DataTransfer()
   d.items.add(new File([text], "scoring.json", { type: "application/json" }))
@@ -480,8 +605,8 @@ t("which is a different list from the one the estimate produced",
 // follows when it falls back to a Monday and says so.
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-await p.waitForSelector(".board-row", { timeout: 25000 })
-withWire.pools["yahoo:228947"].at = new Date(Date.now() - 7 * 86_400_000).toISOString()
+await p.waitForSelector(".onboard", { timeout: 25000 })
+withWire.pools[WIRE_KEY].at = new Date(Date.now() - 7 * 86_400_000).toISOString()
 const staleDt = await p.evaluateHandle(text => {
   const d = new DataTransfer()
   d.items.add(new File([text], "scoring.json", { type: "application/json" }))
@@ -502,9 +627,6 @@ t("and it is still USED, because a stale exact list beats an estimate that is no
 t("no page errors after all of that", errs.length===0, errs.join(" | "))
 
 
-await b.close()
-console.log(`\npassed ${pass}, failed ${fail}`)
-process.exit(fail?1:0)
 /**
  * A static build asks for nothing it cannot have.
  *
@@ -515,7 +637,7 @@ process.exit(fail?1:0)
  * production build with no `VITE_API_BASE` has no API by construction.
  */
 {
-  const page = await browser.newPage()
+  const page = await b.newPage()
   const errors = []
   const apiCalls = []
   page.on("console", m => { if (m.type() === "error") errors.push(m.text().slice(0, 120)) })
@@ -527,3 +649,7 @@ process.exit(fail?1:0)
   await page.close()
 }
 
+
+await b.close()
+console.log(`\npassed ${pass}, failed ${fail}`)
+process.exit(fail ? 1 : 0)

@@ -9,7 +9,7 @@ import { canReadPool, api, ApiError } from "./api.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
-import { playersInText } from "../data/paste.ts"
+import { playersInText, rosterFromPaste } from "../data/paste.ts"
 import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
 import "./trade.css"
 import { tradesClosed } from "./panels.tsx"
@@ -328,54 +328,17 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 
 	const readPaste = () => {
 		if (!leagueKey || !snapshot) return
-		const found = playersInText(pasted, snapshot.players)
-		const byId = new Map(snapshot.players.map(pl => [pl.id, pl]))
-		if (!found.players.length) {
-			setPasteNote(
-				"No players found in that. Select your whole roster page — the names are what " +
-					"this matches on, so extra columns and adverts do no harm."
-			)
+		// Shaped in src/data/paste.ts, because the first-run onboarding takes the same
+		// paste and two readings of one page would eventually disagree.
+		const read = rosterFromPaste(pasted, snapshot)
+		if (!read.players.length) {
+			setPasteNote(read.note)
 			return
 		}
-		const keys = found.players.flatMap(f =>
-			rated.filter(r => normalizeName(r.player.name) === normalizeName(f.name)).map(r => rosterKey(r.player))
-		)
-		persist(() => store.set(leagueKey, [...new Set(keys)]))
-		const withSeats = found.players.filter(f => f.slot)
-		if (withSeats.length)
-			setSeats(
-				lineupStore.set(
-					leagueKey,
-					withSeats.map(f => ({
-						slot: f.slot!,
-						name: f.name,
-						/**
-						 * The league's own eligibility where the sweep reached him, and his
-						 * primary position where it did not.
-						 *
-						 * The map covers 328 players, not all 1,435, and an empty list means
-						 * "no slot can be proven legal for him" — so a pasted roster came back
-						 * with every man unseatable and a lineup projecting zero. The primary
-						 * position is a weaker claim and it is the same fallback the board
-						 * already makes; stating it is better than seating nobody.
-						 */
-						positions:
-							snapshot.eligibility?.[String(f.id)] ??
-							(byId.get(f.id)?.position ? [byId.get(f.id)!.position!] : []),
-						team: byId.get(f.id)?.team ?? null
-					})),
-					new Date().toISOString()
-				)
-			)
-		setPasteNote(
-			`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
-				(withSeats.length ?
-					`, ${withSeats.length} with the seat they were in — the daily lineup on Recommendations can diff against that.`
-				:	". No seats were in that text, so Recommendations will show the lineup to set rather than the changes to make.") +
-				(found.ambiguous.length ?
-					` Two different players share ${found.ambiguous.join(" and ")}, so neither was added — search for the one you own below.`
-				:	"")
-		)
+		persist(() => store.set(leagueKey, read.keys))
+		if (read.spots.length)
+			setSeats(lineupStore.set(leagueKey, read.spots, new Date().toISOString()))
+		setPasteNote(read.note)
 		setPasted("")
 	}
 

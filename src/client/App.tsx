@@ -11,13 +11,11 @@ import { Board } from "./Board.tsx"
 import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
 import { Decide } from "./Decide.tsx"
+import { Onboard } from "./Onboard.tsx"
 import { leagues } from "./leagues.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
-import { lineupStore } from "./lineup.ts"
 import {
 	EligibilityPanel,
-	EXAMPLE_LEAGUE_KEY,
-	ExampleNote,
 	Fragment2,
 	freshness,
 	IMPORT_COMMAND,
@@ -30,7 +28,6 @@ import {
 	TeamCountInput,
 	type View,
 	VIEWS,
-	WaysIn
 } from "./panels.tsx"
 import { useSnapshot } from "./useBoard.ts"
 import { useToast } from "./useToast.tsx"
@@ -96,6 +93,17 @@ export const App = () => {
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
 	const [view, setView] = useState<View>("board")
+	/**
+	 * Whether the first-run setup is on screen.
+	 *
+	 * It opens by itself when this browser holds no league, which is now every first
+	 * visit: the site used to seed one — a real Yahoo league belonging to a real
+	 * person — so a stranger's first screen was a ranked board denominated in
+	 * somebody else's points, under a notice explaining that it was. It closes when
+	 * the reader says so, and it can be reopened, because "I set the league up and
+	 * now I want to add my roster" is a thing people come back for.
+	 */
+	const [onboarding, setOnboarding] = useState(false)
 	/** True while a file is over the window. A drop target nobody can see is a
 	 *  feature nobody uses, so the page says it will take the file. */
 	const [dragging, setDragging] = useState(false)
@@ -163,6 +171,10 @@ export const App = () => {
 		setConfig(next)
 		setKey(chosen)
 		setLoadError(null)
+		// A browser with no league cannot rank anything, so the setup is the page
+		// rather than a card above it. Opened here rather than in an effect so it is
+		// true on the first paint and never flashes an empty board first.
+		if (!keys.length) setOnboarding(true)
 	}, [])
 
 	useEffect(() => {
@@ -241,6 +253,10 @@ export const App = () => {
 					return
 				const loaded = leagues.replace(text)
 				adopt(loaded.config)
+				// A file is a finished setup: it carries the league, and usually the roster
+				// and the free-agent list too. Leaving the first-run card up over a board
+				// that is already ranked would be asking for what has just arrived.
+				setOnboarding(false)
 				// what actually arrived, counted from the file rather than assumed: a
 				// file with no roster in it must not be reported as having brought one
 				const carried = [
@@ -359,11 +375,16 @@ export const App = () => {
 	 * the switcher, and only when there is more than one league to switch between.
 	 */
 	const manage =
-		view === "league" ||
+		// The first-run setup IS the way in, and it names every route in the order
+		// they are worth trying. Leaving the toolbar above it offered a second,
+		// unexplained set of the same buttons — New, Remove, Download, Load file and
+		// a URL field — to the one reader who has no idea which of them is for them.
+		!onboarding &&
+		(view === "league" ||
 		// nothing to work with yet: importing or creating one is the only move left
 		(store === "read" && !Object.keys(config?.leagues ?? {}).length) ||
-		// and the unreadable-store card below points at Load file as the way out
-		store === "unreadable"
+			// and the unreadable-store card below points at Load file as the way out
+			store === "unreadable")
 
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
@@ -439,14 +460,23 @@ export const App = () => {
 					<button
 						key={v.id}
 						role="tab"
-						title={v.purpose}
+						title={league ? v.purpose : `${v.purpose} — set a league up first`}
 						aria-selected={view === v.id}
 						aria-current={view === v.id ? "page" : undefined}
 						className={view === v.id ? "on" : ""}
+						// Nothing on any of them exists yet. A tab that highlights and then
+						// shows the same setup card reads as a broken button; saying why
+						// costs one attribute.
+						disabled={!league}
 						// the .on class carries the tab's state; the accent is the same "this one
 						// is live" signal .modes and .chip-btn already use for a selected control
 						style={view === v.id ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}
-						onClick={() => setView(v.id)}
+						onClick={() => {
+							// Choosing a tab is choosing to leave the setup. It reopens by
+							// itself if the last league is ever removed.
+							setOnboarding(false)
+							setView(v.id)
+						}}
 					>
 						{v.label}
 					</button>
@@ -485,6 +515,7 @@ export const App = () => {
 						show("Removed")
 					})
 				}
+				onOnboard={() => setOnboarding(true)}
 				onDownload={() => {
 					if (!config) return
 					const file = leagues.download(config)
@@ -528,7 +559,55 @@ export const App = () => {
 				</div>
 			)}
 
-			{!loadError && !loading && !ready && (
+			{/* First run, and any time the reader asks for it back. It replaces `Setup`
+			    rather than sitting beside it: two cards both headed "you have no league"
+			    is how a first visit becomes a maze. */}
+			{!loadError && !loading && (onboarding || !league) && (
+				<Onboard
+					config={config}
+					snapshot={snapshot}
+					leagueKey={key}
+					league={league ?? null}
+					canImport={getMode() !== "static"}
+					preset={preset ? { key: preset.key, label: preset.label } : null}
+					onCreateLeague={(platform, made) =>
+						void run(async () => {
+							if (!config) return
+							// The settings page prints the league's own id, so a pasted league is
+							// keyed exactly as an imported one is — the same league read by the
+							// two routes lands in the same place instead of twice.
+							const k =
+								made.meta.league_id ?
+									`${made.meta.platform}:${made.meta.league_id}`
+								:	leagues.suggestKey(config, platform)
+							adopt(leagues.save(k, made), k)
+							show(`Read ${made.meta.league_name ?? "your league"} from that page`)
+						})
+					}
+					onUsePreset={() => preset && void create(preset.key)}
+					onImportUrl={url =>
+						void run(async () => {
+							const { key: k, league: got } = await api.import(url)
+							adopt(leagues.save(k, got), k)
+							show(`Imported ${got.meta.league_name ?? k}`)
+						})
+					}
+					onLoadFile={() => openPicker.current?.()}
+					onOpenSetup={() => {
+						setOnboarding(false)
+						setView("league")
+					}}
+					onDone={() => {
+						setOnboarding(false)
+						setView("board")
+					}}
+				/>
+			)}
+
+			{/* A league that exists but cannot rank yet: this names the gaps in place,
+			    on whichever tab is open, without taking the screen over the way the
+			    first-run setup does. */}
+			{!loadError && !loading && !onboarding && league && !ready && (
 				<Setup
 					leagueKey={key}
 					league={league ?? null}
@@ -536,24 +615,6 @@ export const App = () => {
 					preset={preset?.label ?? null}
 					onUsePreset={preset ? () => void create(preset.key) : undefined}
 					onLoadFile={() => openPicker.current?.()}
-					onOpenSetup={view === "league" ? undefined : () => setView("league")}
-				/>
-			)}
-
-			{/* On every tab, not just the board: the demo is not a property of one
-			    screen, and League setup is where the note is most useful.
-			    
-			    "It goes away the moment a different league is active" was the whole
-			    gate, and it is wrong for exactly one reader — the one whose league IS
-			    the shipped example. He runs the command line, drops his own file with
-			    his roster and his league's free agents in it, and the page goes on
-			    telling him this is not his team. The demo is the SEEDED copy, and what
-			    distinguishes it is that nobody has read anything into it: the seed
-			    carries scoring and slots and no roster and no wire. So the note asks
-			    that instead of asking for a name. */}
-			{league && key === EXAMPLE_LEAGUE_KEY && !lineupStore.of(key) && !poolStore.of(key) && (
-				<ExampleNote
-					league={league}
 					onOpenSetup={view === "league" ? undefined : () => setView("league")}
 				/>
 			)}
@@ -600,31 +661,15 @@ export const App = () => {
 				/>
 			)}
 
-			{/* The demo league CAN rank, so the Setup card above stays hidden for a
-			    first-time visitor — which left the routes to their own league named
-			    nowhere at all: the toolbar has a New button, a Download button and a
-			    URL field, and nothing that says which of them is for a Yahoo user.
-			    This is the same list, on the tab they are sent to. */}
-			{!loadError && !loading && ready && view === "league" && key === EXAMPLE_LEAGUE_KEY && (
-				<div className="grid">
-					<section className="card full">
-						<h2>Use your own league</h2>
-						<p className="sub">
-							Everything below is {league?.meta.team_name ?? "somebody else's team"}&rsquo;s.
-							Any of these replaces it.
-						</p>
-						<WaysIn
-							canImport={getMode() !== "static"}
-							preset={preset?.label ?? null}
-							league={league ?? null}
-							onUsePreset={preset ? () => void create(preset.key) : undefined}
-							onLoadFile={() => openPicker.current?.()}
-						/>
-					</section>
-				</div>
-			)}
-
-			{view === "board" ?
+			{/* Nothing below can say anything until a league exists — the board is
+			    empty, the draft is empty, and a trade has no prices — so on a first
+			    visit the setup above is the page rather than a card on top of four
+			    empty ones. Keyed on the LEAGUE rather than on whether the setup is
+			    open, because those come apart: the setup stays open while a
+			    half-read league is being finished, and that league can already rank
+			    a board worth seeing underneath it. */}
+			{!league ? null
+			: view === "board" ?
 				<>
 					{/* The answer first, the ranking under it. `Decide` names both sides of
 					    every move and can be carried out without reading anything else; the
@@ -803,6 +848,7 @@ const Toolbar = ({
 	onCreate,
 	onRemove,
 	onDownload,
+	onOnboard,
 	onLoadFile,
 	onPicker,
 	onReject
@@ -821,6 +867,8 @@ const Toolbar = ({
 	onCreate: (template: string) => void
 	onRemove: (key: string) => void
 	onDownload: () => void
+	/** Reopens the guided setup — the same screen a first visit lands on. */
+	onOnboard: () => void
 	onLoadFile: (file: File) => void
 	/** Hands the file input's opener up, so the Setup card can offer the same
 	 *  route without a second `<input type=file>` to keep in step. */
@@ -883,6 +931,23 @@ const Toolbar = ({
 		<>
 			<div className="bar">
 				{selector}
+				{/* The way back to the first-run setup.
+				    A reader who already has a league had no route to it at all — it opens
+				    by itself on a first visit and never again — and "I set up the wrong
+				    league" and "I want to add my second one" are both ordinary. It leads
+				    the row because it is the guided route; New and the rest are the
+				    unguided ones. */}
+				{/* Deliberately not `.primary`: Import owns that in this row, and the two
+				    are different promises — Import reads a league now, this one walks a
+				    person through getting one in. Leading the row is the emphasis it
+				    needs. */}
+				<button
+					data-ctl="onboard"
+					title="Read a league off its own settings page, or start from a preset — the guided setup"
+					onClick={onOnboard}
+				>
+					Set up a league
+				</button>
 				<label className="ctl">
 					<span>Start a league from</span>
 					<select

@@ -274,12 +274,26 @@ t("the ready-made preset is what it lands on, not the blank one",
   (await fp.inputValue("#tpl")) === "yahoo" && /standard values/i.test(tplOptions.find(o => o.value === "yahoo").label),
   `${await fp.inputValue("#tpl")} — ${tplOptions.map(o => o.label).join(" | ")}`)
 
-// The routes are NAMED on the tab a first-time visitor is sent to. The demo league
-// can rank, so the "finish setting this league up" card stays hidden, and before
-// this the toolbar was the only thing on screen: a New button, a Download button
-// and a URL field, with nothing saying which of them a Yahoo user wants.
-const routes = await fp.$$eval(".routes dt", n => n.map(e => e.textContent))
-t("the ways into your own league are named on the setup tab", routes.length >= 3, routes.join(" | "))
+/**
+ * The routes are NAMED where a person goes looking for them.
+ *
+ * They used to be listed on League setup, inside a card headed "Use your own
+ * league" that rendered only while the SEEDED example league was active — and the
+ * seed is gone: the deployed build ships no league and a first visit opens on the
+ * guided setup instead. The claim is unchanged and is still the one that matters:
+ * every way into your own league is named, in one place, and the file route prints
+ * a command the reader could actually run.
+ *
+ * Reached here through "Set up a league", which is the route back for somebody who
+ * already has one — the setup opens by itself only on a first visit, and without
+ * this button a reader who set the wrong league up had no way to it at all.
+ */
+await fp.click('.bar button:text-is("Set up a league")')
+await fp.waitForSelector(".onboard")
+await fp.click('.onboard .chip-btn:text-is("Yahoo")')
+await fp.click(".onboard-alts summary")
+const routes = await fp.$$eval(".onboard-alts dt", n => n.map(e => e.textContent))
+t("the ways into your own league are named, in one place", routes.length >= 3, routes.join(" | "))
 // It must be runnable by the person READING it, which is somebody on
 // beanemachine.com with no clone. `node --experimental-strip-types src/cli.ts` was
 // neither: the flag has not been needed since node 22.18, and the path only exists
@@ -287,8 +301,20 @@ t("the ways into your own league are named on the setup tab", routes.length >= 3
 // at a compiled bundle, because node refuses to strip types under node_modules and
 // the .ts bin failed on its first line for everyone.
 t("and the file route prints a command a visitor could actually run",
-  /^npx --yes github:/.test(await fp.locator(".routes pre").first().textContent()),
-  await fp.locator(".routes pre").first().textContent())
+  /^npx --yes github:/.test(await fp.locator(".onboard-alts pre").first().textContent()),
+  await fp.locator(".onboard-alts pre").first().textContent())
+// The paste route leads, because it is the only one no platform can switch off.
+t("and pasting the settings page leads, above every route that needs permission",
+  await fp.evaluate(() => {
+    const box = document.querySelector('textarea[data-ctl="paste-settings"]')
+    const alts = document.querySelector(".onboard-alts")
+    return !!box && !!alts &&
+      !!(box.compareDocumentPosition(alts) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }))
+// back out of the setup the way a reader does
+await fp.click(".onboard-done button")
+await fp.click(".views button:nth-child(2)")
+await fp.waitForSelector("#tpl")
 
 // Route 1: one click from the picker to a ranked board.
 await fp.click('.bar button:text-is("New")')
@@ -312,12 +338,12 @@ t("and it carries scoring, slots and a team count — the three the engine needs
 
 // A board that ranks looks like a board that is right, which is the whole risk of
 // shipping a preset. The page has to keep saying whose numbers these are.
-const preset = await fp.locator(".example-note").first().textContent()
+const preset = await fp.locator(".preset-note").first().textContent()
 t("the board says the values were not read from your league",
   /not read from your league/i.test(preset), preset.slice(0, 120))
 t("and it names what to check, from the league's own needs_review",
-  (await fp.$$eval(".example-note .flags li", n => n.length)) >= 3,
-  String(await fp.$$eval(".example-note .flags li", n => n.length)))
+  (await fp.$$eval(".preset-note .flags li", n => n.length)) >= 3,
+  String(await fp.$$eval(".preset-note .flags li", n => n.length)))
 t("and the provenance chip reads unverified, not read from source",
   (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).includes("unverified"),
   (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).join(" / "))
@@ -328,11 +354,11 @@ t("and the provenance chip reads unverified, not read from source",
 // the other sixteen borrowed. This is the user's own statement, and what it records
 // is manual entry, not a read — `verified` stays false either way, because importing
 // the league is still the only thing that can change that.
-await fp.click('.example-note button:text-is("I\u2019ve checked these against my league")')
+await fp.click('.preset-note button:text-is("I\u2019ve checked these against my league")')
 await fp.waitForTimeout(400)
 t("saying you checked the preset's values ends the notice",
-  (await fp.locator(".example-note").count()) === 0,
-  await fp.locator(".example-note").first().textContent().catch(() => "(gone)"))
+  (await fp.locator(".preset-note").count()) === 0,
+  await fp.locator(".preset-note").first().textContent().catch(() => "(gone)"))
 const checked = await fp.evaluate(k => {
   const c = JSON.parse(localStorage.getItem(k))
   return c.leagues[c.active_league]

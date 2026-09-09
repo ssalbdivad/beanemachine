@@ -752,24 +752,40 @@ t("and so does a payload with no scheduleSettings at all",
   deriveEspnPeriod({}).period.kind === null)
 
 
-// --- the public seed carries scoring, and nobody's team -----------------------
+// --- the public seed carries nobody's league ---------------------------------
 //
-// src/cli.ts writes the free-agent pool, the roster and the lineup into
+// src/cli.ts writes the league, the free-agent pool, the roster and the lineup into
 // scoring.json — that is the whole point of the file a Yahoo user carries to the
-// hosted site, since those are the three things a browser can never read for
-// itself. But scoring.json is ALSO the asset every first visit is seeded from, and
-// the build used to copy it wholesale: one person's roster and their league's wire
-// shipped to every stranger who opened the page, presented as the demo. Measured
-// when it happened: 150 free agents and 24 rostered players, with the masthead
-// telling visitors it had read a wire it had no business having.
+// hosted site, since those are things a browser can never read for itself. But
+// scoring.json is ALSO the asset every first visit is seeded from, and the build
+// used to copy it wholesale: one person's roster and their league's wire shipped to
+// every stranger who opened the page, presented as the demo. Measured when it
+// happened: 150 free agents and 24 rostered players, with the masthead telling
+// visitors it had read a wire it had no business having.
 //
-// vite.config.ts strips the three carried stores on the way into public/. This is
-// the assertion that keeps them out.
+// The pool, the roster and the lineup were stripped then. The LEAGUE was not, and
+// that is what this section now pins. A seeded league is somebody's league however
+// carefully the page labels it — a stranger's first screen was a fully ranked board
+// denominated in another man's points — so `publishSnapshot` in vite.config.ts
+// empties `leagues` too, and a first visit opens on the setup in Onboard.tsx.
+//
+// This assertion used to read "the seeded league is real scoring, or the demo board
+// ranks nothing", and it was true of a demo board that should not have existed. It
+// is rewritten to the new truth rather than dropped: the seed must still carry the
+// things that are nobody's — the presets a reader can deliberately choose, and the
+// canonical stat list — or the setup screen has nothing to offer.
 const seed = JSON.parse(readFileSync("public/scoring.json", "utf8"))
-t("the seeded league is real scoring, or the demo board ranks nothing",
-  Object.keys(seed.leagues ?? {}).length > 0 &&
-    Object.values(seed.leagues).every(l => Object.keys(l.scoring?.batting ?? {}).length > 0),
-  Object.keys(seed.leagues ?? {}).join(","))
+t("the published seed carries no league, so a first visit borrows nobody's",
+  Object.keys(seed.leagues ?? {}).length === 0 && seed.active_league === null,
+  `${Object.keys(seed.leagues ?? {}).join(",")} active=${seed.active_league}`)
+t("but it does carry the presets, which are the offer the setup screen makes",
+  Object.keys(seed.platform_templates ?? {}).length > 0 &&
+    Object.values(seed.platform_templates).some(
+      l => Object.keys(l.scoring?.batting ?? {}).length > 0
+    ),
+  Object.keys(seed.platform_templates ?? {}).join(","))
+t("and the canonical stat list, which is what a pasted table is mapped onto",
+  (seed.stat_keys?.batting ?? []).length > 0 && (seed.stat_keys?.pitching ?? []).length > 0)
 for (const carried of ["pools", "rosters", "lineups"])
   t(`the seed carries no ${carried} — those belong to whoever ran the importer`,
     Object.keys(seed[carried] ?? {}).length === 0,

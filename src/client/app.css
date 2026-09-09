@@ -519,16 +519,21 @@ pre{
    Deliberately not a `.card`: it is a caption on the whole page rather than one
    more module competing with the board, and a card would read as content. Flag
    colouring because it is a caveat, not an error and not a success. */
-.example-note{
+/* The borrowed-values notice. It was `.example-note`, named for a seeded demo
+   league that no longer exists — the site shipped one, every first visit opened on
+   it, and it is gone; a first visit opens on Onboard.tsx now. What is left is the
+   one case that was always the real subject: a PRESET, whose numbers came from
+   another league and stay borrowed until somebody checks them. */
+.preset-note{
   display:flex;gap:var(--sp-4);align-items:center;flex-wrap:wrap;
   margin:var(--sp-4) 0 0;padding:var(--sp-3) var(--sp-4);
   border:1px solid var(--edge-line);border-left:2.5px solid var(--flag);
   border-radius:0 var(--r-md) var(--r-md) 0;background:var(--flag-soft);
   backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
 }
-.example-note p{margin:0;flex:1;min-width:min(280px,100%);font-size:var(--fs-4);line-height:var(--lh-snug);color:var(--muted)}
-.example-note b{color:var(--ink)}
-.example-note button{flex:none}
+.preset-note p{margin:0;flex:1;min-width:min(280px,100%);font-size:var(--fs-4);line-height:var(--lh-snug);color:var(--muted)}
+.preset-note b{color:var(--ink)}
+.preset-note button{flex:none}
 
 /* ---------- board primer ----------
    One line above the ranking, at the altitude the table cannot speak from: the
@@ -544,8 +549,8 @@ pre{
    orientation that buries the board it is orienting you to has failed. */
 @media(max-width:640px){
   .primer{margin:var(--sp-4) 0 0;font-size:var(--fs-3)}
-  .example-note{padding:var(--sp-3);gap:var(--sp-3)}
-  .example-note p{font-size:var(--fs-3)}
+  .preset-note{padding:var(--sp-3);gap:var(--sp-3)}
+  .preset-note p{font-size:var(--fs-3)}
 }
 
 /* ---------- colophon ----------
@@ -910,10 +915,69 @@ pre{
 .boundary h2{margin:var(--sp-3) 0 0;font-size:var(--fs-1)}
 .boundary p{margin:0;max-width:66ch}
 .boundary-error{
-	background:var(--sunk);border:1px solid var(--line);border-radius:6px;
+	background:var(--sunken);border:1px solid var(--line);border-radius:6px;
 	padding:var(--sp-3);overflow-x:auto;font-size:var(--fs-2);white-space:pre-wrap;
 	max-height:40vh;margin:0;
 }
 .boundary button.chip-btn{align-self:flex-start}
 .boundary-soft{color:var(--muted);font-size:var(--fs-2)}
 .linkish{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-decoration:underline}
+
+/* ---------- pasting, and the first run ----------
+   Every route into this app that cannot be revoked is a paste — the settings page
+   in Onboard.tsx, the roster and the free-agent page in Trade.tsx — and until now
+   the boxes they are pasted into had no styling at all: a raw <textarea> in a
+   serif page, sized by the browser's default 20-col font. These are the widest
+   control on the screen and the one thing a first-time visitor is asked to use,
+   so they are styled like the rest of the form rather than like a form from 1997.
+   ------------------------------------------------------------------------- */
+textarea{
+  width:100%;box-sizing:border-box;resize:vertical;
+  font-family:var(--mono);font-size:var(--fs-3);line-height:var(--lh-snug);
+  color:var(--ink);background:var(--sunken);
+  border:1px solid var(--line);border-radius:var(--r-md);
+  padding:var(--sp-3);margin:var(--sp-2) 0 0;
+}
+textarea:hover{border-color:var(--rule-strong)}
+textarea:focus-visible{outline:none;border-color:var(--accent);box-shadow:var(--ring)}
+textarea::placeholder{color:var(--faint)}
+
+.paste-roster{margin-top:var(--sp-5)}
+.paste-roster h3{margin:0 0 var(--sp-2)}
+/* Numbered because they are steps in an order, not a list of options: the one
+   people miss is select-all, and a bullet does not say "second". */
+.paste-how{margin:0 0 var(--sp-2);padding-left:1.35em;display:flex;flex-direction:column;gap:5px}
+.paste-how li{font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--muted)}
+.paste-how b{color:var(--ink)}
+.paste-note{margin:var(--sp-2) 0 0}
+kbd{
+  font-family:var(--mono);font-size:.88em;padding:1px 5px;
+  border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
+  background:var(--sunken);color:var(--ink);white-space:nowrap;
+}
+
+/* The first-run setup. It is the whole page on a first visit, so it is laid out
+   as a sequence with a live position in it rather than as another card of prose —
+   a reader who has chosen a platform should be able to see, without reading, that
+   one thing is done and what the next one is. */
+.onboard-steps{list-style:none;margin:var(--sp-4) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-5)}
+.onboard-step{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--sp-3);align-items:start}
+.onboard-n{
+  width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:50%;
+  font-family:var(--mono);font-size:var(--fs-2);font-weight:600;
+  color:var(--muted);background:var(--glass-2);border:1px solid var(--line);
+}
+.onboard-step.done .onboard-n{color:var(--accent);border-color:transparent;background:var(--accent-soft)}
+.onboard-body{min-width:0}
+.onboard-body h3{margin:2px 0 var(--sp-2);font-size:var(--fs-5);font-weight:600;letter-spacing:-.01em}
+.onboard-body .sub{margin:0 0 var(--sp-2)}
+.onboard-alts{margin-top:var(--sp-4)}
+.onboard-alts dl{margin-top:var(--sp-3)}
+.onboard-url{display:flex;gap:var(--sp-2);margin-top:var(--sp-2);flex-wrap:wrap}
+.onboard-url input{flex:1 1 220px;min-width:0}
+.onboard-done{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-5) 0 0}
+.onboard-done .sub{margin:0;flex:1 1 260px}
+@media(max-width:640px){
+  .onboard-steps{gap:var(--sp-4)}
+  .onboard-step{gap:var(--sp-2)}
+}

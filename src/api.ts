@@ -39,14 +39,25 @@ const poolCache = new Map<string, { at: number; pool: unknown }>()
 /**
  * Who may call this, and how often.
  *
- * A deployed endpoint that scrapes somebody else's site on request is an invitation
- * to be used as a scraper, and the cost of that falls on Yahoo and then on this
- * app's own access. So: the browser origins this API exists for, and a small
- * per-address budget.
+ * What is worth protecting is not this process — it is the OUTBOUND scraping of
+ * somebody else's site. A deployed endpoint that fetches Yahoo on request is an
+ * invitation to be used as a scraper, and the cost of that lands on Yahoo and then
+ * on this app's own access.
  *
- * The limit is per instance and resets on a cold start, which makes it a courtesy
- * rather than a wall — it is honest about being one. It is sized to be invisible to
- * a person using the site and to bite a script immediately.
+ * So the budget counts the requests that actually reach Yahoo, and nothing else. The
+ * first version counted every request, including health probes and cache hits, and
+ * the app's own ordinary navigation — board, trade, draft, back — spent it in
+ * seconds: a user got 429s for using the site normally. Caught by test/journey.mjs
+ * failing intermittently, which is the shape a rate limit that is too tight always
+ * takes.
+ *
+ * The unknown-address case is the one that would have been a genuine outage. Behind
+ * a platform proxy there is an `x-forwarded-for`; anywhere else there is not, and
+ * bucketing everyone under one "unknown" key turns a per-user limit into a global
+ * one — thirty requests a minute for the whole site, shared, and the thirty-first
+ * visitor is refused because of the first thirty. Unknown addresses now get their
+ * own much larger ceiling, which still stops a single script and cannot take the
+ * site down for everybody.
  */
 const ALLOWED_ORIGINS = [
 	"https://beanemachine.com",
@@ -54,10 +65,17 @@ const ALLOWED_ORIGINS = [
 	"https://ssalbdivad.github.io"
 ]
 const WINDOW = 60_000
-const PER_WINDOW = 30
+/** Per address, sized to be invisible to a person and to bite a script. Reading one
+ *  league costs one; the app re-reads a pool at most every ten minutes. */
+const PER_ADDRESS = 20
+/** The shared bucket for requests with no usable address. Deliberately far larger:
+ *  its job is to stop a runaway, not to ration real visitors who cannot be told
+ *  apart. */
+const PER_UNKNOWN = 400
 const hits = new Map<string, { at: number; n: number }>()
 
-const overBudget = (who: string): boolean => {
+/** Only called where a request is about to reach Yahoo — see the middleware. */
+const overBudget = (who: string, ceiling: number): boolean => {
 	const now = Date.now()
 	const seen = hits.get(who)
 	if (!seen || now - seen.at > WINDOW) {
@@ -68,7 +86,7 @@ const overBudget = (who: string): boolean => {
 		return false
 	}
 	seen.n++
-	return seen.n > PER_WINDOW
+	return seen.n > ceiling
 }
 
 export const app = new Hono()
@@ -91,21 +109,28 @@ app.use(
 	})
 )
 
-/** The budget, applied before anything reaches a scraper. */
-app.use("/api/*", async (c, next) => {
+/**
+ * The budget, applied to the routes that actually reach Yahoo.
+ *
+ * `/health` is exempt: it is a probe, it touches nothing outside this process, and
+ * counting it meant a page load could spend budget before the reader had asked for
+ * anything. `/available` and `/roster` and `/import` are the ones that leave.
+ */
+app.use("/api/:route{available|roster|import}", async (c, next) => {
 	if (c.req.method === "OPTIONS") return next()
-	const who =
+	const address =
 		c.req.header("cf-connecting-ip") ??
 		c.req.header("x-real-ip") ??
 		c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
-		"unknown"
-	if (overBudget(who))
+		null
+	const ceiling = address ? PER_ADDRESS : PER_UNKNOWN
+	if (overBudget(address ?? "unknown", ceiling))
 		return c.json(
 			{
 				error:
-					`Too many requests from this address — ${PER_WINDOW} a minute is the limit. ` +
-					`This endpoint reads league pages off Yahoo on your behalf, and the cost of ` +
-					`going faster lands on them. Wait a minute and try again.`
+					`Too many league reads from here — ${ceiling} a minute is the limit. This ` +
+					`endpoint reads pages off Yahoo on your behalf and the cost of going faster ` +
+					`lands on them. Wait a minute and try again.`
 			},
 			429
 		)

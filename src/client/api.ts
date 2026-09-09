@@ -102,6 +102,25 @@ const send = async <T,>(path: string, body?: unknown): Promise<T> => {
  *  no longer comes from the API, so a page can now go its whole life without
  *  calling one. */
 export const detectMode = async (): Promise<Mode> => {
+	/**
+	 * Do not probe for an API that cannot be there.
+	 *
+	 * A production build with no `VITE_API_BASE` has no API by construction: the site
+	 * is static, and `/api/health` resolves against a host that serves files. Asking
+	 * anyway produced a failed request and a red 404 in the console on every single
+	 * page load of beanemachine.com — which is what a broken site looks like to
+	 * anyone who opens devtools, and is a request per visitor for an answer already
+	 * known.
+	 *
+	 * A dev build is the opposite case: `npx vite` proxies /api to a server that may
+	 * or may not be running, and only asking can tell. So dev probes, and so does any
+	 * build that was given somewhere to probe.
+	 */
+	const configured = !!env().VITE_API_BASE
+	if (!configured && env().PROD) {
+		mode = "static"
+		return mode
+	}
 	mode = await send<{ ok: true }>("/api/health").then(
 		() => "server" as const,
 		() => "static" as const

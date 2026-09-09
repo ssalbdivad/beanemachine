@@ -491,3 +491,25 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
 await b.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail?1:0)
+/**
+ * A static build asks for nothing it cannot have.
+ *
+ * `detectMode` probed `/api/health` unconditionally, and on beanemachine.com — a
+ * static host, by design — that was a failed request and a red 404 in the console on
+ * every single page load. To anyone who opens devtools that is what a broken site
+ * looks like, and it is a request per visitor for an answer already known: a
+ * production build with no `VITE_API_BASE` has no API by construction.
+ */
+{
+  const page = await browser.newPage()
+  const errors = []
+  const apiCalls = []
+  page.on("console", m => { if (m.type() === "error") errors.push(m.text().slice(0, 120)) })
+  page.on("request", r => { if (r.url().includes("/api/")) apiCalls.push(r.url()) })
+  await page.goto(BASE, { waitUntil: "networkidle" })
+  await page.waitForTimeout(1500)
+  t("a static build makes no API request at all", apiCalls.length === 0, apiCalls.join(", "))
+  t("and logs no console errors on load", errors.length === 0, errors.join(" | "))
+  await page.close()
+}
+

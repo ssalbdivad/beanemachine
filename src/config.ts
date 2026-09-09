@@ -11,17 +11,31 @@ import { Config } from "./schema.ts"
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
-const CONFIG_PATH = join(ROOT, "scoring.json")
+
+/**
+ * Where scoring.json lives, and the caller decides.
+ *
+ * This module held its own `CONFIG_PATH` fixed at the package root while
+ * `src/cli.ts` computed a different one and printed THAT to the reader. Inside a
+ * clone the two agree, which is why nothing noticed for as long as the only way to
+ * run this was from a clone. Through `npx` they do not: the package root is a hashed
+ * directory under `~/.npm/_npx`, so the file was written somewhere nobody would find
+ * it while the last line of output confidently named the working directory.
+ *
+ * Verified by running the published command in an empty directory and looking at
+ * what was in it afterwards, which was nothing.
+ */
+export const defaultConfigPath = join(ROOT, "scoring.json")
 
 export class ConfigError extends Error {}
 
 /** Reads scoring.json and validates it against the ArkType schema. */
-export const loadConfig = async (): Promise<Config> => {
+export const loadConfig = async (path: string = defaultConfigPath): Promise<Config> => {
 	let raw: string
 	try {
-		raw = await readFile(CONFIG_PATH, "utf8")
+		raw = await readFile(path, "utf8")
 	} catch {
-		throw new ConfigError(`No scoring.json at ${CONFIG_PATH}.`)
+		throw new ConfigError(`No scoring.json at ${path}.`)
 	}
 	let parsed: unknown
 	try {
@@ -35,12 +49,15 @@ export const loadConfig = async (): Promise<Config> => {
 }
 
 /** Validates before writing, so an invalid config can never reach disk. */
-export const saveConfig = async (config: Config): Promise<Config> => {
+export const saveConfig = async (
+	config: Config,
+	path: string = defaultConfigPath
+): Promise<Config> => {
 	const out = Config(config)
 	if (out instanceof type.errors)
 		throw new ConfigError(`Refusing to save an invalid config:\n${out}`)
-	const tmp = `${CONFIG_PATH}.tmp`
+	const tmp = `${path}.tmp`
 	await writeFile(tmp, `${JSON.stringify(out, null, 2)}\n`)
-	await rename(tmp, CONFIG_PATH)
+	await rename(tmp, path)
 	return out
 }

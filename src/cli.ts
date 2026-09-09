@@ -258,7 +258,9 @@ const readExtras = async (league: League, leagueId: string): Promise<Extras> => 
 
 try {
 	const { key, league } = await importLeague(url)
-	const config = (await loadConfig()) as ReturnType<typeof Object> & {
+	// read from the same place it will be written, so a run outside a clone starts
+	// from the file the reader can see rather than from one in an npm cache
+	const config = (await loadConfig(CONFIG).catch(() => loadConfig())) as ReturnType<typeof Object> & {
 		leagues: Record<string, League>
 		active_league: string | null
 		pools?: Record<string, unknown>
@@ -343,7 +345,7 @@ try {
 			`  Open League setup in the app and fill them in — nothing here will guess them.`
 		)
 
-	await saveConfig(config)
+	await saveConfig(config, CONFIG)
 
 	// LAST, always. This is the one line the reader has to act on — the file goes to
 	// beanemachine.com — and a path buried above a list of caveats is a path that

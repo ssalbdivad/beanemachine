@@ -152,3 +152,16 @@
   .slot-change .now{grid-column:3;grid-row:2}
 }
 .verdict-missing{margin-top:0}
+
+/* The paste route — see `readPaste` in Trade.tsx. It leads because it is the only
+   way in that another company cannot switch off. */
+.paste-roster{display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-3) 0}
+.paste-roster h3{margin:0;font-size:var(--fs-1)}
+.paste-roster p{margin:0;max-width:70ch}
+.paste-roster textarea{
+	width:100%;font:inherit;font-size:var(--fs-2);font-family:var(--mono);
+	padding:var(--sp-2);border:1px solid var(--line);border-radius:6px;
+	background:var(--sunk);color:var(--ink);resize:vertical;min-height:5.5em;
+}
+.paste-roster button{align-self:flex-start}
+.paste-note{color:var(--muted)}

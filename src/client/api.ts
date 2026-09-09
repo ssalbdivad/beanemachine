@@ -182,6 +182,11 @@ const direct = async <T,>(what: string, read: () => Promise<T>): Promise<T> => {
 export interface AvailablePool {
 	players: { yahooId: string; name: string; team: string | null; positions: string[] }[]
 	positionsRead: string[]
+	/**
+	 * Every position the sweep asked for. Absent on an older carried file, which is
+	 * why `poolIsPartial` treats absence as "cannot tell" rather than as complete.
+	 */
+	positionsRequested?: string[]
 	note: string
 	/**
 	 * ISO instant this list was read off the league, when it is known.
@@ -292,6 +297,9 @@ export const api = {
 						yahooId: x.yahooId, name: x.name, team: x.team, positions: x.positions
 					})),
 					positionsRead: pool.positionsRead,
+					// ESPN's pool is one request for the whole wire, not a sweep of nine
+					// position pages, so there is no partial-read failure mode to report and
+					// `poolIsPartial` correctly reads the absence as "cannot tell".
 					note: pool.note
 				}
 			// an empty read is a state, not an answer: fall through to whatever else
@@ -342,4 +350,32 @@ export const api = {
 				direct("Importing that league", () => importLeague(url))
 			:	yahooNeedsServer<{ key: string; league: League }>("Importing a Yahoo league")
 	}
+}
+
+
+/**
+ * Whether a free-agent read covered enough of the league to be used AS one.
+ *
+ * Yahoo throttles by serving an empty page rather than an error, so a sweep that
+ * asked for nine positions and got one is indistinguishable, in the data, from a
+ * league with one position's worth of free agents. On 2026-09-09 that is exactly
+ * what arrived: `positionsRead: ["RP"]`, 25 relievers — and the page said "25
+ * players are actually free", the board's own filter cut the streaming list to two
+ * rows, and every recommendation in the app came out of a ninth of the wire.
+ *
+ * An incomplete list is worse than an estimate. An estimate misjudges who is free;
+ * an incomplete list EXCLUDES men who are, and does it silently, because the men it
+ * leaves out look exactly like men somebody else owns.
+ *
+ * So a read that missed positions is not promoted to the exact tier. Two thirds is
+ * the bar: below it the gaps are structural rather than a league genuinely having
+ * nobody free at a position, which does happen at catcher.
+ */
+export const poolIsPartial = (pool: {
+	positionsRead: string[]
+	positionsRequested?: string[]
+}): boolean => {
+	const asked = pool.positionsRequested?.length ?? 0
+	if (!asked) return false
+	return pool.positionsRead.length < Math.ceil(asked * (2 / 3))
 }

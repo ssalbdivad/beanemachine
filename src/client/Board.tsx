@@ -9,7 +9,9 @@ import {
 	realInnings,
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
-import { canReadPool, api, ApiError, getMode, type AvailablePool } from "./api.ts"
+import {
+	canReadPool, api, ApiError, getMode, poolIsPartial, type AvailablePool
+} from "./api.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { replacementBySlot } from "../engine/trade.ts"
@@ -538,12 +540,39 @@ export const Board = ({
 		[pool]
 	)
 
+	/**
+	 * A partial read is not this league's free-agent list, so it does not become one.
+	 *
+	 * Yahoo throttles by serving an empty page rather than an error, so a sweep that
+	 * asked for nine positions and got one looks, in the data, exactly like a league
+	 * with one position's worth of free agents. On 2026-09-09 that arrived here as 25
+	 * relievers, the page said "25 players are actually free", and the streaming
+	 * board filtered itself down to two rows — every recommendation in the app drawn
+	 * from a ninth of the wire.
+	 *
+	 * Null hands the question back to the ownership estimate, which is the honest
+	 * answer: an estimate misjudges who is free, while an incomplete list EXCLUDES
+	 * men who are and does it invisibly, because the men it leaves out look exactly
+	 * like men somebody else owns.
+	 */
 	const availableNames = useMemo(
-		() => (pool && pool.players.length ? new Set(pool.players.map(p => normalizeName(p.name))) : null),
+		() =>
+			pool && pool.players.length && !poolIsPartial(pool) ?
+				new Set(pool.players.map(p => normalizeName(p.name)))
+			:	null,
+		[pool]
+	)
+	/** Positions the sweep asked for and did not get — a gap in the read, which the
+	 *  page has to distinguish from a league with nobody free there. */
+	const missedPositions = useMemo(
+		() =>
+			pool?.positionsRequested && !poolIsPartial(pool) ?
+				pool.positionsRequested.filter(x => !pool.positionsRead.includes(x))
+			:	[],
 		[pool]
 	)
 	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort } =
-		useBoard(snapshot, league, filters, availableNames, poolEligibility)
+		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]

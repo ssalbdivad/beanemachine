@@ -8,6 +8,7 @@ import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
+import { playersInText } from "../data/paste.ts"
 import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
 import "./trade.css"
 import { tradesClosed } from "./panels.tsx"
@@ -49,14 +50,19 @@ export interface TradeProps {
 	leagueKey: string | null
 	/** Snapshot load failure, passed straight through the way `Board` takes it. */
 	error: string | null
+	/** Takes the reader to the card that actually answers "what should I add" — this
+	 *  page used to answer it too, worse, and the two could disagree. */
+	onOpenBoard: () => void
 }
 
-export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
+export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: TradeProps) => {
 	const { rated, scored } = useBoard(snapshot, league, TRADE_FILTERS)
 	const [owned, setOwned] = useState<string[]>([])
 	const [storeError, setStoreError] = useState<string | null>(null)
 	const [give, setGive] = useState<string[]>([])
 	const [take, setTake] = useState<string[]>([])
+	const [pasted, setPasted] = useState("")
+	const [pasteNote, setPasteNote] = useState<string | null>(null)
 	const [ownQuery, setOwnQuery] = useState("")
 	const [takeQuery, setTakeQuery] = useState("")
 	/** Narrows the give-up side. Separate from `ownQuery`, which searches all of
@@ -255,6 +261,73 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		} finally {
 			setPulling(false)
 		}
+	}
+
+	/**
+	 * Read the team out of whatever he pasted.
+	 *
+	 * The reason this exists rather than another button that reads Yahoo: on
+	 * 2026-09-09 the Yahoo read returned 25 free agents instead of 150, then none,
+	 * then "Request denied", while the page went on offering to do it. A paste cannot
+	 * be revoked. The browser doing the reading is his, already signed in, and not
+	 * rate-limited as a scraper because it is not one — and it works on PRIVATE
+	 * leagues, which is most leagues and which nothing here has ever reached.
+	 *
+	 * The seats come with it where the paste carried them, which is what makes the
+	 * daily diff on Recommendations work: a roster page prints the slot to the left
+	 * of each name, and `playersInText` keeps it.
+	 */
+	const readPaste = () => {
+		if (!leagueKey || !snapshot) return
+		const found = playersInText(pasted, snapshot.players)
+		const byId = new Map(snapshot.players.map(pl => [pl.id, pl]))
+		if (!found.players.length) {
+			setPasteNote(
+				"No players found in that. Select your whole roster page — the names are what " +
+					"this matches on, so extra columns and adverts do no harm."
+			)
+			return
+		}
+		const keys = found.players.flatMap(f =>
+			rated.filter(r => normalizeName(r.player.name) === normalizeName(f.name)).map(r => rosterKey(r.player))
+		)
+		persist(() => store.set(leagueKey, [...new Set(keys)]))
+		const withSeats = found.players.filter(f => f.slot)
+		if (withSeats.length)
+			setSeats(
+				lineupStore.set(
+					leagueKey,
+					withSeats.map(f => ({
+						slot: f.slot!,
+						name: f.name,
+						/**
+						 * The league's own eligibility where the sweep reached him, and his
+						 * primary position where it did not.
+						 *
+						 * The map covers 328 players, not all 1,435, and an empty list means
+						 * "no slot can be proven legal for him" — so a pasted roster came back
+						 * with every man unseatable and a lineup projecting zero. The primary
+						 * position is a weaker claim and it is the same fallback the board
+						 * already makes; stating it is better than seating nobody.
+						 */
+						positions:
+							snapshot.eligibility?.[String(f.id)] ??
+							(byId.get(f.id)?.position ? [byId.get(f.id)!.position!] : []),
+						team: byId.get(f.id)?.team ?? null
+					})),
+					new Date().toISOString()
+				)
+			)
+		setPasteNote(
+			`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
+				(withSeats.length ?
+					`, ${withSeats.length} with the seat they were in — the daily lineup on Recommendations can diff against that.`
+				:	". No seats were in that text, so Recommendations will show the lineup to set rather than the changes to make.") +
+				(found.ambiguous.length ?
+					` Two different players share ${found.ambiguous.join(" and ")}, so neither was added — search for the one you own below.`
+				:	"")
+		)
+		setPasted("")
 	}
 
 	useEffect(() => {
@@ -484,6 +557,37 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						</button>
 					</div>
 				)}
+				{/**
+				  * The route that cannot be taken away.
+				  *
+				  * It leads, above the platform read, because the platform read is the one
+				  * that stops working: on 2026-09-09 the Yahoo sweep returned a sixth of
+				  * the wire, then none of it, then "Request denied", while this page went
+				  * on offering the button. A paste is the reader's own signed-in browser
+				  * doing the reading, it is not rate-limited because it is not a scraper,
+				  * and it reaches PRIVATE leagues — which is most leagues, and which
+				  * nothing else here has ever reached.
+				  */}
+				<div className="paste-roster">
+					<h3>Paste your roster</h3>
+					<p className="sub">
+						Open your team on your fantasy site, select the page, copy it, and paste it
+						here. Works on any platform, works on a private league, and brings the seat
+						each man is in with it.
+					</p>
+					<textarea
+						data-ctl="paste-roster"
+						value={pasted}
+						onChange={e => setPasted(e.currentTarget.value)}
+						placeholder={"C\tBen Rice NYY - C,1B\n1B\tJonathan Aranda TB - 1B\n…"}
+						rows={4}
+						aria-label="Paste your roster page here"
+					/>
+					<button type="button" className="chip-btn" onClick={readPaste} disabled={!pasted.trim()}>
+						Read that
+					</button>
+					{pasteNote && <p className="sub paste-note">{pasteNote}</p>}
+				</div>
 				{leagueId && (
 					<div className="pull-roster">
 						{/* The league says which team is yours only when its URL carried one.
@@ -501,9 +605,13 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								/>
 							</label>
 						)}
+						{/* No longer `primary`. This route works when the platform allows it and
+						    stops when it does not — on 2026-09-09 Yahoo answered a sweep with a
+						    sixth of the wire, then nothing, then "Request denied" — and a button
+						    styled as the main way in was making a promise this app cannot keep.
+						    The paste above it is the one that always works. */}
 						<button
 							type="button"
-							className="primary"
 							disabled={pulling || !readTeamId}
 							onClick={() => void pullRoster()}
 						>
@@ -518,7 +626,10 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								(!readTeamId ?
 									`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
 									`number to read it.`
-								:	"Only publicly-viewable leagues can be read without signing in.")}
+								:	"Only publicly-viewable leagues can be read this way, and the platform " +
+									"can refuse or throttle it at any time — Yahoo does. If it fails or comes " +
+									"back short, paste instead: that always works and reaches private leagues " +
+									"too.")}
 						</span>
 					</div>
 				)}
@@ -630,7 +741,24 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			 * page's own answer ("+33.71 Grant Taylor for Randy Vásquez") sat there.
 			 * Ordered by what each card answers without being asked, it goes first.
 			 */}
-			<AdviceCard advice={advice} seats={seats} pool={pool} platform={league.meta.platform ?? null} />
+			{/* "What to add and drop" was a second, worse answer to the question the
+			    decision card on Recommendations already answers. It required the SEATS
+			    your league has you in and an exact free-agent list, so a visitor who had
+			    just typed his team in here was told to go and read a roster, and a Yahoo
+			    user was told the page "needs the local server" — the sentence this whole
+			    audit exists to delete. The card needs neither: it works from the men you
+			    own and estimates availability from ownership when nothing has read the
+			    wire. One question, one answer, and it is the better one. */}
+			<section className="card full advice">
+				<h2>What to add and drop</h2>
+				<p className="sub">
+					On <b>Recommendations</b>, at the top — it names both sides of every move and
+					works from whatever this browser knows, including a team you entered by hand.
+				</p>
+				<button type="button" className="chip-btn" onClick={onOpenBoard}>
+					Take me there
+				</button>
+			</section>
 			<LineupCard
 				league={league}
 				lineup={lineup}
@@ -857,116 +985,6 @@ const SOURCE_CLASS: Record<Start["source"], string> = {
  * silently ignored a candidate would be indistinguishable from one that never saw
  * him.
  */
-const AdviceCard = ({
-	advice,
-	seats,
-	pool,
-	platform
-}: {
-	advice: { plan: Plan; rails: string[] } | null
-	seats: StoredLineup | null
-	pool: Set<string> | null
-	platform: string | null
-}) => {
-	if (!seats?.spots.length)
-		return (
-			<section className="card full advice">
-				<h2>What to add and drop</h2>
-				<p className="empty">
-					Read your roster above and this fills in. It needs the seats your league has
-					you in, not just who you own, because what to start and what to drop both
-					turn on where a man currently sits.
-				</p>
-			</section>
-		)
-	if (!pool?.size)
-		return (
-			<section className="card full advice">
-				<h2>What to add and drop</h2>
-				<p className="empty">
-					{platform === "yahoo" ?
-						"Your league's free agent list couldn't be read, so there is nobody to " +
-						"recommend adding. Only publicly-viewable Yahoo leagues can be read " +
-						"without signing in, and this needs the local server."
-					:	"Reading the free agent list only works for publicly-viewable Yahoo " +
-						"leagues right now, so there is nobody to recommend adding here."}
-				</p>
-			</section>
-		)
-	if (!advice) return null
-	const { plan: p, rails } = advice
-	// A rail violation is a bug in the planner, not advice to weigh. run.ts prints
-	// nothing when one fires and neither does this.
-	if (rails.length)
-		return (
-			<section className="card full advice">
-				<h2>What to add and drop</h2>
-				<ul className="notes warn">
-					{rails.map(r => (
-						<li key={r}>{r}</li>
-					))}
-				</ul>
-				<p className="sub">
-					The plan broke one of its own rules, so it is withheld rather than shown.
-				</p>
-			</section>
-		)
-	return (
-		<section className="card full advice">
-			<h2>What to add and drop</h2>
-			<p className="sub">
-				From your seats as read {seats.at.slice(0, 10)}, the fortnight board, and your
-				league&rsquo;s own free agents. Nothing here is executed — it is a
-				recommendation to review.
-			</p>
-			{p.moves.length ?
-				<ul className="advice-moves">
-					{p.moves.map(m => (
-						<li key={`${m.add}-${m.drop}`}>
-							<span className="advice-gain">+{m.gain}</span>
-							<span className="advice-swap">
-								<b>{m.add}</b> <span className="advice-score">{m.addScore}</span>
-								<span className="advice-arrow"> for </span>
-								<b>{m.drop}</b> <span className="advice-score">{m.dropScore}</span>
-							</span>
-							<span className="advice-reason">{m.reason}</span>
-						</li>
-					))}
-				</ul>
-			:	<p className="empty">No move clears the bar.</p>}
-			{/* The planner explains every move it DIDN'T make, one line per player, and
-			    on a full roster that is sixteen near-identical sentences burying the two
-			    it did. They are the honest reasoning and none is dropped — they are just
-			    a click down, where the moves are the headline. Folded wholesale rather
-			    than grouped by matching their prose: a UI that keys on the wording of an
-			    engine string breaks silently the day that string is reworded. */}
-			{p.notes.length > 0 && (
-				<details className="advice-notes">
-					<summary>
-						{p.notes.length === 1 ? "Why one other move wasn’t made" : (
-							`Why ${p.notes.length} other moves weren’t made`
-						)}
-					</summary>
-					<ul className="notes">
-						{p.notes.map(n => (
-							<li key={n}>{n}</li>
-						))}
-					</ul>
-				</details>
-			)}
-			{p.skipped.length > 0 && (
-				<details className="advice-skipped">
-					<summary>{p.skipped.length} considered and passed over</summary>
-					<ul className="notes">
-						{p.skipped.map(x => (
-							<li key={x}>{x}</li>
-						))}
-					</ul>
-				</details>
-			)}
-		</section>
-	)
-}
 
 /** What you actually start. Every spot is accounted for out loud: filled by you,
  *  covered off the wire, or empty — and an empty one is a hole, not a zero. */

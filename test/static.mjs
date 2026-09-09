@@ -274,9 +274,23 @@ await p.waitForSelector(".board-row", { timeout: 25000 })
 const tabs = await p.$$eval(".views button", n => n.map(e => e.textContent))
 await p.click(`.views button:nth-child(${tabs.findIndex(x => /my team/i.test(x)) + 1})`)
 await p.waitForSelector(".pull-roster", { timeout: 15000 })
+// Located by what it says rather than by `.primary`, which it no longer is. That
+// class was removed deliberately: this route works when the platform allows it and
+// stops when it does not — Yahoo answered a sweep with a sixth of the wire, then
+// nothing, then "Request denied" — and styling it as the main way in made a promise
+// the app cannot keep. Pasting leads now. The route still works and is still
+// asserted; it is just not the headline.
+const readButton = p.locator(".pull-roster button", { hasText: /Read my roster/ })
 t("the roster card offers to read from ESPN, naming the platform the league is on",
-  /Read my roster from ESPN/.test(await p.locator(".pull-roster button.primary").textContent()))
-await p.click(".pull-roster button.primary")
+  /Read my roster from ESPN/.test((await readButton.textContent()) ?? ""))
+t("and the paste route, which no platform can switch off, is offered above it",
+  await p.evaluate(() => {
+    const paste = document.querySelector(".paste-roster")
+    const pull = document.querySelector(".pull-roster")
+    return !!paste && !!pull &&
+      !!(paste.compareDocumentPosition(pull) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }))
+await readButton.click()
 // the note is the reader's own, and it only appears once the fetch has come back
 await p.waitForFunction(
   () => !/^This league|^Only publicly/.test(document.querySelector(".pull-roster .sub")?.textContent ?? ""),

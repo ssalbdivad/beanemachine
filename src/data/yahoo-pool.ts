@@ -124,7 +124,14 @@ export const parsePage = (htmlText: string): PoolEntry[] => {
 export const fetchAvailable = async (
 	leagueId: string,
 	sport = "baseball"
-): Promise<{ players: PoolEntry[]; positionsRead: string[]; note: string }> => {
+): Promise<{
+	players: PoolEntry[]
+	positionsRead: string[]
+	/** Every position the sweep asked for, so a caller can see a partial read for
+	 *  what it is rather than for a small league. */
+	positionsRequested: string[]
+	note: string
+}> => {
 	const players: PoolEntry[] = []
 	const seen = new Set<string>()
 	const positionsRead: string[] = []
@@ -160,13 +167,28 @@ export const fetchAvailable = async (
 				players.push(p)
 			}
 	}
+	/**
+	 * A PARTIAL sweep is not a free-agent list, and saying how many positions were
+	 * asked for is what lets a caller tell the difference.
+	 *
+	 * Yahoo throttles, and it throttles by serving an empty page rather than an
+	 * error, so a sweep that asked for nine positions and got one looks exactly like
+	 * a league with one position's worth of free agents. On 2026-09-09 that is what
+	 * happened: `positionsRead: ["RP"]`, 25 relievers, presented by the page as "25
+	 * players are actually free" — and every recommendation in the app was then drawn
+	 * from a ninth of the wire, with the streaming board narrowing to two rows. An
+	 * incomplete list is worse than an estimate, because it does not merely misjudge
+	 * who is free, it EXCLUDES men who are.
+	 */
 	return {
 		players,
 		positionsRead,
+		positionsRequested: POSITIONS,
 		note:
-			`Top 25 free agents per position (${positionsRead.join(", ")}). Yahoo serves ` +
-			`25 rows to an anonymous reader, so this is the addable pool by position ` +
-			`rather than every unrostered player.`
+			`Top 25 free agents per position (${positionsRead.join(", ")}` +
+			`${positionsRead.length < POSITIONS.length ? ` — ${POSITIONS.length - positionsRead.length} of ${POSITIONS.length} positions came back empty, which is how Yahoo throttles` : ""}). ` +
+			`Yahoo serves 25 rows to an anonymous reader, so this is the addable pool by ` +
+			`position rather than every unrostered player.`
 	}
 }
 

@@ -8,7 +8,7 @@ import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
-import { canReadPool, api, type AvailablePool } from "./api.ts"
+import { canReadPool, api, poolIsPartial, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
@@ -164,7 +164,9 @@ export const Decide = ({
 			season: league?.meta.season,
 			sport: league?.meta.sport
 		})
-			.then(p => on && p.players.length && setRead(p))
+			// a partial sweep is not a wire — see `poolIsPartial`. Left unset, the card
+			// falls through to the ownership estimate, which covers everybody.
+			.then(p => on && p.players.length && !poolIsPartial(p) && setRead(p))
 			.catch(() => {
 				// the carried copy below is the fallback, and it needs no announcement
 				// here — the board already reports why a live read failed
@@ -706,7 +708,8 @@ export const Decide = ({
 				<h2>What should I do?</h2>
 				<p>
 					Tell me who is on your team and this becomes a lineup and a list of moves.
-					It takes about a minute and none of it leaves your browser.
+					It takes about a minute, and your team is stored in this browser and nowhere
+					else.
 				</p>
 				<p>
 					<b>

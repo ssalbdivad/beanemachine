@@ -255,7 +255,11 @@ export const useBoard = (
 	availableNames?: Set<string> | null,
 	/** Eligibility as the LEAGUE's own platform states it, by normalised name, where
 	 *  the free-agent read carried it. Overlays the snapshot's Yahoo-derived map. */
-	poolEligibility?: Map<string, string[]> | null
+	poolEligibility?: Map<string, string[]> | null,
+	/** Positions the free-agent sweep asked for and did not get. Named on the page,
+	 *  because "no free catcher" and "the catcher page did not answer" are different
+	 *  facts and only one of them is about the league. */
+	missedPositions: string[] = []
 ) => {
 	// The reader's today, not the capture's. A snapshot is a set of games; which of
 	// them are still ahead of you is a question only the clock can answer.
@@ -347,7 +351,22 @@ export const useBoard = (
 				exact: true,
 				cut: null as OwnershipCut | null,
 				size: availableNames.size,
-				basisText: `read off your league's own free-agent list: ${availableNames.size} players are actually free`
+				/**
+				 * ...and which positions it never reached, because that is the difference
+				 * between "nobody is free at catcher" and "we did not look".
+				 *
+				 * Yahoo's sweep is nine separate page reads and it throttles by serving an
+				 * empty one. On 2026-09-09 eight came back and the catcher page did not —
+				 * a good read by any measure, so it is used — but a reader filtering to
+				 * catcher was then told "Nobody", about a position the list had never
+				 * seen. An absence of evidence rendered as evidence of absence is the one
+				 * mistake this whole app is built to avoid.
+				 */
+				basisText:
+					`read off your league's own free-agent list: ${availableNames.size} players are actually free` +
+					(missedPositions.length ?
+						`. ${missedPositions.join(", ")} could not be read this time, so nobody is listed at ${missedPositions.length === 1 ? "that position" : "those positions"} — that is a gap in the read, not an empty wire`
+					:	"")
 			}
 		// the same map `hydrate` builds, without re-hydrating a 2.1 MB snapshot to
 		// read one field of it
@@ -366,7 +385,7 @@ export const useBoard = (
 				cut?.basis ??
 				"nothing this page can read says who is on the wire in your league, so nobody is filtered out for it"
 		}
-	}, [availableNames, league, snapshot])
+	}, [availableNames, league, snapshot, missedPositions])
 
 	/**
 	 * Who the reader can actually get, as one test, drawn from whichever rung of the

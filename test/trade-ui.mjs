@@ -1,4 +1,5 @@
 // The trade analyzer in a real browser, against the real snapshot.
+import { readFileSync } from "node:fs"
 //
 // The claim the engine makes is that a trade is worth what it does to YOUR
 // STARTING LINEUP, so these assertions are about slots and totals rather than
@@ -156,6 +157,24 @@ t("the recommendation comes before the lineup, and both before the deal",
   at(/add and drop/i) > -1 && at(/add and drop/i) < at(/starting lineup/i) &&
     at(/starting lineup/i) < at(/the deal/i),
   cardOrder.join(" | "))
+
+/*
+ * ...and it no longer ANSWERS here, it points.
+ *
+ * This card used to propose moves of its own, and it needed the SEATS your league
+ * has you in plus an exact free-agent list to do it — so a visitor who had just
+ * typed his team in on this very page was told to go and read a roster, and a Yahoo
+ * user was told the page "needs the local server". The decision card on
+ * Recommendations needs neither and is strictly better. Two answers to one question
+ * is the thing this app keeps having to stop doing.
+ */
+const adviceCard = await page.$("section.advice")
+t("but it defers to the card that owns the question rather than answering twice",
+  !!adviceCard && /Recommendations/.test(await adviceCard.innerText()) &&
+    !/needs the local server/.test(await adviceCard.innerText()),
+  adviceCard ? (await adviceCard.innerText()).replace(/\n/g, " ").slice(0, 160) : "(no card)")
+t("and offers a control that goes there, not an instruction to go looking",
+  !!(await page.$("section.advice button")), "no control on the advice card")
 
 // The flat list of who you own is folded, because "Your starting lineup" below it
 // shows every one of the same men in the seat he holds. Folded, never dropped:
@@ -347,6 +366,69 @@ if (cfg) {
 }
 
 t("still no page errors", errors.length === 0, errors.join(" | "))
+
+/**
+ * Pasting a roster, which is the route that cannot be taken away.
+ *
+ * Every other way in depends on somebody else's permission. On 2026-09-09 the Yahoo
+ * sweep returned a sixth of the wire, then none of it, then "Request denied", while
+ * this page went on offering the button. A paste is the reader's own signed-in
+ * browser doing the reading; it is not rate-limited because it is not a scraper, and
+ * it reaches PRIVATE leagues, which is most leagues.
+ *
+ * The seats are the half that matters most: a roster page prints the slot to the
+ * left of each name, and carrying it through is what lets Recommendations show the
+ * CHANGES to make rather than a lineup to copy out by hand.
+ */
+{
+	const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+	const bats = snap.players
+		.filter(x => x.group === "hitting")
+		.sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+		.slice(0, 5)
+	const slots = ["C", "1B", "2B", "3B", "SS"]
+	const text =
+		"Pos\tPlayer\tAction\n" +
+		bats.map((x, i) => `${slots[i]}\t${x.name} ${x.team ?? ""} - ${slots[i]}\tAdd/Drop`).join("\n")
+
+	const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } })
+	page.on("dialog", d => d.accept())
+	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
+	const tab = page.locator(".views button", { hasText: /trade/i }).first()
+	if (await tab.count()) {
+		await tab.click()
+		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		t("the paste route is offered above the platform read, not below it",
+			await page.evaluate(() => {
+				const paste = document.querySelector(".paste-roster")
+				const pull = document.querySelector(".pull-roster")
+				return !pull || !!(paste.compareDocumentPosition(pull) & Node.DOCUMENT_POSITION_FOLLOWING)
+			}), "the fragile route is listed first")
+
+		await page.fill("[data-ctl=paste-roster]", text)
+		await page.click(".paste-roster button")
+		await page.waitForSelector(".paste-note", { timeout: 15000 })
+		const note = (await page.textContent(".paste-note")) ?? ""
+		t("a pasted roster page is read, and says how many it found",
+			new RegExp(`Found ${bats.length} players`).test(note), note)
+		t("and it says the seats came with them, because that is what unlocks the diff",
+			/with the seat they were in/.test(note), note)
+
+		const owned = await page.$$eval(".trade-own b", n => n.map(e => e.textContent.trim()))
+		t("the men it found really are on the team afterwards",
+			bats.every(x => owned.some(o => o.includes(x.name.split(" ").slice(-1)[0]))),
+			owned.join(", "))
+
+		// nonsense in, nothing out — and a sentence rather than a silent no-op
+		await page.fill("[data-ctl=paste-roster]", "Standings Scores Sign in Terms Privacy")
+		await page.click(".paste-roster button")
+		await page.waitForTimeout(600)
+		t("page furniture yields nobody, and says so rather than doing nothing",
+			/No players found/.test((await page.textContent(".paste-note")) ?? ""),
+			(await page.textContent(".paste-note")) ?? "")
+	}
+	await page.close()
+}
 
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)

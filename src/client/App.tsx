@@ -668,6 +668,7 @@ export const App = () => {
 						league={league ?? null}
 						leagueKey={key}
 						error={snapshotError}
+						onOpenBoard={() => setView("board")}
 					/>
 				</div>
 			: league && key ?

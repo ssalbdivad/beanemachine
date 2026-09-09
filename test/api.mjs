@@ -11,6 +11,7 @@
 // input validation — and the two routes that would leave are exercised with input
 // that is rejected before any fetch happens.
 import app from "../src/api.ts"
+import { poolIsPartial } from "../src/client/api.ts"
 
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
@@ -124,6 +125,35 @@ const call = (path, { method = "GET", body, headers = {} } = {}) =>
 	t("a URL that is not a supported league is refused by name, not fetched",
 		nonsense.status === 400 && /Unrecognized league URL/.test(said),
 		`${nonsense.status} ${said.slice(0, 120)}`)
+}
+
+// ── a throttled read is not a free-agent list ───────────────────────────────────
+//
+// Yahoo throttles by serving an EMPTY PAGE rather than an error, so a sweep that
+// asked for nine positions and got one is indistinguishable, in the data, from a
+// league with one position's worth of free agents. On 2026-09-09 that reached the
+// page as 25 relievers under the words "25 players are actually free", the streaming
+// board filtered itself to two rows, and every recommendation in the app came out of
+// a ninth of the wire.
+//
+// An incomplete list is worse than an estimate. An estimate misjudges who is free;
+// an incomplete list EXCLUDES men who are, invisibly, because the men it leaves out
+// look exactly like men somebody else owns.
+{
+  const nine = ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"]
+  t("one position out of nine is a throttled read, not a small league",
+    poolIsPartial({ positionsRead: ["RP"], positionsRequested: nine }))
+  t("and so is a third of them",
+    poolIsPartial({ positionsRead: ["RP", "SP", "C"], positionsRequested: nine }))
+  t("a complete sweep is used as what it is",
+    !poolIsPartial({ positionsRead: nine, positionsRequested: nine }))
+  t("and so is one short a position, because a league really can have no free catcher",
+    !poolIsPartial({ positionsRead: nine.slice(1), positionsRequested: nine }))
+  // An older carried file predates the field. "Cannot tell" is not "incomplete":
+  // refusing every carried pool would throw away the exact lists this app's one
+  // offline route exists to produce.
+  t("a read that does not say what it asked for is not called partial",
+    !poolIsPartial({ positionsRead: ["RP"] }))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

@@ -161,6 +161,10 @@ const tab = async (page, label) => {
 const open = async (seeds, opts = {}) => {
 	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
 	if (opts.offline) await page.route("**/api/available", r => r.abort())
+	/** Cut the two LIVE MLB reads — the schedule and the transactions feed — so the
+	 *  card has to fall back to the shipped capture. See the block at the foot of this
+	 *  file for why that fallback must never be silent. */
+	if (opts.noMlb) await page.route("**statsapi.mlb.com**", r => r.abort())
 	await page.addInitScript(([l, p, cfg]) => {
 		if (l) localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
 		if (p) localStorage.setItem("beanemachine:pool", JSON.stringify(p))
@@ -1110,6 +1114,36 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		rendered, crashes.join(" | ") || "the card never appeared")
 	t("and throws nothing at the page while doing it",
 		crashes.length === 0, crashes.join(" | "))
+	await page.close()
+}
+
+/* ── a live read that failed has to say so ───────────────────────────────────
+ *
+ * Two feeds are read live on this card: MLB's schedule, for tonight's posted lineups
+ * and probable starters, and MLB's transactions, for who went on the injured list
+ * since the capture was taken. Both fall back to the shipped snapshot when they
+ * cannot be reached, which is the right behaviour — the card is useful without them
+ * and must not go blank because somebody else's API is slow.
+ *
+ * What is not right is doing it silently, and that is what shipped: `slateError` was
+ * captured from the hook and never rendered. The capture is days old; it cannot know
+ * about tonight's card or this morning's IL move; and a card that presents it as
+ * tonight is making exactly the claim this file exists to stop it making. The reader
+ * has to be told, and told WHICH of the two failed, because they answer different
+ * questions.
+ */
+{
+	const page = await open({ lineup: seedLineup, pool: seedPool }, { noMlb: true })
+	const warn = await page.$(".decide-stale")
+	t("with MLB unreachable the card says so rather than presenting the capture as tonight",
+		!!warn, await page.$eval(".decide", e => e.innerText.slice(0, 200)))
+	if (warn) {
+		const text = (await warn.innerText()).replace(/\s+/g, " ")
+		t("and it names both feeds, because they answer different questions",
+			/lineups and injured list/.test(text), text)
+		t("and how old the thing it fell back to is",
+			/from the capture, \d+[hd] ago/.test(text), text)
+	}
 	await page.close()
 }
 

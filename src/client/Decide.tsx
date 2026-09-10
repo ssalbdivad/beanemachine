@@ -8,6 +8,7 @@ import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
+import { freshness } from "./panels.tsx"
 import { canReadPool, api, poolIsPartial, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
@@ -97,7 +98,7 @@ export const Decide = ({
 	 * the capture as it stands", which is the honest fallback rather than a blank.
 	 */
 	const captured = useMemo(() => (snapshot ? hydrate(snapshot).injuries : null), [snapshot])
-	const { merged: liveInjuries } = useInjuries(captured, snapshot?.capturedAt)
+	const { merged: liveInjuries, error: injuryError } = useInjuries(captured, snapshot?.capturedAt)
 	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
 
 	/**
@@ -939,6 +940,27 @@ export const Decide = ({
 								<> · next lock {clock(today.nextLock)}</>
 							)}
 						</span>
+						{/*
+						  A live read that failed has to say so.
+						  
+						  Both feeds fall back to the shipped capture, which is the right
+						  behaviour and the wrong thing to do silently: the capture is days old,
+						  it cannot know about tonight's card or this morning's IL move, and a
+						  card that quietly presents it as tonight is making exactly the claim
+						  this file exists to stop making. `slateError` and the injury error were
+						  both being captured and never rendered.
+						*/}
+						{(slateError || injuryError) && (
+							<span className="decide-stale">
+								couldn&rsquo;t reach MLB ({slateError ?? injuryError}) — tonight&rsquo;s{" "}
+								{slateError && injuryError ?
+									"lineups and injured list are"
+								: slateError ?
+									"lineups are"
+								:	"injured list is"}{" "}
+								from the capture, {freshness(snapshot?.capturedAt, Date.now()).label}
+							</span>
+						)}
 					</h3>
 					{/* Everyone unpriceable is not "bench everyone". A roster whose names none
 					    of the board recognises — a capture that predates a call-up, a read that

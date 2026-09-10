@@ -80,3 +80,10 @@
    not a value — but present, because a change worth making after first pitch is not
    a change at all. */
 .decide-lock{color:var(--flag);font-variant-numeric:tabular-nums}
+
+/* A live read that failed, said in the heading rather than swallowed. Warning
+   colour, because the number above it is now older than it looks. */
+.decide-stale{
+  display:block;margin-top:3px;font-family:var(--sans);font-size:var(--fs-2);
+  text-transform:none;letter-spacing:0;color:var(--flag);
+}

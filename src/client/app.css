@@ -1020,3 +1020,9 @@ kbd{
    other in the order a decision is made, and the reader who needs the second one
    has just finished the first. */
 .next-screen{grid-column:1/-1;margin:0;display:flex;justify-content:flex-end}
+
+/* The three-tap route to a working board, offered before the two-minute one. It
+   reads as an aside rather than as a step, because it is not one: it is the way to
+   see the thing work before committing a league to it. */
+.onboard-shortcut{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
+.onboard-shortcut .sub{margin:0;flex:1 1 240px;min-width:0}

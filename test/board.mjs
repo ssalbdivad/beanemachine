@@ -1596,6 +1596,25 @@ await phone.close()
   await phone.close()
 }
 
+/* ── what the league lets you spend ───────────────────────────────────────────
+ *
+ * The scarce resource on this screen is not the ranking, it is the weekly
+ * acquisition cap. A board that ignores it invites a reader to plan five adds in a
+ * league that allows two, and the cap is stated on the league's own settings page
+ * and was being read by exactly one surface (the Decide card) out of two.
+ *
+ * Both figures come from the league rather than from a default, and the test that
+ * matters is the second one: a league that states no cap must be told nothing, not
+ * told a made-up number.
+ */
+{
+  const line = await page.$eval(".board-controls + .card .sub, .card .sub", e => e.textContent.replace(/\s+/g, " "))
+  t("the board says how many adds a week this league allows",
+    /6 adds a week/.test(line), line)
+  t("and the innings floor it sets, which decides how many arms are worth adding",
+    /20 IP floor/.test(line), line)
+}
+
 /* ── Δ MINE: the board finally mentions your team ─────────────────────────────
  *
  * Every other number on this table is measured against the (teams × seats)-th man

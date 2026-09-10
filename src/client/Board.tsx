@@ -4,6 +4,7 @@ import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
 import { readView, writeView } from "./view.ts"
 import { roster } from "./roster.ts"
+import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
 	realInnings,
@@ -632,6 +633,17 @@ export const Board = ({
 		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
+	/** What this league lets you spend in a week, where it says. Null is "it did not
+	 *  say", never a default — a made-up cap is worse than no cap. */
+	const budget = useMemo(() => {
+		const raw = ((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
+			?.raw_settings ?? {}) as Record<string, string>
+		return {
+			moves: deriveMoveLimit(raw).perPeriod,
+			innings: deriveInningsMinimum(raw).perPeriod
+		}
+	}, [league])
+
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
 	/**
 	 * The availability tooltip, with the wire's own failure in it when there was one.
@@ -1134,8 +1146,31 @@ export const Board = ({
 				    playing time leans on, what each column means — is a click below, where
 				    it is available on the rare occasion anyone wants it and costs no height
 				    on the many occasions nobody does. */}
+				{/*
+				  What the league lets you SPEND, beside how many there are to spend it on.
+				  
+				  The scarce resource on this screen is not the ranking, it is the weekly
+				  acquisition cap: a board that ignores it invites a reader to plan five
+				  adds in a league that allows two. Both figures are read off the league's
+				  own settings — `deriveMoveLimit` returns null for "no maximum", which is
+				  a real and common answer and is not a large number — and neither is shown
+				  where the league did not state it.
+				*/}
 				<p className="sub">
 					<b className="count">{rows.length}</b> players · {span.range}
+					{budget.moves !== null && (
+						<>
+							{" · "}
+							<b className="count">{budget.moves}</b> add{budget.moves === 1 ? "" : "s"} a
+							week
+						</>
+					)}
+					{budget.innings !== null && (
+						<>
+							{" · "}
+							<b className="count">{budget.innings}</b> IP floor
+						</>
+					)}
 				</p>
 				{/*
 				  How much of this window MLB has actually named, MEASURED off the window

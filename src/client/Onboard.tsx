@@ -211,6 +211,33 @@ export const Onboard = ({
 						</div>
 					)}
 
+					{/*
+					  The route that ends in a ranked board in three taps, said out loud.
+					  
+					  It already existed and it was folded inside a disclosure called "Other
+					  ways in", 1,536px down a screen whose only visible path is one a phone
+					  cannot walk: selecting a whole settings page with Ctrl-A is a desktop
+					  gesture, and this app is opened on a phone. So the first-time visitor
+					  who could not paste had no visible way to see the thing work at all.
+					  
+					  It is offered as what it is — borrowed values, replaceable in a tap —
+					  and the notice above the board goes on saying so until somebody checks
+					  them. Only before a league exists: once one does, this is a second
+					  league nobody asked for.
+					*/}
+					{preset && !league && (
+						<p className="onboard-shortcut">
+							<button type="button" className="chip-btn" onClick={onUsePreset}>
+								Show me a board first
+							</button>
+							<span className="sub">
+								Starts from <b>{preset.label}</b> — standard values, nothing read from
+								your league, and the page keeps saying so until you check them. Setting
+								your own up replaces it.
+							</span>
+						</p>
+					)}
+
 					{where &&
 						step(
 							2,

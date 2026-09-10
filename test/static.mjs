@@ -203,6 +203,24 @@ t("and it does not offer Yahoo a URL import a browser cannot perform",
     const alts = document.querySelector(".onboard-alts")
     return !alts || !alts.querySelector('input[type=text]')
   }))
+/*
+ * The three-tap route, visible.
+ *
+ * It existed before this and it was folded inside a disclosure called "Other ways
+ * in", 1,536px down — while the only VISIBLE path on the screen was pasting a whole
+ * settings page, which needs Ctrl-A, which is a desktop gesture on an app that is
+ * opened on a phone. A first-time visitor who could not paste had no visible way to
+ * see the thing work at all, and a tool nobody has seen work is a tool nobody sets
+ * a league up in.
+ *
+ * Asserted as VISIBLE without opening anything, because that is the whole change.
+ */
+t("a first visit can see a board in three taps, without opening a disclosure",
+  await p.locator('.onboard-shortcut button:text-is("Show me a board first")').isVisible())
+t("and it says the values are borrowed, on the button's own line",
+  /standard values|nothing read from your league/i.test(
+    await p.$eval(".onboard-shortcut", e => e.innerText)),
+  await p.$eval(".onboard-shortcut", e => e.innerText))
 t("the tabs are disabled until there is a league, and say so",
   await p.$$eval(".views button", n => n.every(e => e.disabled)) &&
     /set a league up first/i.test(await p.$eval(".views button", e => e.title)),

@@ -3,6 +3,7 @@ import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
 import { readView, writeView } from "./view.ts"
+import { roster } from "./roster.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
 	realInnings,
@@ -130,6 +131,18 @@ const BOARD_GRID_CSS = `
 .board .board-head,.board .board-row{
 	grid-template-columns:30px minmax(0,1fr) 84px 66px 62px 86px 46px;
 }
+/* With a roster entered there is one more track: Δ MINE sits beside bscore,
+   because the two are the same subtraction against two different bars and reading
+   them side by side is the point. Declared as its own rule rather than by editing
+   the template above, so a reader with no roster is not paying a column of blanks
+   for a question he has not asked. */
+.board[data-mine] .board-head,.board[data-mine] .board-row{
+	grid-template-columns:28px minmax(0,1fr) 74px 60px 58px 54px 80px 40px;
+}
+.board[data-mine] .board-head>[data-col=mine],.board[data-mine] .board-row>[data-col=mine]{grid-column:5}
+.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{grid-column:6}
+.board[data-mine] .board-head>[data-col=conf],.board[data-mine] .board-row>[data-col=conf]{grid-column:7}
+.board[data-mine] .board-head>[data-col=luck],.board[data-mine] .board-row>[data-col=luck]{grid-column:8}
 /* Placed by NAME. app.css places the same cells by nth-child, which cannot
    survive a column being added to one row and not the other — that is on the
    record: auto-placement once put the confidence gauge under "GP" and the games
@@ -171,6 +184,12 @@ const BOARD_GRID_CSS = `
 	.board .board-head>.sort-head[data-col=conf]{display:flex}
 	.board .board-row>[data-col=conf]{display:block}
 	.board .board-head>.sort-head[data-col=luck],.board .board-row>[data-col=luck]{display:none}
+	/* Every template below has to be repeated for the roster case, because
+	   .board[data-mine] outranks a bare .board inside a media query — without these
+	   the desktop eight-track grid would apply on a tablet. */
+	.board[data-mine] .board-head,.board[data-mine] .board-row{
+		grid-template-columns:26px minmax(0,1fr) 76px 62px 56px 58px 86px;gap:var(--sp-2);
+	}
 }
 /* Under 640px only two numbers fit beside the name — measured at 390px the board
    is 300px wide. They used to be uscore and bscore, and uscore is the column that
@@ -185,6 +204,20 @@ const BOARD_GRID_CSS = `
 	.board .board-head,.board .board-row{
 		grid-template-columns:24px minmax(0,1fr) 56px 62px;gap:var(--sp-2);
 	}
+	/* Four tracks is what 300px of board holds, and Δ MINE is the more useful of the
+	   two value columns to a reader who has entered a team: it is about HIS roster.
+	   So on a phone it takes uscore's place rather than adding a fifth. */
+	.board[data-mine] .board-head,.board[data-mine] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 56px 62px;gap:var(--sp-2);
+	}
+	.board[data-mine] .board-head>.sort-head[data-col=uscore],
+	.board[data-mine] .board-row>[data-col=uscore]{display:none}
+	.board[data-mine] .board-head>[data-col=mine],
+	.board[data-mine] .board-row>[data-col=mine]{grid-column:3;display:block}
+	.board[data-mine] .board-head>[data-col=bscore],
+	.board[data-mine] .board-row>[data-col=bscore]{grid-column:4}
+	.board[data-mine] .board-head>[data-col=games],
+	.board[data-mine] .board-row>[data-col=games]{display:none}
 	.board .board-head>.sort-head[data-col=conf],.board .board-row>[data-col=conf]{display:none}
 	.board:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore],
 	.board:not([data-sort=uscore]) .board-row>[data-col=uscore]{display:none}
@@ -465,12 +498,38 @@ const StartLine = ({ s }: { s: Starts }) => {
 export const Board = ({
 	snapshot,
 	league,
+	leagueKey,
 	error
 }: {
 	snapshot: Snapshot | null
 	league: League | null
+	/** Which league's roster to price each row against. Null is a real state — a
+	 *  reader who has not entered a team gets the generic bar and no Δ MINE. */
+	leagueKey: string | null
 	error: string | null
 }) => {
+	/**
+	 * Your own men, so a row can be priced against the seat it would actually take.
+	 *
+	 * The board never mentioned your team: every bscore was measured against the
+	 * (teams x seats)-th man in the league, which is the bar for the league and not
+	 * the bar for you. Guarded, because `roster.of` throws on a corrupt store and a
+	 * bad localStorage key must not blank the one screen that ranks anything.
+	 */
+	const myNames = useMemo(() => {
+		if (!leagueKey || !snapshot) return null
+		let held: string[]
+		try {
+			held = roster.of(leagueKey)
+		} catch {
+			return null
+		}
+		if (!held.length) return null
+		const ids = new Set(held.map(k => Number(k.split(":")[0])))
+		return new Set(
+			snapshot.players.filter(p => ids.has(p.id)).map(p => normalizeName(p.name))
+		)
+	}, [leagueKey, snapshot])
 	/**
 	 * Opens on the question this reader last asked, not on a guess about a stranger.
 	 * Only mode, window and moves are restored — see `view.ts` for why the filters
@@ -570,7 +629,7 @@ export const Board = ({
 		[pool]
 	)
 	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort } =
-		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions)
+		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
@@ -1183,7 +1242,7 @@ export const Board = ({
 				    here in the first place. The board ranks; the card decides. */}
 				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
 				    uscore column back on a phone when the board is ranked by it. */}
-				<div className="board" data-sort={filters.sort} data-mode={filters.mode}>
+				<div className="board" data-sort={filters.sort} data-mode={filters.mode} data-mine={myNames ? "" : undefined}>
 					{/* Seven columns, each answering a different question. `proj pts` and
 					    `waiver pts` used to sit here too, but bscore is one minus the other,
 					    so the table stated the same fact three times; the arithmetic is in
@@ -1202,6 +1261,19 @@ export const Board = ({
 							<SortHead col="pts" field="points" filters={filters} setFilters={setFilters} right>pts</SortHead>
 						:	<SortHead col="uscore" field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>}
 						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
+						{/* Δ MINE: what he gains over the man he would actually displace on YOUR
+						    roster. bscore is measured against the (teams x seats)-th man in the
+						    league — the right unit for "who is the best available player" and not
+						    the unit a move is made in, because a manager is choosing between this
+						    man and the worst man he owns who could hold that seat. A deep outfield
+						    makes a good free-agent outfielder worth nothing to him; a hole at
+						    catcher makes a mediocre one worth a great deal. Rendered only when a
+						    roster has been entered — a column of blanks teaches nothing. */}
+						{myNames && (
+							<SortHead col="mine" field="deltaMine" filters={filters} setFilters={setFilters} right>
+								Δ mine
+							</SortHead>
+						)}
 						{/* Not "GP" any more. GP is the games a player's TEAM plays, which for a
 						    starting pitcher is the wrong number by about a factor of six: on the
 						    committed fixture the median starter with published turns has 3.0 of
@@ -1237,6 +1309,7 @@ export const Board = ({
 							r={r}
 							stream={filters.mode === "stream"}
 							starts={startsFor(r)}
+							mine={!!myNames}
 							/* the reader's budget, counted down the ranking he is actually
 							   looking at — his filters have already decided who is on it */
 							open={open === r.player.id}
@@ -1396,6 +1469,8 @@ const BillysPick = ({
 
 const COLUMN_HELP: Record<NonNullable<Filters["sort"]>, string> = {
 	name: "Sort by player name.",
+	deltaMine:
+		"\u0394 mine \u2014 what adding him gains over the man he would actually displace on YOUR roster, over this window. bscore prices every row against the (teams \u00d7 seats)-th man in the league, which is the bar for the league; this is the bar for you. A deep outfield makes a good free-agent outfielder worth nothing to you, and a hole at catcher makes a mediocre one worth a great deal. Blank where nobody you own is eligible for a seat he could take, or where he is already yours.",
 	uscore:
 		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. The ownership it divides by is printed under it; \u201cunlisted\u201d means Yahoo prices no ownership for him — unknown, not unowned, so there is no uscore either.",
 	bscore:
@@ -1584,11 +1659,16 @@ const Row = ({
 	r,
 	stream,
 	starts,
+	mine,
 	open,
 	onToggle
 }: {
 	rank: number
 	r: BoardRow
+	/** Whether a roster has been entered, so the Δ MINE cell exists at all. The head
+	 *  and the row must agree about the column count or the named grid placement
+	 *  silently leaves one of them a track short. */
+	mine: boolean
 	/** On the Streaming tab, where the row answers a different question and
 	 *  therefore carries different columns — see STREAM_GRID_CSS. */
 	stream: boolean
@@ -1673,6 +1753,19 @@ const Row = ({
 				}
 			</span>}
 			<span className="r bscore" data-col="bscore">{r.bscore}</span>
+			{mine && (
+				<span
+					className={`r gap${(r.deltaMine ?? 0) > 0 ? " up" : ""}`}
+					data-col="mine"
+					title={
+						r.deltaMine === null ?
+							"Nobody you own is eligible for a seat he could take, or he is already yours — so there is no man for him to displace and no number to state."
+						:	`Adding him and benching your worst eligible man is worth this much over the window, in your league's points. bscore beside it is the same subtraction against the league's generic replacement instead of against your roster.`
+					}
+				>
+					{r.deltaMine === null ? "—" : r.deltaMine > 0 ? `+${r.deltaMine}` : r.deltaMine}
+				</span>
+			)}
 			<Window r={r} />
 			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
 			{!stream && <span

@@ -80,7 +80,6 @@ type StoreState = "reading" | "read" | "unreadable"
 const LEAGUE_LABEL: Record<View, string> = {
 	board: "Deciding for",
 	wire: "Scoring these picks against",
-	league: "League being edited",
 	trade: "League and team"
 }
 
@@ -692,6 +691,7 @@ export const App = () => {
 						key={wireKey}
 						snapshot={snapshot}
 						league={league ?? null}
+						leagueKey={key}
 						error={snapshotError}
 					/>
 				</div>
@@ -736,33 +736,7 @@ export const App = () => {
 						/>
 					:	null}
 				</>
-			: league && key ?
-				<LeagueEditor
-					key={key}
-					leagueKey={key}
-					league={league}
-					snapshot={snapshot}
-					onSaved={next => {
-						adopt(next, key)
-						acknowledge()
-						show("Saved to this browser")
-					}}
-					onError={m => show(m, true)}
-					run={run}
-				/>
-			:	<div className="grid">
-					<section className="card full">
-						<h2>League setup</h2>
-						<p className="empty">
-							{loading ?
-								"Reading the leagues stored in this browser…"
-							: loadError ?
-								"There is nothing to edit until the store above is replaced."
-							:	"No league to edit yet — import one from its URL, or press New, and its scoring, slots and team count appear here."}
-						</p>
-					</section>
-				</div>
-			}
+			:	null}
 
 			<Colophon />
 

@@ -651,7 +651,17 @@ export const PresetNote = ({
 export { IMPORT_COMMAND } from "./command.ts"
 import { IMPORT_COMMAND } from "./command.ts"
 
-export type View = "board" | "wire" | "league" | "trade"
+/**
+ * Three screens. "league" was a fourth and is gone: the League setup editor is now
+ * the lower half of Setup, and leaving the value in this union kept a second,
+ * unreachable copy of that editor alive in App.tsx — which is exactly how a
+ * refactor reintroduces a surface somebody removed on purpose.
+ *
+ * The ids are the ones the views have always had rather than renamed to match the
+ * new labels, because they are also the key `view.ts` stores in this browser: a
+ * rename here silently drops every returning reader back on the default screen.
+ */
+export type View = "board" | "wire" | "trade"
 
 /**
  * The four tabs, in DOM order — which is deliberately not the order a season is

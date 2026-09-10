@@ -697,30 +697,85 @@ t("the paste wrote both stores under one league key — the ids, and the seats",
 	JSON.stringify({ roster: stored.roster[leagueKey]?.length, lineup: stored.lineup[leagueKey]?.spots?.length }))
 
 /**
- * THE SEATING BUG, asserted where it was measured.
+ * THE SEATING BUG, asserted on the exact value that was wrong.
  *
- * `legalSlotsFor` compares a man's `positions` against the league's `slot_accepts`
- * lists, which are written in SLOT names — "OF", "SP", "Util". The fallback handed it
- * MLB's raw position instead — "CF", "P" — which matches no slot at all, and the
- * league's own eligibility grid covers only 328 of 1,446 players, so a hand-entered
- * roster was seated off the fallback and the fallback never worked: ONE man out of
- * eighteen got a seat. Measured on a pasted 23-man roster, 1 seat filled and 16.41
- * projected became 3 seats and 31.92 once `slotsFor` was applied in `rosterFromPaste`.
+ * `legalSlotsFor` decides whether a man may sit in a seat by comparing his stored
+ * `positions` against the league's own `slot_accepts` lists, and those lists are
+ * written in SLOT names: this league accepts C, 1B, 2B, 3B, SS, OF into the seats of
+ * the same name, {C,1B,2B,3B,SS,OF} into Util, and {SP,RP} into P. The paste's
+ * fallback stored MLB's RAW POSITION instead — "CF", "LF", "P" — and not one of those
+ * three tokens appears in any accepts list, so they matched nothing. The league's own
+ * eligibility grid, which would have covered for it, holds only 328 of 1,446 players.
+ * Measured on a pasted 23-man roster: ONE seat filled out of eighteen, 16.41 projected.
+ * With `slotsFor` from src/engine/bscore.ts applied in `rosterFromPaste` it was 3 seats
+ * and 31.92.
  *
- * It is asserted here rather than in test/paste.mjs because the failure was invisible
- * at every single layer: the paste said "14 with the seat", the store held fourteen
- * spots, the team listed fourteen men, and the lineup card still projected one. Only
- * a claim that ties the pasted COUNT to the priced TOTAL catches it, and that tie
- * crosses the paste, the store and the lineup planner.
+ * Two things about how this is asserted, both learned the hard way on this journey.
+ *
+ * It is asserted on the STORED POSITIONS rather than on the projected total, because
+ * the total cannot fail: the first draft of this claim was `total > 20` — the bug's
+ * 16.41 against the fix's 31.92 — and on this journey's fourteen men the card projects
+ * 1472.91. Seventy-three times clear of the line is not a test, and it would have
+ * passed with thirteen of the fourteen men unseated.
+ *
+ * Nor is it asserted on how many seats the roster fills, which is the quantity the fix
+ * was reported in but is not a property of the fix: five of eighteen here, because
+ * these fourteen men came off the TOP of a board already filtered to players nobody
+ * has, and at most slots the wire's replacement bar legitimately beats them. A planner
+ * preferring a better man is not a seating failure, so counting seats would make this
+ * claim fail on a recapture that moved the bar.
+ *
+ * What IS a property of the fix, and is false in exactly the broken case, is that every
+ * token the paste wrote is one this league's seats can accept. The accepts lists are
+ * read out of the stored config rather than written here, so the claim cannot drift
+ * from the league the app is actually using.
  */
+const seatVocabulary = await page.evaluate(() => {
+	const cfg = JSON.parse(localStorage.getItem("beanemachine:config") ?? "{}")
+	const league = Object.values(cfg.leagues ?? {})[0]
+	const accepts = league?.roster?.slot_accepts ?? {}
+	return [...new Set(Object.values(accepts).flatMap(a => (Array.isArray(a) ? a : [])))]
+})
+/**
+ * AT LEAST ONE accepted token per man, not every token accepted, and the difference
+ * is load-bearing rather than pedantry.
+ *
+ * `legalSlotsFor` keeps a seat if ANY of the man's tokens appears in that seat's
+ * accepts list, so a redundant token costs nothing — and `slotsFor` emits two of them
+ * on purpose: "Util" beside a bat's real position and "P" beside SP or RP, so that a
+ * caller reading the list as "seats he could sit in" gets the right answer. Neither
+ * string appears in any accepts list in this league (Util accepts C/1B/2B/3B/SS/OF; P
+ * accepts SP/RP), so a first draft of this assertion demanding every token be accepted
+ * failed on "Util,P" while the seating was working perfectly.
+ *
+ * What the bug did was leave a man with NO accepted token at all: "CF" alone, or "P"
+ * alone. That is the claim, made per man so one well-formed spot cannot cover for
+ * thirteen broken ones.
+ */
+const unseatableMen = (stored.lineup[leagueKey]?.spots ?? [])
+	.filter(sp => !(sp.positions ?? []).some(p => seatVocabulary.includes(p)))
+	.map(sp => `${sp.name} [${(sp.positions ?? []).join("/") || "no positions at all"}]`)
+t("this league's seats accept a vocabulary worth checking against",
+	seatVocabulary.length >= 6, seatVocabulary.join(","))
+t("every man the paste stored can legally sit somewhere — none was written in MLB's own positions",
+	(stored.lineup[leagueKey]?.spots ?? []).length === mine.length && unseatableMen.length === 0,
+	unseatableMen.join(" | "))
+/**
+ * And the consequence, because a stored token is only worth checking if it reaches a
+ * seat: an outfielder's raw MLB position is CF, LF or RF and none of the three is
+ * accepted anywhere, so an OF seat holding a man off this roster is a thing the broken
+ * fallback could not produce. The slot is read off the lineup card's own rows.
+ */
+const ownSeats = await page.$$eval(".lineup-row.roster", n =>
+	n.map(r => r.querySelector(".code")?.textContent.trim()))
+const spotsLine = (await page.textContent(".lineup-unit")).replace(/\s+/g, " ").trim()
 const lineupTotalAfterPaste = num(await page.textContent(".lineup-total"))
-// Printed on a pass as well as a failure, because it is the measurement the fix was
-// reported in and a threshold nobody can see the margin on is a threshold that can
-// rot silently. 16.41 off 23 men was the bug; 31.92 off 23 was the fix.
-console.log(`      measured: ${mine.length} men pasted, the lineup card projects ${lineupTotalAfterPaste}`)
-t("a pasted roster is really seated, not seated once and dropped thirteen times",
-	lineupTotalAfterPaste > 20,
-	`${lineupTotalAfterPaste} projected from ${mine.length} pasted men (the bug scored 16.41 off 23)`)
+// Printed on a pass as well as a failure: this is the measurement the seating fix was
+// reported in, and a count nobody can see is a count that can rot quietly.
+console.log(`      measured: ${mine.length} men pasted, ${spotsLine}, ${lineupTotalAfterPaste} projected`)
+t("and those seats are really filled — including one no raw MLB position can reach",
+	ownSeats.length > 1 && ownSeats.includes("OF") && lineupTotalAfterPaste > 0,
+	`seats off this roster: ${ownSeats.join(",") || "none"} — ${spotsLine}`)
 
 // --- 6. the payoff: the seats entered on Setup are tonight's instructions ------
 

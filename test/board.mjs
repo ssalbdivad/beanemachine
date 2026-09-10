@@ -1596,7 +1596,78 @@ await phone.close()
   await phone.close()
 }
 
-await browser.close()
+/* ── Δ MINE: the board finally mentions your team ─────────────────────────────
+ *
+ * Every other number on this table is measured against the (teams × seats)-th man
+ * in the LEAGUE. That is the right unit for "who is the best available player" and
+ * it is not the unit a move is made in: a manager is not choosing between this man
+ * and an abstraction, he is choosing between this man and the worst man he owns who
+ * could hold that seat. Two audits found the same gap independently — the board
+ * never once referenced the reader's own roster — and this is the column that closes
+ * it.
+ *
+ * The properties that matter are that it is ABSENT without a roster (a column of
+ * blanks teaches nothing), that it DIFFERS from bscore (or it is decoration), and
+ * that a null is a null: "nobody you own could be displaced by him" is the absence
+ * of an answer, never a zero.
+ */
+{
+  const dm = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+  await dm.goto(BASE, { waitUntil: "domcontentloaded" })
+  await dm.waitForSelector(".views button", { timeout: 30000 })
+  await dm.click('.views button:has-text("Wire")')
+  await dm.waitForSelector(".board-row", { timeout: 30000 })
+  t("with no roster entered the board carries no Δ MINE column",
+    (await dm.$$(".board-head [data-col=mine]")).length === 0)
 
+  // A team, entered the way a reader enters one.
+  const roster = await dm.evaluate(async () => {
+    const snap = await (await fetch("/snapshot.json")).json()
+    const bats = snap.players.filter(p => p.group === "hitting")
+      .sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+    const arms = snap.players.filter(p => p.group === "pitching")
+      .sort((a, b) => (b.stats?.outs ?? 0) - (a.stats?.outs ?? 0))
+    // deliberately NOT the best men: a roster of stars has nothing to displace, and
+    // the whole column is about what he would displace
+    const rows = []
+    const seats = ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "Util", "Util"]
+    seats.forEach((s, i) => rows.push(`${s}\t${bats[120 + i * 4].name}`))
+    ;["SP", "SP", "RP", "RP", "P", "P"].forEach((s, i) => rows.push(`${s}\t${arms[70 + i].name}`))
+    return rows.join("\n")
+  })
+  await dm.click('.views button:has-text("Setup")')
+  await dm.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
+  await dm.fill('textarea[data-ctl="paste-roster"]', roster)
+  await dm.click('.paste-roster button:text-is("Read that")')
+  await dm.waitForTimeout(800)
+  await dm.click('.views button:has-text("Wire")')
+  await dm.waitForSelector(".board-row", { timeout: 30000 })
+  await dm.waitForTimeout(1200)
+
+  const head = await dm.$$eval(".board-head > *", n => n.map(e => e.textContent.trim()))
+  t("with a roster it appears, beside bscore",
+    head.some(h => /mine/i.test(h)), head.join(" | "))
+  const pairs = await dm.$$eval(".board-row", rs =>
+    rs.slice(0, 20).map(r => ({
+      b: r.querySelector("[data-col=bscore]")?.textContent.trim(),
+      m: r.querySelector("[data-col=mine]")?.textContent.trim()
+    })))
+  t("every row carries the cell, so the grid cannot go a track short",
+    pairs.every(p => p.m !== undefined && p.m !== ""), JSON.stringify(pairs.slice(0, 3)))
+  // If it agreed with bscore on every row it would be a second copy of a number the
+  // table already has. The point is that a deep position and a hole price the same
+  // free agent differently.
+  const differs = pairs.filter(p => p.m !== "—" && Math.abs(Number(p.m) - Number(p.b)) > 0.5)
+  t("and it says something bscore does not, on most rows",
+    differs.length >= pairs.length / 2,
+    `${differs.length} of ${pairs.length} differ — ${JSON.stringify(pairs.slice(0, 3))}`)
+  // A null is a null. Rendering "nobody you own could be displaced by him" as 0
+  // would put men the column cannot price among men it prices at nothing.
+  t("a row it cannot price shows a dash, never a zero",
+    pairs.every(p => p.m !== "0" && p.m !== "0.0"), JSON.stringify(pairs.map(p => p.m)))
+  await dm.close()
+}
+
+await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

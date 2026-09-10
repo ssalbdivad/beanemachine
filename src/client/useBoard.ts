@@ -18,7 +18,26 @@ export type { Ranked }
  * `true` / `false` are claims; `null` is the refusal to make one. Nothing is hidden
  * on a null — a man we cannot price is a man we have no grounds to remove.
  */
-export type BoardRow = Ranked & { free: boolean | null }
+export type BoardRow = Ranked & {
+	free: boolean | null
+	/**
+	 * What ADDING him would gain over the man he would actually displace on YOUR
+	 * roster, in this league's points, over the window on screen.
+	 *
+	 * bscore prices every row against a generic (teams x seats)-th man — the bar for
+	 * the league, not for you. It is the right unit for "who is the best available
+	 * player" and it is not the unit a manager makes a move in, because he is not
+	 * choosing between this man and an abstraction, he is choosing between this man
+	 * and the worst man he owns who could hold that seat. Two of them can differ by
+	 * a lot: a deep outfield makes a good free-agent outfielder worth nothing to you
+	 * and a hole at catcher makes a mediocre one worth a great deal.
+	 *
+	 * Null means the question does not apply — he is already yours, nobody you own
+	 * is eligible for a seat he could take, or no roster has been entered. Null is
+	 * not zero and must never render as one.
+	 */
+	deltaMine: number | null
+}
 
 /**
  * The ranking engine is pure, so it runs here in the browser against a snapshot of
@@ -119,6 +138,10 @@ export interface Filters {
 		| "contact"
 		| "replacement"
 		| "confidence"
+		/** What he gains over the man he would displace on YOUR roster — see
+		 *  `BoardRow.deltaMine`. Null-sorted last, because "no man to displace" is not
+		 *  a small number, it is the absence of one. */
+		| "deltaMine"
 		| "name"
 	desc: boolean
 }
@@ -273,7 +296,11 @@ export const useBoard = (
 	/** Positions the free-agent sweep asked for and did not get. Named on the page,
 	 *  because "no free catcher" and "the catcher page did not answer" are different
 	 *  facts and only one of them is about the league. */
-	missedPositions: string[] = []
+	missedPositions: string[] = [],
+	/** Your own men, by normalised name, so a row can be priced against the seat it
+	 *  would actually take rather than against the league's generic bar. Empty or
+	 *  absent means no roster has been entered and the column stays blank. */
+	myNames?: Set<string> | null
 ) => {
 	/**
 	 * The injured list, brought up to date from MLB rather than read off a capture.
@@ -548,10 +575,45 @@ export const useBoard = (
 	 * list arriving. Folding them together would re-rate the whole pool the moment
 	 * the wire responded.
 	 */
+	/**
+	 * The worst man you own who could hold each seat, in projected points.
+	 *
+	 * One pass over the roster rather than a lineup solve per row: `planSwaps` does
+	 * the exact version and costs a simulation each time, which is right for the two
+	 * moves the Today card recommends and wrong for a thousand rows. What this asks
+	 * is the cheap, honest question a manager asks while scanning — "who would come
+	 * off for him" — and it answers it with the lowest-projecting of your men who is
+	 * eligible for a seat this man could take.
+	 */
+	const worstMineBySlot = useMemo(() => {
+		if (!myNames?.size) return null
+		const worst = new Map<string, number>()
+		for (const r of rated) {
+			if (!r.rateable || !myNames.has(normalizeName(r.player.name))) continue
+			for (const slot of r.slots) {
+				const held = worst.get(slot)
+				if (held === undefined || r.points < held) worst.set(slot, r.points)
+			}
+		}
+		return worst.size ? worst : null
+	}, [rated, myNames])
+
 	const board: BoardRow[] = useMemo(
 		() =>
 			rated.map(r => ({
 				...r,
+				deltaMine:
+					!worstMineBySlot || !r.rateable || myNames?.has(normalizeName(r.player.name)) ?
+						null
+					:	(() => {
+							// The seat he would take is the one where he displaces the least —
+							// a manager benches his worst eligible man, not his worst man.
+							const floors = r.slots
+								.map(slot => worstMineBySlot.get(slot))
+								.filter((v): v is number => v !== undefined)
+							if (!floors.length) return null
+							return Math.round((r.points - Math.min(...floors)) * 10) / 10
+						})(),
 				free:
 					availability.basis === "pool" ?
 						availableNames!.has(normalizeName(r.player.name))
@@ -562,7 +624,7 @@ export const useBoard = (
 						})
 					:	null
 			})),
-		[rated, availability, availableNames, valueRank]
+		[rated, availability, availableNames, valueRank, worstMineBySlot, myNames]
 	)
 
 	/** Which sides this league actually scores — an unconfigured template scores
@@ -757,6 +819,10 @@ export const useBoard = (
 				case "points": return r.points
 				case "replacement": return r.replacement
 				case "confidence": return r.confidence.value
+				// -Infinity, not 0: "nobody you own could be displaced by him" is the
+				// absence of an answer, and sorting it beside a genuine zero would put men
+				// the column cannot price in among men it prices at nothing.
+				case "deltaMine": return r.deltaMine ?? -Infinity
 				case "undervaluation": return r.undervaluation ?? -1
 				case "uscore": return r.uscore ?? -Infinity
 				case "marketEdge": return r.marketEdge ?? -Infinity

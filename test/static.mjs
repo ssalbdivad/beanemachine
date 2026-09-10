@@ -606,11 +606,27 @@ t("and it says ESPN imports here, so it can't be read as a blanket refusal",
 // The refusal has to end somewhere a visitor can go. It used to end at "run a
 // server", said to somebody who opened a hosted page precisely because they were
 // not going to run one — and it named `nub`, a command that does not exist on a
-// machine that just cloned this repo. Now it names the file route and the command
-// src/cli.ts actually prints for itself.
-t("and it names the route that works for Yahoo: read it locally, carry the file back",
-  /src\/cli\.ts/.test(yahooMsg) && /drop that file/i.test(yahooMsg) && !/\bnub\b/.test(yahooMsg),
-  yahooMsg)
+// machine that just cloned this repo.
+//
+// It then named `node --experimental-strip-types src/cli.ts <url>`, which is what
+// this assertion pinned, and that was no better: the flag has not been required
+// since node 22.18 and the path only resolves inside a checkout of the repository.
+// test/leagues.mjs had forbidden that exact string since IMPORT_COMMAND was
+// written; this copy escaped it by being a second, hand-written copy of the same
+// sentence, inside the one message a Yahoo user is the only reader of.
+//
+// So the claim is now asserted against the SHARED constant rather than against a
+// path: whatever src/client/command.ts says is what the refusal has to say, and
+// leagues.mjs is what keeps that constant runnable.
+{
+  const { IMPORT_COMMAND } = await import("../src/client/command.ts")
+  t("and it names the route that works for Yahoo: read it locally, carry the file back",
+    yahooMsg.includes(IMPORT_COMMAND) && /drop that file/i.test(yahooMsg) && !/\bnub\b/.test(yahooMsg),
+    yahooMsg)
+  t("and the command it names is one a visitor with no clone could actually run",
+    /^npx --yes github:/.test(IMPORT_COMMAND) && !/experimental-strip-types/.test(IMPORT_COMMAND),
+    IMPORT_COMMAND)
+}
 
 // A URL that is no league at all must not be blamed on Yahoo either — that is the
 // shape the message took when the static build had one refusal for everything.

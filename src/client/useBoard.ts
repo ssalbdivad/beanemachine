@@ -7,6 +7,7 @@ import {
 } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
 import { resolvePeriod, windowFrom, withinDays } from "../engine/period.ts"
+import { useInjuries } from "./useInjuries.ts"
 
 export type { Ranked }
 
@@ -274,6 +275,22 @@ export const useBoard = (
 	 *  facts and only one of them is about the league. */
 	missedPositions: string[] = []
 ) => {
+	/**
+	 * The injured list, brought up to date from MLB rather than read off a capture.
+	 *
+	 * The board excludes injured men from the ranking and marks them where it keeps
+	 * them, and it was doing both against a file that is right on the day it is built
+	 * and wrong every day after. The expensive direction is the one that ranks a man
+	 * who went on the list yesterday as a free agent worth adding — a recommendation
+	 * the reader's own league page contradicts before he has finished reading it.
+	 *
+	 * Null means "use the capture as it stands", which is the honest fallback: the
+	 * board is useful without the overlay and must not empty because MLB is slow.
+	 * The request is shared with the Today screen — see `useInjuries`.
+	 */
+	const captured = useMemo(() => (snapshot ? hydrate(snapshot).injuries : null), [snapshot])
+	const { merged: liveInjuries } = useInjuries(captured, snapshot?.capturedAt)
+	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
 	// The reader's today, not the capture's. A snapshot is a set of games; which of
 	// them are still ahead of you is a question only the clock can answer.
 	const period = useMemo(() => {
@@ -469,7 +486,7 @@ export const useBoard = (
 				available: gettable,
 				players: h.players,
 				underlying: h.underlying,
-				injuries: h.injuries,
+				injuries,
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: horizon.games,
 				opponentsByTeam: horizon.opponents,
@@ -488,7 +505,7 @@ export const useBoard = (
 			),
 			h.ownership
 		)
-	}, [snapshot, league, filters.mode, week, longWindows, gettable])
+	}, [snapshot, league, filters.mode, week, longWindows, gettable, injuries])
 
 	/**
 	 * Can the reader actually add this man — and how sure is the answer.

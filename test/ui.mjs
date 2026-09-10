@@ -1,7 +1,13 @@
 import { chromium, firefox } from "playwright-core"
 import { readFileSync } from "node:fs"
 
-const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
+// Defaults to THIS repo's dev port. It used to default to :5173, which is Vite's
+// own default and therefore belongs to whichever project on the machine started
+// first — here that is another live app, and pointing a suite that clears
+// localStorage and types into forms at somebody else's running site is a real
+// hazard, not just a wrong-port failure. The wordmark check below still exists
+// because a 200 on any port is not proof of identity.
+const BASE = process.env.BASE ?? "http://127.0.0.1:5299"
 // Leagues live in the browser, so this suite runs against a fresh profile that
 // seeds itself from the committed scoring.json and writes only to localStorage.
 // Nothing here can reach the file on disk, which is asserted below rather than
@@ -80,8 +86,8 @@ page.on("console", m => {
 
 await page.goto(BASE, { waitUntil: "networkidle" })
 
-// A 200 on this port is not proof it is this app: :5173 is a common default and
-// another project's dev server answers it just as happily, after which every
+// A 200 on this port is not proof it is this app: a stale dev server for another
+// project answers a goto just as happily, after which every
 // assertion below fails as a selector timeout that reads like a UI defect. The
 // wordmark is the cheapest proof of identity, so it is checked before anything
 // else and stops the run rather than letting the next wait speak for it.
@@ -89,12 +95,76 @@ const wordmark = await page.waitForSelector("h1", { timeout: 15000 }).then(h => 
 t("the page under test is beanemachine", wordmark === "beanemachine",
   `BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
 if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
-// the recommendation board is the default view; the config editor is a tab
-const toLeagueSetup = async pg => {
+/**
+ * ── Navigating by the tab's NAME, never by its index ─────────────────────────────
+ *
+ * Every click in this file used to be `.views button:nth-child(N)`, and the app just
+ * went from four tabs to three: "Recommendations | League setup | My team & trades"
+ * became "Today | Wire | Setup", the league editor this suite is almost entirely
+ * about moved from the second tab to the THIRD — underneath the team panel — and the
+ * tab that used to be second no longer exists. Every `nth-child(2)` in here silently
+ * became a click on Wire, and the first one took the whole run down as a 30s selector
+ * timeout that read like a broken editor.
+ *
+ * An index encodes a fact nobody promised: the order of the nav. A name encodes the
+ * thing the assertion actually depends on — which screen owns the job. So navigation
+ * goes through `screen()`, which matches the visible label exactly (`:text-is`, not
+ * `:has-text`, so "Setup" cannot also match a future "Setup help"), and the next
+ * rename is one line here instead of a dozen index bumps scattered through the file.
+ */
+const screen = async (pg, label) => {
   await pg.waitForSelector(".views button")
-  await pg.click('.views button:nth-child(2)')
-  await pg.waitForSelector(".grid section.card .rows")
+  await pg.click(`.views button:text-is("${label}")`)
 }
+
+/**
+ * The league editor now SHARES its screen with the team panel, so "the first card in
+ * the grid" no longer means what it did.
+ *
+ * Setup renders Trade's grid (My team, What to add and drop, your lineup, The deal),
+ * then the editor's own two grids — This league / Scoring period, then batting,
+ * pitching, slots, eligibility, needs-review, league rules. The old
+ * `.grid section:nth-of-type(1)` matched the first section of EVERY grid on the page,
+ * which on this screen is "My team", and `.code`/`input.val` reads through it came
+ * back empty rather than wrong — the worst shape for a failure, because an empty list
+ * makes `codes.indexOf("HR")` return -1 and every value assertion below it reads a
+ * field that was never found.
+ *
+ * Addressing the card by its own heading is both narrower and stable: it survives the
+ * cards being reordered, regrouped into a different number of grids, or moved onto
+ * another screen again — all three of which have now happened once.
+ */
+const BATTING = 'section.card:has(h2:text-is("Batting"))'
+const PITCHING = 'section.card:has(h2:text-is("Pitching"))'
+
+// Setup is the third tab and the editor is the lower half of it; the wait is on a
+// stat table rather than on the tab being marked current, because the team panel
+// above it paints first and a click that landed on the wrong screen has to fail here
+// rather than forty assertions later.
+const toLeagueSetup = async pg => {
+  await screen(pg, "Setup")
+  await pg.waitForSelector(`${BATTING} .rows`)
+}
+
+/**
+ * The league MANAGEMENT row — Set up a league, the template picker, New, Remove,
+ * Download, Load file, import by URL — is on Setup too, and only there.
+ *
+ * It used to sit above whatever tab was open, which put five controls nobody on the
+ * recommendations page needs between the masthead and the answer. `manage` in
+ * src/client/App.tsx now renders it for `view === "trade"` (Setup), for a store with
+ * no leagues at all, and for a store that could not be read — the three situations
+ * where managing a league is the thing you came to do. So a test that wants the
+ * toolbar has to be ON Setup, and waits for the toolbar itself rather than for the
+ * stat tables, because the two halves of this screen mount independently and a wait
+ * on the wrong half is a timeout that blames the wrong component.
+ */
+const toSetupBar = async pg => {
+  await screen(pg, "Setup")
+  await pg.waitForSelector("#tpl")
+  await pg.waitForSelector('.bar button:text-is("Download")')
+}
+
 await toLeagueSetup(page)
 
 await page.screenshot({ path: "/tmp/bc-light.png", fullPage: true })
@@ -112,14 +182,14 @@ t("chip shows team", chips.some(c => c.includes("Mrs. Met's Harem")), chips.join
 t("chip shows provenance", chips.includes("read from source"), chips.join(" / "))
 
 // scoring tables rendered with the real values
-const codes = await page.$$eval(".grid section:nth-of-type(1) .code", n => n.map(e => e.textContent))
-const vals = await page.$$eval(".grid section:nth-of-type(1) input.val", n => n.map(e => e.value))
+const codes = await page.$$eval(BATTING + " .code", n => n.map(e => e.textContent))
+const vals = await page.$$eval(BATTING + " input.val", n => n.map(e => e.value))
 t("batting has 9 stats", codes.length === 9, codes.join(","))
 t("HR = 10.4", vals[codes.indexOf("HR")] === "10.4", vals.join(","))
-const pvals = await page.$$eval(".grid section:nth-of-type(2) input.val", n => n.map(e => e.value))
+const pvals = await page.$$eval(PITCHING + " input.val", n => n.map(e => e.value))
 t("pitching ER = -3", pvals.includes("-3"), pvals.join(","))
 t("negatives styled as penalties",
-  (await page.$$eval(".grid section:nth-of-type(2) input.val.neg", n => n.length)) === 4)
+  (await page.$$eval(PITCHING + " input.val.neg", n => n.length)) === 4)
 
 // roster totals
 const totals = await page.$$eval(".tot", n => n.map(e => e.textContent))
@@ -129,14 +199,14 @@ t("roster totals 18/5/4/27",
 
 // save bar hidden until an edit, then appears
 t("save bar hidden initially", !(await page.locator(".savebar").evaluate(e => e.classList.contains("on"))))
-const hr = page.locator(".grid section:nth-of-type(1) input.val").nth(codes.indexOf("HR"))
+const hr = page.locator(BATTING + " input.val").nth(codes.indexOf("HR"))
 await hr.fill("11.5"); await hr.blur()
 await page.waitForTimeout(150)
 t("editing marks dirty", await page.locator(".savebar").evaluate(e => e.classList.contains("on")))
 
 // revert restores
 await page.click(".savebar button:not(.primary)"); await page.waitForTimeout(150)
-const after = await page.$$eval(".grid section:nth-of-type(1) input.val", n => n.map(e => e.value))
+const after = await page.$$eval(BATTING + " input.val", n => n.map(e => e.value))
 t("revert restores value", after[codes.indexOf("HR")] === "10.4", after.join(","))
 t("save bar hides after revert", !(await page.locator(".savebar").evaluate(e => e.classList.contains("on"))))
 
@@ -147,11 +217,11 @@ t("save bar hides after revert", !(await page.locator(".savebar").evaluate(e => 
  * -3 produced 83. Most pitching categories ARE penalties, so the path this app
  * exists to serve could not express them. No suite saw it.
  */
-const erIndex = (await page.$$eval(".grid section:nth-of-type(2) .code", n =>
+const erIndex = (await page.$$eval(PITCHING + " .code", n =>
   n.map(e => e.textContent)
 )).indexOf("ER")
 if (erIndex >= 0) {
-  const er = page.locator(".grid section:nth-of-type(2) input.val").nth(erIndex)
+  const er = page.locator(PITCHING + " input.val").nth(erIndex)
   await er.click()
   await page.keyboard.press("ControlOrMeta+a")
   await page.keyboard.type("-3.5")
@@ -210,7 +280,7 @@ t("committed scoring.json is untouched",
   JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"].scoring.batting.HR === 10.4)
 await page.reload({ waitUntil: "networkidle" })
 await toLeagueSetup(page)
-const reloaded = await page.$$eval(".grid section:nth-of-type(1) input.val", n => n.map(e => e.value))
+const reloaded = await page.$$eval(BATTING + " input.val", n => n.map(e => e.value))
 t("the edit survives a reload", reloaded[codes.indexOf("HR")] === "12.25", reloaded.join(","))
 
 // restore the true value through the UI
@@ -231,7 +301,7 @@ t("download exports the stored config", exported.leagues["yahoo:228947"].scoring
 t("download is named scoring.json", download.suggestedFilename() === "scoring.json")
 
 // a blank field must restore the real value, never become 0
-const first = page.locator(".grid section:nth-of-type(1) input.val").first()
+const first = page.locator(BATTING + " input.val").first()
 const before = await first.inputValue()
 await first.fill(""); await first.blur(); await page.waitForTimeout(150)
 t("blank point value restores, doesn't become 0",
@@ -289,8 +359,15 @@ t("no spinner widget is eating the field",
 
 // every control in the toolbar says what it is
 const labels = await page.$$eval(".ctl > span", n => n.map(e => e.textContent.trim().toLowerCase()))
+// "League being edited" was the label when the editor had a tab of its own. The same
+// select now sits on Setup, which is the team AND the league, and `LEAGUE_LABEL` in
+// src/client/App.tsx says so per view ("Deciding for" on Today, "Scoring these picks
+// against" on Wire, "League and team" here). The claim being protected is unchanged
+// and is the reason the map exists: this control means a different thing on each
+// screen, so it must never be an unlabelled box — a bare select next to New/Remove/
+// Download reads as "pick a template", which is the control beside it.
 t("dropdowns and URL field are labelled",
-  labels.some(l => l.includes("league being edited")) &&
+  labels.some(l => l.includes("league and team")) &&
   labels.some(l => l.includes("start a league")) &&
   labels.some(l => l.includes("import a league")),
   labels.join(" | "))
@@ -317,9 +394,12 @@ const freshErrors = []
 fp.on("pageerror", e => freshErrors.push(String(e)))
 fp.on("dialog", d => d.accept())
 await fp.goto(BASE, { waitUntil: "networkidle" })
-await fp.waitForSelector(".board-row", { timeout: 25000 })
-await fp.click(".views button:nth-child(2)")
-await fp.waitForSelector("#tpl")
+// The app opens on Today, which is the Decide card and nothing else — the ranked
+// board moved to Wire. This wait used to be for `.board-row` and was really only
+// asking "has the app finished booting"; `.decide` is the same question asked of the
+// screen that is actually in front of the reader now.
+await fp.waitForSelector(".decide", { timeout: 25000 })
+await toSetupBar(fp)
 
 // The picker is generated from scoring.json's platform_templates, so it cannot
 // offer a league type the data does not ship — which is how "a sleeper template"
@@ -374,11 +454,18 @@ t("and pasting the settings page leads, above every route that needs permission"
   }))
 // back out of the setup the way a reader does
 await fp.click(".onboard-done button")
-await fp.click(".views button:nth-child(2)")
-await fp.waitForSelector("#tpl")
+// `onDone` sends the reader to Today, so the toolbar has to be walked back to rather
+// than assumed: the management row lives only on Setup now.
+await toSetupBar(fp)
 
 // Route 1: one click from the picker to a ranked board.
 await fp.click('.bar button:text-is("New")')
+// `New` leaves you where you clicked it, which is Setup — the ranked board it makes
+// possible is one screen over. The claim is unchanged (one click from the picker to a
+// board that ranks) and the click it now takes to SEE that is part of the claim: if
+// Wire came up empty for a freshly created preset league, the preset would be useless
+// no matter how complete its stored values were.
+await screen(fp, "Wire")
 await fp.waitForSelector(".board-row", { timeout: 25000 })
 t("choosing the preset lands on a board that actually ranks",
   (await fp.$$eval(".board-row", n => n.length)) > 50,
@@ -460,8 +547,7 @@ await fp.evaluate(() => {
   }))
 })
 await fp.reload({ waitUntil: "networkidle" })
-await fp.click(".views button:nth-child(2)")
-await fp.waitForSelector('.bar button:text-is("Download")')
+await toSetupBar(fp)
 const [taken] = await Promise.all([
   fp.waitForEvent("download"),
   fp.click('.bar button:text-is("Download")')
@@ -487,7 +573,11 @@ t("and it is still a valid config, so a file from an older build still loads",
 // Wipe the browser and drop the file back on the page — no file dialog, no toolbar.
 await fp.evaluate(() => localStorage.clear())
 await fp.reload({ waitUntil: "networkidle" })
-await fp.waitForSelector(".board-row", { timeout: 25000 })
+// Under `npx vite` the cleared store re-seeds from the committed scoring.json, so a
+// league is back and the app opens on Today. Waiting for `.decide` rather than
+// `.board-row` is not a weaker wait: what this needs is "the app has mounted and its
+// window drop handler is registered", and Today is what mounts.
+await fp.waitForSelector(".decide", { timeout: 25000 })
 const dropped = readFileSync(await taken.path(), "utf8")
 const dt = await fp.evaluateHandle(text => {
   const d = new DataTransfer()
@@ -536,7 +626,12 @@ t("each carried store owns its own key; the config keeps no second copy",
 t("a pool is not shown for a league it was not read from",
   (await fp.locator('[data-wire="carried"]').count()) === 0,
   await fp.locator('[data-wire="carried"]').textContent().catch(() => "(absent)"))
-await fp.selectOption('select[aria-label="Scoring these picks against"], select[aria-label="League being edited"]', "yahoo:228947")
+// The league select is in the masthead bar on every screen once there are two
+// leagues to choose between, but its LABEL changes per screen (LEAGUE_LABEL), and
+// after the drop the page is on Today — so it is addressed as "the one select in the
+// bar that is not the template picker" rather than by a label that is a property of
+// whichever tab happens to be open. `#tpl` is the only other select the bar ever has.
+await fp.selectOption(".bar select:not(#tpl)", "yahoo:228947")
 await fp.waitForTimeout(500)
 const wireChip = await fp.locator('[data-wire="carried"]').textContent()
 t("the masthead names the exact list and how old it is",
@@ -618,20 +713,65 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
   await lp.goto(BASE, { waitUntil: "networkidle" })
   await lp.waitForSelector(".views button")
   const tabs = await lp.$$eval(".views button", n => n.map(e => e.textContent.trim()))
-  t("the tabs are the three that are left, and none of them is a draft",
-    JSON.stringify(tabs) === JSON.stringify(["Recommendations", "League setup", "My team & trades"]),
+  /**
+   * THE NAV ITSELF, which is the thing three other assertions in this block navigate
+   * by, so it is pinned rather than inferred.
+   *
+   * It read ["Recommendations", "League setup", "My team & trades"] — three tabs left
+   * over from four, named after the machinery rather than after the moment they serve.
+   * It is now ["Today", "Wire", "Setup"]: one question per screen, in the order a
+   * season is actually lived — what to do before first pitch, who is out there to get,
+   * and the once-a-season league-and-team setup both of those are priced in.
+   *
+   * The half of the old assertion that has not changed at all is the one that matters
+   * most here: there are THREE, and none of them is a draft. A fourth tab reappearing
+   * is how the deleted draft board would come back.
+   */
+  t("the tabs are the three screens that are left, and none of them is a draft",
+    JSON.stringify(tabs) === JSON.stringify(["Today", "Wire", "Setup"]),
     tabs.join(" | "))
-  // The default view is the one the deleted banner deferred to, and it ranks — so
-  // nothing a reader could act on left with the draft board.
-  t("the app opens on the page that banner pointed at, already ranking",
-    (await lp.$eval(".views button.on", e => e.textContent.trim())) === "Recommendations" &&
-      (await lp.waitForSelector(".board-row", { timeout: 25000 }).then(() => true, () => false)),
-    await lp.$eval(".views button.on", e => e.textContent.trim()).catch(() => "(no tab marked current)"))
-  // Every tab, not just the default: a draft board that is merely unlinked is a
-  // draft board.
+  /**
+   * WHERE THE APP OPENS, and what it says there.
+   *
+   * This used to assert that the default tab was "Recommendations" and that it was
+   * already rendering `.board-row`s — the ranked table — because the banner the draft
+   * tab carried pointed a mid-season reader at that page, and the claim being kept
+   * alive was "the thing the banner deferred to is still there, and still works".
+   *
+   * Both halves moved, in opposite directions. The default is Today, and Today no
+   * longer ranks: it renders the Decide card alone. At phone width the old shared tab
+   * was 7,477px, which put the first ranked row well past the fold and the decision a
+   * reader came for underneath nothing; Today is now 947px and 105 words with no
+   * roster loaded. The ranked board is Wire, one tap away.
+   *
+   * So the assertion is split in two, because the single claim has become two and
+   * collapsing them would let either one rot unnoticed: Today is what opens and it
+   * answers with a decision, and the ranking is still reachable and still ranks. Only
+   * the second half is what the draft banner pointed at, and it is the one that would
+   * have been quietly lost by deleting this.
+   */
+  t("the app opens on Today, with the decision rather than the table",
+    (await lp.$eval(".views button.on", e => e.textContent.trim())) === "Today" &&
+      (await lp.waitForSelector(".decide", { timeout: 25000 }).then(() => true, () => false)) &&
+      (await lp.locator(".board-row").count()) === 0,
+    `${await lp.$eval(".views button.on", e => e.textContent.trim()).catch(() => "(no tab marked current)")} — ${await lp.locator(".board-row").count()} board rows`)
+  // The link is part of the claim: Today only gets to be this short because the thing
+  // it dropped is one labelled tap away, and a reader who cannot find the table is no
+  // better off than one who had to scroll past it.
+  t("and it names the way to the ranked board, which still ranks",
+    (await lp.locator('.next-screen button:text-is("Everyone you can get →")').count()) === 1 &&
+      (await lp
+        .click('.next-screen button:text-is("Everyone you can get →")')
+        .then(() => lp.waitForSelector(".board-row", { timeout: 25000 }))
+        .then(() => lp.$$eval(".board-row", n => n.length), () => 0)) > 50,
+    `${await lp.locator(".board-row").count()} rows, tab ${await lp.$eval(".views button.on", e => e.textContent.trim()).catch(() => "?")}`)
+  // Every screen, not just the default: a draft board that is merely unlinked is a
+  // draft board. Walked by NAME — this loop was the worst of the `nth-child` callers,
+  // because it derived its indices from `tabs` and so would have gone on passing while
+  // visiting the wrong three screens if a fourth tab were ever inserted.
   const drafty = []
-  for (const [i, label] of tabs.entries()) {
-    await lp.click(`.views button:nth-child(${i + 1})`)
+  for (const label of tabs) {
+    await screen(lp, label)
     await lp.waitForTimeout(400)
     const found = await lp.evaluate(() =>
       document.querySelectorAll(".draft-pick, .draft-underway, .draft-board").length)
@@ -639,10 +779,10 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
   }
   t("no draft surface renders on any of them, not merely unlinked from the nav",
     drafty.length === 0, drafty.join(" "))
-  // What "how far in" became. Stated on the tab a person actually opens, and in the
-  // masthead, so it is on all of them.
-  await lp.click(".views button:nth-child(1)")
-  await lp.waitForSelector(".board-row", { timeout: 25000 })
+  // What "how far in" became. Read on Today, the screen a person actually opens, and
+  // it is in the masthead so it is on all three.
+  await screen(lp, "Today")
+  await lp.waitForSelector(".decide", { timeout: 25000 })
   const ageChip = await lp.locator(".chip", { hasText: /player data/ }).first()
   const ageText = (await ageChip.textContent()).replace(/\s+/g, " ").trim()
   t("the page still says how old the data behind the numbers is",

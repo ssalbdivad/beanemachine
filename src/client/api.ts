@@ -8,6 +8,7 @@ import {
 } from "../import.ts"
 import type { League } from "../schema.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
+import { IMPORT_COMMAND } from "./command.ts"
 
 export class ApiError extends Error {}
 
@@ -148,14 +149,25 @@ export const detectMode = async (): Promise<Mode> => {
 const yahooNeedsServer = <T,>(action: string): Promise<T> =>
 	Promise.reject(
 		new ApiError(
-			// Every command named here has to be one that exists. `nub` is not installed
-			// on a machine that just cloned this repo, and this toast used to name it.
+			/*
+			 * Every command named here has to be one that exists, and this one did not.
+			 *
+			 * It shipped `node --experimental-strip-types src/cli.ts <your league URL>`:
+			 * a flag node has not required since 22.18, in front of a path that only
+			 * resolves inside a checkout of this repository, printed to somebody who
+			 * arrived at beanemachine.com precisely because they were not going to
+			 * clone anything. test/leagues.mjs has forbidden exactly that string since
+			 * the day `IMPORT_COMMAND` was written; this copy escaped the check by being
+			 * a second, hand-written copy of the same sentence.
+			 *
+			 * So there is one string now, in src/client/command.ts, and both the panel
+			 * and this refusal read it.
+			 */
 			`${action} can't be done from this page: Yahoo sends no CORS headers, so a ` +
 				`browser is never handed the response. ESPN leagues do import right here. ` +
-				`For Yahoo, read it once on your own machine — ` +
-				`\`node --experimental-strip-types src/cli.ts <your league URL>\` — then press ` +
-				`Download and drop that file onto this page. Running the local server does ` +
-				`the same job live. Your leagues are stored in this browser either way.`
+				`For Yahoo, read it once on your own machine — \`${IMPORT_COMMAND}\` — then ` +
+				`press Download and drop that file onto this page. Running the local server ` +
+				`does the same job live. Your leagues are stored in this browser either way.`
 		)
 	)
 

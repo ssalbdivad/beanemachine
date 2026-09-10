@@ -7,7 +7,14 @@ import { readFileSync } from "node:fs"
 // a delta that does not equal after minus before is the one failure that would
 // make every recommendation on the page a lie.
 import { chromium, firefox } from "playwright-core"
-const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
+/**
+ * :5173 was the default here, and it is the one port on this machine that must never
+ * be tested against: another project's dev server owns it. A bare `node test/trade-ui.mjs`
+ * therefore either talked to somebody else's app — which `identify` below catches, and
+ * which is the whole reason it exists — or, worse, typed a roster into it. This repo's
+ * dev server answers on :5299, so that is the default; BASE still wins when it is set.
+ */
+const BASE = process.env.BASE ?? "http://127.0.0.1:5299"
 const ENGINE = process.env.BROWSER ?? "chromium"
 const browser = ENGINE === "firefox" ? await firefox.launch() : await chromium.launch({ args: ["--no-sandbox"] })
 console.log(`--- ${ENGINE} ---`)
@@ -19,9 +26,9 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
 const errors = []
 page.on("pageerror", e => errors.push(String(e)))
 
-/** A 200 on this port is not proof it is this app: :5173 is a common default and
- *  another project's dev server answers it just as happily — and here it would SKIP
- *  with exit 0, since no other app mounts a trade tab. The wordmark is the cheapest
+/** A 200 on the port is not proof it is this app: vite's defaults are shared by every
+ *  project on the machine and another one answers just as happily — and here that would
+ *  SKIP with exit 0, since no other app mounts a team panel. The wordmark is the cheapest
  *  proof of identity, and openTrade navigates four times, so it is claimed once. */
 let identified = false
 const identify = async () => {
@@ -55,16 +62,40 @@ const visit = async (timeout = 60000) => {
 	await page.waitForSelector(".views button", { timeout: 30000 })
 }
 
+/**
+ * The screens, by the text a reader can see on the tab, in ONE place.
+ *
+ * Every block in this file used to reach the team panel with `.views button` matching
+ * /trade/i, and that stopped working the day the four tabs became three: "My team &
+ * trades" and "League setup" were merged into a single screen labelled **Setup**,
+ * which contains the string "trade" nowhere at all. The locator matched no button,
+ * `openTrade` returned false, and the suite SKIPPED with exit 0 — 54 assertions
+ * retired by a rename and reported as a clean run. The same hazard as the Draft
+ * deletion, arriving from the other direction.
+ *
+ * Matching the visible label is what makes the next rename a one-line change here
+ * rather than a silent skip somewhere else: `SCREEN` is the only thing in this file
+ * that knows what the tabs are called and `toScreen` is the only thing that clicks
+ * one. The match is anchored rather than loose, so a fourth tab whose name merely
+ * CONTAINS one of these cannot quietly capture the clicks.
+ */
+const SCREEN = { today: "Today", wire: "Wire", setup: "Setup" }
+const toScreen = async (pg, label) => {
+	const tab = pg.locator(".views button", { hasText: new RegExp(`^${label}$`) }).first()
+	if (!(await tab.count())) return false
+	await tab.click()
+	return true
+}
+
 /** The component is mounted by the app, so this suite must not assume where. It
- *  finds the trade view, or reports that nothing mounts it yet and stops — a
+ *  finds the team panel — now on Setup, the third screen, with the whole League
+ *  setup editor rendered under it — or reports that nothing mounts it and stops: a
  *  wired-up UI is what is under test, not the existence of the file. */
 const openTrade = async () => {
 	await visit()
 	await identify()
 	if (await page.$(".trade-team")) return true
-	const tab = page.locator(".views button", { hasText: /trade/i }).first()
-	if (!(await tab.count())) return false
-	await tab.click()
+	if (!(await toScreen(page, SCREEN.setup))) return false
 	const ok = await page
 		.waitForSelector(".trade-team", { timeout: 30000 })
 		.then(() => true, () => false)
@@ -101,13 +132,22 @@ const openClosedDeal = async () => {
 	/**
 	 * The tab this whole suite hangs off, asserted by name before anything clicks it.
 	 *
-	 * Everything below reaches the evaluator through `.views button` matching /trade/i,
-	 * and `openTrade` SKIPS with exit 0 when it finds none — which was right while
-	 * <Trade/> existed unmounted, and is a trap now that it is mounted: the four tabs
-	 * became three in one commit (Draft deleted, with src/engine/draft.ts and
-	 * test/draft.mjs), and a fourth deletion that took this one would have retired 54
-	 * assertions to a green run. So the census is an assertion, and a missing trade tab
-	 * fails here before the skip can swallow it.
+	 * Everything below reaches the evaluator through `toScreen(page, SCREEN.setup)`,
+	 * and `openTrade` SKIPS with exit 0 when that tab is missing — which was right
+	 * while <Trade/> existed unmounted, and is a trap now that it is mounted. It has
+	 * already gone wrong twice by rename: the four tabs became three when Draft was
+	 * deleted (with src/engine/draft.ts and test/draft.mjs), and then the remaining
+	 * three were renamed and re-cut — "Recommendations | League setup | My team &
+	 * trades" became "Today | Wire | Setup", the ranked board moving out to Wire and
+	 * the league editor moving IN under the team panel on Setup. The second of those
+	 * took this file's /trade/i locator with it and turned 54 assertions into a skip.
+	 * So the census is an assertion, and a nav that no longer carries the screen this
+	 * suite lives on fails here, loudly, before the skip can swallow it.
+	 *
+	 * Asserted by POSITION, not membership, which is the half the old version left
+	 * open: the three screens are ordered by when you need them — decide tonight,
+	 * then look somebody up, then go and fix the inputs — and a nav that offers the
+	 * right three in the wrong order is a different page.
 	 *
 	 * It also pins the absence of Draft from the one place a reader meets the tabs.
 	 * That tab is gone on purpose — the engine behind it is gone too, so a button
@@ -115,16 +155,14 @@ const openClosedDeal = async () => {
 	 * census is what says so out loud rather than leaving it to a diff nobody reads.
 	 */
 	const tabs = await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))
-	t("the nav offers exactly the three tabs this app has, trades among them",
-		tabs.length === 3 && tabs.includes("Recommendations") && tabs.includes("League setup") &&
-			tabs.includes("My team & trades"),
+	t("the nav offers exactly the three screens this app has, in the order you need them",
+		tabs.length === 3 && tabs[0] === SCREEN.today && tabs[1] === SCREEN.wire &&
+			tabs[2] === SCREEN.setup,
 		tabs.join(" | "))
 	t("and no draft tab, whose engine and suite were deleted with it",
 		!tabs.some(label => /draft/i.test(label)), tabs.join(" | "))
 
-	const tab = page.locator(".views button", { hasText: /trade/i }).first()
-	if (await tab.count()) {
-		await tab.click()
+	if (await toScreen(page, SCREEN.setup)) {
 		await page.waitForSelector(".trade-team", { timeout: 30000 })
 		const closed = await page.$(".trade-closed")
 		t("a league past its own trade deadline is not shown a deal form",
@@ -197,6 +235,13 @@ t("a second real starter cannot lower the total", twoTotal > oneTotal, `${oneTot
  * shipped league at 1280x1000, it opened at y=1912 of a 3487px page, under two
  * screens of a roster you already knew. The order is a claim about which card
  * matters, so it is asserted rather than left to whoever edits the JSX next.
+ *
+ * `cardOrder` is now a census of the WHOLE screen rather than of the team panel: the
+ * "League setup" tab was folded into this one, so "This league", "Scoring period",
+ * "Batting", "Pitching", "Roster slots" and the rest follow the four cards below.
+ * That is why the three assertions here are relative positions and not indices —
+ * indices into this list were always going to move, and now they move every time
+ * somebody adds a field to the league editor, which is a different screen's job.
  */
 const cardOrder = await page.$$eval("section.card h2", n => n.map(e => e.textContent.trim()))
 const at = re => cardOrder.findIndex(h => re.test(h))
@@ -205,19 +250,52 @@ t("the recommendation comes before the lineup, and both before the deal",
     at(/starting lineup/i) < at(/the deal/i),
   cardOrder.join(" | "))
 
+/**
+ * Your TEAM comes before your LEAGUE, and that is the whole argument for merging the
+ * two tabs rather than keeping them.
+ *
+ * "My team & trades" and "League setup" were two of four tabs, both of them things
+ * one person does once a season, and the tab bar did not fit the phone this app is
+ * actually opened on. Merged, the order becomes a claim: the roster paste is the step
+ * people abandon, and a league with perfect scoring and no roster produces a board
+ * and no decision, so the paste is what the screen opens on and the scoring tables
+ * live below it. Asserted because the merge makes the opposite order a one-line
+ * mistake — the editor is a sibling of <Trade/> in App.tsx, and swapping two JSX
+ * children would bury the paste box under five cards of stat values with nothing
+ * failing anywhere.
+ *
+ * "This league" is the first card the editor renders, so it is the boundary: every
+ * card the team panel owns must be above it, and it must be on the screen at all —
+ * a Setup screen missing the editor is the old two-tab world with one tab deleted.
+ */
+const editorStarts = at(/^this league$/i)
+t("the league editor is on this screen too, under the team rather than beside it",
+  editorStarts > -1 && at(/the deal/i) < editorStarts, cardOrder.join(" | "))
+t("and the scoring tables are below the team, not above it",
+  at(/^batting$/i) > editorStarts && at(/^roster slots$/i) > editorStarts,
+  cardOrder.join(" | "))
+
 /*
  * ...and it no longer ANSWERS here, it points.
  *
  * This card used to propose moves of its own, and it needed the SEATS your league
  * has you in plus an exact free-agent list to do it — so a visitor who had just
  * typed his team in on this very page was told to go and read a roster, and a Yahoo
- * user was told the page "needs the local server". The decision card on
- * Recommendations needs neither and is strictly better. Two answers to one question
- * is the thing this app keeps having to stop doing.
+ * user was told the page "needs the local server". The decision card needs neither
+ * and is strictly better. Two answers to one question is the thing this app keeps
+ * having to stop doing.
+ *
+ * The screen it points at is TODAY now — the tab called "Recommendations" was renamed
+ * when the ranked board moved off it — but src/client/Trade.tsx still writes the old
+ * name into this card's copy, twice, so the sentence sends a reader to a tab that is
+ * not in the nav. That is a src defect, not a test one, and it is reported as such
+ * rather than papered over here; the assertion accepts either name so that fixing
+ * the copy does not break this file, and the CONTROL is what is checked hard below,
+ * because a button that lands on the right screen is the claim that actually matters.
  */
 const adviceCard = await page.$("section.advice")
 t("but it defers to the card that owns the question rather than answering twice",
-  !!adviceCard && /Recommendations/.test(await adviceCard.innerText()) &&
+  !!adviceCard && /\b(Today|Recommendations)\b/.test(await adviceCard.innerText()) &&
     !/needs the local server/.test(await adviceCard.innerText()),
   adviceCard ? (await adviceCard.innerText()).replace(/\n/g, " ").slice(0, 160) : "(no card)")
 t("and offers a control that goes there, not an instruction to go looking",
@@ -353,6 +431,29 @@ const missingShown = await page.$$eval(".verdict-missing li", n => n.map(e => e.
 t("nothing the engine could not read is silently dropped",
   missingShown.every(m => m.length > 0), missingShown.join(" | "))
 
+/**
+ * The deferral, taken at its word: the button really lands on the card that answers.
+ *
+ * "It defers to the card that owns the question" was only ever checked as prose plus
+ * the existence of a button, and prose is exactly what went stale here — the copy
+ * names a tab ("Recommendations") that the nav stopped offering. A card that points
+ * somewhere instead of answering is only better than answering twice if the pointer
+ * arrives, so this clicks it and requires the decision card to be on screen with the
+ * first tab selected. It is run last of the assertions that share this page state
+ * because it navigates away, and the reload block immediately below re-enters Setup
+ * from scratch anyway.
+ */
+await page.click("section.advice button")
+const landed = await page
+  .waitForSelector("section.card.decide", { timeout: 30000 })
+  .then(() => true, () => false)
+t("the control on that card really arrives at the decision card",
+  landed && (await page.$$eval(".views button", n => {
+    const on = n.find(e => e.getAttribute("aria-selected") === "true")
+    return on ? on.textContent.trim() : "(none selected)"
+  })) === SCREEN.today,
+  landed ? await page.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim()).join(",")) : "no decision card after the click")
+
 // The team lives in this browser, keyed per league — so it has to survive a reload.
 const stored = await page.evaluate(() => localStorage.getItem("beanemachine:roster"))
 t("the team is stored per league in this browser", !!stored && /"\d+:(hitting|pitching)"/.test(stored), String(stored))
@@ -403,8 +504,7 @@ if (cfg) {
     localStorage.setItem("beanemachine:config", JSON.stringify(c))
   }, cfg)
   await visit()
-  const tab = page.locator(".views button", { hasText: /trade/i }).first()
-  if (await tab.count()) await tab.click()
+  await toScreen(page, SCREEN.setup)
   const said = await page
     .waitForSelector(".trade-unscored", { timeout: 30000 })
     .then(() => true, () => false)
@@ -444,9 +544,9 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	// the live MLB slate read too, and its own `page` shadows the one `visit` holds
 	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
 	await page.waitForSelector(".views button", { timeout: 30000 })
-	const tab = page.locator(".views button", { hasText: /trade/i }).first()
-	if (await tab.count()) {
-		await tab.click()
+	// its own page, so its own navigation — `toScreen` takes the page it is handed,
+	// which matters here because this block shadows the outer `page`
+	if (await toScreen(page, SCREEN.setup)) {
 		await page.waitForSelector(".paste-roster", { timeout: 30000 })
 		const how = (await page.textContent(".paste-how")) ?? ""
 		t("the paste route says which page to open and which keys to press",

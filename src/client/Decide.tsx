@@ -14,6 +14,7 @@ import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { useSlate } from "./useSlate.ts"
+import { useInjuries } from "./useInjuries.ts"
 import { statusOf, type TodayStatus } from "../data/today.ts"
 import "./decide.css"
 
@@ -84,6 +85,21 @@ export const Decide = ({
 	onOpenTeam: () => void
 }) => {
 	const storedSeats = leagueKey ? lineupStore.of(leagueKey) : null
+	/** Tonight, live, from MLB. One request, no server — see src/data/today.ts. */
+	const { slate, error: slateError } = useSlate()
+	/**
+	 * The capture's injured list, brought up to date.
+	 *
+	 * The shipped snapshot's injury map is right on the day it is built and wrong
+	 * every day after — and wrong the expensive way round, because a man placed on
+	 * the list yesterday is still, to the file, available to start tonight. `merged`
+	 * is null while the request is in flight or after it failed, and null means "use
+	 * the capture as it stands", which is the honest fallback rather than a blank.
+	 */
+	const captured = useMemo(() => (snapshot ? hydrate(snapshot).injuries : null), [snapshot])
+	const { merged: liveInjuries } = useInjuries(captured, snapshot?.capturedAt)
+	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
+
 	/**
 	 * An unreadable roster store must not take the page down.
 	 *
@@ -321,7 +337,7 @@ export const Decide = ({
 				eligibility: h.eligibility,
 				probableCoverage: w.coverage,
 				underlying: h.underlying,
-				injuries: h.injuries,
+				injuries,
 				injuryPolicy: "exclude",
 				teams: league.meta.max_teams
 			})
@@ -332,7 +348,7 @@ export const Decide = ({
 		// whole-pool simulation, if none had loaded at first render — while `plan` and
 		// `keepForSeason` moved on. That is the exact defect the memo above says it
 		// exists to end, one memo up.
-	}, [snapshot, league, wireTest])
+	}, [snapshot, league, wireTest, injuries])
 
 	/**
 	 * TODAY — the decision this league actually forces every day.
@@ -356,8 +372,6 @@ export const Decide = ({
 	 * from a fortnight would also be nonsense here — a fortnight's replacement level
 	 * against one day's points would price almost every seat as a hole.
 	 */
-	/** Tonight, live, from MLB. One request, no server — see src/data/today.ts. */
-	const { slate, error: slateError } = useSlate()
 
 	const today = useMemo(() => {
 		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length) return null
@@ -373,7 +387,7 @@ export const Decide = ({
 			ownership: h.ownership, probableStarts: w.probableStarts,
 			opposingStarters: w.opposingStarters, startOpponents: w.startOpponents,
 			eligibility: h.eligibility, probableCoverage: w.coverage,
-			underlying: h.underlying, injuries: h.injuries, injuryPolicy: "exclude",
+			underlying: h.underlying, injuries, injuryPolicy: "exclude",
 			teams: league.meta.max_teams
 		})
 		const byName = new Map(rows.map(r => [normalizeName(r.player.name), r]))
@@ -528,7 +542,7 @@ export const Decide = ({
 			}),
 			start: start.map(st => ({ name: st.name, slot: st.slot, points: st.points }))
 		}
-	}, [snapshot, league, seats, slate])
+	}, [snapshot, league, seats, slate, injuries])
 
 	/**
 	 * Men who are worth too much over the REST OF THE SEASON to give away for a week.
@@ -556,7 +570,7 @@ export const Decide = ({
 			gamesByTeam: w.games, opponentsByTeam: w.opponents,
 			recentVolumeByWindow: h.recentVolumeByWindow, recentStats: h.recentStats,
 			ownership: h.ownership, eligibility: h.eligibility, underlying: h.underlying,
-			injuries: h.injuries, injuryPolicy: "keep", teams: league.meta.max_teams
+			injuries, injuryPolicy: "keep", teams: league.meta.max_teams
 		})
 		const mine = new Set(seats.spots.map(sp => normalizeName(sp.name)))
 		const keep = new Set<string>()
@@ -566,7 +580,7 @@ export const Decide = ({
 			if (mine.has(n) && r.bscore >= DEFAULTS.keepFloor) keep.add(n)
 		}
 		return keep
-	}, [snapshot, league, seats, wireTest])
+	}, [snapshot, league, seats, wireTest, injuries])
 
 	const plan = useMemo(() => {
 		if (!rated || !league || !seats?.spots.length) return null

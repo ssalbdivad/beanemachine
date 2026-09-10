@@ -74,26 +74,65 @@ t("and this browser holds no league until the visitor puts one in it",
     Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length === 0))
 
 /**
- * Three tabs, and the PUBLISHED bundle is where that has to be checked.
+ * Three SCREENS, and the PUBLISHED bundle is where that has to be checked.
  *
- * There were four. The fourth was Draft — src/client/Draft.tsx, src/engine/draft.ts
- * and test/draft.mjs, all deleted — so `View` no longer has a "draft" member and
- * `VIEWS` in panels.tsx is board / league / trade. Asserted by NAME and in ORDER
- * rather than by a count, for two reasons:
+ * There were four tabs — Recommendations / League setup / My team & trades, and
+ * before them Draft. Draft went first (src/client/Draft.tsx, src/engine/draft.ts
+ * and test/draft.mjs, all deleted). Then the remaining three were re-cut along the
+ * question being asked rather than along the engine that answers it:
  *
- * - every positional click in this file is only correct while this order holds:
- *   `.views button:nth-child(1)` is the board and `nth-child(2)` is League setup,
- *   and a tab inserted at the front would quietly move a dozen assertions onto the
- *   wrong panel and fail them somewhere far from the cause.
- * - this suite reads the published asset rather than the source tree, which is the
- *   one place a stale bundle can be caught. A hosted build still serving a Draft
- *   tab after the source stopped having one is exactly the failure this file
- *   exists for, and nothing else here would notice it.
+ *   Today  (view id "board")  the Decide card alone — tonight's lineup changes, the
+ *                            empty seats, the one add/drop — and a link to Wire.
+ *   Wire   (view id "wire")   the ranked board alone: mode strip, filters, Billy's
+ *                            pick, the table.
+ *   Setup  (view id "trade")  your team, then the whole League setup editor under
+ *                            it, plus the New / Remove / Download / Load file /
+ *                            import-by-URL toolbar that used to live on its own tab.
+ *
+ * So "Recommendations" no longer owns the ranked board and "League setup" is not a
+ * tab at all. Every assertion below that used to click a tab BY INDEX now names the
+ * screen that owns the job it is about — see `go` — and this list is checked by NAME
+ * and in ORDER anyway, for the reason it always was: this suite reads the published
+ * asset rather than the source tree, which is the one place a stale bundle can be
+ * caught. A hosted build still serving a Draft tab, or still serving a separate
+ * League setup tab, after the source stopped having one is exactly the failure this
+ * file exists for, and nothing else here would notice it.
  */
-const TAB_LABELS = ["Recommendations", "League setup", "My team & trades"]
+const TAB_LABELS = ["Today", "Wire", "Setup"]
 const tabLabels = await p.$$eval(".views button", n => n.map(e => e.textContent))
-t("the published build offers three tabs, in the order this file clicks them by position",
+t("the published build offers three screens, named and in the order a season uses them",
   JSON.stringify(tabLabels) === JSON.stringify(TAB_LABELS), tabLabels.join(" | "))
+/**
+ * Navigate by the tab's VISIBLE TEXT, never by position.
+ *
+ * This file used to hold six `.views button:nth-child(N)` clicks, and the
+ * four-tabs-to-three re-cut moved every one of them: `nth-child(2)` was League
+ * setup and is now Wire, so the block that edits a scoring table and the block that
+ * reads `#tpl` both landed on the ranked board and failed a dozen assertions a
+ * hundred lines away from their cause. An index is a fact about the nav bar; what
+ * each assertion actually depends on is which SCREEN owns the thing it reads. So
+ * the label is the address, and the next rename is a one-line change here.
+ *
+ * Each screen is waited for on a marker only it renders — `.decide` for Today and
+ * `.board-row` for Wire — because a click that registers before React has swapped
+ * the view reads the OLD screen's DOM, and that failure looks exactly like a
+ * missing feature.
+ */
+/*
+  Setup is waited for on the management toolbar's own button rather than on anything
+  in the team panel. `.pull-roster` was the obvious choice and is wrong: that card
+  only renders for a league whose platform a browser can actually read, so a Yahoo
+  preset — which is half of what this file sets up — never shows it and the wait
+  times out on a screen that came up perfectly. `[data-ctl="onboard"]` is rendered by
+  the toolbar, and the toolbar is rendered for exactly one view: this one. That is
+  itself worth pinning, because the toolbar moving off this screen is the change that
+  would strand the Download, Load file and import-by-URL assertions below.
+*/
+const MARKER = { Today: ".decide", Wire: ".board-row", Setup: '.bar [data-ctl="onboard"]' }
+const go = async label => {
+  await p.click(`.views button:text-is("${label}")`)
+  await p.waitForSelector(MARKER[label], { timeout: 25000 })
+}
 t("and the Draft tab is gone from the shipped bundle, not only from the source tree",
   !/draft/i.test(await p.$eval(".views", e => e.innerText)),
   await p.$eval(".views", e => e.innerText))
@@ -198,7 +237,13 @@ const onboard = async () => {
   await p.click('.onboard button:text-is("Read that")')
   await p.waitForSelector(".onboard-done button", { timeout: 15000 })
   await p.click(".onboard-done button")
-  await p.waitForSelector(".board-row", { timeout: 25000 })
+  // Finishing the setup lands on TODAY, and Today is the Decide card and nothing
+  // else — it used to be "Recommendations", which was the Decide card with the whole
+  // ranked board under it, so this waited on `.board-row` and now times out there.
+  // Waited on `.decide` instead: it is the card that screen exists to show, and it
+  // renders even with no roster loaded (as `.decide-blocked`, naming what is missing),
+  // which is exactly the state a freshly set-up league is in.
+  await p.waitForSelector(".decide", { timeout: 25000 })
   return p.evaluate(() => JSON.parse(localStorage.getItem("beanemachine:config")).active_league)
 }
 
@@ -219,11 +264,43 @@ t("and the same team count, which is what replacement level is cut at",
 t("but it is not marked read-from-source, because nothing here fetched that page",
   pasted.provenance.verified === false && /^paste:/.test(pasted.provenance.method),
   pasted.provenance.method)
+/**
+ * Everything from here to the config editor is about the RANKED BOARD, and the
+ * ranked board is now the Wire screen rather than the first tab.
+ *
+ * This is the single biggest thing the re-cut moved. "Recommendations" rendered the
+ * Decide card and then the whole table beneath it — at phone width that put the
+ * first ranked row 1,600px down a 8,400px scroll — so every assertion below this
+ * line used to pass without navigating anywhere at all. Today now renders the Decide
+ * card and ONE link out of it, so `.board-row`, `.toggle`, `.card.pick`, the column
+ * headers and the availability default are all on a screen this suite has to ask
+ * for. Asserted right after arriving, because "the board renders with no server" is
+ * the claim this whole file is about and it is worth knowing that the screen that
+ * owns it came up at all.
+ */
+await go("Wire")
 // A ranked board at all, which is what "with no server" is about. It is NOT about
 // the default filter: the list is capped at 60 rows, so the filtered default and
 // the unfiltered ranking both read 60 here and this number cannot tell them apart.
 // The default is asserted below, where it can be seen.
 t("the board renders with no server", (await p.$$eval(".board-row", n=>n.length)) > 50)
+// Today is the other half of that split and nothing else in this file sees it: the
+// screen a reader lands on must be the DECISION, not the lookup. A regression that
+// put the table back under the Decide card would leave every other assertion here
+// passing — the board would still render, just one screen too early — so the
+// separation is pinned where it can be seen, on the screen that was measured at
+// 947px with no roster loaded where it used to be 7,477px.
+await go("Today")
+t("and Today is the decision alone: the table is not hiding under the Decide card",
+  (await p.$$eval(".decide", n => n.length)) === 1 &&
+    (await p.$$eval(".board-row", n => n.length)) === 0,
+  `${await p.$$eval(".board-row", n => n.length)} ranked rows on the Today screen`)
+// and the way across to it is a link on Today, not a scroll — the one thing that
+// screen offers besides the decision itself
+t("with one link across to the ranking, named as what it leads to",
+  /Everyone you can get/.test(await p.$eval(".next-screen", e => e.innerText)),
+  await p.$eval(".next-screen", e => e.innerText))
+await go("Wire")
 /**
  * The availability toggle WORKS with no server now, which is the point of the whole
  * ownership estimate. It used to be asserted disabled, because "who can I add" read
@@ -318,21 +395,62 @@ t("and that default is doing work: the full ranking opens with men it keeps off 
   `everyone: ${everyone.join(", ")} / can add: ${gettable.slice(0, 6).join(", ")}`)
 await availBox.check()
 await p.waitForTimeout(600)
-// now switch to the config editor for the remaining assertions
-await p.click(".views button:nth-child(2)")
+// now switch to the config editor for the remaining assertions. It was its own tab,
+// "League setup", reached as `nth-child(2)`; it is the bottom half of SETUP now,
+// under the team panel, and `nth-child(2)` is the ranked board.
+await go("Setup")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
-t("static banner shown", await p.locator(".static-note").isVisible())
-const note = await p.locator(".static-note").textContent()
-// The claim, not the wording. A blanket "importing needs the local server" was the
-// single sentence standing between a visitor and using this on their own league, and
-// it was false for ESPN, which imports here with no backend at all. It is equally
-// false the other way round: a banner that only says the server is needed leaves a
-// Yahoo user — most of this app's users — with nothing to do. So the banner must
-// name Yahoo whenever it raises the server, AND it must name a route that ends
-// somewhere: the preset, or a file carried over from a local read.
-t("the static banner says your leagues live in this browser", /browser/i.test(note), note)
-t("and it does not claim the server is needed to import without naming Yahoo",
-  !/server/i.test(note) || /yahoo/i.test(note), note)
+/**
+ * ── Where the storage reassurance went ──────────────────────────────────────────
+ *
+ * This read `.static-note` — a masthead line, "Your leagues are saved in this
+ * browser.", rendered on every view of every page load. It is DELETED from the
+ * source: the masthead was 199px on a desktop and 203px on a phone above a page
+ * whose first ranked row was 1,229px down, and a reassurance that is read once does
+ * not belong on every screen forever.
+ *
+ * What it was protecting is a real claim and it is asserted here in its new home:
+ * before a stranger types a league into this page they must be told the league is
+ * not going anywhere. That sentence is now on the FIRST-RUN SETUP — "it all stays in
+ * this browser" — which is strictly the better place, because it is the screen where
+ * somebody is deciding whether to trust this with their league rather than a line
+ * above a board they have already committed to.
+ *
+ * Read off a clean browser rather than this one, because this one has a league in it
+ * and the first-run setup is therefore not on screen. A second page is cheaper than
+ * clearing and re-onboarding the page the next forty assertions depend on.
+ *
+ * WHAT IS NO LONGER PROTECTED ANYWHERE, and is recorded rather than dropped: there
+ * is now no VISIBLE sentence about where LEAGUES (as opposed to the roster) are kept
+ * once the setup has been dismissed. The Setup screen says it of the roster — "it is
+ * saved in this browser, per league" — and the Download button says it of the leagues
+ * in a `title=` nobody on a phone can open. A reader who arrives on a shared link,
+ * dismisses the setup and then wonders whether their league went to a server has
+ * nowhere on the page to find out.
+ */
+{
+  const fresh = await b.newPage({ viewport: { width: 1280, height: 1000 } })
+  await fresh.route("**/api/**", r => r.abort())
+  await fresh.goto(BASE, { waitUntil: "networkidle" })
+  await fresh.waitForSelector(".onboard", { timeout: 25000 })
+  const note = (await fresh.$eval(".onboard", e => e.innerText)).replace(/\s+/g, " ")
+  t("the first screen still promises the league stays in this browser",
+    /stays in this browser/i.test(note), note.slice(0, 200))
+  // The claim, not the wording. A blanket "importing needs the local server" was the
+  // single sentence standing between a visitor and using this on their own league, and
+  // it was false for ESPN, which imports here with no backend at all. It is equally
+  // false the other way round: copy that only says the server is needed leaves a
+  // Yahoo user — most of this app's users — with nothing to do. So wherever the server
+  // is raised, Yahoo must be named as the reason, AND a route that ends somewhere must
+  // be named with it: the preset, or a file carried over from a local read.
+  t("and it does not claim the server is needed to import without naming Yahoo",
+    !/server/i.test(note) || /yahoo/i.test(note), note.slice(0, 260))
+  // The line it replaced is gone from the shipped bundle, not only from the source.
+  t("and the every-view masthead banner it replaced is not still being shipped",
+    (await fresh.$$eval(".static-note", n => n.length)) === 0 &&
+      (await p.$$eval(".static-note", n => n.length)) === 0)
+  await fresh.close()
+}
 /* The claim "a Yahoo user is given a route they can finish" is asserted up in the
    first-visit block now, against the onboarding, because that is where importing is
    attempted. It used to be checked here, on League setup, where a card headed "Use
@@ -356,7 +474,8 @@ t("saving works with no server", (await p.locator(".toast").textContent()).inclu
 t("the save landed in browser storage", await p.evaluate(k =>
   JSON.parse(localStorage.getItem("beanemachine:config")).leagues[k].scoring.batting.HR === 9.9, KEY))
 await p.reload({ waitUntil:"networkidle" })
-await p.click(".views button:nth-child(2)")
+// Setup, not `nth-child(2)`: the scoring editor is the bottom half of Setup now.
+await go("Setup")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
 const kept = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))
 t("the edit survives a reload with no server", kept[codes.indexOf("HR")]==="9.9", kept.join(","))
@@ -395,7 +514,12 @@ t("the edit survives a reload with no server", kept[codes.indexOf("HR")]==="9.9"
  *  reports what actually appeared instead of dying on a timeout. */
 const importUrl = async (url, expect) => {
   await p.waitForSelector(".toast", { state:"detached", timeout: 12000 }).catch(() => {})
-  await p.fill('input[type=text]', url)
+  // Scoped to the toolbar. It used to be the only `input[type=text]` on League setup,
+  // and League setup is now the bottom half of SETUP — which renders the team panel
+  // above it, carrying three more text inputs (add a man, the two trade sides). An
+  // unscoped fill is ambiguous there, and the one it would reach first is the roster
+  // box, so the import would silently never be attempted.
+  await p.fill('.bar input[type=text]', url)
   await p.click(".bar button.primary")
   await p.waitForFunction(src => {
     const el = document.querySelector(".toast")
@@ -520,9 +644,12 @@ await p.evaluate(k => {
   localStorage.setItem("beanemachine:config", JSON.stringify(c))
 }, KEY)
 await p.reload({ waitUntil:"networkidle" })
-await p.waitForSelector(".board-row", { timeout: 25000 })
-const tabs = await p.$$eval(".views button", n => n.map(e => e.textContent))
-await p.click(`.views button:nth-child(${tabs.findIndex(x => /my team/i.test(x)) + 1})`)
+// A reload opens on Today, which has no `.board-row` on it any more.
+await p.waitForSelector(".decide", { timeout: 25000 })
+// This searched the tab labels for /my team/ — "My team & trades" — and that tab is
+// gone: the team panel is the TOP half of Setup, above the league editor. Named
+// rather than matched, because `go` already holds the one place a label lives.
+await go("Setup")
 await p.waitForSelector(".pull-roster", { timeout: 15000 })
 // Located by what it says rather than by `.primary`, which it no longer is. That
 // class was removed deliberately: this route works when the platform allows it and
@@ -582,14 +709,20 @@ await p.waitForSelector(".onboard", { timeout: 25000 })
 await p.click('.onboard .chip-btn:text-is("Yahoo")')
 await p.click(".onboard-alts summary")
 await p.click('.onboard-alts button:text-is("Use the preset")')
-await p.waitForSelector(".board-row", { timeout: 25000 })
-await p.click(".views button:nth-child(2)")
+// A preset that ranks lands on Today (src/client/App.tsx `create`), so the thing to
+// wait for is the Decide card, not a board row.
+await p.waitForSelector(".decide", { timeout: 25000 })
+// `#tpl` — "Start a league from" — lives in the management toolbar, which used to be
+// on the League setup tab and is now on SETUP, the third screen. This was
+// `nth-child(2)`, which is Wire, where no toolbar renders at all.
+await go("Setup")
 await p.waitForSelector("#tpl", { timeout: 15000 })
 t("the picker offers no Sleeper league type on the hosted build either",
   !(await p.$$eval("#tpl option", n => n.map(e => `${e.value}${e.textContent}`).join(" "))).match(/sleeper/i),
   await p.$$eval("#tpl option", n => n.map(e => e.textContent).join(" | ")))
-await p.click(".views button:nth-child(1)")
-await p.waitForSelector(".board-row", { timeout: 25000 })
+// and the board, which is what a preset is FOR, is on Wire — `nth-child(1)` was the
+// tab that used to carry it and is now the Decide card alone.
+await go("Wire")
 t("a Yahoo preset ranks a full board with no server and no import",
   (await p.$$eval(".board-row", n => n.length)) > 50,
   String(await p.$$eval(".board-row", n => n.length)))
@@ -660,6 +793,11 @@ await p.reload({ waitUntil: "networkidle" })
 // longer a seeded one to inherit.
 const WIRE_KEY = await onboard()
 const streamHead = async (n = 6) => {
+  // Navigates first, every time. The mode strip, the filters and the table are all
+  // on Wire now, and this helper is called from four places that arrive on Today —
+  // straight out of `onboard()`, or after a reload, or after a dropped file. `go` is
+  // idempotent: clicking the tab you are already on is a no-op plus a marker wait.
+  await go("Wire")
   await p.click('.modes .mode:has-text("Streaming")')
   await p.waitForTimeout(400)
   return p.$$eval(".board-row .who b", els => els.map(e => e.textContent.trim()))
@@ -762,6 +900,11 @@ const staleDt = await p.evaluateHandle(text => {
 await p.dispatchEvent("body", "drop", { dataTransfer: staleDt })
 await p.waitForSelector(".toast", { timeout: 10000 })
 await p.waitForTimeout(600)
+// The chip is in the masthead and shows on every screen, but the availability toggle
+// read below it is the board's, and the board is Wire. A drop lands you wherever you
+// were — the first-run setup, on Today — so this has to ask for the screen. It used
+// not to, because the board was the first tab and the first tab was where you were.
+await go("Wire")
 const staleChip = await p.locator('[data-wire="carried"]')
 t("a week-old free-agent list is shown as a week old, and flagged",
   /read 7d ago/.test((await staleChip.textContent()).replace(/\s+/g, " ")) &&

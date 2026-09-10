@@ -136,7 +136,29 @@ const cliSrc = readFileSync("src/cli.ts", "utf8")
 // Asserted against the exported STRING, not the whole file: the comment above it
 // quotes the command this replaced, which is the history worth keeping and is not a
 // thing the page prints.
-const importCommand = panelsSrc.match(/export const IMPORT_COMMAND = "([^"]+)"/)?.[1] ?? ""
+//
+// It moved to src/client/command.ts, and the move is the point. This assertion has
+// forbidden `--experimental-strip-types` since the constant was written — and
+// src/client/api.ts shipped that exact command anyway, in a hand-written second copy
+// of the same sentence, inside the refusal a Yahoo user is the ONLY reader of. A
+// check on one copy of a string is not a check on the string. There is one now, and
+// both the panel and the refusal read it.
+const commandSrc = readFileSync("src/client/command.ts", "utf8")
+const importCommand = commandSrc.match(/export const IMPORT_COMMAND = "([^"]+)"/)?.[1] ?? ""
+// The other half: nothing user-facing may name the command again. Comments may — the
+// history of what this replaced is worth keeping — so only string literals count.
+{
+  const files = ["src/client/api.ts", "src/client/panels.tsx", "src/client/Decide.tsx", "src/client/Onboard.tsx"]
+  const offenders = files.filter(f => {
+    const src = readFileSync(f, "utf8")
+    return src
+      .split("\n")
+      .filter(l => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .some(l => /experimental-strip-types|\bnub\b/.test(l))
+  })
+  t("and no screen writes its own second copy of that command",
+    offenders.length === 0, offenders.join(", "))
+}
 t("the page names a command a visitor with no clone could run",
   /^npx --yes github:/.test(importCommand) &&
     !/\bnub\b/.test(importCommand) &&

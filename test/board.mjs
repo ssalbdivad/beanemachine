@@ -1523,28 +1523,73 @@ await phone.close()
  * looser bar of its own that still catches paragraphs accreting above it.
  */
 {
+  /*
+   * The two numbers are now measured on the two SCREENS that own them, which is
+   * what makes them tighter rather than looser.
+   *
+   * Both used to be read on one page, because the decision card and the ranking were
+   * one tab: `.decide` near the top, the first `.board-row` somewhere below it, and
+   * the board's bar had to carry the whole height of the card above it (1,800px
+   * desktop, 2,400px phone). With the card on Today and the table on Wire, neither
+   * number pays for the other, so both bars come down — and the reason for having
+   * them at all is unchanged: this has regressed three times (1,187px, fixed to 895,
+   * back to 1,506 on the streaming tab), every paragraph defensible on its own,
+   * which is exactly why a number is needed instead of judgement.
+   *
+   * Measured here, on the streaming tab, because that is the deepest of the three
+   * horizons — it adds the strip and the coverage note — and the looser a horizon is
+   * the more it has to clear. Bars are set above where it sits, not at it.
+   */
+  const top = (p, s) => p.$eval(s, e => Math.round(e.getBoundingClientRect().top + scrollY))
+
+  // TODAY: the decision, on the screen that is now only the decision.
+  await screen(page, "Today")
+  await page.waitForSelector(".decide", { timeout: 30000 })
+  await page.waitForTimeout(400)
+  /*
+   * And the converse of the Wire assertion at the top of this file. Today renders the
+   * card and no table: the whole point of the split is that a reader who came to be
+   * told what to do does not scroll past a thousand rows, and a reader who came to
+   * look somebody up does not scroll past an answer he did not ask for. Either screen
+   * growing the other one back is the regression, so both halves are pinned.
+   */
+  t("Today carries the decision and not the ranking",
+    (await page.$(".board-row")) === null && (await page.$(".board-controls")) === null,
+    "the ranked board is back under the decision card")
+  const deskDecide = await top(page, ".decide")
+  t("the answer is on the first screen on a desktop, without scrolling",
+    deskDecide < 500, `decision card at y=${deskDecide}`)
+  /*
+   * The way to the board is a link on this screen, and it has to actually land on the
+   * board. The suite reaches Wire by its tab everywhere else, so nothing else here
+   * would notice if this button stopped working — and it is the only route a reader
+   * who is already on Today is invited to take.
+   */
+  await page.click(".next-screen button")
+  await page.waitForSelector(".board-row", { timeout: 30000 })
+  t("the link at the foot of Today reaches the ranked board",
+    (await page.$eval(".views button.on", e => e.textContent.trim())) === "Wire")
+
+  // WIRE: the ranking, with nothing above it but its own controls.
   await page.click(".modes .mode:has-text('Streaming')")
   await page.waitForTimeout(900)
-  const top = s => page.$eval(s, e => Math.round(e.getBoundingClientRect().top + scrollY))
-  const deskDecide = await top(".decide")
-  t("the answer is on the first screen on a desktop, without scrolling",
-    deskDecide < 700, `decision card at y=${deskDecide}`)
-  const deskTop = await top(".board-row")
-  t("and the board under it still starts within two screens",
-    deskTop < 1800, `first ranked row at y=${deskTop}`)
+  const deskTop = await top(page, ".board-row")
+  t("and the board starts within one and a half screens of its own",
+    deskTop < 1300, `first ranked row at y=${deskTop}`)
 
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await phone.goto(BASE, { waitUntil: "domcontentloaded" })
-  await phone.waitForSelector(".board-row", { timeout: 30000 })
+  await phone.waitForSelector(".decide", { timeout: 30000 })
   await phone.waitForTimeout(1200)
+  const phoneDecide = await top(phone, ".decide")
+  t("the answer is within one screen on a phone", phoneDecide < 650,
+    `decision card at y=${phoneDecide}`)
+  await screen(phone, "Wire")
+  await phone.waitForSelector(".board-row", { timeout: 30000 })
   await phone.click(".modes .mode:has-text('Streaming')")
   await phone.waitForTimeout(1200)
-  const phoneTop = s => phone.$eval(s, e => Math.round(e.getBoundingClientRect().top + scrollY))
-  const phoneDecide = await phoneTop(".decide")
-  t("the answer is within one screen on a phone", phoneDecide < 900,
-    `decision card at y=${phoneDecide}`)
-  const phoneBoard = await phoneTop(".board-row")
-  t("and the board under it within three", phoneBoard < 2400,
+  const phoneBoard = await top(phone, ".board-row")
+  t("and the board within two screens on a phone", phoneBoard < 1900,
     `first ranked row at y=${phoneBoard}`)
   t("with nothing spilling sideways on a phone",
     (await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0)

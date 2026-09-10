@@ -14,7 +14,7 @@
 .decide-free,.decide-note{color:var(--muted);font-weight:400}
 .decide-why{display:block;font-size:var(--fs-2);color:var(--muted);font-style:normal;margin-top:2px}
 .decide-ok{color:var(--muted);font-family:var(--mono);min-width:5ch;text-align:right;flex:none}
-.decide-warn{color:var(--bad);font-family:var(--mono);font-weight:700;min-width:5ch;text-align:right;flex:none}
+.decide-warn{color:var(--neg);font-family:var(--mono);font-weight:700;min-width:5ch;text-align:right;flex:none}
 .decide-blocked p{max-width:62ch}
 .decide-slot{
 	font-family:var(--mono);font-size:var(--fs-2);color:var(--muted);
@@ -28,7 +28,7 @@
 .decide-notes summary{cursor:pointer}
 .decide-notes ul{margin:var(--sp-2) 0 0;padding-left:var(--sp-4);display:flex;flex-direction:column;gap:4px}
 .decide-cmd{
-	background:var(--sunk);border:1px solid var(--line);border-radius:6px;
+	background:var(--sunken);border:1px solid var(--line);border-radius:6px;
 	padding:var(--sp-2) var(--sp-3);overflow-x:auto;font-size:var(--fs-2);margin:0;
 }
 .decide-changes .decide-slot{color:var(--accent)}
@@ -62,3 +62,16 @@
    the moves rather than like a footnote — same list idiom, same slot gutter. */
 .decide-fill .decide-slot{color:var(--flag)}
 .decide-fill-head{margin-top:var(--sp-4)}
+
+/* Fourteen names in bold is a wall, not a list. In a bench group the fact is the
+   REASON — "no game today" — and the names are who it applies to, so they read at
+   normal weight with the seat quieter still. Individual rows keep their emphasis:
+   one name in bold is a decision, fourteen is shouting. */
+.decide-bench-group b{font-weight:500;color:var(--muted)}
+.decide-bench-group .decide-seat{opacity:.72}
+.decide-bench-group .decide-why{color:var(--ink);font-style:normal}
+
+/* The card is a list of decisions, not prose, so it sets one step down from body
+   text: more rows in a screen, and the numbers still line up. */
+.decide-list li>span:last-child{font-size:var(--fs-3)}
+.decide-list li>span:last-child b{font-size:var(--fs-4)}

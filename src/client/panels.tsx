@@ -646,7 +646,10 @@ export const PresetNote = ({
  * is what makes this form real — see `RUN` in src/cli.ts, which prints the local
  * form when it IS running from a clone.
  */
-export const IMPORT_COMMAND = "npx --yes github:ssalbdivad/beanemachine <your league URL>"
+// Re-exported so every consumer keeps importing it from here, and read from
+// src/client/command.ts so api.ts can use the same string without importing React.
+export { IMPORT_COMMAND } from "./command.ts"
+import { IMPORT_COMMAND } from "./command.ts"
 
 export type View = "board" | "wire" | "league" | "trade"
 

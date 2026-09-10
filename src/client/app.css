@@ -21,9 +21,13 @@
 :root{
   /* ---- palette: light is the base, and every token is defined here ---- */
   --paper:#f4efe4; --sunken:#ece5d7;
-  --ink:#191c1f; --muted:#5f5b53; --faint:#878176;
+  /* --faint was #878176 — 3.37:1 on this paper, below the 4.5:1 AA bar, and it is
+     the colour of every column header, every unit label and every row's second
+     line. --accent was #2f7d5b at 4.35:1, and the accent IS the bscore: the one
+     number the whole board exists to show. Both darkened to clear AA. */
+  --ink:#191c1f; --muted:#5f5b53; --faint:#6e685c;
   --rule:rgba(92,82,66,.16); --rule-strong:rgba(92,82,66,.34);
-  --accent:#2f7d5b; --accent-soft:rgba(47,125,91,.13);
+  --accent:#276848; --accent-soft:rgba(39,104,72,.13);
   --acc:var(--accent);
   --neg:#b0432b; --neg-soft:rgba(176,67,43,.11);
   --flag:#8a6d1f; --flag-soft:rgba(200,163,60,.17);
@@ -99,7 +103,7 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme=light]){
     --paper:#14161a; --sunken:#22262c;
-    --ink:#eceae4; --muted:#a6a096; --faint:#7b756c;
+    --ink:#eceae4; --muted:#a6a096; --faint:#8b8578;
     --rule:rgba(255,255,255,.10); --rule-strong:rgba(255,255,255,.22);
     --accent:#5cb98d; --accent-soft:rgba(92,185,141,.15);
     --neg:#e0785c; --neg-soft:rgba(224,120,92,.15);
@@ -120,7 +124,7 @@
 }
 :root[data-theme=dark]{
   --paper:#14161a; --sunken:#22262c;
-  --ink:#eceae4; --muted:#a6a096; --faint:#7b756c;
+  --ink:#eceae4; --muted:#a6a096; --faint:#8b8578;
   --rule:rgba(255,255,255,.10); --rule-strong:rgba(255,255,255,.22);
   --accent:#5cb98d; --accent-soft:rgba(92,185,141,.15);
   --neg:#e0785c; --neg-soft:rgba(224,120,92,.15);

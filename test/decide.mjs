@@ -135,6 +135,23 @@ const seedPool = {
 const reserve = slot => /^(BN|IL|NA)/i.test(slot)
 
 /**
+ * Click a tab by its VISIBLE TEXT, never by position.
+ *
+ * Four suites in this directory reached for `.views button:nth-child(N)`, and the
+ * restructure from four tabs to three moved every index: the card this file is about
+ * is still the first tab, but "League setup" was the third and is now gone, and the
+ * screen that takes a roster went from second to third. An index-based click is a
+ * silent rename away from asserting against the wrong screen — it does not fail, it
+ * tests something else — whereas a label-based one fails loudly and is a one-line fix
+ * when a tab is renamed. The labels are the contract with the reader anyway: he finds
+ * "Setup" by reading it, not by counting.
+ */
+const tab = async (page, label) => {
+	await page.click(`.views button:text-is("${label}")`)
+	await page.waitForTimeout(400)
+}
+
+/**
  * @param seeds  what localStorage holds before the page loads
  * @param opts   `offline` blocks the server read of the wire, so the carried-file
  *               path is exercised deterministically. Without it this case passes or
@@ -168,11 +185,56 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 {
 	const page = await open({ lineup: seedLineup, pool: seedPool })
 	const text = await page.$eval(".decide", e => e.innerText)
-	t("the card is the first thing on the page, above the board",
-		await page.evaluate(() => {
-			const d = document.querySelector(".decide"), b = document.querySelector(".board")
-			return !b || d.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
-		}), text.slice(0, 60))
+	/*
+	 * TODAY HOLDS THE DECISION AND NOTHING ELSE. This assertion changed in kind, not
+	 * in wording, and the old one has to be described or the change looks like a loss.
+	 *
+	 * It read "the card is the first thing on the page, above the board", and it was
+	 * written when this card and the ranked board shared one tab called
+	 * "Recommendations": the card on top, a thousand-row table underneath, and the only
+	 * thing left to protect was the ORDER — that the answer came before the lookup. The
+	 * two are separate screens now, and the old assertion could therefore only pass: it
+	 * was `!board || cardIsFirst`, so with no board on the screen at all the first
+	 * clause is true and nothing whatever is checked. An assertion that cannot fail is
+	 * worse than no assertion, because the log still prints PASS and reads like cover.
+	 *
+	 * What replaces it is the property the split was actually for, and it is the
+	 * stronger claim: Today renders NO board. Measured at phone width the combined tab
+	 * was 7,477px with the first ranked row 1,600px down; Today is 947px and 105 words
+	 * with no roster loaded. Two questions asked at different moments — what do I do
+	 * before first pitch, and who is out there — stopped being one scroll.
+	 *
+	 * The board is not lost, so the link to it is asserted too, and asserted to LAND:
+	 * a control promising "Everyone you can get" that does not reach the ranked table
+	 * has told the reader to go and find something, which is the same failure the
+	 * blocked card's CTA is written against further down.
+	 */
+	t("Today carries the decision and no ranked board under it",
+		!(await page.$(".board")) && !!(await page.$(".decide")),
+		text.slice(0, 60))
+	t("and the card is the tab labelled Today, which is the one that opens",
+		await page.$eval(".views button.on", e => e.textContent.trim()) === "Today",
+		await page.$eval(".views", e => e.innerText.replace(/\s+/g, " ")))
+	{
+		const link = await page.$(".next-screen button")
+		t("the way to the board is one control on this screen",
+			!!link && /Everyone you can get/.test(await link.innerText()),
+			(await page.$eval(".decide, .next-screen", e => e.innerText).catch(() => "")).slice(-120))
+		if (link) {
+			await link.click()
+			const onWire = await page
+				.waitForSelector(".board .board-row", { timeout: 20000 })
+				.then(() => true, () => false)
+			t("and it really lands on Wire, where the ranked board now lives",
+				onWire && await page.$eval(".views button.on", e => e.textContent.trim()) === "Wire",
+				onWire ? "the board arrived but the tab did not follow" : "no ranked row ever appeared")
+			// back to Today by LABEL, because everything below this point is about the
+			// card and the tab it sits behind has moved once already
+			await tab(page, "Today")
+			t("and Today is still the card when you come back to it",
+				!!(await page.$(".decide")) && !(await page.$(".board")), "")
+		}
+	}
 	t("it answers for the league's own scoring period, not a fortnight",
 		/For <?b?>?(this matchup|this scoring period|today)/.test(text) || /For\s+(this matchup|this scoring period|today)/.test(text),
 		text.split("\n").slice(0, 3).join(" | "))
@@ -693,17 +755,43 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 */
 	t("a visitor meets no command line on the card at all",
 		!(await page.$(".decide-cmd")) && !/npx |node --/.test(deep), deep.slice(0, 400))
+	/*
+	 * WHERE THE BUTTON GOES is the same claim against a different screen.
+	 *
+	 * It used to land on "My team & trades", the second of four tabs. That tab and
+	 * "League setup" were merged into one screen called Setup — both are things one
+	 * person does once a season from a laptop, and half the navigation was furniture
+	 * that did not fit the phone the site is opened on. So the destination is now the
+	 * THIRD tab, and the assertion names the screen by its label rather than trusting
+	 * an index or the old tab's name.
+	 *
+	 * The extra half is new and is worth the line: the roster paste and the league's
+	 * own scoring tables are now one screen, and several blocked states on this card
+	 * say "Open League setup" (see the team-count case below). If those two ever came
+	 * apart again, a reader following the only control this card offers would arrive
+	 * somewhere that cannot do the thing the card's other sentences tell him to do.
+	 */
 	await page.click(".decide-cta")
 	const landed = await page
 		.waitForSelector(".trade-team .paste-roster", { timeout: 15000 })
 		.then(() => true, () => false)
 	t("and the control on it really lands on the screen that takes a roster",
-		landed, "pressing Add your players did not reach My team")
+		landed, "pressing Add your players did not reach the roster paste")
+	t("which is the tab labelled Setup, wherever in the bar that sits",
+		await page.$eval(".views button.on", e => e.textContent.trim()) === "Setup",
+		await page.$eval(".views", e => e.innerText.replace(/\s+/g, " ")))
 	if (landed) {
 		const team = await page.$eval(".trade-team", e => e.innerText)
 		t("which is also where the exact free-agent list is got, with no terminal",
 			/Paste your free agents/.test(team) && !/npx |node --/.test(team),
 			team.slice(0, 400))
+		// case-insensitively, and on the headings rather than the rendered text: these
+		// <h2>s are small-caps by stylesheet, so innerText hands back "BATTING" and a
+		// literal /Batting/ failed against a screen that was perfectly correct
+		const heads = await page.$$eval("h2", ns => ns.map(n => n.textContent.trim().toLowerCase()))
+		t("and the league's own scoring lives on that same screen, as its copy promises",
+			["batting", "pitching", "roster slots", "this league"].every(h => heads.includes(h)),
+			JSON.stringify(heads))
 	}
 	await page.close()
 }
@@ -816,6 +904,20 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	cfg.leagues[KEY].meta.max_teams = null
 	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
 	const text = await page.$eval(".decide", e => e.innerText)
+	/*
+	 * "League setup" is no longer the name of anything a reader can see, and this
+	 * assertion is left strict on purpose so that stays visible.
+	 *
+	 * There were four tabs and one of them was called "League setup"; there are three
+	 * and the editor is the bottom half of "Setup". The card's own sentence still reads
+	 * "Open League setup and set the team count", so the regex below still matches —
+	 * but it is now matching a name the navigation does not use, which is the reader
+	 * being sent to find a tab that is not there. Loosening this to `/Setup/` would
+	 * make the test agree with whichever wording ships and stop reporting the mismatch,
+	 * so it stays as it is and the mismatch is reported as a src concern instead. The
+	 * CTA block above asserts the team count really is editable on the screen the
+	 * button reaches, so the ROUTE is covered even while the NAME is wrong.
+	 */
 	t("a league with no team count is told that, and where to set it",
 		/how many teams are in it/.test(text) && /League setup/.test(text), text.slice(0, 240))
 	await page.close()

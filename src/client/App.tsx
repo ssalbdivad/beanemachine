@@ -169,10 +169,25 @@ export const App = () => {
 		setConfig(next)
 		setKey(chosen)
 		setLoadError(null)
-		// A browser with no league cannot rank anything, so the setup is the page
-		// rather than a card above it. Opened here rather than in an effect so it is
-		// true on the first paint and never flashes an empty board first.
-		if (!keys.length) setOnboarding(true)
+		/*
+		 * With no league, the setup opens AND the board runs beside it on the preset.
+		 *
+		 * This used to open the setup instead of a board, on the reasoning that a
+		 * bscore is denominated in a league's own points and there is no honest board
+		 * without one. Both halves are true and the conclusion was wrong: a stranger
+		 * cannot tell whether this is worth two minutes of setup until he has seen what
+		 * it produces, and the ask that loses him is "fill in seventeen point values and
+		 * then I will show you". So he lands on Wire — the screen that ranks, and the
+		 * one Billy's pick is on — with the setup card above it and the board itself
+		 * saying whose scoring it is on.
+		 *
+		 * Set here rather than in an effect so it is true on the first paint and never
+		 * flashes the wrong screen.
+		 */
+		if (!keys.length) {
+			setOnboarding(true)
+			setView("wire")
+		}
 	}, [])
 
 	useEffect(() => {
@@ -363,6 +378,32 @@ export const App = () => {
 	const templates = useMemo(() => templateOptions(config), [config])
 	const preset = templates.find(t => t.filled) ?? null
 	/**
+	 * A ranked board before anybody has committed a league.
+	 *
+	 * The first visit used to be the setup and nothing else, on the reasoning that a
+	 * bscore is denominated in a league's own points and there is no honest board
+	 * without one. Both halves of that are true and the conclusion was wrong: a
+	 * stranger cannot tell whether this is worth two minutes of setup until he has
+	 * seen what it produces, and "trust me, fill in seventeen point values" is the
+	 * ask that loses him. What was actually wrong before was seeding somebody's REAL
+	 * league and letting it pass for his own.
+	 *
+	 * So the board runs on the shipped PRESET — standard head-to-head points values,
+	 * nobody's team, labelled as borrowed on the card above it and in the board's own
+	 * heading — and the setup sits beside it rather than in front of it. Every number
+	 * moves the moment a real league arrives, which is the argument for setting one
+	 * up, made by showing it rather than by asserting it.
+	 */
+	const preview = useMemo((): League | null => {
+		if (league || !preset || !config) return null
+		const tpl = config.platform_templates[preset.key]
+		const parsed = LeagueSchema(tpl)
+		return parsed instanceof type.errors ? null : parsed
+	}, [league, preset, config])
+	/** The league every ranked surface is denominated in: the reader's own where he
+	 *  has one, the preset preview where he has not, and null where neither exists. */
+	const shown = league ?? preview
+	/**
 	 * League MANAGEMENT — create, remove, import, download, load a file — is chrome
 	 * for a thing you do once, and it was sitting above the recommendations on every
 	 * view. Measured in the browser: it pushed the first ranked row to y=1187, so on
@@ -450,14 +491,14 @@ export const App = () => {
 					<button
 						key={v.id}
 						role="tab"
-						title={league ? v.purpose : `${v.purpose} — set a league up first`}
+						title={shown ? v.purpose : `${v.purpose} — set a league up first`}
 						aria-selected={view === v.id}
 						aria-current={view === v.id ? "page" : undefined}
 						className={view === v.id ? "on" : ""}
 						// Nothing on any of them exists yet. A tab that highlights and then
 						// shows the same setup card reads as a broken button; saying why
 						// costs one attribute.
-						disabled={!league}
+						disabled={!shown}
 						// the .on class carries the tab's state; the accent is the same "this one
 						// is live" signal .modes and .chip-btn already use for a selected control
 						style={view === v.id ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}
@@ -654,7 +695,7 @@ export const App = () => {
 			    open, because those come apart: the setup stays open while a
 			    half-read league is being finished, and that league can already rank
 			    a board worth seeing underneath it. */}
-			{!league ? null
+			{!shown ? null
 			: view === "board" ?
 				/*
 				  TODAY is its own screen now, and the ranked board is its own screen.
@@ -674,7 +715,7 @@ export const App = () => {
 				<div className="grid">
 					<Decide
 						snapshot={snapshot}
-						league={league ?? null}
+						league={shown}
 						leagueKey={key}
 						error={snapshotError}
 						onOpenTeam={() => setView("trade")}
@@ -690,9 +731,10 @@ export const App = () => {
 					<Board
 						key={wireKey}
 						snapshot={snapshot}
-						league={league ?? null}
+						league={shown}
 						leagueKey={key}
 						error={snapshotError}
+						preview={!league}
 					/>
 				</div>
 			: view === "trade" ?

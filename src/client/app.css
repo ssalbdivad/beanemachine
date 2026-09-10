@@ -1043,3 +1043,41 @@ kbd{
 .period-fold>summary::after{content:"▸";color:var(--faint);font-size:var(--fs-2)}
 .period-fold[open]>summary::after{content:"▾"}
 .period-fold[open]>summary{margin-bottom:var(--sp-3)}
+
+/* The horizon strip is three words wide and a phone is 346px of content. Measured at
+   390px it cut "Stash" in half, which is a control a reader cannot see and therefore
+   does not have. Tighter type and padding under 640px, and a scroll with a fade as
+   the fallback for a language whose words are longer — a strip that scrolls and says
+   it scrolls beats one that silently ends. */
+@media(max-width:640px){
+  .modes{
+    max-width:100%;overflow-x:auto;scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent);
+    mask-image:linear-gradient(90deg,#000 calc(100% - 22px),transparent);
+  }
+  .modes::-webkit-scrollbar{display:none}
+  .modes .mode{flex:none;padding:6px 10px;gap:5px}
+  .modes .mode b{font-size:var(--fs-3)}
+}
+
+/* Search and Rank by sit side by side on a phone. Stacked, with a label above each,
+   they were 150px of the 600px climb to the first ranked row on the one screen that
+   exists to show ranked rows — and neither needs full width: a player name is short
+   and the select truncates its own text. */
+@media(max-width:640px){
+  .board-controls .filters{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2) var(--sp-3);align-items:end}
+  .board-controls .filters>.toggle{grid-column:1/-1}
+  .board-controls .filters .ctl{min-width:0}
+  .board-controls .filters .ctl input[type=text],.board-controls .filters .ctl select{width:100%;min-width:0}
+}
+
+/* A board a reader has not committed a league to. Every number on it is real and
+   none of it is his, and the difference has to be on the board rather than only on
+   the card above it — a ranked table with no league named is exactly the mistake the
+   seeded demo league was. */
+.preview-note{
+  margin:0 0 var(--sp-2);padding:7px 11px;border-radius:var(--r-md);
+  background:var(--flag-soft);border-left:2.5px solid var(--flag);
+  font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--muted);
+}
+.preview-note b{color:var(--ink)}

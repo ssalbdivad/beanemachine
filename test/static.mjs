@@ -66,9 +66,31 @@ t("the published seed carries no league at all",
 t("but it still carries the presets and the stat list, which are nobody's league",
   Object.keys(seed.platform_templates).length > 0 && seed.stat_keys.batting.length > 0,
   Object.keys(seed.platform_templates).join(","))
-t("a first visit shows the setup, not somebody else's ranked board",
-  (await p.$$eval(".board-row", n => n.length)) === 0,
+/*
+ * A first visit shows a ranked board AND the setup, side by side.
+ *
+ * This assertion used to require the opposite — no board at all — and it was written
+ * against the right defect and the wrong cure. The defect was that the build shipped
+ * one real Yahoo league belonging to a real person and seeded it into every browser,
+ * so a stranger's first screen was a full board denominated in somebody else's
+ * points. The cure taken was to show nothing until a league arrives, and that asks a
+ * stranger to fill in seventeen point values before he has seen what they buy.
+ *
+ * What ships now is the shipped PRESET: standard head-to-head points values, nobody's
+ * team, nobody's roster, and the board says so on its own face. So the claim splits
+ * into the two facts that were always underneath it — there is something ranked to
+ * look at, and it is not anybody's league.
+ */
+t("a first visit ranks players, so a stranger can see what the setup buys him",
+  (await p.$$eval(".board-row", n => n.length)) > 50,
   String(await p.$$eval(".board-row", n => n.length)))
+t("and Billy's pick is on it, because a pick is the shortest demonstration there is",
+  await p.locator(".card.pick").isVisible())
+t("but the board says whose scoring it is on, on the board itself",
+  /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
+  await p.$eval(".preview-note", e => e.innerText))
+t("and the setup is beside it, not behind it",
+  await p.locator(".onboard").isVisible())
 t("and this browser holds no league until the visitor puts one in it",
   await p.evaluate(() =>
     Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length === 0))
@@ -221,10 +243,20 @@ t("and it says the values are borrowed, on the button's own line",
   /standard values|nothing read from your league/i.test(
     await p.$eval(".onboard-shortcut", e => e.innerText)),
   await p.$eval(".onboard-shortcut", e => e.innerText))
-t("the tabs are disabled until there is a league, and say so",
-  await p.$$eval(".views button", n => n.every(e => e.disabled)) &&
-    /set a league up first/i.test(await p.$eval(".views button", e => e.title)),
-  await p.$eval(".views button", e => e.title))
+/*
+ * The tabs work on a first visit now, and that is the same change as the one above.
+ *
+ * They were disabled because nothing could be ranked, and something can: the preset
+ * board is on Wire, which is the screen a first visit lands on. Today still has
+ * nothing to say without a roster and says so in its own card rather than through a
+ * dead tab — a disabled control teaches nothing about why.
+ */
+t("the tabs work on a first visit, because there is something behind each of them",
+  await p.$$eval(".views button", n => n.every(e => !e.disabled)),
+  await p.$$eval(".views button", n => n.map(e => `${e.textContent}:${e.disabled}`).join(" ")))
+t("and the visit lands on the screen that ranks",
+  (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim())))[0] === "Wire",
+  (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim()))).join(","))
 
 /**
  * The route that cannot be revoked, on the build where it is the only one.
@@ -968,7 +1000,22 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   page.on("request", r => { if (r.url().includes("/api/")) apiCalls.push(r.url()) })
   await page.goto(BASE, { waitUntil: "networkidle" })
   await page.waitForTimeout(1500)
-  t("a static build makes no API request at all", apiCalls.length === 0, apiCalls.join(", "))
+  /*
+   * "The API" here means THIS app's backend, which a static build does not have. It
+   * was matched as any URL containing "/api/", and that now also catches the two
+   * public MLB feeds the page reads directly — statsapi.mlb.com/api/v1/schedule for
+   * tonight's posted lineups and /api/v1/transactions for who went on the injured
+   * list. Those are the opposite of the defect this assertion guards: they are how a
+   * page with no backend gets facts it would otherwise have to invent, and they are
+   * CORS-open precisely so it can. The claim is unchanged and the match is now the
+   * app's own origin.
+   */
+  t("a static build makes no request to a backend of its own",
+    apiCalls.filter(u => u.startsWith(BASE)).length === 0,
+    apiCalls.filter(u => u.startsWith(BASE)).join(", "))
+  t("and what it does ask for off-origin is MLB's own public data, nothing else",
+    apiCalls.every(u => u.startsWith(BASE) || u.startsWith("https://statsapi.mlb.com/")),
+    apiCalls.join(", "))
   t("and logs no console errors on load", errors.length === 0, errors.join(" | "))
   await page.close()
 }

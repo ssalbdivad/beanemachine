@@ -224,6 +224,15 @@ const BOARD_GRID_CSS = `
 	.board:not([data-sort=uscore]) .board-row>[data-col=uscore]{display:none}
 	.board:not([data-sort=uscore]) .board-head>[data-col=games],
 	.board:not([data-sort=uscore]) .board-row>[data-col=games]{grid-column:3}
+	/* On a board nobody has committed a league to, uscore is the more useful of the
+	   two: bscore asks who is best, uscore asks who is the best you can actually get,
+	   and a reader who has not entered a team is exactly the reader asking the second
+	   question. It takes the games column's place rather than adding a fifth track. */
+	.board[data-preview]:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore],
+	.board[data-preview]:not([data-sort=uscore]) .board-row>[data-col=uscore]{display:block;grid-column:3}
+	.board[data-preview]:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore]{display:flex}
+	.board[data-preview] .board-head>[data-col=games],
+	.board[data-preview] .board-row>[data-col=games]{display:none}
 	.board[data-sort=uscore] .board-head>[data-col=games],
 	.board[data-sort=uscore] .board-row>[data-col=games]{display:none}
 }`
@@ -500,7 +509,8 @@ export const Board = ({
 	snapshot,
 	league,
 	leagueKey,
-	error
+	error,
+	preview = false
 }: {
 	snapshot: Snapshot | null
 	league: League | null
@@ -508,6 +518,10 @@ export const Board = ({
 	 *  reader who has not entered a team gets the generic bar and no Δ MINE. */
 	leagueKey: string | null
 	error: string | null
+	/** Whether the league behind these numbers is the shipped preset rather than the
+	 *  reader's own. Every number is real and none of it is HIS, and a board that does
+	 *  not say which it is on is the demo-league mistake in a new coat. */
+	preview?: boolean
 }) => {
 	/**
 	 * Your own men, so a row can be priced against the seat it would actually take.
@@ -1156,6 +1170,12 @@ export const Board = ({
 				  a real and common answer and is not a large number — and neither is shown
 				  where the league did not state it.
 				*/}
+				{preview && (
+					<p className="preview-note">
+						<b>Standard scoring, not yours.</b> Every number below is real and none of
+						it is about your league yet — set yours up and they all move.
+					</p>
+				)}
 				<p className="sub">
 					<b className="count">{rows.length}</b> players · {span.range}
 					{budget.moves !== null && (
@@ -1277,7 +1297,7 @@ export const Board = ({
 				    here in the first place. The board ranks; the card decides. */}
 				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
 				    uscore column back on a phone when the board is ranked by it. */}
-				<div className="board" data-sort={filters.sort} data-mode={filters.mode} data-mine={myNames ? "" : undefined}>
+				<div className="board" data-sort={filters.sort} data-mode={filters.mode} data-mine={myNames ? "" : undefined} data-preview={preview ? "" : undefined}>
 					{/* Seven columns, each answering a different question. `proj pts` and
 					    `waiver pts` used to sit here too, but bscore is one minus the other,
 					    so the table stated the same fact three times; the arithmetic is in

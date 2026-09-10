@@ -878,5 +878,30 @@ t("a player Yahoo never listed is counted gettable rather than dropped",
 t("ownership for fewer players than the league can hold is refused",
   ownershipCut(league, new Map([...Array(100)].map((_, i) => [i, 100 - i]))).usable === false)
 
+/* ── which seats start nobody, asked once ────────────────────────────────────
+ *
+ * `RESERVE_SLOTS` was exported so there would be one answer, and six places went on
+ * writing `slot !== "BN" && slot !== "IL" && slot !== "NA"` by hand. That form omits
+ * Yahoo's second injured slot, "IL+", which `src/import.ts` already marks
+ * `injured_only` — so two RENDERED components (the roster summary on League setup
+ * and the scarcity panel under the board) counted an injured seat as a starting one,
+ * and every replacement bar drawn from that count was one seat too deep.
+ *
+ * The predicate is asserted here rather than the Set, because the drift was never
+ * about the contents. It was about a check that is easy to retype and easy to get
+ * wrong. */
+{
+  const { isReserveSlot, RESERVE_SLOTS } = await import("../src/engine/bscore.ts")
+  for (const slot of ["BN", "IL", "NA", "IL+"])
+    t(`${slot} starts nobody`, isReserveSlot(slot), slot)
+  for (const slot of ["C", "1B", "SS", "OF", "Util", "SP", "RP", "P", "DH"])
+    t(`${slot} starts somebody`, !isReserveSlot(slot), slot)
+  // The forms platforms actually print: a trailing space from a copied cell, and
+  // Yahoo's own "IL60"/"NA" family.
+  t("a slot with whitespace round it is still read", isReserveSlot(" IL+ "))
+  t("and the exported Set and the predicate cannot disagree",
+    [...RESERVE_SLOTS].every(s => isReserveSlot(s)), [...RESERVE_SLOTS].join(","))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

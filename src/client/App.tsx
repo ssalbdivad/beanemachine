@@ -8,7 +8,6 @@ import { League as LeagueSchema } from "../schema.ts"
 import { api, ApiError, detectMode, getMode } from "./api.ts"
 import { Billy } from "./Billy.tsx"
 import { Board } from "./Board.tsx"
-import { Draft } from "./Draft.tsx"
 import { Trade } from "./Trade.tsx"
 import { Decide } from "./Decide.tsx"
 import { Onboard } from "./Onboard.tsx"
@@ -82,7 +81,6 @@ const LEAGUE_LABEL: Record<View, string> = {
 	board: "Scoring these picks against",
 	league: "League being edited",
 	trade: "Team being managed",
-	draft: "Drafting in"
 }
 
 export const App = () => {
@@ -422,37 +420,26 @@ export const App = () => {
 				</div>
 			)}
 			<header>
+				{/*
+				  One line.
+
+				  The masthead was 199px on a desktop and 203px on a phone — a wordmark, a
+				  tagline on its own line, and a banner saying leagues are saved in this
+				  browser — sitting above a page whose first ranked row was already 1,229px
+				  down. None of the three is a decision input, and two of them are read
+				  once. So they share the line: Billy and the wordmark carry the identity,
+				  the tagline sits beside them and drops out under 640px where there is no
+				  room for charm, and the storage reassurance moves to League setup, which
+				  is the screen where somebody is deciding whether to trust this with a
+				  league.
+				*/}
 				<div className="mark">
 					<Billy />
 					<h1>
 						beane<b>machine</b>
 					</h1>
+					<p className="tagline">How can you not be robotic about baseball?</p>
 				</div>
-				<p className="tag tagline">How can you not be robotic about baseball?</p>
-				{/* The hosted build's first impression used to be four lines of instructions
-				    for running a dev server — read by everyone, relevant to the few who are
-				    about to import. The reassurance a visitor needs is one line; the caveat
-				    belongs where importing is attempted, and it is on that form already. */}
-				{/* It also said "importing one by URL needs the local server", flatly, which
-				    is false for two platforms out of three: ESPN reflects our origin in
-				    `access-control-allow-origin` and Sleeper sends `*`, so a browser reads
-				    both directly. Only Yahoo has no CORS headers at all, and Yahoo is a
-				    scrape rather than an API. That blanket sentence was the single thing
-				    standing between a visitor and using this on their own league. */}
-				{/* Sleeper used to be named here as a way in. It runs no fantasy baseball —
-				    src/import.ts refuses a Sleeper URL and quotes the check — so pointing a
-				    baseball user at it was a dead end dressed up as an option. What replaces it is the route
-				    a Yahoo user can actually finish: a preset now, or a file they carry
-				    over, both of which end in a board that ranks. */}
-				{/* This carried six lines about CORS, in the masthead, on every page view —
-				    134px of a 1,506px climb to the first recommendation. The same explanation
-				    already appears four times in the setup panel, which is where importing is
-				    actually attempted and where somebody is asking the question it answers.
-				    What belongs here is the one fact a visitor needs before doing anything:
-				    their data is not going anywhere. */}
-				{config && getMode() === "static" && (
-					<p className="tag static-note">Your leagues are saved in this browser.</p>
-				)}
 			</header>
 
 			<nav className="views" role="tablist" aria-label="Sections">
@@ -696,15 +683,6 @@ export const App = () => {
 						/>
 					</div>
 				</>
-			: view === "draft" ?
-				<div className="grid">
-					<Draft
-						snapshot={snapshot}
-						league={league ?? null}
-						leagueKey={key}
-						error={snapshotError}
-					/>
-				</div>
 			: view === "trade" ?
 				<div className="grid">
 					<Trade
@@ -789,7 +767,7 @@ const Colophon = () => (
 				target="_blank"
 				rel="noreferrer"
 			>
-				How to read the board
+				How to read this
 			</a>
 			<a
 				href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/METHODOLOGY.md"
@@ -802,37 +780,27 @@ const Colophon = () => (
 				Source
 			</a>
 		</p>
-		<dl>
-			<Fragment2 term="what is measured">
-				Scored against a naive &ldquo;he keeps doing what he has been doing&rdquo;
-				baseline over 2016&ndash;2026 at a 14-day horizon, this ordering won 48 of 50
-				hitting folds (mean Spearman &rho; 0.676 against 0.574) and 49 of 50 pitching
-				folds (0.532 against 0.470). The consistency is the result, not the size:
-				&rho; 0.68 leaves a great deal of disagreement between the projected order and
-				the real one, and a bscore of 55 is not a forecast that you gain 55 points.
-			</Fragment2>
-			<Fragment2 term="what is not">
-				Playing five seasons out, the model beats an inactive manager 98 weeks of 111
-				and a streak-chaser 74, both clearly. Against a manager who blends season and
-				recent form it is 63 of 111 &mdash; 63W&ndash;47L, z 1.53, one-sided p 0.064.
-				That is suggestive and does not clear the 5% bar the rest of these results
-				are held to.
-			</Fragment2>
-			<Fragment2 term="what cannot be checked">
-				Where MLB has published a probable starter the board projects a pitcher from
-				his own scheduled starts. Probables are announced and then overwritten and
-				nothing archives them, so that step cannot be backtested at all, and its
-				weight was set by judgment rather than by a measurement.
-			</Fragment2>
-			<Fragment2 term="what is known broken">
-				<b>Market edge</b> is selectable and unreliable, so it is not the default.
-				The sweep that reads Yahoo&rsquo;s &ldquo;% Ros&rdquo; caught a per-game
-				weather figure in the committed capture, and being per-game it is shared by
-				everyone in both clubs &mdash; 225 players across four games read 51%. bscore
-				is the honest column, and <b>Free agents only</b> is the control that answers
-				what edge was there to answer.
-			</Fragment2>
-		</dl>
+		{/*
+		  One sentence, and the caveat that changes a decision.
+
+		  This was four paragraphs — 277 words of backtest results, folds, z-scores and
+		  p-values — rendered under EVERY tab. Measured on the first screen a new
+		  visitor sees, it was 67% of the words on the page. It was also the wrong
+		  words: it quoted "48 of 50 hitting folds" at a reader who cannot act on it,
+		  while METHODOLOGY.md says that number was measured on a configuration this app
+		  no longer ships. Rigour that nobody reads and that has quietly drifted from the
+		  code is not rigour.
+
+		  What survives is the one thing a reader's decision depends on: a bscore is not
+		  a promise of points. Everything else — every fold, every effect size, and the
+		  three things that could not be measured at all — is in METHODOLOGY.md, which is
+		  linked above and is where it can be kept true.
+		*/}
+		<p className="tiny-note">
+			A bscore is a ranking, not a forecast: 55 means &ldquo;further ahead of the next
+			man up than 40 is&rdquo;, never &ldquo;55 points in the bank&rdquo;. What was
+			measured, and the parts that could not be, are in Methodology.
+		</p>
 	</footer>
 )
 

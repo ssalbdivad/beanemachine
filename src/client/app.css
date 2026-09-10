@@ -55,15 +55,22 @@
   --line:var(--edge-line);
   --panel:var(--glass-2);
 
-  /* ---- type scale. Nine steps, and nothing between them ---- */
-  --fs-1:9.5px;   /* mono micro-caps: column heads, unit labels */
+  /* ---- type scale ----
+     Nine steps, and four of them lived inside 5.5px of each other: 9.5, 11, 12.5
+     and 13.5 did most of the work on the page and were not reliably tellable
+     apart, so hierarchy at the small end was nominal — four shades of the same
+     grey noise rather than four levels. The steps below are spread far enough
+     to read as different, and the tokens are kept so nothing has to be
+     renamed. 24 and 30 collapse into one: two headline figures a pixel and a
+     half apart are one figure. */
+  --fs-1:10px;    /* mono micro-caps: column heads, unit labels */
   --fs-2:11px;    /* mono caps: control labels, section heads */
-  --fs-3:12.5px;  /* secondary prose, row meta, table numbers */
-  --fs-4:13.5px;  /* body prose, player names */
-  --fs-5:15px;    /* base, and the one number per row that matters */
-  --fs-6:18px;    /* a card's headline figure */
-  --fs-7:24px;    /* gauge readouts */
-  --fs-8:30px;    /* the answer */
+  --fs-3:13px;    /* secondary prose, row meta, table numbers */
+  --fs-4:15px;    /* body prose, player names */
+  --fs-5:17px;    /* the one number per row that matters */
+  --fs-6:20px;    /* a card's headline figure */
+  --fs-7:26px;    /* gauge readouts */
+  --fs-8:32px;    /* the answer */
   --fs-9:32px;    /* display */
 
   --lh-tight:1.25; --lh-snug:1.45; --lh-body:1.55;
@@ -155,7 +162,11 @@ body::before{
   mix-blend-mode:soft-light;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.38'/%3E%3C/svg%3E");
 }
-.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 var(--sp-5) 130px}
+/* 1080px was ~200px wider than anything in it, and the surplus landed as a hole
+   down the middle of the board: eight columns spread across a measure none of
+   them needed, and card prose running to 110 characters. 940 is the width the
+   board's own columns want, and it is one measure for the whole page. */
+.wrap{position:relative;z-index:1;max-width:940px;margin:0 auto;padding:0 var(--sp-5) 130px}
 
 select,input,button{font:inherit;color:inherit}
 /* Firefox paints persistent number-input spinners that eat the field and read as
@@ -197,7 +208,7 @@ header::after{
   background-image:linear-gradient(90deg,var(--tick) 1px,transparent 1px);
   background-size:28px 100%;background-repeat:repeat-x;opacity:.85;
 }
-.mark{display:flex;align-items:baseline;gap:11px}
+.mark{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
 .bot{width:76px;height:59px;flex:none;align-self:center}
 .bot circle{transition:fill .25s ease, stroke .25s ease}
 .saved .bot circle[r="11"]{fill:var(--accent-soft);stroke:var(--accent)}
@@ -214,7 +225,11 @@ h1 b{font-weight:600;color:var(--accent)}
    two equal greys and no hierarchy. Not italic — this sheet spends italics on
    quiet asides (.empty, .tiny-note), so an italic line here would read as a
    footnote rather than as a subtitle. */
-.tagline{font-family:var(--serif);font-size:var(--fs-6);color:var(--ink);line-height:var(--lh-tight)}
+/* Beside the wordmark, not under it — and gone on a phone, where 390px has no
+   room for a line nobody reads twice. */
+.tagline{margin:0;font-family:var(--serif);font-size:var(--fs-4);color:var(--faint);
+  line-height:var(--lh-tight);flex:1 1 auto;min-width:0}
+@media(max-width:700px){.tagline{display:none}}
 .static-note{
   margin-top:var(--sp-2);font-size:var(--fs-3);color:var(--flag);
   background:var(--flag-soft);border:1px solid var(--edge-line);
@@ -471,7 +486,7 @@ pre{
   transform:translateY(105%);transition:transform .26s cubic-bezier(.22,1.1,.36,1);
 }
 .savebar.on{transform:none}
-.savebar .inner{max-width:1080px;margin:0 auto;padding:var(--sp-3) var(--sp-5);display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+.savebar .inner{max-width:940px;margin:0 auto;padding:var(--sp-3) var(--sp-5);display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
 .savebar .msg{flex:1;font-size:var(--fs-2);letter-spacing:.06em;color:var(--muted);min-width:min(220px,100%)}
 
 /* ---------- toast ---------- */
@@ -578,13 +593,18 @@ pre{
 /* ---------- what are you deciding ----------
    Three questions, not three filters — so they read as a choice of what the
    board is FOR, with the reason under each label. */
-.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-2);margin:var(--sp-3) 0 0}
+/* A segmented control, not three cards. Each mode was a bordered box with a line
+   of explanatory prose under it — 130px of a 1,229px climb to the first ranked
+   row, spent on a sentence a reader needs once. The prose is on the tooltip now
+   and the strip is one row. */
+.modes{display:inline-flex;gap:2px;margin:var(--sp-3) 0 0;padding:2px;
+  border:1px solid var(--line);border-radius:var(--r-pill);background:var(--well)}
 .modes .mode{
-  display:flex;flex-direction:column;gap:var(--sp-1);align-items:flex-start;text-align:left;
-  padding:11px var(--sp-3);border-radius:11px;cursor:pointer;
-  border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  display:flex;align-items:center;gap:7px;
+  padding:7px 14px;border-radius:var(--r-pill);cursor:pointer;
+  border:0;background:transparent;color:var(--muted);
   box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;
-  transition:border-color .16s,color .16s,background .16s;
+  transition:color .16s,background .16s;
 }
 .modes .mode b{
   display:flex;align-items:center;gap:7px;
@@ -596,9 +616,9 @@ pre{
   background:var(--well);box-shadow:0 0 0 1.4px var(--rule-strong);
   transition:background .16s,box-shadow .16s;
 }
-.modes .mode span{font-size:var(--fs-3);line-height:var(--lh-snug)}
-.modes .mode:hover:not(:disabled){border-color:var(--rule-strong);background:var(--glass);color:var(--ink)}
-.modes .mode.on{border-color:var(--accent);background:var(--accent-soft)}
+
+.modes .mode:hover:not(:disabled){background:var(--glass);color:var(--ink)}
+.modes .mode.on{background:var(--paper);box-shadow:var(--shadow)}
 .modes .mode.on b{color:var(--accent)}
 .modes .mode.on b::before{background:var(--accent);box-shadow:0 0 0 1.4px var(--accent),0 0 8px var(--accent)}
 /* The stacked layout used to hide the explanation under each label, which is
@@ -642,7 +662,17 @@ pre{
 /* ---------- filters ----------
    Position first and as chips, not a select: it is the filter people reach for
    constantly, and two clicks to change a dropdown is two too many. */
-.board-controls .chips{margin:var(--sp-3) 0 var(--sp-4)}
+/* The controls are a toolbar between two answers, so they are spaced like a rule
+   rather than padded like a panel — see the note in Board.tsx. */
+.board-controls{
+  grid-column:1/-1;
+  display:flex;flex-direction:column;gap:var(--sp-3);
+  margin:var(--sp-5) 0 0;padding:var(--sp-3) 0;
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  min-width:0;
+}
+.board-controls .modes{margin:0}
+.board-controls .chips{margin:0}
 .chip-btn{
   border:1px solid var(--line);background:var(--panel);color:var(--muted);
   border-radius:var(--r-pill);padding:5px var(--sp-3);font-size:var(--fs-3);font-weight:500;

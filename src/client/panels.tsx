@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
 import { deriveTradeDeadline } from "../import.ts"
+import { isReserveSlot } from "../engine/bscore.ts"
 
 type Num = (value: number) => void
 
@@ -488,7 +489,9 @@ export const leagueGaps = (league: League): Gap[] => {
 	].filter(v => v !== 0).length
 	const slots = Object.entries(league.roster.slots).filter(([, n]) => n > 0)
 	const starters = slots
-		.filter(([slot]) => slot !== "BN" && slot !== "IL" && slot !== "NA")
+		// isReserveSlot, not a hand-written triple comparison: this one omitted "IL+"
+		// and counted an injured seat as a starting one.
+		.filter(([slot]) => !isReserveSlot(slot))
 		.reduce((a, [, n]) => a + n, 0)
 	return [
 		{
@@ -645,7 +648,7 @@ export const PresetNote = ({
  */
 export const IMPORT_COMMAND = "npx --yes github:ssalbdivad/beanemachine <your league URL>"
 
-export type View = "board" | "league" | "trade" | "draft"
+export type View = "board" | "league" | "trade"
 
 /**
  * The four tabs, in DOM order — which is deliberately not the order a season is
@@ -704,12 +707,6 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
 		label: "My team & trades",
 		season: 3,
 		purpose: "Your roster and starting lineup in points, and what a proposed deal does to it."
-	},
-	{
-		id: "draft",
-		label: "Draft",
-		season: 2,
-		purpose: "Who to take next, what he gains over the next man up, and where each position's cliff is."
 	}
 ]
 

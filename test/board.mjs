@@ -47,14 +47,62 @@ const bscores = await page.$$eval(".board-row .bscore", n =>
 t("board opens sorted by bscore, descending",
   bscores.length > 50 && bscores.every((v, i) => i === 0 || bscores[i - 1] >= v),
   `${bscores.length} rows: ${String(bscores.slice(0, 5))}`)
-// The whole rateable pool, not the handful edge could price. Market edge dropped
-// everyone unpriced, and on a thin capture that silently shrank the board to a
-// short list that looked like a working one. Read off the count the board states,
-// not off the rendered rows — the board pages in as you scroll now, so the number
-// on screen is the size of the render window rather than of the ranking.
-const rankedCount = await page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
-t("the default ranking places the whole pool rather than the priced subset",
-  rankedCount >= 1000, `${rankedCount} ranked`)
+/**
+ * The default board is the men he can ADD, and the whole rateable pool is one
+ * untick away.
+ *
+ * This used to read "the default ranking places the whole pool rather than the
+ * priced subset": >= 1,000 ranked, not the handful market edge could price. That
+ * assertion existed because market edge drops everyone it has no ownership figure
+ * for, and on a thin capture that silently shrank the board to a short list which
+ * looked like a working one — so the count the board states was pinned.
+ *
+ * `AVAILABLE_ONLY_DEFAULT.board` is true now, so "the default ranking is the whole
+ * pool" is simply no longer the truth, and the assertion passed only by luck: 1,010
+ * of the 1,248 rateable players clear the ownership cut on the committed capture, so
+ * a filtered board still answered ">= 1000" and the check had stopped meaning
+ * anything. The flip has a measurement behind it — 42 of the first 50 rows of the
+ * old default are rostered in 90% or more of leagues, not one under 50% — so the
+ * first screen of the tab this app exists for was fifty men nobody can have.
+ *
+ * Both halves are asserted rather than one quietly replacing the other: the default
+ * opens on what he can get (the new truth), AND every rateable player is still
+ * placed and still reachable in one click (the old protection, which is exactly what
+ * market edge's priced subset could not do).
+ *
+ * Every count is read off the number the board states, never off the rendered rows:
+ * the board pages in 60 at a time, so a filter that removed a thousand players would
+ * look like it had removed none.
+ */
+const rankedAt = () => page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
+const availOnBoard = ".board-controls .filters .toggle:has-text('I can add') input"
+// Ownership off `.us-own`, not off the cell's text: the cell reads "0.899% owned"
+// — uscore 0.8 then 99% — and any regex run over that string captures "0.899" as
+// the percentage. One element per number, one number per element.
+const ownPcts = () =>
+  page.$$eval(".board-row [data-col=uscore] .us-own", n =>
+    n.slice(0, 20).map(e => Number(String(e.textContent).replace(/[^0-9.]/g, ""))).filter(Number.isFinite))
+t("the board opens on players the reader can add, with no click at all",
+  await page.$eval(availOnBoard, e => e.checked))
+const addableCount = await rankedAt()
+const addableOwn = await ownPcts()
+await page.uncheck(availOnBoard)
+await page.waitForTimeout(700)
+const wholePool = await rankedAt()
+const wholeOwn = await ownPcts()
+t("the whole rateable pool is still ranked, one untick away",
+  wholePool >= 1000 && wholePool > addableCount,
+  `${addableCount} addable of ${wholePool} rateable`)
+// The measurement that justified the flip, re-derived off whatever capture is
+// committed rather than quoted from the commit message that made the change.
+t("the old default really did open on men nobody could have",
+  wholeOwn.filter(p => p >= 90).length >= 10 && addableOwn.every(p => p < 60),
+  `unfiltered: ${wholeOwn.slice(0, 6)} | default: ${addableOwn.slice(0, 6)}`)
+await page.check(availOnBoard)
+await page.waitForTimeout(700)
+const rankedCount = await rankedAt()
+t("and the filter is undoable in both directions", rankedCount === addableCount,
+  `${rankedCount} back from ${wholePool}, default was ${addableCount}`)
 // and the render window grows rather than stopping dead at a cap
 const firstPage = await page.$$eval(".board-row", n => n.length)
 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
@@ -214,27 +262,106 @@ const byB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.tex
 t("sorting by bscore still orders by bscore",
   byB.every((v, i) => i === 0 || byB[i - 1] >= v), String(byB.slice(0, 5)))
 
-// Scarcity must reflect the league's real slots and rank by the actual cliff.
-const scars = await page.$$eval(".scar", n => n.map(e => ({
-  slot: e.querySelector("b").textContent.trim(),
-  val: Number(String(e.querySelector(".val").textContent).replace("+", ""))
-})))
-t("scarcity lists the league's active slots", scars.length >= 5, JSON.stringify(scars.map(s => s.slot)))
-t("scarcity is ordered by how steep the drop-off is",
-  scars.every((s, i) => i === 0 || scars[i - 1].val >= s.val), JSON.stringify(scars))
-t("a scarce slot really is scarcer than a deep one",
-  scars[0].val > scars[scars.length - 1].val, `${scars[0]?.slot} ${scars[0]?.val} vs ${scars.at(-1)?.slot} ${scars.at(-1)?.val}`)
+/**
+ * "Where it hurts to wait" is gone, and the thing it was telling the reader is not.
+ *
+ * Three assertions lived here: the card lists the league's active slots, it is
+ * ordered by how steep each slot's drop-off is, and the steepest is genuinely
+ * steeper than the shallowest. What all three protected is one claim — THIS PAGE
+ * PRICES POSITIONAL DROP-OFF, so a catcher who beats catchers is not compared
+ * against an outfielder who beats outfielders.
+ *
+ * The card is deleted, so the ranking OF slots against each other is gone with it
+ * (said out loud in this agent's return value, because it is a real loss and not a
+ * wash). The claim itself is not gone: it was never the card's, it is bscore's
+ * definition. bscore subtracts the (teams x seats)-th man AT THE SAME SLOT, which is
+ * precisely the cliff the card was drawing, and the number is on every row of the
+ * board instead of summarised for five slots in a panel below it.
+ *
+ * So this block now asserts the card's absence AND that the per-slot bar is still
+ * real and still visible — measured, not taken on the definition's word: a catcher's
+ * replacement bar and a pitcher's are different numbers, which is the only way the
+ * drop-off can be priced at all. A single league-wide bar would make every assertion
+ * above about bscore pass and quietly answer the wrong question.
+ */
+t("the positional-scarcity card is gone from the board",
+  (await page.$(".scarcity")) === null && (await page.$$(".scar")).length === 0,
+  "a scarcity panel is back under the board")
+// The definition the reader can actually reach: the header's own tooltip, which is
+// where COLUMN_HELP survived the deletion of the "How this ranking was built"
+// disclosure that used to hold a second copy of it.
+const bscoreHelp = await page.$eval(".board-head .sort-head:has-text('bscore')", e => e.getAttribute("title") ?? "")
+t("bscore still states that the bar it subtracts is drawn at the same slot",
+  /same slot/.test(bscoreHelp) && /teams × seats/.test(bscoreHelp), bscoreHelp.slice(0, 120))
+// ...and the bar really does move with the slot. Read out of the drill-down, which
+// is where "waiver points" lives now.
+const waiverAt = async slot => {
+  await page.click(`.chip-btn:text-is("${slot}")`)
+  await page.waitForTimeout(450)
+  await page.click(".board-row")
+  await page.waitForSelector(".detail")
+  const out = await page.evaluate(() => {
+    const pair = [...document.querySelectorAll(".detail .pair")].find(
+      e => e.querySelector("dt").textContent.trim() === "waiver points")
+    return {
+      code: document.querySelector(".board-row .who .code")?.textContent?.trim(),
+      waiver: Number(pair?.querySelector("dd")?.textContent)
+    }
+  })
+  await page.click(".board-row")
+  await page.waitForTimeout(200)
+  return out
+}
+const cBar = await waiverAt("C")
+const pBar = await waiverAt("SP")
+t("the replacement bar the card summarised is still drawn per slot, not league-wide",
+  Number.isFinite(cBar.waiver) && Number.isFinite(pBar.waiver) &&
+    Math.abs(cBar.waiver - pBar.waiver) > 2,
+  `${cBar.code} replaced at ${cBar.waiver}, ${pBar.code} at ${pBar.waiver}`)
+await page.click('.chip-btn:text-is("All")')
+await page.waitForTimeout(400)
 
-// Buy low must be an intersection, not a rebrand of the main board: every card
-// has to be both cheap and out-hitting its line, or the panel is decoration.
-const buylow = await page.$$eval(".buylow-card", cards =>
-  cards.map(c => ({
-    gap: Number(c.querySelector("dd.good")?.textContent),
-    own: Number(String([...c.querySelectorAll("dd")][1]?.textContent).replace("%", ""))
-  }))
-)
-t("buy-low picks all beat their line on contact", buylow.every(c => c.gap > 0.03), JSON.stringify(buylow))
-t("buy-low picks are all actually cheap", buylow.every(c => c.own < 70), JSON.stringify(buylow))
+/**
+ * Buy low is gone, and the two signals it intersected are both still on the board.
+ *
+ * The two assertions here required every card to be cheap (under 70% rostered) AND
+ * out-hitting its line by more than .03 of wOBA — an intersection, so that the panel
+ * could not degrade into a rebrand of the main board. The card is deleted; the
+ * intersection it presented as five names is now two controls the reader drives
+ * himself, and that is the replacement being asserted.
+ *
+ * - "out-hitting his line" is the `luck` column, on every row, a percentile of
+ *   expected-minus-actual over three weeks — and `undervaluation` ranks the whole
+ *   board by it, which is the same ordering the card's picks came out of.
+ * - "cheap" is `uscore`, which multiplies what he adds by the share of leagues he is
+ *   still free in, and the ownership it used is printed under it.
+ *
+ * The hard-coded thresholds are deliberately NOT carried over. 70% and .03 were the
+ * card's own cut-offs; with the reader doing the intersecting there is nothing to
+ * cut off, and inventing a bar here would be asserting a number no code holds.
+ * What must hold is that both halves still rank.
+ */
+t("the buy-low card is gone from the board",
+  (await page.$(".buylow")) === null && (await page.$$(".buylow-card")).length === 0,
+  "a buy-low panel is back under the board")
+await page.selectOption("[data-ctl=sort]", "undervaluation")
+await page.waitForTimeout(450)
+const luckRanked = await page.$$eval(".board-row [data-col=luck]", n =>
+  n.slice(0, 12).map(e => Number(String(e.textContent).replace(/[^0-9.\-]/g, ""))))
+t("the luck half of buy-low still ranks the board on its own",
+  luckRanked.length > 5 && luckRanked.every(Number.isFinite) &&
+    luckRanked.every((v, i) => i === 0 || luckRanked[i - 1] >= v) && luckRanked[0] > 80,
+  String(luckRanked.slice(0, 5)))
+// and the cheapness half, which is the other axis the card crossed with it
+await page.selectOption("[data-ctl=sort]", "uscore")
+await page.waitForTimeout(450)
+const cheapOwn = await page.$$eval(".board-row [data-col=uscore] .us-own", n =>
+  n.slice(0, 12).map(e => Number(String(e.textContent).replace(/[^0-9.]/g, ""))))
+t("the cheapness half does too, and says the ownership it priced",
+  cheapOwn.length > 5 && cheapOwn.every(Number.isFinite),
+  String(cheapOwn.slice(0, 5)))
+await page.selectOption("[data-ctl=sort]", "bscore")
+await page.waitForTimeout(400)
 
 // The three horizons must actually be three different questions. A stash ranking
 // that matches the streaming ranking is a tab that does nothing.
@@ -412,6 +539,15 @@ t("and the projected total is a real number on every row, not a dash",
  * ranks a 21-day contact gap against ownership and its picks on this fixture are
  * hitters; "Where it hurts to wait" is the shape of each slot's drop-off, which
  * does not move between now and Sunday.
+ *
+ * That argument was made about the streaming tab first and then applied to every
+ * tab: both cards are deleted outright, so this now holds everywhere rather than
+ * here only. It is kept pointed at the streaming tab because this is where the cost
+ * was measured (1,506px before the first recommendation) and because the pull to
+ * put a season-long panel back under a ranking is strongest here. Where each card's
+ * actual claim went is asserted up on the fortnight board — see "the replacement bar
+ * the card summarised is still drawn per slot" and "the luck half of buy-low still
+ * ranks the board on its own".
  */
 t("the season-long cards are not on the streaming tab",
   (await page.$(".buylow")) === null && (await page.$(".scarcity")) === null)
@@ -730,6 +866,32 @@ t("the active column header announces the direction it is sorted",
   sortLabels.some(([, l]) => /sorted (descending|ascending)/.test(l ?? "")),
   JSON.stringify(sortLabels))
 
+/**
+ * Every column still carries its own definition, on the header.
+ *
+ * Nothing asserted this while there were two copies of the glossary: COLUMN_HELP was
+ * written into each header's `title` AND into the `<details class="legend">` "How this
+ * ranking was built" disclosure under the table, so an assertion about either one
+ * would have passed on the other's strength. The disclosure is deleted — it was a
+ * second copy of definitions the reader can get by resting on the word itself — which
+ * leaves the header as the ONLY place the definitions live, and therefore the first
+ * time this is worth pinning. A board of abbreviations nobody can expand is the
+ * failure mode the legend existed to prevent, and deleting it without this assertion
+ * is how that ships.
+ */
+const helps = await page.$$eval(".board-head .sort-head", n =>
+  n.map(e => [e.dataset.col, (e.getAttribute("title") ?? "").trim()]))
+t("the legend is gone and the definitions it held are on the headers instead",
+  (await page.$("details.legend")) === null &&
+    helps.length >= 4 && helps.every(([, h]) => h.length > 12),
+  JSON.stringify(helps.map(([c, h]) => `${c}:${h.length}`)))
+// named columns, not just non-empty ones: uscore and luck are the two the reader
+// cannot guess from the word, and they are the two the glossary was for
+t("and the two columns nobody can guess are the ones it defines at length",
+  helps.some(([c, h]) => c === "uscore" && /share of leagues|still free/.test(h)) &&
+    helps.some(([c, h]) => c === "luck" && /contact/.test(h)),
+  JSON.stringify(helps.map(([c]) => c)))
+
 
 /**
  * bscore must be value OVER REPLACEMENT, so proj − repl should equal it.
@@ -969,13 +1131,30 @@ t("Billy's card says which claim it is making",
   : /availability unknown/i.test(availLine),
   `tier ${tier}: ${availLine}`)
 const poolRead = tier === "pool"
+/**
+ * Driven by its LABEL, and left in the state it was found in.
+ *
+ * `.toggle input` first() was the availability checkbox only as long as availability
+ * was the first toggle in the row, and `check()` then `uncheck()` only restored the
+ * page as long as the default was OFF. `AVAILABLE_ONLY_DEFAULT.board` is true now, so
+ * both halves went wrong in the same direction: the `check()` became a no-op and the
+ * `uncheck()` left the board UNFILTERED for every assertion that followed — including
+ * Billy's pick, the phone board and the "answer is on the first screen" pins, none of
+ * which would have said why they were suddenly looking at a different list. The same
+ * lesson is already written into the streaming strip's start-filter selector further
+ * up this file; it applies to every toggle on the page.
+ */
+const availByLabel = ".board-controls .filters .toggle:has-text('I can add') input"
+const restoreAvail = async () => {
+  const want = await page.$eval(availByLabel, e => !e.disabled)
+  if (want) await page.check(availByLabel)
+  await page.waitForTimeout(400)
+}
 if (poolRead) {
   // the decisive one: the pick has to be somebody you can actually get
-  await page.locator(".toggle input").first().check()
+  await page.check(availByLabel)
   await page.waitForTimeout(400)
   const freeNames = await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
-  await page.locator(".toggle input").first().uncheck()
-  await page.waitForTimeout(400)
   const pickedName = (await page.textContent(".pick-name")).trim()
   t("Billy's pick is a player you can actually add",
     freeNames.includes(pickedName), `${pickedName} not among ${freeNames.length} free agents`)
@@ -984,10 +1163,29 @@ if (poolRead) {
   const topRow = (await page.$$eval(".board-row .who b", n => n[0].textContent.trim()))
   t("the board still ranks by value even though the pick is filtered by availability",
     typeof topRow === "string" && topRow.length > 0, topRow)
+  await restoreAvail()
 }
 
-// the league's real free-agent pool — the board must recommend addable players
-if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {
+/**
+ * The availability control says which of the three answers it has, and it filters.
+ *
+ * This block read `.pool-count` as a bare number of free agents and accepted the
+ * string "unavailable" as the other legitimate outcome — a two-state world, from
+ * before the ownership fallback existed. There are three states now and "unavailable"
+ * is not one of them: "N free" when the league's own wire was read, "estimated" when
+ * the ownership cut stood in for it, "can't tell" when neither could be had. The old
+ * form would have failed on the committed capture for a page telling the truth.
+ *
+ * It was also unreachable. The gate was `!BASE || BASE.includes("127.0.0.1:5173")`,
+ * and 5173 is not this app's port any more — so under the documented run command this
+ * whole block was skipped and its staleness could not surface. A test that cannot run
+ * is not protecting anything, so it is gated on a local dev server instead.
+ *
+ * And the direction the filter is driven is reversed, because the default is. It used
+ * to tick the box and look for a changed list; the box is ticked on arrival now, so
+ * the evidence that it filters is what comes BACK when it is unticked.
+ */
+if (!process.env.BASE || /127\.0\.0\.1|localhost/.test(process.env.BASE)) {
   // "…" is a legitimate state of this element (still fetching), so wait for it to
   // settle rather than for it to merely exist
   await page.waitForFunction(
@@ -998,19 +1196,18 @@ if (!process.env.BASE || process.env.BASE.includes("127.0.0.1:5173")) {
     { timeout: 30000 }
   ).catch(() => {})
   const poolText = (await page.textContent(".pool-count")).trim()
-  const poolCount = Number(poolText)
-  // Yahoo rate-limits, so an unavailable pool is a legitimate outcome to assert on
-  t("free-agent pool is either read or reported unavailable",
-    poolCount > 50 || poolText === "unavailable", poolText)
-  if (poolCount > 50) {
-    const beforeNames = await page.$$eval(".board-row .who b", n => n.slice(0,5).map(e => e.textContent))
-    await page.locator(".toggle input").first().check()
+  t("the availability control states which of the three answers it has",
+    /^\d+ free$/.test(poolText) || poolText === "estimated" || poolText === "can't tell",
+    poolText)
+  if (poolText !== "can't tell") {
+    const withFilter = await page.$$eval(".board-row .who b", n => n.slice(0, 5).map(e => e.textContent))
+    await page.uncheck(availByLabel)
     await page.waitForTimeout(500)
-    const afterNames = await page.$$eval(".board-row .who b", n => n.slice(0,5).map(e => e.textContent))
-    t("free-agents-only changes who is recommended",
-      afterNames.join() !== beforeNames.join(), `${beforeNames[0]} → ${afterNames[0]}`)
-    await page.locator(".toggle input").first().uncheck()
-    await page.waitForTimeout(400)
+    const withoutFilter = await page.$$eval(".board-row .who b", n => n.slice(0, 5).map(e => e.textContent))
+    t("the availability filter changes who is recommended",
+      withoutFilter.join() !== withFilter.join(),
+      `${withFilter[0]} → ${withoutFilter[0]}`)
+    await restoreAvail()
   }
 }
 

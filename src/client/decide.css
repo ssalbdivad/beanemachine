@@ -36,3 +36,29 @@
 .decide-seat{color:var(--muted)}
 .decide-cta{font-size:var(--fs-1);padding:6px 14px}
 .decide-blocked .decide-notes{margin-top:var(--sp-3)}
+
+/* A bench group is one fact about the schedule and the list of men it applies to,
+   not one decision per man — see the note in Decide.tsx. The seat sits with the
+   name rather than in the gutter, because the gutter now holds the count. */
+.decide-seat{
+  font-style:normal;font-family:var(--mono);font-size:var(--fs-1);
+  color:var(--faint);letter-spacing:.04em;
+}
+.decide-bench-group .decide-slot{color:var(--faint)}
+
+/* Fine print is one tap away, not four lines down. The summary reads as a quiet
+   aside rather than as a control, because opening it is optional in a way that
+   nothing else on this card is. */
+.decide-fine{display:inline}
+.decide-fine>summary{
+  display:inline;cursor:pointer;list-style:none;
+  color:var(--faint);text-decoration:underline;text-underline-offset:2px;
+  margin-left:.4em;font-size:var(--fs-2);
+}
+.decide-fine>summary::-webkit-details-marker{display:none}
+.decide-fine[open]>summary{display:block;margin:0 0 4px}
+
+/* Empty seats are the biggest measured lever in a points season, so they read like
+   the moves rather than like a footnote — same list idiom, same slot gutter. */
+.decide-fill .decide-slot{color:var(--flag)}
+.decide-fill-head{margin-top:var(--sp-4)}

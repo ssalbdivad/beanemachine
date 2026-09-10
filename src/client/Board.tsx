@@ -2,7 +2,6 @@ import { Fragment, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
-import { BoardPrimer, Fragment2 } from "./panels.tsx"
 import { readView, writeView } from "./view.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
@@ -14,7 +13,6 @@ import {
 } from "./api.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
-import { replacementBySlot } from "../engine/trade.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -776,10 +774,17 @@ export const Board = ({
 			    streaming list is ordered by projected points, so above that list it was
 			    pointing at the wrong column. `.full` because `.grid` is two columns. */}
 			<div className="full">
-				<BoardPrimer mode={filters.mode} />
 			</div>
-			<section className="card full board-controls">
-				<h2>What are you deciding?</h2>
+			{/*
+			  A toolbar, not a card.
+
+			  This was a full card with its own heading — "What are you deciding?" — and
+			  it cost 322px on a desktop and 431px on a phone, sitting between the two
+			  surfaces that answer the reader's question. A card announces a subject; this
+			  is a set of controls whose meaning is the thing they filter, which is
+			  directly underneath. The heading is on the label of each control.
+			*/}
+			<section className="board-controls">
 				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
 				<style href="board-grid" precedence="default">{BOARD_GRID_CSS}</style>
 				<style href="board-stream" precedence="default">{STREAM_CSS}</style>
@@ -801,10 +806,14 @@ export const Board = ({
 							onFocus={() => setFocusedMode(id)}
 							onKeyDown={onTabKey}
 							className={`mode${filters.mode === id ? " on" : ""}`}
+							/* The explanation moves to the tooltip. As three stacked cards with a
+							   line of prose each, this strip was 130px of the 1,229px climb to the
+							   first ranked row — and the prose answers a question you have once,
+							   above a control you use every visit. */
+							title={why}
 							onClick={() => setFilters(f => ({ ...f, mode: id }))}
 						>
 							<b>{label}</b>
-							<span>{why}</span>
 						</button>
 					))}
 				</div>
@@ -1236,45 +1245,6 @@ export const Board = ({
 					))}
 					{!rows.length && <p className="empty">No players match these filters. Try clearing the slot filter or lowering the confidence minimum.</p>}
 				</div>
-				<details className="legend">
-					<summary>How this ranking was built</summary>
-					<p className="sub">
-						{filters.mode === "stash" ?
-							"Every game left in the regular season, so playing time and role matter more than a hot fortnight. This is the view for who to hold rather than who to start."
-						: filters.mode === "stream" ?
-							`${period ? period.basis.charAt(0).toUpperCase() + period.basis.slice(1) : "A window this capture cannot state"}, counted off the real schedule.`
-						:	"The next fortnight — long enough that one cold week doesn't decide it, short enough that today's role still holds."}
-						{" "}Playing time leans on recent form: the last{" "}
-						{(snapshot.recentWindow?.hitting ?? [3, 7, 21]).join("/")} days for batters
-						and {(snapshot.recentWindow?.pitching ?? [5, 21]).join("/")} for pitchers,
-						weighting the most recent window double. Every number is denominated in{" "}
-						{league.meta.league_name ?? "this league"}&rsquo;s own scoring.
-					</p>
-					<dl>
-						{(
-							[
-								["bscore", COLUMN_HELP.bscore],
-								["proj pts", COLUMN_HELP.points],
-								["waiver pts", COLUMN_HELP.replacement],
-								["uscore", COLUMN_HELP.uscore],
-								// The games column reads in two units and nothing else on the page
-								// explains why. It has no entry in COLUMN_HELP because that map is
-								// keyed by sort field and this column cannot be sorted on.
-								[
-									"games",
-									"GS is a starting pitcher's own scheduled starts, from MLB's published probables — the number his projection is actually built on. GP is the games his team plays, which is the right question for a hitter and the wrong one for a starter by roughly a factor of six. A pitcher shows GP when no probables reach this window."
-								],
-								["confidence", COLUMN_HELP.confidence],
-								["edge", COLUMN_HELP.marketEdge],
-								["luck", COLUMN_HELP.undervaluation]
-							] as const
-						).map(([term, text]) => (
-							<Fragment2 key={term} term={term}>
-								{text}
-							</Fragment2>
-						))}
-					</dl>
-				</details>
 				{/* The end of the rendered window. Scrolling to it grows the list; when
 				    everything is on screen it is an empty div and says nothing. */}
 				<div ref={sentinel} aria-hidden />
@@ -1285,191 +1255,11 @@ export const Board = ({
 				)}
 			</section>
 
-			{/*
-			  Supporting analysis sits AFTER the ranking it supports. Both answer
-			  "where should I spend attention", which is a second question — putting
-			  them above the board pushed the actual recommendations below the fold.
-
-			  And neither is on the Streaming tab at all. Buy low ranks a 21-day
-			  expected-minus-actual gap against ownership: a signal about a season,
-			  and on this fixture its picks are hitters, who cannot be streamed for a
-			  start. "Where it hurts to wait" is a draft and roster-construction
-			  reading — the shape of the drop-off at each slot, which does not change
-			  between now and Sunday. Two full-width cards that cannot help a reader
-			  choose an arm for the weekend are two cards of scrolling between him and
-			  the one that can.
-			*/}
-			{filters.mode !== "stream" && (
-				<>
-					<BuyLow rows={rows} />
-					<Scarcity pool={rated} league={league} />
-				</>
-			)}
 		</>
 	)
 }
 
-/**
- * Positional scarcity — the shape of the drop-off, per slot.
- *
- * Replacement level is already the denominator of every bscore, but it is invisible
- * as a single number on one row. Seen side by side it answers the question people
- * actually ask while building a team: where does it hurt to wait? A slot where the
- * starter and the waiver-wire body are close is one you can punt; a slot where the
- * cliff is steep is one you pay for early.
- */
-const Scarcity = ({ pool, league }: { pool: Ranked[]; league: League }) => {
-	// The whole rated pool, not the board's filtered rows. A waiver bar is the
-	// (teams × slots)-th best man eligible there, so handing this the 67 rows the
-	// default market-edge sort leaves would clamp that depth to the size of the
-	// filtered set and report its worst row as the bar. Scarcity is a fact about
-	// the league's pool; it does not move when you type in the search box.
-	const teams = league.meta.max_teams
-	if (teams == null) return null
-	// slot_order lists every roster SPOT, so a 3-outfielder league names OF three
-	// times. Scarcity is a property of the slot, not of each seat in it.
-	const accepts = league.roster.slot_accepts
-	const active = [
-		...new Set(
-			(league.roster.slot_order ?? Object.keys(league.roster.slots)).filter(
-				s => s !== "BN" && s !== "IL" && s !== "NA"
-			)
-		)
-	]
-		// Catch-all spots are filled by whoever is spare, so their card was always a
-		// duplicate of a real slot's: on the fortnight Util printed C's number under C's
-		// name (+36 Drake Baldwin) and P printed RP's (+21 Ian Seymour). Util is also
-		// the least scarce spot in the league by construction — its bar is 111.06
-		// against OF's 91.69, because every hitter is eligible there — so it is the one
-		// slot nothing is ever waiting on. Leagues that never stated slot_accepts keep
-		// every slot rather than lose the panel.
-		.filter(s => !Array.isArray(accepts?.[s]) || accepts[s].length === 1)
-	// The bar at each card's OWN slot. `Rated.replacement` cannot answer this: it
-	// reports the bar where a player was worth MOST, so `best.points - best.replacement`
-	// is literally `best.bscore` — the old number — and a slot that is nobody's best
-	// is missing from it entirely. SP is that slot here, which is why the card
-	// labelled SP was showing a P-priced figure. `replacementBySlot` is the same
-	// arithmetic rateAll uses, and test/trade.mjs pins the two against each other.
-	const bars = replacementBySlot(league, pool, teams)
-	const cards = active
-		.map(slot => {
-			// An unknown bar is not a bar of zero: a slot nobody in the pool is eligible
-			// for is left out of the map, and a cliff cannot be measured against nothing.
-			const bar = bars.get(slot)
-			if (bar === undefined) return null
-			const eligible = pool.filter(r => r.rateable && r.slots.includes(slot))
-			if (eligible.length < 3) return null
-			// By POINTS, not bscore, now that the bar is per-slot: max points is max
-			// cliff, and picking by bscore names the man who is best somewhere ELSE —
-			// on Streaming the 1B card read "Jake Bauers", an outfielder, over Rafael
-			// Devers. A reduce rather than `pool[0]`, which was whichever row the
-			// board's CURRENT sort happened to put first: sorting by name turned this
-			// card into "+-29 · A.J. Minter", the alphabetically first reliever, his
-			// negative bscore printed with a plus in front of it.
-			const best = eligible.reduce((a, b) => (b.points > a.points ? b : a))
-			return { slot, cliff: best.points - bar, best }
-		})
-		.filter((x): x is NonNullable<typeof x> => x !== null)
-		.sort((a, b) => b.cliff - a.cliff)
 
-	if (cards.length < 2) return null
-	const widest = cards[0]!.cliff || 1
-	return (
-		<section className="card full">
-			<h2>Where it hurts to wait</h2>
-			<p className="sub">
-				How far the best player you can still get at each slot sits above the next man
-				up there. A short bar is a slot you can punt; a long one is a slot worth paying
-				for, because waiting costs you the whole gap.
-			</p>
-			<div className="scarcity">
-				{cards.map(c => (
-					<div className="scar" key={c.slot}>
-						<b>{c.slot}</b>
-						<div className="bar" aria-hidden="true">
-							<i style={{ width: `${Math.max(3, (c.cliff / widest) * 100)}%` }} />
-						</div>
-						<span className="val">+{c.cliff.toFixed(0)}</span>
-						<span className="who" title={`${c.best.player.name} is the best ${c.slot} in the player pool by projected points`}>
-							{c.best.player.name}
-						</span>
-					</div>
-				))}
-			</div>
-		</section>
-	)
-}
-
-/**
- * Buy low: the two new signals, which are only interesting together.
- *
- * A big expected-minus-actual gap on its own finds unlucky players who everyone
- * already owns. A low ownership on its own finds players nobody wants for good
- * reason. The intersection — hitting the ball better than his line says AND still
- * cheap — is the one case where the field is demonstrably behind the data, and it
- * is the reason to read Statcast at all.
- *
- * Scored as the product of two normalised terms rather than a sum, so a player has
- * to clear both bars: being free does not compensate for making weak contact.
- */
-const BuyLow = ({ rows }: { rows: Ranked[] }) => {
-	const picks = rows
-		.filter(
-			r =>
-				r.regressionGap !== null &&
-				r.rosteredPct !== null &&
-				r.rosteredPct < 70 &&
-				r.bscore > 0 &&
-				(r.player.group === "hitting" ? r.regressionGap : -r.regressionGap) > 0.035
-		)
-		.map(r => {
-			const gap = (r.player.group === "hitting" ? 1 : -1) * r.regressionGap!
-			return { r, gap, score: gap * (100 - r.rosteredPct!) }
-		})
-		.sort((a, b) => b.score - a.score)
-		.slice(0, 3)
-
-	if (!picks.length) return null
-	return (
-		<section className="card full buylow">
-			<h2>Buy low</h2>
-			<p className="sub">
-				Hitting the ball harder than their results show over the last three weeks, and
-				still cheap. Both conditions, not either — an unlucky player everyone already
-				owns is not an opportunity.
-			</p>
-			<div className="buylow-grid">
-				{picks.map(({ r, gap }) => (
-					<article key={r.player.id} className="buylow-card">
-						<b>{r.player.name}</b>
-						<span className="pos">
-							{r.player.team ?? "FA"} · {r.slot}
-						</span>
-						<dl>
-							<div className="pair">
-								<dt>expected − actual</dt>
-								<dd className="good">+{gap.toFixed(3)}</dd>
-							</div>
-							<div className="pair">
-								<dt>rostered</dt>
-								<dd>{r.rosteredPct}%</dd>
-							</div>
-							<div className="pair">
-								<dt>bscore</dt>
-								<dd>{r.bscore}</dd>
-							</div>
-						</dl>
-						<p className="tiny-note">
-							{r.player.group === "hitting" ?
-								`His contact over the last three weeks was worth ${gap.toFixed(3)} more wOBA than he was paid for, and ${100 - r.rosteredPct!}% of leagues still have him free.`
-							:	`He has been hit softer than his line suggests by ${gap.toFixed(3)} wOBA, with ${100 - r.rosteredPct!}% of leagues not rostering him.`}
-						</p>
-					</article>
-				))}
-			</div>
-		</section>
-	)
-}
 
 /**
  * What the card says when the filters leave nobody worth adding.

@@ -33,11 +33,33 @@ const identify = async () => {
 	if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
 }
 
+/**
+ * Load the app and wait for the tabs, NOT for the network to go quiet.
+ *
+ * Every goto in this file used `waitUntil: "networkidle"`, and that stopped being a
+ * safe wait the moment the page started reading tonight's slate live: `useSlate` fires
+ * one request to statsapi.mlb.com on mount, so "no connections for 500ms" now depends
+ * on a third party answering a machine that may be offline, throttled or behind a
+ * proxy. The last run of this suite died on exactly that — a 30s TimeoutError out of
+ * `page.goto`, no assertion reached, four tabs' worth of evaluator untested — and it
+ * read as a flaky server because the server was fine.
+ *
+ * `domcontentloaded` plus the nav React renders is the honest wait: it is the same
+ * thing every assertion below actually needs, it cannot be held open by somebody
+ * else's API, and a page that fails to mount still fails here rather than hanging.
+ * The nav wait matters on its own — `tab.count()` on a bare document returns 0, and
+ * a 0 there would have SKIPPED whole blocks green.
+ */
+const visit = async (timeout = 60000) => {
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+}
+
 /** The component is mounted by the app, so this suite must not assume where. It
  *  finds the trade view, or reports that nothing mounts it yet and stops — a
  *  wired-up UI is what is under test, not the existence of the file. */
 const openTrade = async () => {
-	await page.goto(BASE, { waitUntil: "networkidle" })
+	await visit()
 	await identify()
 	if (await page.$(".trade-team")) return true
 	const tab = page.locator(".views button", { hasText: /trade/i }).first()
@@ -73,8 +95,33 @@ const openClosedDeal = async () => {
  * away, because the evaluator still works and a keeper league has reasons.
  */
 {
-	await page.goto(BASE, { waitUntil: "networkidle" })
+	await visit()
 	await identify()
+
+	/**
+	 * The tab this whole suite hangs off, asserted by name before anything clicks it.
+	 *
+	 * Everything below reaches the evaluator through `.views button` matching /trade/i,
+	 * and `openTrade` SKIPS with exit 0 when it finds none — which was right while
+	 * <Trade/> existed unmounted, and is a trap now that it is mounted: the four tabs
+	 * became three in one commit (Draft deleted, with src/engine/draft.ts and
+	 * test/draft.mjs), and a fourth deletion that took this one would have retired 54
+	 * assertions to a green run. So the census is an assertion, and a missing trade tab
+	 * fails here before the skip can swallow it.
+	 *
+	 * It also pins the absence of Draft from the one place a reader meets the tabs.
+	 * That tab is gone on purpose — the engine behind it is gone too, so a button
+	 * labelled "Draft" reappearing in this nav is a regression, not a feature, and the
+	 * census is what says so out loud rather than leaving it to a diff nobody reads.
+	 */
+	const tabs = await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))
+	t("the nav offers exactly the three tabs this app has, trades among them",
+		tabs.length === 3 && tabs.includes("Recommendations") && tabs.includes("League setup") &&
+			tabs.includes("My team & trades"),
+		tabs.join(" | "))
+	t("and no draft tab, whose engine and suite were deleted with it",
+		!tabs.some(label => /draft/i.test(label)), tabs.join(" | "))
+
 	const tab = page.locator(".views button", { hasText: /trade/i }).first()
 	if (await tab.count()) {
 		await tab.click()
@@ -355,7 +402,7 @@ if (cfg) {
     }
     localStorage.setItem("beanemachine:config", JSON.stringify(c))
   }, cfg)
-  await page.goto(BASE, { waitUntil: "networkidle" })
+  await visit()
   const tab = page.locator(".views button", { hasText: /trade/i }).first()
   if (await tab.count()) await tab.click()
   const said = await page
@@ -393,7 +440,10 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 
 	const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } })
 	page.on("dialog", d => d.accept())
-	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
+	// see `visit`: domcontentloaded plus the nav, never networkidle — this page mounts
+	// the live MLB slate read too, and its own `page` shadows the one `visit` holds
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
 	const tab = page.locator(".views button", { hasText: /trade/i }).first()
 	if (await tab.count()) {
 		await tab.click()

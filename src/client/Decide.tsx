@@ -13,6 +13,8 @@ import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
+import { useSlate } from "./useSlate.ts"
+import { statusOf, type TodayStatus } from "../data/today.ts"
 import "./decide.css"
 
 /**
@@ -336,6 +338,9 @@ export const Decide = ({
 	 * from a fortnight would also be nonsense here — a fortnight's replacement level
 	 * against one day's points would price almost every seat as a hole.
 	 */
+	/** Tonight, live, from MLB. One request, no server — see src/data/today.ts. */
+	const { slate, error: slateError } = useSlate()
+
 	const today = useMemo(() => {
 		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length) return null
 		if (league.scoring_period?.lineup_lock !== "daily") return null
@@ -354,6 +359,8 @@ export const Decide = ({
 			teams: league.meta.max_teams
 		})
 		const byName = new Map(rows.map(r => [normalizeName(r.player.name), r]))
+		/** What MLB says about each man tonight, where the live read succeeded. */
+		const liveStatus = new Map<string, TodayStatus | null>()
 		const playing = new Set<string>()
 		const idle: string[] = []
 		/** Men the board has no row for at all — a capture that predates a call-up, a
@@ -369,7 +376,18 @@ export const Decide = ({
 			// "has a game" is a claim about a man who can play it. Counting everyone whose
 			// club is on today put his whole 24 in the total, two of them on the injured
 			// list — `injuryPolicy: "exclude"` had already made them unrateable.
-			const plays = r.rateable && r.player.teamId != null && w.games.has(r.player.teamId)
+			//
+			// The schedule comes from the committed capture, which is right about a
+			// season and cannot be right about tonight: it is stamped days ago and knows
+			// nothing about a scratch, a rest day or a lineup card. `slate` is tonight,
+			// read live from MLB on mount, and where it disagrees it wins — a man his own
+			// manager has left out is not a man to start, whatever the projection says.
+			const live = slate ? statusOf(r.player.id, r.player.teamId, r.player.group, slate) : null
+			liveStatus.set(normalizeName(sp.name), live)
+			const onField =
+				live ? live.kind !== "no-game" && live.kind !== "benched"
+				:	r.player.teamId != null && w.games.has(r.player.teamId)
+			const plays = r.rateable && onField
 			if (plays) playing.add(normalizeName(sp.name))
 			else if (!RESERVE.test(sp.slot)) idle.push(sp.name)
 		}
@@ -429,6 +447,12 @@ export const Decide = ({
 		const start = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size,
+			/** Every man rated for TODAY, so the seats nobody you own can fill can be
+			 *  offered somebody who is actually on a card tonight. */
+			ratedToday: rows,
+			/** How many clubs are on today at all. Thirteen empty seats reads as a
+			 *  broken app; "only five games are being played" reads as a Wednesday. */
+			games: slate ? slate.games.length : null,
 			readAt: seats.at,
 			/**
 			 * Three reasons a man comes out, and they are different claims.
@@ -447,22 +471,46 @@ export const Decide = ({
 			 */
 			bench: bench.map(sp => {
 				const r = byName.get(normalizeName(sp.name))
+				const live = liveStatus.get(normalizeName(sp.name)) ?? null
 				return {
 					name: sp.name,
 					slot: sp.slot,
+					/**
+					 * MLB's answer first, where there is one.
+					 *
+					 * "he is not projected to play today" is a statement about a projection
+					 * dressed as a statement about the schedule, and a reader who checks it
+					 * finds the app wrong about a fact. Tonight's card, tonight's schedule
+					 * and tonight's probables are all knowable for free, and they say which
+					 * of four different things is actually true.
+					 */
 					why:
-						!r ? "he is not on the board — no projection exists for that name"
-						: unmatched.includes(sp.name) ?
+						!r || unmatched.includes(sp.name) ?
 							"he is not on the board — no projection exists for that name"
-						: idle.includes(sp.name) && !r.rateable ?
-							"he is not projected to play today"
+						: live && live.kind === "no-game" ? "no game today"
+						: live && live.kind === "benched" ? "not in today's lineup"
+						/*
+						 * The ENGINE'S own reason, where it has one.
+						 *
+						 * This branch used to read "a better man is projected for that seat
+						 * today" for every man who was neither idle nor unmatched — a
+						 * sentence this file invented. `rateAll` already builds a specific
+						 * one per player (src/engine/bscore.ts:435): he is on the injured
+						 * list, MLB has published a starter for every game of the window and
+						 * he is not one of them, this league scores nothing on his side of
+						 * the ball, his projected volume rounds to zero. Throwing those away
+						 * and substituting a guess is the exact failure this app exists not
+						 * to commit: it named a gap it did not have and hid the one it did.
+						 */
+						: !r.rateable && r.unrateable ? r.unrateable
+						: !r.rateable ? "no projection could be made for him over this window"
 						: idle.includes(sp.name) ? "his club is not playing today"
 						:	"a better man is projected for that seat today"
 				}
 			}),
 			start: start.map(st => ({ name: st.name, slot: st.slot, points: st.points }))
 		}
-	}, [snapshot, league, seats])
+	}, [snapshot, league, seats, slate])
 
 	/**
 	 * Men who are worth too much over the REST OF THE SEASON to give away for a week.
@@ -597,6 +645,60 @@ export const Decide = ({
 		return { floor, cap, projected, after }
 	}, [league, rated, lineup, plan, seats, wire])
 
+	/**
+	 * The seats that will score nothing tonight, and who could fill them.
+	 *
+	 * This is the biggest measured lever in a points league and the app was burying
+	 * it in a disclosure. The published decompositions put volume accumulation —
+	 * never leaving an allowed slot unused — at roughly the magnitude of all
+	 * in-season move quality combined, and in this league's own scoring an empty
+	 * hitter seat costs about 6.9 points a day against 0.7–1.5 for a realistic
+	 * within-roster upgrade. Ranking adds by season value while three seats sit
+	 * empty is optimising the small term.
+	 *
+	 * Two conditions, both hard: the man has to be gettable, and he has to be on a
+	 * card TONIGHT. A free agent who does not play tonight fills the seat with the
+	 * same zero it already has.
+	 */
+	const fillTonight = useMemo(() => {
+		if (!league || !today?.unfilled.length || !today.ratedToday.length) return []
+		if (!candidates.length) return []
+		const free = new Set(candidates.map(p => normalizeName(p.name)))
+		const seen = new Set<string>()
+		/** One man can only fill one seat. Sam Antonacci is eligible at 2B, 3B, OF and
+		 *  Util in this league, so without this he was offered for four of them at once
+		 *  — four adds that are really one, and three seats still empty afterwards. */
+		const taken = new Set<string>()
+		const out: { slot: string; name: string; points: number; team: string | null }[] = []
+		for (const slot of today.unfilled) {
+			if (seen.has(slot)) continue
+			seen.add(slot)
+			// `slots` on a Rated is the set of seats the engine has already worked out he
+			// may legally fill in THIS league — the same list the lineup planner seats
+			// him by — so nothing here has to re-derive eligibility and the two cannot
+			// disagree about it.
+			const best = today.ratedToday
+				.filter(
+					r =>
+						r.rateable &&
+						r.slots.includes(slot) &&
+						free.has(normalizeName(r.player.name)) &&
+						!taken.has(normalizeName(r.player.name))
+				)
+				.sort((a, b) => b.points - a.points)[0]
+			if (best && best.points > 0) {
+				taken.add(normalizeName(best.player.name))
+				out.push({
+					slot,
+					name: best.player.name,
+					points: best.points,
+					team: best.player.team ?? null
+				})
+			}
+		}
+		return out.slice(0, 4)
+	}, [today, candidates, league])
+
 	if (!league) return null
 
 	/**
@@ -705,47 +807,28 @@ export const Decide = ({
 			:	base
 		return (
 			<section className="card full decide decide-blocked">
+				{/*
+				  One sentence and a button.
+
+				  This was four paragraphs — a hundred and ten words, most of it about CORS —
+				  standing between a reader and the only thing he can do on this screen. It
+				  explained that availability would be estimated, why Yahoo cannot be read by
+				  any browser, and how to run a command line, to somebody who has not yet told
+				  the app who is on his team. None of it changes the next tap.
+
+				  What survives is the ask and what it buys. The estimate is already labelled
+				  on the control that uses it, and the command line is already on My team,
+				  where a reader who wants the exact list is standing.
+				*/}
 				<h2>What should I do?</h2>
 				<p>
-					Tell me who is on your team and this becomes a lineup and a list of moves.
-					It takes about a minute, and your team is stored in this browser and nowhere
-					else.
+					<button type="button" className="primary decide-cta" onClick={onOpenTeam}>
+						Add your players
+					</button>{" "}
+					and this becomes tonight&rsquo;s lineup and the moves to make. About a
+					minute, and it stays in this browser.
+					{espn && " Your platform answers a browser directly, so it can read the whole roster in one click."}
 				</p>
-				<p>
-					<b>
-						<button
-							type="button"
-							className="chip-btn decide-cta"
-							onClick={onOpenTeam}
-						>
-							Add your players
-						</button>
-					</b>{" "}
-					on <b>My team</b> — type a name, pick him, done.
-					{espn && " Your platform also answers a browser directly, so it can read the whole roster for you in one click."}
-				</p>
-				<p className="sub">
-					Who is available to add will be <b>estimated</b> from how widely each player
-					is rostered, calibrated to your league&rsquo;s size, and every screen that
-					uses it says so.{" "}
-					{espn ?
-						"Reading your roster gets you the exact list as well."
-					:	"Yahoo sends no CORS headers, so no web page — this one included — can read your league's own free-agent list."}
-				</p>
-				{!espn && (
-					<details className="decide-notes">
-						<summary>Get the exact list instead of the estimate</summary>
-						<p className="sub">
-							If you run things on your own machine, one command reads your league&rsquo;s
-							settings, its actual free agents and your roster with the seat each man is
-							in, and writes a file you drop anywhere on this page.
-						</p>
-						<pre className="decide-cmd">
-							npx --yes github:ssalbdivad/beanemachine{" "}
-							{url ?? "<your league URL>"}
-						</pre>
-					</details>
-				)}
 			</section>
 		)
 	}
@@ -771,8 +854,19 @@ export const Decide = ({
 							{/* "have a game" is not what this counts. A starting pitcher on his club's
 							    off-turn HAS a game — his club is playing — and cannot score in it,
 							    and the set is now the men who are rateable today, which is the
-							    useful one. So the words are the ones that match it. */}
-							{today.playing} of your men can score today · your lineup projects{" "}
+							    useful one. So the words are the ones that match it.
+
+							    The GAME COUNT is here because without it the card reads as broken.
+							    On a five-game Wednesday a 27-man roster has four men who can score
+							    and fourteen empty seats, and a reader who is not told that only five
+							    clubs are playing concludes the app has lost his team. It is the
+							    schedule, and saying so costs three words. */}
+							{today.games !== null && (
+								<>
+									{today.games} {today.games === 1 ? "game" : "games"} today ·{" "}
+								</>
+							)}
+							{today.playing} of your men can score · your lineup projects{" "}
 							{today.lineup.pointsPlanned}
 						</span>
 					</h3>
@@ -800,11 +894,36 @@ export const Decide = ({
 										</span>
 									</li>
 								))}
-								{today.bench.map(b => (
-									<li key={`out-${b.name}`}>
-										<span className="decide-slot">{b.slot}</span>
+								{/*
+								  Grouped by REASON, not one row per man.
+								  Measured on a real 27-man roster on a five-game night: sixteen
+								  consecutive rows reading "Bench X — he is not projected to play
+								  today", identical but for the name, above the two moves that were
+								  the point of the card. Sixteen rows of the same sentence is not
+								  sixteen decisions; it is one fact about the schedule and a list of
+								  who it applies to. The names stay — each is still a seat he has to
+								  change in Yahoo — but they cost a line each instead of a row each.
+								*/}
+								{Object.entries(
+									today.bench.reduce<Record<string, typeof today.bench>>((by, b) => {
+										;(by[b.why] ??= []).push(b)
+										return by
+									}, {})
+								).map(([why, men]) => (
+									<li key={`out-${why}`} className="decide-bench-group">
+										<span className="decide-slot">
+											{men.length === 1 ? men[0]!.slot : `×${men.length}`}
+										</span>
 										<span>
-											Bench <b>{b.name}</b> <em className="decide-why">{b.why}</em>
+											Bench{" "}
+											{men.map((b, i) => (
+												<span key={b.name}>
+													{i > 0 && ", "}
+													<b>{b.name}</b>{" "}
+													<em className="decide-seat">{b.slot}</em>
+												</span>
+											))}{" "}
+											<em className="decide-why">{why}</em>
 										</span>
 									</li>
 								))}
@@ -847,6 +966,46 @@ export const Decide = ({
 							Nothing to change — every seat already holds the right man for today.
 						</p>
 					}
+					{/*
+					  The seats that will score nothing, and the men who could stop that.
+					  
+					  This is the largest measured lever in a points-league season — never
+					  leaving an allowed slot unused — and it was buried inside the seat-by-seat
+					  disclosure below, described as "leave empty". Leaving it empty is the
+					  right answer only if nobody gettable is playing; where somebody is, the
+					  seat is worth about seven points a night and the upgrade a move usually
+					  buys is worth about one.
+					  
+					  Both conditions are hard. He has to be free — or as free as the wire can
+					  say, and the line under the moves says which — and he has to be on a card
+					  TONIGHT, because a free agent who is not playing fills the seat with the
+					  same zero it already has.
+					*/}
+					{fillTonight.length > 0 && (
+						<>
+							<h3 className="decide-head decide-fill-head">
+								Empty seats
+								<span className="decide-gain">
+									{today.unfilled.length}{" "}
+									{today.unfilled.length === 1 ? "seat scores" : "seats score"} nothing
+									tonight
+								</span>
+							</h3>
+							<ul className="decide-list decide-fill">
+								{fillTonight.map(f => (
+									<li key={`${f.slot}-${f.name}`}>
+										<span className="decide-slot">{f.slot}</span>
+										<span>
+											Add <b>{f.name}</b>{" "}
+											<em className="decide-why">
+												{f.points} projected tonight{f.team ? ` · ${f.team}` : ""}
+											</em>
+										</span>
+									</li>
+								))}
+							</ul>
+						</>
+					)}
 					<details className="decide-notes">
 						<summary>The whole lineup, seat by seat</summary>
 						<ul className="decide-list decide-today">
@@ -885,10 +1044,11 @@ export const Decide = ({
 					    something would be inventing the something. */}
 					<p className="sub decide-read">
 						{today.readAt ?
-							<>
-								Compared against your seats as read {readAgo(today.readAt)}. Change your
-								lineup in Yahoo since then and this list is against the old one.
-							</>
+							/* One clause, with the age in it, because the age is the only part that
+							   changes what the reader should do. The second sentence — "change your
+							   lineup in Yahoo since then and this list is against the old one" —
+							   restated the first for anyone who had already understood it. */
+							<>vs your seats as read {readAgo(today.readAt)}</>
 						:	<>
 								Nothing here knows which seats you currently have these men in, so this is
 								the lineup to <b>set</b>, not the changes to make. Read your roster off
@@ -1016,28 +1176,42 @@ export const Decide = ({
 					    phone was an eight-line paragraph under each of two moves, most of it
 					    identical. What differs per move is the gain and the seat, and those
 					    are on the row. */}
+					{/*
+					  Four sentences became one clause and a disclosure.
+
+					  The paragraph explained what the gain is denominated in, that every man
+					  leaving is under the keep floor, that none is worth holding for the rest
+					  of the season, and — where the wire is an estimate — the arithmetic behind
+					  the ownership cut. All of it true, none of it a thing a reader does
+					  anything differently about. What DOES change a decision is the one word
+					  in front: whether the availability is read or estimated. That stays on the
+					  line; the rest is one tap away.
+					*/}
 					<p className="sub decide-rest">
-						Each figure is what your starting lineup projects over this period with the
-						move made. The men leaving are all under the keep floor — none is more than{" "}
-						{DEFAULTS.keepFloor} points clear of what the wire still offers at his own
-						slot — and none is worth holding over the rest of the season either.
 						{estimatedWire ?
-							<>
-								{" "}
-								<b>Who is available is an estimate.</b> Nothing has read your
-								league&rsquo;s own free-agent list, so these are the men rostered in{" "}
-								<b>{estimatedWire.cut.cut}% of leagues or fewer</b> — the boundary a{" "}
-								{estimatedWire.cut.depth / estimatedWire.cut.seats}-team league with{" "}
-								{estimatedWire.cut.seats} seats implies. Some of them will already be
-								taken in yours.
-							</>
+							<b>Who is free is an estimate</b>
 						: wireAge ?
-							<>
-								{" "}
-								Read against your league&rsquo;s free-agent list as it stood{" "}
-								<b>{wireAge}</b> — anyone picked up or dropped since is not in it.
-							</>
-						:	null}
+							<>Your league&rsquo;s own free-agent list, read {wireAge}</>
+						:	<>Points your lineup gains over this period</>}
+						<details className="decide-fine">
+							<summary>what these numbers are</summary>
+							Each figure is what your starting lineup projects over this period with
+							the move made. Everyone leaving is under the keep floor — no more than{" "}
+							{DEFAULTS.keepFloor} points clear of what the wire still offers at his own
+							slot — and none is worth holding for the rest of the season either.
+							{estimatedWire ?
+								<>
+									{" "}
+									Nothing has read your league&rsquo;s own free-agent list, so these are
+									the men rostered in {estimatedWire.cut.cut}% of leagues or fewer — the
+									boundary a {estimatedWire.cut.depth / estimatedWire.cut.seats}-team
+									league with {estimatedWire.cut.seats} seats implies. Some will already
+									be taken in yours.
+								</>
+							: wireAge ?
+								<> Anyone picked up or dropped since is not in it.</>
+							:	null}
+						</details>
 					</p>
 				</>
 			}
@@ -1068,11 +1242,19 @@ export const Decide = ({
 										</>
 									)}
 									.{" "}
+									{/* One clause on the line, the rest a tap away. What a reader has
+									    to know before acting is that this counts only what is STILL TO
+									    COME; why it cannot count the rest is a fact about this page, not
+									    about his week. */}
 									<em className="decide-why">
-										An estimate from their scheduled turns, not an announcement — and it
-										does not count innings already thrown this period, which nothing this
-										page reads carries. It can tell you what is still to come, not
-										whether you will clear the floor.
+										still to come only, from their scheduled turns
+										<details className="decide-fine">
+											<summary>why not the whole week</summary>
+											Innings already thrown this period are on your team page, which
+											nothing here reads — so this can tell you what is left, not
+											whether you will clear the floor. The turns themselves are MLB&rsquo;s
+											published probables, which are an announcement about a plan.
+										</details>
 									</em>
 								</span>
 							</li>

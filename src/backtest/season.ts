@@ -1,6 +1,7 @@
 import { scoreStats } from "../engine/points.ts"
 import { matchupIndexFor, teamStrength, type TeamStrength } from "../engine/matchup.ts"
 import { MODEL } from "../engine/weights.ts"
+import { isReserveSlot } from "../engine/bscore.ts"
 import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import type { League } from "../schema.ts"
 import type { PlayerSeason } from "../data/statsapi.ts"
@@ -163,7 +164,7 @@ const opponentsOf = async (start: string, end: string): Promise<Map<number, numb
 
 const ACTIVE_SLOTS = (league: League): string[] =>
 	(league.roster.slot_order ?? Object.keys(league.roster.slots)).filter(
-		s => s !== "BN" && s !== "IL" && s !== "NA"
+		s => !isReserveSlot(s)
 	)
 
 const slotsFor = (p: PlayerSeason): string[] => {
@@ -316,7 +317,7 @@ const applyVorp = (
 	const teams = league.meta.max_teams ?? 10
 	const replacement = new Map<string, number>()
 	for (const [slot, count] of Object.entries(league.roster.slots)) {
-		if (slot === "BN" || slot === "IL" || slot === "NA") continue
+		if (isReserveSlot(slot)) continue
 		const eligible = ranked.filter(r => slotsFor(r.p).includes(slot))
 		const depth = Math.min(teams * count, Math.max(eligible.length - 1, 0))
 		replacement.set(slot, eligible[depth]?.score ?? 0)

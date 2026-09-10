@@ -22,6 +22,22 @@ import { MODEL } from "./weights.ts"
 export const RESERVE_SLOTS = new Set(["BN", "IL", "NA", "IL+"])
 
 /**
+ * The same question, asked the way callers actually ask it.
+ *
+ * `RESERVE_SLOTS` was exported so there would be one list, and then six places went
+ * on writing `slot !== "BN" && slot !== "IL" && slot !== "NA"` by hand — a form that
+ * silently omits Yahoo's second injured slot, "IL+". Two of them are rendered
+ * components (the roster summary on League setup, and the scarcity panel under the
+ * board), so a league carrying an IL+ seat was told it starts one more man than it
+ * does, and every replacement bar drawn from that count was one seat too deep.
+ *
+ * A predicate rather than the Set, because the drift was never about the contents:
+ * it was about the shape of the check being easy to retype and easy to get wrong.
+ */
+export const isReserveSlot = (slot: string): boolean =>
+	RESERVE_SLOTS.has(slot.trim()) || /^(BN|IL|NA)/i.test(slot.trim())
+
+/**
  * The bscore: a player's projected points over the horizon, minus what a freely
  * available replacement at the same roster slot would produce, in THIS league's
  * scoring. Points above replacement is the honest unit — it is denominated in the

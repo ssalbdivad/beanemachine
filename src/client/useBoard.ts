@@ -169,9 +169,22 @@ export const DEFAULT_FILTERS: Filters = {
  * Glasnow (94% rostered) at the top. A control the reader must find and switch on
  * to get an answer is a control that has not answered him.
  */
+/**
+ * ON everywhere except Stash, because a recommendation you cannot act on is not a
+ * recommendation.
+ *
+ * The standing board opened OFF, on the reasoning that "the standing board is the
+ * standing board". Measured on the committed capture: 42 of the first 50 rows are
+ * rostered in 90% or more of leagues and not one is under 50%, so the default screen
+ * — the first thing a reader sees, on the tab this app exists for — ranked fifty men
+ * he cannot have. A ranking of everyone in baseball is a fine thing to be able to
+ * ask for; it is the wrong thing to open on.
+ *
+ * Stash stays OFF because it is explicitly about players you already hold.
+ */
 export const AVAILABLE_ONLY_DEFAULT: Record<Filters["mode"], boolean> = {
 	stream: true,
-	board: false,
+	board: true,
 	stash: false
 }
 

@@ -17,10 +17,66 @@ console.log(`--- ${ENGINE} ---`)
 let pass = 0, fail = 0
 const t = (n, ok, extra = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + extra}`) }
 
+/**
+ * Tonight's slate is STUBBED, in every page this suite opens.
+ *
+ * The app now reads MLB's schedule endpoint live — `src/data/today.ts`, called from
+ * `src/client/useSlate.ts` — so that Decide can say "no game today" about tonight
+ * rather than about a capture that is two days old. That request goes to
+ * statsapi.mlb.com from inside the browser, and two things follow for this suite,
+ * neither of them about the UI it exists to test:
+ *
+ *  - On a machine whose browser cannot reach the public internet the request never
+ *    settles. It does not fail, it HANGS, so `waitUntil: "networkidle"` never fires.
+ *    Measured: the reload after `localStorage.clear()` below timed out at 30s with
+ *    exactly one request outstanding, the schedule one, and took the whole run down
+ *    as an uncaught TimeoutError two thirds of the way through.
+ *  - On a machine that CAN reach it, the answer is a different slate every day, and
+ *    every wait in here would be paced by somebody else's server.
+ *
+ * An empty-but-valid schedule (`{"dates":[]}`) is what gets served instead:
+ * `fetchSlate` reads it as a slate with no games and no error, which is the one
+ * response that is both deterministic and not a failure state. Nothing in THIS suite
+ * asserts on lineups — that is test/today.mjs and test/decide.mjs — so a real slate
+ * buys this file nothing and costs it determinism.
+ */
+const stubSlate = target =>
+  target.route("**statsapi.mlb.com/**", r =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ dates: [] }) }))
+
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+await stubSlate(page)
+
+/**
+ * The console trap SPLITS rather than filters, because one failing request here is
+ * the app working correctly.
+ *
+ * `detectMode` in src/client/api.ts probes `/api/health` on every dev load: the
+ * Hono server may or may not be running behind `npx vite`, and asking is the only
+ * way to find out whether this page can read a Yahoo league for itself. With no
+ * server up, Vite's `/api` proxy answers 502 and the browser logs a bare "Failed to
+ * load resource" — with no URL in the text, so it cannot be told apart by matching
+ * the message. It has to be correlated with the response that caused it, which is
+ * what the `PROBE` / `unexpectedFailures` pair below does. This is the same split
+ * test/journey.mjs makes for the same probe, for the same reason.
+ *
+ * The important half is that this cannot quietly swallow a real broken asset: any
+ * OTHER failing request makes the generic line ours again and fails the assertion.
+ */
+const PROBE = /\/api\/health$/
 const errors = []
-page.on("pageerror", e => errors.push(String(e)))
-page.on("console", m => { if (m.type() === "error") errors.push(m.text()) })
+const unexpectedFailures = []
+const GENERIC_LOAD_FAILURE = /^Failed to load resource/
+page.on("pageerror", e => errors.push(`pageerror: ${e}`))
+page.on("response", r => {
+  if (r.status() >= 400 && !PROBE.test(new URL(r.url()).pathname))
+    unexpectedFailures.push(`${r.status()} ${r.url()}`)
+})
+page.on("console", m => {
+  if (m.type() !== "error") return
+  if (GENERIC_LOAD_FAILURE.test(m.text()) && !unexpectedFailures.length) return
+  errors.push(m.text())
+})
 
 await page.goto(BASE, { waitUntil: "networkidle" })
 
@@ -43,6 +99,10 @@ await toLeagueSetup(page)
 
 await page.screenshot({ path: "/tmp/bc-light.png", fullPage: true })
 t("no console/page errors on load", errors.length === 0, errors.join(" | "))
+// The half of the old single assertion that the split above would otherwise have
+// dropped: no request failed except the mode probe, which is allowed to.
+t("nothing but the API probe failed to load", unexpectedFailures.length === 0,
+  unexpectedFailures.join(" | "))
 t("wordmark renders", (await page.textContent("h1")) === "beanemachine")
 t("league selected", (await page.inputValue(".bar select")) === "yahoo:228947")
 
@@ -251,6 +311,7 @@ t("dropdowns and URL field are labelled",
  */
 const cfgFile = JSON.parse(readFileSync("scoring.json", "utf8"))
 const fresh = await browser.newContext({ viewport: { width: 1280, height: 1000 }, acceptDownloads: true })
+await stubSlate(fresh)
 const fp = await fresh.newPage()
 const freshErrors = []
 fp.on("pageerror", e => freshErrors.push(String(e)))
@@ -489,6 +550,7 @@ await fresh.close()
 
 // dark mode renders
 const dark = await browser.newContext({ colorScheme: "dark", viewport: { width: 1280, height: 1000 } })
+await stubSlate(dark)
 const dp = await dark.newPage()
 await dp.goto(BASE, { waitUntil: "networkidle" })
 await toLeagueSetup(dp)
@@ -497,6 +559,7 @@ t("dark mode background applied", bg === "rgb(20, 22, 26)", bg)
 
 // mobile layout: no horizontal overflow
 const mob = await browser.newContext({ viewport: { width: 390, height: 844 } })
+await stubSlate(mob)
 const mp = await mob.newPage()
 await mp.goto(BASE, { waitUntil: "networkidle" })
 await toLeagueSetup(mp)
@@ -511,27 +574,96 @@ t("no card overflows its own width at 390px", wide.length === 0, wide.join(" "))
 await dp.screenshot({ path: "/tmp/bc-dark.png", fullPage: true })
 await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 /**
- * The Draft tab, in September, says the season is already running.
+ * ── There is no Draft tab, and the question its banner answered is still answered ──
  *
- * Asserted on screen rather than only in the data, because the failure this
- * guards is a reader opening a draft board mid-season and taking it seriously.
+ * WHAT THIS USED TO ASSERT. A fourth tab, "Draft", rendered a pick-by-pick draft
+ * board out of `src/engine/draft.ts`. Opened in September — which is when the
+ * committed capture is from, 144 games deep — a draft board is worse than useless:
+ * it is a confident plan for an event that happened in March. So the tab carried a
+ * `.draft-underway` banner, and three assertions lived here:
+ *
+ *   1. "a draft board opened mid-season says so before anything else"
+ *   2. "it says how far in, and points at the page that can still help"
+ *      (matched /\d+ games into/ and /Recommendations/ in the banner)
+ *   3. "and it does not remove the board underneath it" (.draft-pick still present)
+ *
+ * WHY THEY CHANGED. The tab is gone: `src/client/Draft.tsx`, `src/engine/draft.ts`
+ * and `test/draft.mjs` are deleted and `VIEWS` in src/client/panels.tsx is down to
+ * three entries. The whole class of failure those assertions guarded — a reader
+ * taking a stale draft board seriously — cannot happen when there is no draft board,
+ * and deleting a warning is the right move only if the thing it warned about went
+ * with it. So (1) and (3) become ONE assertion that the surface is really gone
+ * everywhere rather than merely unlinked, which is the way a removal like this
+ * actually rots: the component stays, a tab stops pointing at it, and it comes back
+ * on the next refactor.
+ *
+ * (2) is the one that protected something a reader still needs, and it survives
+ * pointed at what now answers it. Two separate claims were packed into that regex:
+ *
+ *   - "how far in" — how current the data behind the numbers is. That is now the
+ *     masthead chip, `player data <b>2d ago</b>`, which `freshness()` in panels.tsx
+ *     marks `.warn` past 36 hours and which renders on EVERY tab rather than only on
+ *     the one a person was least likely to open. It is a better home for the claim
+ *     than the draft banner was.
+ *   - "points at the page that can still help" — Recommendations. A banner is no
+ *     longer needed to point at it: it is where the app opens.
+ *
+ * Asserted on a fresh context, because `page` has been clicked through forty
+ * assertions of league editing and is no longer on the default view.
  */
 {
-  const tab = page.locator(".views button", { hasText: /draft/i }).first()
-  if (await tab.count()) {
-    await tab.click()
-    await page.waitForSelector(".draft-pick, .draft-underway", { timeout: 30000 })
-    const banner = await page.$(".draft-underway")
-    t("a draft board opened mid-season says so before anything else",
-      !!banner, "no season-underway banner on a capture 144 games deep")
-    if (banner) {
-      const text = await banner.innerText()
-      t("it says how far in, and points at the page that can still help",
-        /\d+ games into/.test(text) && /Recommendations/.test(text), text.replace(/\n/g, " "))
-      t("and it does not remove the board underneath it",
-        !!(await page.$(".draft-pick")), "the draft board itself vanished")
-    }
+  const look = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+  await stubSlate(look)
+  const lp = await look.newPage()
+  await lp.goto(BASE, { waitUntil: "networkidle" })
+  await lp.waitForSelector(".views button")
+  const tabs = await lp.$$eval(".views button", n => n.map(e => e.textContent.trim()))
+  t("the tabs are the three that are left, and none of them is a draft",
+    JSON.stringify(tabs) === JSON.stringify(["Recommendations", "League setup", "My team & trades"]),
+    tabs.join(" | "))
+  // The default view is the one the deleted banner deferred to, and it ranks — so
+  // nothing a reader could act on left with the draft board.
+  t("the app opens on the page that banner pointed at, already ranking",
+    (await lp.$eval(".views button.on", e => e.textContent.trim())) === "Recommendations" &&
+      (await lp.waitForSelector(".board-row", { timeout: 25000 }).then(() => true, () => false)),
+    await lp.$eval(".views button.on", e => e.textContent.trim()).catch(() => "(no tab marked current)"))
+  // Every tab, not just the default: a draft board that is merely unlinked is a
+  // draft board.
+  const drafty = []
+  for (const [i, label] of tabs.entries()) {
+    await lp.click(`.views button:nth-child(${i + 1})`)
+    await lp.waitForTimeout(400)
+    const found = await lp.evaluate(() =>
+      document.querySelectorAll(".draft-pick, .draft-underway, .draft-board").length)
+    if (found) drafty.push(`${label}:${found}`)
   }
+  t("no draft surface renders on any of them, not merely unlinked from the nav",
+    drafty.length === 0, drafty.join(" "))
+  // What "how far in" became. Stated on the tab a person actually opens, and in the
+  // masthead, so it is on all of them.
+  await lp.click(".views button:nth-child(1)")
+  await lp.waitForSelector(".board-row", { timeout: 25000 })
+  const ageChip = await lp.locator(".chip", { hasText: /player data/ }).first()
+  const ageText = (await ageChip.textContent()).replace(/\s+/g, " ").trim()
+  t("the page still says how old the data behind the numbers is",
+    /^player data (just now|\d+h ago|\d+d ago|age unknown)$/.test(ageText), ageText)
+  // And it is FLAGGED, not just printed. The committed capture is stamped
+  // 2026-09-08; anything past 36h is stale by `freshness()`'s own line, and a stale
+  // age that renders in the same grey as a fresh one is the draft banner's failure
+  // all over again — true on the page and invisible to the reader.
+  const stale = /(\d+)d ago/.exec(ageText)
+  if (stale) {
+    t("and a capture this old is flagged, not printed in the same grey as a fresh one",
+      await ageChip.evaluate(e => e.classList.contains("warn")),
+      `${ageText} — classes: ${await ageChip.getAttribute("class")}`)
+  } else {
+    // Reached only against a freshly captured snapshot. The claim still has to be
+    // checked, so it is checked in the other direction rather than skipped.
+    t("and a fresh capture is not flagged as stale",
+      !(await ageChip.evaluate(e => e.classList.contains("warn"))),
+      `${ageText} — classes: ${await ageChip.getAttribute("class")}`)
+  }
+  await look.close()
 }
 
 /**
@@ -550,6 +682,7 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
  */
 {
 	const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+	await stubSlate(page)
 	await page.route("**/snapshot.json", r =>
 		r.fulfill({
 			status: 200,

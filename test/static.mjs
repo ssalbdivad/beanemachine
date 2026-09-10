@@ -72,6 +72,71 @@ t("a first visit shows the setup, not somebody else's ranked board",
 t("and this browser holds no league until the visitor puts one in it",
   await p.evaluate(() =>
     Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length === 0))
+
+/**
+ * Three tabs, and the PUBLISHED bundle is where that has to be checked.
+ *
+ * There were four. The fourth was Draft — src/client/Draft.tsx, src/engine/draft.ts
+ * and test/draft.mjs, all deleted — so `View` no longer has a "draft" member and
+ * `VIEWS` in panels.tsx is board / league / trade. Asserted by NAME and in ORDER
+ * rather than by a count, for two reasons:
+ *
+ * - every positional click in this file is only correct while this order holds:
+ *   `.views button:nth-child(1)` is the board and `nth-child(2)` is League setup,
+ *   and a tab inserted at the front would quietly move a dozen assertions onto the
+ *   wrong panel and fail them somewhere far from the cause.
+ * - this suite reads the published asset rather than the source tree, which is the
+ *   one place a stale bundle can be caught. A hosted build still serving a Draft
+ *   tab after the source stopped having one is exactly the failure this file
+ *   exists for, and nothing else here would notice it.
+ */
+const TAB_LABELS = ["Recommendations", "League setup", "My team & trades"]
+const tabLabels = await p.$$eval(".views button", n => n.map(e => e.textContent))
+t("the published build offers three tabs, in the order this file clicks them by position",
+  JSON.stringify(tabLabels) === JSON.stringify(TAB_LABELS), tabLabels.join(" | "))
+t("and the Draft tab is gone from the shipped bundle, not only from the source tree",
+  !/draft/i.test(await p.$eval(".views", e => e.innerText)),
+  await p.$eval(".views", e => e.innerText))
+
+/**
+ * ── The colophon says one thing, and the working is one click away ──────────────
+ *
+ * It used to say 277 words: four paragraphs of folds, Spearman rho, z-scores and
+ * one-sided p-values, rendered under EVERY tab — 67% of the words on the screen a
+ * first visitor sees, which is this one. It is three links and one sentence now,
+ * and the results live in docs/METHODOLOGY.md.
+ *
+ * What those 277 words were protecting was never their own length. It was two
+ * claims, and both are asserted here in the form they take now:
+ *
+ * - that this app does not present a bscore as a forecast. The surviving sentence
+ *   is the one place that is still said, so it is read for the claim and not for
+ *   the wording.
+ * - that the measured results AND the admitted failures are reachable from the
+ *   page, not only from the repo. So METHODOLOGY must be linked, and linked by
+ *   ABSOLUTE URL — which is measured, not assumed: fetching `docs/METHODOLOGY.md`
+ *   from this preview answers 200 with content-type text/html, because docs/ is
+ *   not published with the build and the SPA fallback serves index.html for it. A
+ *   relative link would have rendered the app again and silently lost the document
+ *   on exactly the hosted build this file is about.
+ *
+ * The removal is asserted too, and not as tidiness: METHODOLOGY records that the
+ * hitting-fold figure quoted here was measured on a configuration this app no
+ * longer ships, and the human comparison's 63/111 was printed here without its
+ * one-sided p of 0.064. Numbers a reader cannot act on and that have drifted from
+ * the code are worse than no numbers, so their absence is part of the claim.
+ */
+const colophon = (await p.$eval(".colophon", e => e.innerText)).replace(/\s+/g, " ").trim()
+t("the colophon is one sentence, not the 277-word statistics footer",
+  colophon.split(" ").length < 90 && /ranking, not a forecast/i.test(colophon),
+  `${colophon.split(" ").length} words: ${colophon.slice(0, 140)}`)
+t("and it no longer quotes folds, rho, z-scores or p-values at a reader who cannot act on them",
+  !/\bfolds?\b|spearman|\brho\b|z-score|p-value/i.test(colophon), colophon.slice(0, 200))
+const colophonLinks = await p.$$eval(".colophon a", n => n.map(e => e.getAttribute("href") ?? ""))
+t("but the measured results are still one click off the page, by absolute URL the static host cannot swallow",
+  colophonLinks.some(h => /^https:\/\/github\.com\/.*METHODOLOGY\.md$/.test(h)) &&
+    colophonLinks.some(h => /^https:\/\/github\.com\/.*GUIDE\.md$/.test(h)),
+  colophonLinks.join(" | "))
 // The tabs are all about a league. Highlighting one and then showing the same setup
 // card reads as a broken button, so they say why instead.
 /**
@@ -154,6 +219,10 @@ t("and the same team count, which is what replacement level is cut at",
 t("but it is not marked read-from-source, because nothing here fetched that page",
   pasted.provenance.verified === false && /^paste:/.test(pasted.provenance.method),
   pasted.provenance.method)
+// A ranked board at all, which is what "with no server" is about. It is NOT about
+// the default filter: the list is capped at 60 rows, so the filtered default and
+// the unfiltered ranking both read 60 here and this number cannot tell them apart.
+// The default is asserted below, where it can be seen.
 t("the board renders with no server", (await p.$$eval(".board-row", n=>n.length)) > 50)
 /**
  * The availability toggle WORKS with no server now, which is the point of the whole
@@ -171,6 +240,84 @@ t("and says the answer is estimated rather than read",
   /estimate|estimated/i.test(await p.$eval("body", e => e.innerText)),
   (await p.$eval("body", e => e.innerText)).slice(0, 160))
 t("Billy's pick renders", await p.locator(".card.pick").isVisible())
+
+/**
+ * ── The board lost its supporting prose and kept its definitions ────────────────
+ *
+ * Gone from Board.tsx: the "Buy low" card, the "Where it hurts to wait" scarcity
+ * card, <BoardPrimer>, and the <details class="legend"> disclosure headed "How this
+ * ranking was built" — which also held a SECOND copy of the per-column glossary,
+ * under a table whose headers already carried the first.
+ *
+ * Deleting a definition and deleting a duplicate of one are not the same act, and
+ * this is where the difference is held. COLUMN_HELP survives as the `title=` on
+ * every sortable header, so the question the legend answered — what a bscore is,
+ * and what uscore is doing differently — is still answered ON the thing being
+ * asked about rather than in a list below it. Both halves are asserted: the
+ * disclosure is gone from the published bundle, and the definitions it carried are
+ * still reachable there. The second half is the one that matters; a page that
+ * dropped both would pass the first on its own.
+ */
+const boardText = await p.$eval("body", e => e.innerText)
+t("the ranking legend and its second copy of the glossary are gone",
+  (await p.$$eval(".legend", n => n.length)) === 0 &&
+    !/How this ranking was built/i.test(boardText),
+  String(await p.$$eval(".legend", n => n.length)))
+t("and Buy low and the scarcity card no longer run beneath the table",
+  !/Buy low|hurts to wait/i.test(boardText),
+  (await p.$$eval("section.card h2, section.card h3", n => n.map(e => e.textContent))).join(" | "))
+/**
+ * The property the legend was protecting, asserted against what replaced it.
+ *
+ * Read for LENGTH as well as presence, because `title=""` is a header with a title
+ * attribute and no definition in it, and that is precisely how this would rot: a
+ * column added to COLUMN_HELP with a placeholder would leave the glossary gone and
+ * nothing in its place, and a bare `hasAttribute` check would call that a pass.
+ */
+const heads = Object.fromEntries(await p.$$eval(".board-head .sort-head",
+  n => n.map(e => [e.getAttribute("data-col"), e.getAttribute("title") ?? ""])))
+t("but every column still defines itself, on the header instead of in a list below it",
+  ["uscore", "bscore", "conf", "luck"].every(c => (heads[c] ?? "").length > 40),
+  Object.entries(heads).map(([c, h]) => `${c}:${h.length}ch`).join(" "))
+// The one definition a reader cannot do without, and the one the old primer got
+// WRONG: it said "the best free agent at the same slot", and the engine draws the
+// bar at the (teams x seats)-th of them — who is left once every team has filled
+// that seat. The surviving copy has to be the correct one.
+t("and bscore's definition still names the man it subtracts, which is the whole number",
+  /teams\s*[x×]\s*seats/i.test(heads.bscore ?? "") && /minus/i.test(heads.bscore ?? ""),
+  (heads.bscore ?? "(no title at all)").slice(0, 180))
+
+/**
+ * The board opens on players the reader can ADD.
+ *
+ * `AVAILABLE_ONLY_DEFAULT.board` was false, on the reasoning that the standing
+ * board is the standing board. Measured on the committed capture: 42 of the first
+ * 50 rows of that default were rostered in 90% or more of leagues, and not one was
+ * under 50% — so the first ranked screen of the app this suite publishes was fifty
+ * men nobody in the league could have.
+ *
+ * Asserted as a different HEAD rather than as a row count, because a row count
+ * cannot see it. The list is capped at 60 rows, so filtered and unfiltered both
+ * read 60 and the ">50 rows" assertions in this file are silent on which one a
+ * reader is looking at — the exact blindness that let the old default ship.
+ */
+const availBox = p.locator(".toggle", { hasText: "Only players I can add" }).locator("input")
+t("the default board is the one he can act on: only players I can add starts ticked",
+  await availBox.isChecked())
+const gettable = await p.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
+await availBox.uncheck()
+await p.waitForTimeout(600)
+const everyone = await p.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()).slice(0, 6))
+// Not "the two heads differ", which one drifting row would satisfy. The claim is
+// that the default REMOVES men the full ranking puts at its very top — those are
+// the 42-in-50 the measurement above counted, and if none of the unfiltered top six
+// is missing from the whole 60-row default then the filter is not doing the thing
+// the default was changed for.
+t("and that default is doing work: the full ranking opens with men it keeps off the board",
+  everyone.length === 6 && everyone.some(n => !gettable.includes(n)),
+  `everyone: ${everyone.join(", ")} / can add: ${gettable.slice(0, 6).join(", ")}`)
+await availBox.check()
+await p.waitForTimeout(600)
 // now switch to the config editor for the remaining assertions
 await p.click(".views button:nth-child(2)")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })

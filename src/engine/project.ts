@@ -467,13 +467,19 @@ export const project = (
 			// verdict; this string was left saying the re-measurement had not landed
 			// yet, months after it did. A drill-down that contradicts the methodology
 			// is the same defect as a number that contradicts its source.
+			/*
+			 * Eighty words became fourteen.
+			 *
+			 * The retraction is real history and it belongs in METHODOLOGY 7.1, which
+			 * holds it in full — the leaked-data result, the re-measurement over 111
+			 * paired weeks, the rho 0.102 against 0.058. What it does not belong in is
+			 * the drill-down of every row of a ranked table, told to somebody deciding
+			 * whether to start a shortstop tonight. The fact he can act on is the whole
+			 * of the first clause: the number is shown and it is not used.
+			 */
 			modelled.push(
-				`Statcast weight is 0, so xwOBA ${underlying.xwoba} is shown but not applied. ` +
-					`The original "it does not help" result ran on leaked data and was ` +
-					`retracted; re-measured on clean point-in-time data over 111 paired weeks ` +
-					`every formulation still loses, the least-bad by 0.7 points a week. The ` +
-					`signal is real — xwOBA out-predicts wOBA for the next seven days ` +
-					`(rho 0.102 vs 0.058) — and it still does not change which players you roster`
+				`Statcast weight is 0: xwOBA ${underlying.xwoba} is shown, not applied ` +
+					`(METHODOLOGY 7.1)`
 			)
 	} else missing.push("underlying expected stats")
 

@@ -108,7 +108,7 @@ const probe = proj(
 t("Statcast adjustment is off by default", probe.qualityMultiplier === 1,
   String(probe.qualityMultiplier))
 t("and the drill-down says so rather than implying it was used",
-  probe.modelled.some(m => /Statcast weight is 0/.test(m) && /shown but not applied/.test(m)),
+  probe.modelled.some(m => /Statcast weight is 0/.test(m) && /not applied/.test(m)),
   probe.modelled.join(" | "))
 
 
@@ -780,10 +780,30 @@ t("an unspecified recent weight means the shipped blend, not a retracted 0.75",
   withDefault.volumePerTeamGame === 6,
   `${withDefault.volumePerTeamGame} vs ${withExplicit.volumePerTeamGame}`)
 
-// the drill-down must report the verdict METHODOLOGY 7.1 actually reached
-t("the Statcast note states the finished verdict, not an open question",
-  probe.modelled.some(m => /111 paired weeks/.test(m) && !/not yet settled/.test(m)),
-  probe.modelled.find(m => /Statcast/.test(m)))
+/*
+ * The drill-down must report the verdict METHODOLOGY 7.1 reached, and must not
+ * re-litigate it on every row.
+ *
+ * This used to assert that the note carried "111 paired weeks" — the sample of the
+ * re-measurement — because an earlier version of the string said the question was
+ * still open months after it had closed, and pinning a detail of the finished result
+ * was how that was caught. The detail was 80 words long and it was printed in the
+ * drill-down of every row of a ranked table, to somebody deciding whether to start a
+ * shortstop tonight. It is history, it is true, and it belongs in METHODOLOGY 7.1,
+ * which holds it in full.
+ *
+ * So the claim is unchanged and the evidence for it moved: the note must state a
+ * SETTLED verdict — weight 0, shown and not used — and must cite where the working
+ * lives, and it must not have grown back into an essay.
+ */
+{
+  const note = probe.modelled.find(m => /Statcast/.test(m)) ?? ""
+  t("the Statcast note states the finished verdict, not an open question",
+    /weight is 0/.test(note) && !/not yet settled|does not help/.test(note), note)
+  t("and it cites where the working is, rather than reciting it on every row",
+    /METHODOLOGY/.test(note) && note.split(/\s+/).length < 25,
+    `${note.split(/\s+/).length} words: ${note}`)
+}
 
 /**
  * 15. Who the reader can ACTUALLY ADD, estimated without a server.

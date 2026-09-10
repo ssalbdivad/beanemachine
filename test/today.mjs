@@ -171,5 +171,43 @@ t("the URL asks for the three hydrations this file reads and nothing else",
     /did not answer/.test(error ?? ""), String(error))
 }
 
+// ── when a seat stops being changeable ───────────────────────────────────────
+//
+// There is no single lineup moment. Measured across the 2025 season, first pitches
+// spread over a median 7h25m window and only about a quarter fall in the 7pm ET
+// hour — so at any point in an evening part of a roster is already locked and the
+// rest is not. A list of changes ordered by what each is WORTH is ordered on the
+// wrong axis at the moment somebody is acting on it: half of it has expired and the
+// reader has to find the half that has not.
+{
+  const { lockFor, nextLock, clock } = await import("../src/data/today.ts")
+  t("a man's lock is his club's first pitch",
+    lockFor(144, slate) === Date.parse("2026-09-10T16:15:00Z"),
+    String(lockFor(144, slate)))
+  t("and it is the same for both clubs in the game",
+    lockFor(139, slate) === lockFor(144, slate))
+  t("a club with no game has no lock, which is not the same as a lock of zero",
+    lockFor(147, slate) === null && lockFor(null, slate) === null)
+
+  const early = Date.parse("2026-09-10T16:15:00Z")
+  const late = Date.parse("2026-09-10T23:10:00Z")
+  t("the next lock is the earliest one still ahead",
+    nextLock([late, early], Date.parse("2026-09-10T15:00:00Z")) === early)
+  // The whole point: a game that has started is not a deadline any more.
+  t("a lock that has passed is not offered as the next one",
+    nextLock([late, early], Date.parse("2026-09-10T17:00:00Z")) === late)
+  t("and when they have all started there is no next lock at all",
+    nextLock([late, early], Date.parse("2026-09-11T00:00:00Z")) === null)
+  t("an unknown lock never becomes the deadline",
+    nextLock([null, late], Date.parse("2026-09-10T15:00:00Z")) === late)
+  t("nothing known at all is null rather than a guess",
+    nextLock([null, null]) === null)
+  // A deadline is read at a glance or it is not read. 24-hour, seconds and a
+  // timezone suffix are all things a reader has to parse.
+  t("the clock reads the way a person says a time",
+    /^\d{1,2}:\d{2}[ap]m$/.test(clock(Date.parse("2026-09-10T23:05:00Z"))),
+    clock(Date.parse("2026-09-10T23:05:00Z")))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

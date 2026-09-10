@@ -75,3 +75,8 @@
    text: more rows in a screen, and the numbers still line up. */
 .decide-list li>span:last-child{font-size:var(--fs-3)}
 .decide-list li>span:last-child b{font-size:var(--fs-4)}
+
+/* The only thing on a change row that expires. Quiet, because it is a deadline and
+   not a value — but present, because a change worth making after first pitch is not
+   a change at all. */
+.decide-lock{color:var(--flag);font-variant-numeric:tabular-nums}

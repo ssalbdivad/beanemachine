@@ -15,7 +15,7 @@ import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { useSlate } from "./useSlate.ts"
 import { useInjuries } from "./useInjuries.ts"
-import { statusOf, type TodayStatus } from "../data/today.ts"
+import { statusOf, lockFor, nextLock, clock, type TodayStatus } from "../data/today.ts"
 import "./decide.css"
 
 /**
@@ -540,7 +540,42 @@ export const Decide = ({
 						:	"a better man is projected for that seat today"
 				}
 			}),
-			start: start.map(st => ({ name: st.name, slot: st.slot, points: st.points }))
+			/**
+			 * Ordered by when each man's game starts, not by what the change is worth.
+			 *
+			 * There is no single lineup moment: measured across the 2025 season, first
+			 * pitches spread over a median 7h25m window and about a quarter fall in the
+			 * 7pm ET hour. So a list ordered by value is ordered on the wrong axis at the
+			 * moment somebody is acting on it — half of it is already unchangeable and
+			 * the reader has to find the half that is not. Earliest first pitch first,
+			 * and a man with no known start time sorts last, because nothing is expiring
+			 * for him.
+			 */
+			start: start
+				.map(st => ({
+					name: st.name,
+					slot: st.slot,
+					points: st.points,
+					lock: slate ? lockFor(byName.get(normalizeName(st.name))?.player.teamId, slate) : null
+				}))
+				.sort((a, b) => (a.lock ?? Infinity) - (b.lock ?? Infinity)),
+			/**
+			 * The next seat still to lock, so the card can say how long is left.
+			 *
+			 * Over every man who has a game, not only over the ones being changed. The
+			 * deadline a reader is working against is the first of HIS games to start —
+			 * after which that seat is fixed whatever the card later says about it — and
+			 * a card that only counted the men it happened to be recommending would go
+			 * quiet on exactly the evening when nothing needs changing yet and something
+			 * might in an hour. Null when they have all started, which is itself worth
+			 * being told.
+			 */
+			nextLock:
+				slate ?
+					nextLock(
+						[...playing].map(name => lockFor(byName.get(name)?.player.teamId, slate))
+					)
+				:	null
 		}
 	}, [snapshot, league, seats, slate, injuries])
 
@@ -900,6 +935,9 @@ export const Decide = ({
 							)}
 							{today.playing} of your men can score · your lineup projects{" "}
 							{today.lineup.pointsPlanned}
+							{today.nextLock !== null && (
+								<> · next lock {clock(today.nextLock)}</>
+							)}
 						</span>
 					</h3>
 					{/* Everyone unpriceable is not "bench everyone". A roster whose names none
@@ -922,7 +960,15 @@ export const Decide = ({
 										<span className="decide-slot">{st.slot}</span>
 										<span>
 											Start <b>{st.name}</b>{" "}
-											<em className="decide-why">{st.points} projected today</em>
+											<em className="decide-why">
+												{st.points} projected today
+												{/* When this seat stops being changeable. It is the only
+												    thing on the row that expires, and the rows are ordered
+												    by it — see the note on `start`. */}
+												{st.lock !== null && (
+													<span className="decide-lock"> · locks {clock(st.lock)}</span>
+												)}
+											</em>
 										</span>
 									</li>
 								))}

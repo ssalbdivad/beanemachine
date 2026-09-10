@@ -226,6 +226,39 @@ export type TodayStatus =
 	| { kind: "benched"; text: "not in today's lineup" }
 	| { kind: "pitching"; text: string }
 
+/**
+ * When this man's game starts, which is when his seat stops being changeable.
+ *
+ * There is no single lineup moment. Measured across the 2025 season, first pitches
+ * spread over a median 7h25m window and only about a quarter fall in the 7pm ET
+ * hour — so at any point in an evening a good part of a roster is already locked and
+ * the rest is not, and a list ordered by how much a change is WORTH is ordered on the
+ * wrong axis at the moment somebody is actually acting on it. Ordered by lock time,
+ * the changes that can still be made come first.
+ *
+ * Null where the club is not playing, or where MLB published no time.
+ */
+export const lockFor = (teamId: number | null | undefined, slate: Slate): number | null => {
+	if (typeof teamId !== "number") return null
+	const game = slate.games.find(g => g.homeTeamId === teamId || g.awayTeamId === teamId)
+	if (!game?.startsAt) return null
+	const at = Date.parse(game.startsAt)
+	return Number.isFinite(at) ? at : null
+}
+
+/** The next seat to lock, of the ones that have not. Null when they all have, or
+ *  when none is known — and "they have all locked" is a useful thing to be told. */
+export const nextLock = (locks: (number | null)[], now: number = Date.now()): number | null => {
+	const ahead = locks.filter((v): v is number => v !== null && v > now)
+	return ahead.length ? Math.min(...ahead) : null
+}
+
+/** A time as a reader's own clock shows it: "7:05pm". */
+export const clock = (at: number): string =>
+	new Date(at)
+		.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+		.replace(/\s?([AP])M/i, (_, m: string) => m.toLowerCase() + "m")
+
 export const statusOf = (
 	playerId: number,
 	teamId: number | null | undefined,

@@ -299,7 +299,7 @@ export const App = () => {
 					// key, which is an internal string nobody chose
 					show(
 						`Ranking on the ${made.meta.platform[0]!.toUpperCase()}${made.meta.platform.slice(1)} ` +
-							`preset — check its values in League setup`
+							`preset — check its values in Setup`
 					)
 				} else {
 					setView("trade")
@@ -432,7 +432,7 @@ export const App = () => {
 				  down. None of the three is a decision input, and two of them are read
 				  once. So they share the line: Billy and the wordmark carry the identity,
 				  the tagline sits beside them and drops out under 640px where there is no
-				  room for charm, and the storage reassurance moves to League setup, which
+				  room for charm, and the storage reassurance moves to Setup, which
 				  is the screen where somebody is deciding whether to trust this with a
 				  league.
 				*/}
@@ -659,7 +659,7 @@ export const App = () => {
 				/*
 				  TODAY is its own screen now, and the ranked board is its own screen.
 				  
-				  They used to share one tab called "Recommendations": the decision card,
+				  They used to share one tab called "Today": the decision card,
 				  then a thousand-row table under it. Measured at phone width, that put the
 				  first ranked row 1,600px down and the answer and the lookup in a single
 				  8,400px scroll — two questions asked at different moments (before first
@@ -699,7 +699,7 @@ export const App = () => {
 				/*
 				  SETUP is one screen: your team, then your league.
 				  
-				  They were two tabs — "My team & trades" and "League setup" — out of four,
+				  They were two tabs — "My team & trades" and "Setup" — out of four,
 				  and both are things one person does once a season from a laptop. Half the
 				  navigation was furniture, and the tab bar did not fit the phone the app is
 				  actually opened on. They are also the same job: everything the other two
@@ -717,7 +717,6 @@ export const App = () => {
 							league={league ?? null}
 							leagueKey={key}
 							error={snapshotError}
-							onOpenBoard={() => setView("board")}
 						/>
 					</div>
 					{league && key ?
@@ -1492,6 +1491,27 @@ const ScoringPeriodPanel = ({
 	)
 }
 
+/**
+ * What the scoring period resolved to, in one line.
+ *
+ * The card it heads is a form for a value the importer derives, and the only thing a
+ * reader checks is whether the derivation got it right. So the summary is that
+ * answer — "7-day matchup from Monday, lineups lock daily" — and everything that
+ * produced it stays one tap below.
+ */
+const periodSummary = (draft: League): string => {
+	const p = draft.scoring_period
+	if (!p || p.kind === null) return "not stated — a rolling week is assumed, and the board says so"
+	if (p.kind === "none") return "no periods — scored over the season"
+	const days = p.days ? `${p.days}-day ` : ""
+	const from = p.starts_on ? ` from ${p.starts_on[0]!.toUpperCase()}${p.starts_on.slice(1)}` : ""
+	const lock =
+		p.lineup_lock === "daily" ? ", lineups lock daily"
+		: p.lineup_lock === "period" ? ", lineups lock for the period"
+		: ""
+	return `${days}${p.kind}${from}${lock}`
+}
+
 const LeagueEditor = ({
 	leagueKey,
 	league,
@@ -1564,15 +1584,30 @@ const LeagueEditor = ({
 					)}
 				</section>
 
+				{/*
+				  Folded, because it is derived and almost never edited.
+				  
+				  The period is read off the league's own settings by
+				  `deriveScoringPeriod` and shown back as a form of five controls plus the
+				  quoted rows it was read from — 914px of a 6,800px screen, for a value one
+				  person corrects once a season if the import got it wrong. The summary
+				  states what it resolved TO, which is the only part anybody checks, and
+				  the controls are one tap away for the person who has to change it.
+				*/}
 				<section className="card full">
-					<h2>Scoring period</h2>
-					<ScoringPeriodPanel
-						draft={draft}
-						saved={league.scoring_period}
-						snapshot={snapshot}
-						onReject={onError}
-						onChange={p => form.setFieldValue("scoring_period", p)}
-					/>
+					<details className="period-fold">
+						<summary>
+							<h2>Scoring period</h2>
+							<span className="sub">{periodSummary(draft)}</span>
+						</summary>
+						<ScoringPeriodPanel
+							draft={draft}
+							saved={league.scoring_period}
+							snapshot={snapshot}
+							onReject={onError}
+							onChange={p => form.setFieldValue("scoring_period", p)}
+						/>
+					</details>
 				</section>
 			</div>
 

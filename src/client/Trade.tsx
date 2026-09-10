@@ -54,10 +54,9 @@ export interface TradeProps {
 	error: string | null
 	/** Takes the reader to the card that actually answers "what should I add" — this
 	 *  page used to answer it too, worse, and the two could disagree. */
-	onOpenBoard: () => void
 }
 
-export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: TradeProps) => {
+export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	const { rated, scored } = useBoard(snapshot, league, TRADE_FILTERS)
 	const [owned, setOwned] = useState<string[]>([])
 	const [storeError, setStoreError] = useState<string | null>(null)
@@ -325,7 +324,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 		})
 		setWireNote(
 			`Found ${found.players.length} free agent${found.players.length === 1 ? "" : "s"}. ` +
-				`Recommendations will use this exact list instead of estimating who is taken.`
+				`Today will use this exact list instead of estimating who is taken.`
 		)
 		setWirePasted("")
 	}
@@ -448,7 +447,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 				<p className="empty">
 					This league doesn&rsquo;t say how many teams are in it, and how deep the waiver
 					wire runs depends on that — so a vacated spot has no honest price yet. Open{" "}
-					<b>League setup</b> and set the team count.
+					<b>Setup</b> and set the team count.
 				</p>
 			</section>
 		)
@@ -466,7 +465,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 				</p>
 				<p className="sub">
 					Paste your league URL above to read the real values off the platform, or open{" "}
-					<b>League setup</b> and enter them. A trade is priced in your league&rsquo;s own
+					<b>Setup</b> and enter them. A trade is priced in your league&rsquo;s own
 					points, so it cannot mean anything until those exist.
 				</p>
 			</section>
@@ -605,7 +604,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 					<p className="sub">
 						Extra columns, adverts and menus do no harm — only the names are read. It
 						works on a private league, and it brings the seat each man is in with it,
-						which is what lets Recommendations show the changes to make.
+						which is what lets Today show the changes to make.
 					</p>
 					<textarea
 						data-ctl="paste-roster"
@@ -803,24 +802,14 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 			 * page's own answer ("+33.71 Grant Taylor for Randy Vásquez") sat there.
 			 * Ordered by what each card answers without being asked, it goes first.
 			 */}
-			{/* "What to add and drop" was a second, worse answer to the question the
-			    decision card on Recommendations already answers. It required the SEATS
-			    your league has you in and an exact free-agent list, so a visitor who had
-			    just typed his team in here was told to go and read a roster, and a Yahoo
-			    user was told the page "needs the local server" — the sentence this whole
-			    audit exists to delete. The card needs neither: it works from the men you
-			    own and estimates availability from ownership when nothing has read the
-			    wire. One question, one answer, and it is the better one. */}
-			<section className="card full advice">
-				<h2>What to add and drop</h2>
-				<p className="sub">
-					On <b>Recommendations</b>, at the top — it names both sides of every move and
-					works from whatever this browser knows, including a team you entered by hand.
-				</p>
-				<button type="button" className="chip-btn" onClick={onOpenBoard}>
-					Take me there
-				</button>
-			</section>
+			{/* A whole card pointing at another screen is furniture, and this one pointed
+			    at a screen by a name it no longer has. "What to add and drop" was once a
+			    second, worse answer to the question the decision card answers — it needed
+			    the SEATS your league has you in and an exact free-agent list, so a visitor
+			    who had just typed his team in here was told to go and read a roster. It
+			    was replaced by a signpost, and now the signpost goes too: Today is a tab,
+			    it is the first one, and it is where somebody who has just entered a team
+			    is going next anyway. */}
 			<LineupCard
 				league={league}
 				lineup={lineup}
@@ -844,7 +833,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 					<p className="sub">
 						Your league stopped taking trades on <b>{tradeWindow.on}</b>, so a deal priced
 						here could not be made. Your roster and lineup above are still live, and adds
-						and drops are on <b>Recommendations</b>.
+						and drops are on <b>Today</b>.
 					</p>
 					{/* A disclosure, not a wall. The default is clean because the deadline has
 					    passed; the evaluator still works and a reader with a reason to run it

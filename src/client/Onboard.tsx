@@ -369,7 +369,7 @@ export const Onboard = ({
 											is guessed on your behalf.
 											<p style={{ margin: "var(--sp-2) 0 0" }}>
 												<button type="button" onClick={onOpenSetup}>
-													Open League setup
+													Open Setup
 												</button>
 											</p>
 										</dd>
@@ -397,7 +397,7 @@ export const Onboard = ({
 								</ul>
 								<p style={{ margin: "var(--sp-3) 0 0" }}>
 									<button type="button" className="primary" onClick={onOpenSetup}>
-										Fill these in on League setup
+										Fill these in on Setup
 									</button>
 								</p>
 							</>
@@ -411,7 +411,7 @@ export const Onboard = ({
 							<>
 								<p className="sub" style={{ margin: "0 0 var(--sp-3)" }}>
 									Optional, and it is what turns a ranked list into an answer: with your
-									team in, Recommendations says which of <i>your</i> men to drop for
+									team in, Today says which of <i>your</i> men to drop for
 									which free agent, and the daily lineup names the seats to change.
 								</p>
 								<ol className="paste-how">

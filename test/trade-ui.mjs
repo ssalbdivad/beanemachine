@@ -245,10 +245,31 @@ t("a second real starter cannot lower the total", twoTotal > oneTotal, `${oneTot
  */
 const cardOrder = await page.$$eval("section.card h2", n => n.map(e => e.textContent.trim()))
 const at = re => cardOrder.findIndex(h => re.test(h))
-t("the recommendation comes before the lineup, and both before the deal",
-  at(/add and drop/i) > -1 && at(/add and drop/i) < at(/starting lineup/i) &&
-    at(/starting lineup/i) < at(/the deal/i),
+/*
+ * The "What to add and drop" card is GONE, and this assertion is about what replaced
+ * it rather than about where it sat.
+ *
+ * Its history in one line: it proposed moves of its own, badly, needing seats and an
+ * exact free-agent list that a visitor who had just typed his team in did not have;
+ * it was demoted to a signpost pointing at the screen that answers properly; and the
+ * signpost has now gone too. A whole card whose entire content is the name of another
+ * tab is furniture — and it was furniture naming a tab by a label the nav no longer
+ * uses, which is the failure mode this project cares most about.
+ *
+ * What survives of the original claim is the part that was always the point: this
+ * screen prices what you propose, and exactly one surface proposes. So the assertion
+ * is that Setup does NOT answer the add/drop question, and the one below is that the
+ * screen which does is the first tab — a reader who has just entered a team lands on
+ * it next without being told to.
+ */
+t("Setup no longer answers the add/drop question at all",
+  at(/add and drop/i) === -1, cardOrder.join(" | "))
+t("and the lineup still comes before the deal — you price a trade against a lineup",
+  at(/starting lineup/i) > -1 && at(/starting lineup/i) < at(/the deal/i),
   cardOrder.join(" | "))
+t("the screen that does answer it is the first tab, so nothing has to point at it",
+  (await page.$$eval(".views button", n => n.map(e => e.textContent.trim())))[0] === "Today",
+  (await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))).join(" | "))
 
 /**
  * Your TEAM comes before your LEAGUE, and that is the whole argument for merging the
@@ -293,13 +314,19 @@ t("and the scoring tables are below the team, not above it",
  * the copy does not break this file, and the CONTROL is what is checked hard below,
  * because a button that lands on the right screen is the claim that actually matters.
  */
-const adviceCard = await page.$("section.advice")
-t("but it defers to the card that owns the question rather than answering twice",
-  !!adviceCard && /\b(Today|Recommendations)\b/.test(await adviceCard.innerText()) &&
-    !/needs the local server/.test(await adviceCard.innerText()),
-  adviceCard ? (await adviceCard.innerText()).replace(/\n/g, " ").slice(0, 160) : "(no card)")
-t("and offers a control that goes there, not an instruction to go looking",
-  !!(await page.$("section.advice button")), "no control on the advice card")
+/*
+ * The card is gone rather than fixed, and the src defect this suite reported last
+ * time — that its copy still named a tab called "Recommendations" — went with it.
+ *
+ * What is asserted instead is the property those two assertions were really
+ * protecting: no surface on this screen may tell a reader to go somewhere by NAME,
+ * because a screen name written into prose is a name that drifts out of the nav. The
+ * nav is the only place a screen should be named.
+ */
+t("no card on Setup sends the reader to a screen by a name written in prose",
+  !(await page.$("section.advice")) &&
+    !/\bRecommendations\b|\bLeague setup\b/.test(await page.$eval(".wrap", e => e.innerText)),
+  (await page.$eval(".wrap", e => e.innerText)).match(/.{0,40}(Recommendations|League setup).{0,40}/)?.[0] ?? "clean")
 
 // The flat list of who you own is folded, because "Your starting lineup" below it
 // shows every one of the same men in the seat he holds. Folded, never dropped:
@@ -432,22 +459,22 @@ t("nothing the engine could not read is silently dropped",
   missingShown.every(m => m.length > 0), missingShown.join(" | "))
 
 /**
- * The deferral, taken at its word: the button really lands on the card that answers.
+ * The route from a team you have just entered to the card that acts on it.
  *
- * "It defers to the card that owns the question" was only ever checked as prose plus
- * the existence of a button, and prose is exactly what went stale here — the copy
- * names a tab ("Recommendations") that the nav stopped offering. A card that points
- * somewhere instead of answering is only better than answering twice if the pointer
- * arrives, so this clicks it and requires the decision card to be on screen with the
- * first tab selected. It is run last of the assertions that share this page state
- * because it navigates away, and the reload block immediately below re-enters Setup
- * from scratch anyway.
+ * This used to click a button on a card headed "What to add and drop", whose whole
+ * content was the name of another tab — and the name went stale, which is exactly why
+ * the card is gone. The claim it was protecting survives and is stronger without it:
+ * a reader who has entered a team reaches the card that decides in ONE tap on the
+ * nav, and the nav is the only place a screen is named. Clicked rather than asserted
+ * as prose, because a pointer that does not arrive is worse than no pointer. Run last
+ * of the assertions sharing this page state because it navigates away; the reload
+ * block below re-enters Setup from scratch anyway.
  */
-await page.click("section.advice button")
+await page.click(`.views button:text-is("${SCREEN.today}")`)
 const landed = await page
   .waitForSelector("section.card.decide", { timeout: 30000 })
   .then(() => true, () => false)
-t("the control on that card really arrives at the decision card",
+t("the decision card is one tab away, and the tab really arrives at it",
   landed && (await page.$$eval(".views button", n => {
     const on = n.find(e => e.getAttribute("aria-selected") === "true")
     return on ? on.textContent.trim() : "(none selected)"

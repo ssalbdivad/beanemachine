@@ -599,7 +599,7 @@ export const PresetNote = ({
 			    the visitor had just asked for, entirely below the fold, which is the
 			    same defect the management toolbar was moved off the board for. Folded,
 			    with the paragraph trimmed to three lines: 163px and y=1278. The same
-			    lines are listed in full, unfolded, on League setup's Needs review
+			    lines are listed in full, unfolded, on Setup's Needs review
 			    card. */}
 			{league.needs_review.length > 0 && (
 				<details>
@@ -616,7 +616,7 @@ export const PresetNote = ({
 			)}
 			{onOpenSetup && (
 				<button className="primary" onClick={onOpenSetup}>
-					Check these in League setup
+					Check these in Setup
 				</button>
 			)}
 			{/* The user's own statement, never an inference. Saving an edit is NOT
@@ -769,7 +769,7 @@ export const WaysIn = ({
 							<b>{preset}</b> — a ready-made scoring table, roster and team count,
 							copied from a league that was read from source. Nothing in it came
 							from your league, so the page keeps saying so until you check it,
-							and every value is editable in League setup.
+							and every value is editable in Setup.
 							<p style={{ margin: "var(--sp-2) 0 0" }}>
 								<button className="primary" onClick={onUsePreset}>
 									Start from this preset
@@ -823,7 +823,7 @@ export const WaysIn = ({
 					<Fragment2 term="By hand">
 						{league && onOpenSetup ?
 							<>
-								Open <b>League setup</b> and type your league&rsquo;s scoring, slots
+								Open <b>Setup</b> and type your league&rsquo;s scoring, slots
 								and team count in. Nothing is filled in for you and nothing is
 								guessed.
 							</>
@@ -931,12 +931,12 @@ export const Setup = ({
 				{league && onOpenSetup && (
 					<p style={{ margin: "var(--sp-3) 0 0" }}>
 						<button className="primary" onClick={onOpenSetup}>
-							Open League setup
+							Open Setup
 						</button>
 					</p>
 				)}
 
-				{/* Deliberately not `.legend`: its 110px term column breaks "Recommendations"
+				{/* Deliberately not `.legend`: its 110px term column breaks "Today"
 				    mid-word, and a tab you are being told to find must be spelled the way
 				    the tab is spelled. */}
 				<p className="tiny-note" style={{ margin: "var(--sp-4) 0 var(--sp-2)" }}>

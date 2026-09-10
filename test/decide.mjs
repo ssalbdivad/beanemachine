@@ -905,21 +905,21 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
 	const text = await page.$eval(".decide", e => e.innerText)
 	/*
-	 * "League setup" is no longer the name of anything a reader can see, and this
-	 * assertion is left strict on purpose so that stays visible.
+	 * The name this sentence sends a reader to has to be a name the navigation uses.
 	 *
-	 * There were four tabs and one of them was called "League setup"; there are three
-	 * and the editor is the bottom half of "Setup". The card's own sentence still reads
-	 * "Open League setup and set the team count", so the regex below still matches —
-	 * but it is now matching a name the navigation does not use, which is the reader
-	 * being sent to find a tab that is not there. Loosening this to `/Setup/` would
-	 * make the test agree with whichever wording ships and stop reporting the mismatch,
-	 * so it stays as it is and the mismatch is reported as a src concern instead. The
-	 * CTA block above asserts the team count really is editable on the screen the
-	 * button reaches, so the ROUTE is covered even while the NAME is wrong.
+	 * This assertion was deliberately left matching "League setup" after the four tabs
+	 * became three, so that the mismatch stayed visible rather than being papered over
+	 * by loosening the regex: the card was telling a reader to open a tab that no
+	 * longer existed. The copy is fixed now — Decide.tsx says "Open Setup" — so the
+	 * assertion moves to the new name, and the pair below is what keeps it honest in
+	 * future: the screen it names must be one the nav actually offers.
 	 */
 	t("a league with no team count is told that, and where to set it",
-		/how many teams are in it/.test(text) && /League setup/.test(text), text.slice(0, 240))
+		/how many teams are in it/.test(text) && /\bSetup\b/.test(text), text.slice(0, 300))
+	t("and the screen it names is one the navigation actually offers",
+		(await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))).includes("Setup") &&
+			!/League setup|Recommendations|My team &/.test(text),
+		text.slice(0, 300))
 	await page.close()
 }
 

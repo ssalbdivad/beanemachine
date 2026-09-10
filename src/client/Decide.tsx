@@ -818,7 +818,7 @@ export const Decide = ({
 					level depends on that. Without it no move has an honest price.
 				</p>
 				<p className="sub">
-					Open <b>League setup</b> and set the team count.
+					Open <b>Setup</b> and set the team count.
 				</p>
 			</section>
 		)
@@ -837,7 +837,7 @@ export const Decide = ({
 					answer.
 				</p>
 				<p className="sub">
-					Open <b>League setup</b> and read the values off your platform, or enter them.
+					Open <b>Setup</b> and read the values off your platform, or enter them.
 				</p>
 			</section>
 		)
@@ -1130,7 +1130,7 @@ export const Decide = ({
 						:	<>
 								Nothing here knows which seats you currently have these men in, so this is
 								the lineup to <b>set</b>, not the changes to make. Read your roster off
-								your platform on <b>My team</b> and it becomes a list of changes.
+								your platform on <b>Setup</b> and it becomes a list of changes.
 							</>
 						}
 					</p>

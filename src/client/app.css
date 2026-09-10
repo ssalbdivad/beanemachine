@@ -1026,3 +1026,20 @@ kbd{
    see the thing work before committing a league to it. */
 .onboard-shortcut{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
 .onboard-shortcut .sub{margin:0;flex:1 1 240px;min-width:0}
+
+/* A folded card: the heading stays a heading and the summary carries the answer, so
+   nothing has to be opened to check it. The marker sits with the text rather than in
+   its own gutter, because the card already has one. */
+.period-fold>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:var(--sp-3);flex-wrap:wrap}
+.period-fold>summary::-webkit-details-marker{display:none}
+.period-fold>summary h2{margin:0}
+/* app.css tracks `summary` in the same uppercase-mono rule as the section heads, so
+   a sentence inside one came out shouting. The heading keeps that treatment; the
+   answer beside it is prose and reads as prose. */
+.period-fold>summary .sub{
+  margin:0;flex:1 1 220px;min-width:0;
+  text-transform:none;letter-spacing:0;font-family:var(--sans);
+}
+.period-fold>summary::after{content:"▸";color:var(--faint);font-size:var(--fs-2)}
+.period-fold[open]>summary::after{content:"▾"}
+.period-fold[open]>summary{margin-bottom:var(--sp-3)}

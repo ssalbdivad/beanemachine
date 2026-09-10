@@ -698,17 +698,17 @@ export const Board = ({
 	if (!league)
 		return (
 			<section className="card full">
-				<h2>Recommendations</h2>
+				<h2>The wire</h2>
 				<p className="empty">Import or configure a league first — the board ranks players in your league's scoring.</p>
 			</section>
 		)
 	if (league.meta.max_teams == null)
 		return (
 			<section className="card full">
-				<h2>Recommendations</h2>
+				<h2>The wire</h2>
 				<p className="empty">
 					A player is worth what he beats the next man up by, and how deep the waiver
-					wire runs decides who that is. Set the team count in <b>League setup</b> and
+					wire runs decides who that is. Set the team count in <b>Setup</b> and
 					the board fills in.
 				</p>
 			</section>
@@ -716,7 +716,7 @@ export const Board = ({
 	if (!snapshot)
 		return (
 			<section className="card full">
-				<h2>Recommendations</h2>
+				<h2>The wire</h2>
 				<p className="empty">Loading player data…</p>
 			</section>
 		)
@@ -1134,7 +1134,7 @@ export const Board = ({
 			    cards below re-rank with it too, but this is the ranking itself, and
 			    the sibling cards can't be wrapped without breaking the page grid. */}
 			<section className="card full" id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(filters.mode)}>
-				<h2>Recommendations</h2>
+				<h2>The wire</h2>
 				{filters.sort === "marketEdge" && edgeCoverage < 0.35 && (
 					<p className="sub warn-note">
 						Yahoo listed ownership for only {Math.round(edgeCoverage * 100)}% of this

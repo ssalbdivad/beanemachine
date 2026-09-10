@@ -24,3 +24,7 @@ public/snapshot.json
 # built by `prepare` on install; not a source artifact
 dist-cli/
 .vercel
+
+# scratch scripts written while working on the UI; never source
+.*.mjs
+probe*.mjs

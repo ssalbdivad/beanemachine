@@ -1,6 +1,16 @@
 // The recommendation engine, end to end in a real browser against real data.
 import { chromium, firefox } from "playwright-core"
-const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
+/**
+ * 5299, not 5173.
+ *
+ * This defaulted to :5173 — Vite's own default — and :5173 on this machine belongs
+ * to a DIFFERENT project's dev server, which answers 200 and serves a working site
+ * that is not this one. The run then failed as a selector timeout on `.board-row`
+ * and read like a UI defect in a board that was never on screen. This repo's dev
+ * server is on :5299; the identity check below is what catches it when the default
+ * is wrong again.
+ */
+const BASE = process.env.BASE ?? "http://127.0.0.1:5299"
 const ENGINE = process.env.BROWSER ?? "chromium"
 const browser = ENGINE === "firefox" ? await firefox.launch() : await chromium.launch({ args: ["--no-sandbox"] })
 console.log(`--- ${ENGINE} ---`)
@@ -12,19 +22,58 @@ const errors = []
 page.on("pageerror", e => errors.push(String(e)))
 await page.goto(BASE, { waitUntil: "networkidle" })
 
-// A 200 on this port is not proof it is this app: :5173 is a common default and
-// another project's dev server answers it just as happily, after which every
-// assertion below fails as a selector timeout that reads like a UI defect. The
-// wordmark is the cheapest proof of identity, so it is checked before anything
-// else and stops the run rather than letting the next wait speak for it.
+// A 200 on this port is not proof it is this app: a dev-server port is a guess and
+// another project's server answers it just as happily, after which every assertion
+// below fails as a selector timeout that reads like a UI defect. That is not
+// hypothetical — this file's own default used to be :5173, which is another app on
+// this machine. The wordmark is the cheapest proof of identity, so it is checked
+// before anything else and stops the run rather than letting the next wait speak
+// for it.
 const wordmark = await page.waitForSelector("h1", { timeout: 15000 }).then(h => h.textContent(), () => null)
 t("the page under test is beanemachine", wordmark === "beanemachine",
   `BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
 if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
 
+/**
+ * The board is on WIRE now, and Wire is a tab you have to ask for.
+ *
+ * Four tabs became three screens, and the split was down the middle of what used to
+ * be one: "Today" is the decision card on its own, "Wire" is this ranked board on
+ * its own, "Setup" is the team and the league's values. Landing on the site puts you
+ * on Today, where there is no `.board-row` at all — so every assertion in this file
+ * was waiting thirty seconds for a table that is one screen over.
+ *
+ * BY VISIBLE TEXT, never by index. Several suites in this directory reached their
+ * screen with `.views button:nth-child(N)`, and this restructure moved every one of
+ * those indices — the old second tab was League setup and is now the board itself,
+ * so an unchanged `nth-child(2)` kept finding A tab and silently tested the wrong
+ * screen, which is the worst way for a navigation selector to fail. A tab's label is
+ * the thing a reader actually clicks and the thing that shows up in a diff, so the
+ * next rename is a one-line change here instead of an archaeology problem.
+ */
+const screen = async (p, label) => {
+  await p.click(`.views button:has-text("${label}")`)
+  await p.waitForTimeout(200)
+}
+await screen(page, "Wire")
+
 await page.waitForSelector(".board-row", { timeout: 30000 })
 
 t("no page errors", errors.length === 0, errors.join(" | "))
+/**
+ * The board is the ONLY thing on Wire, and the decision card is not on it.
+ *
+ * This is the half of the restructure that a ranked-board suite can actually police.
+ * The two used to be stacked on one tab: measured at phone width, the decision card
+ * and the thousand-row table made a single 8,400px scroll, with the first ranked row
+ * 1,600px down. Asserting the card's ABSENCE here is what stops the stack quietly
+ * reassembling — every assertion below would still pass with `Decide` put back on top
+ * of the board, and the pixel pins at the foot of this file would be the only thing
+ * that complained, a thousand lines away from the cause.
+ */
+t("Wire carries the ranked board and nothing else",
+  (await page.$(".decide")) === null && !!(await page.$(".board-controls")),
+  "the decision card is back on top of the board")
 t("board renders ranked rows", (await page.$$eval(".board-row", n => n.length)) > 50)
 
 const scores = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
@@ -1243,18 +1292,37 @@ await page.waitForTimeout(400)
 const slots = await page.$$eval(".board-row .who .code", n => n.map(e => e.textContent))
 t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s === "C"), slots.slice(0,4).join(","))
 
-// changing the league's scoring must change the ranking — the core promise
+/**
+ * Changing the league's scoring must change the ranking — the core promise.
+ *
+ * Rewritten for where the scoring tables now live, not weakened. The editor was its
+ * own tab, reached as `.views button:nth-child(2)`, and the board was `nth-child(1)`.
+ * Both indices are now other screens: the second tab is this board and the first is
+ * the decision card, so the round trip went to the board, typed into nothing, came
+ * back to Today and read a top row that does not exist there. It is the same trip —
+ * leave the board, edit a point value, return — to the screen that owns the values
+ * now.
+ *
+ * The batting table is found by its own HEADING rather than by `section:nth-of-type(1)`
+ * for the same reason the tabs are. Setup stacks the team panel above the league
+ * editor, so the first section on the screen is "My team"; the old positional
+ * selector would have filled a roster textarea's neighbour and reported success.
+ */
 await page.click(".chip-btn:text-is(\"All\")")
 await page.selectOption("[data-ctl=group]", "all")
 await page.waitForTimeout(300)
 const topBefore = await page.$eval(".board-row .who b", e => e.textContent)
-await page.click('.views button:nth-child(2)')
-await page.waitForSelector(".grid section.card .rows")
-const sb = await page.$$eval(".grid section:nth-of-type(1) .code", n => n.map(e => e.textContent))
+await screen(page, "Setup")
+const batting = 'section.card:has(h2:text-is("Batting"))'
+await page.waitForSelector(`${batting} .rows`)
+const sb = await page.$$eval(`${batting} .code`, n => n.map(e => e.textContent))
 const sbIdx = sb.indexOf("SB")
-const sbInput = page.locator(".grid section:nth-of-type(1) input.val").nth(sbIdx)
+t("the league's own scoring is editable from Setup, where the team panel also lives",
+  sbIdx >= 0 && !!(await page.$(".trade-team")),
+  `batting codes ${sb.join(",")}; team panel ${!!(await page.$(".trade-team"))}`)
+const sbInput = page.locator(`${batting} input.val`).nth(sbIdx)
 await sbInput.fill("60"); await sbInput.blur(); await page.waitForTimeout(300)
-await page.click('.views button:nth-child(1)')
+await screen(page, "Wire")
 await page.waitForSelector(".board-row")
 const topAfter = await page.$eval(".board-row .who b", e => e.textContent)
 t("re-scoring the league re-ranks the board",
@@ -1274,6 +1342,11 @@ t("re-scoring the league re-ranks the board",
  */
 const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
 await phone.goto(BASE, { waitUntil: "networkidle" })
+// A fresh context lands on Today, so the phone has to ask for Wire too — and the
+// tab bar is the narrowest thing on this screen, which makes this click its own
+// small proof that three labels still fit on a 390px phone at all. Four did not,
+// which is part of why there are three.
+await screen(phone, "Wire")
 await phone.waitForSelector(".board-row", { timeout: 30000 })
 const cols = async () =>
   phone.evaluate(() => {
@@ -1361,6 +1434,13 @@ await phone.close()
   // own localStorage, which is precisely what coming back to a site is not.
   const back = page
   await back.reload({ waitUntil: "domcontentloaded" })
+  // The remembered QUESTION is the horizon, which is what view.ts stores. The SCREEN
+  // is not stored — a reload lands on Today — so Wire is asked for again before the
+  // horizon is read back. That is a real gap and it is called out in this agent's
+  // return value rather than asserted away here: the argument in view.ts for
+  // remembering the window ("the default is a guess about a stranger, this is a fact
+  // about him") applies word for word to which of the three screens he was on.
+  await screen(back, "Wire")
   await back.waitForSelector(".board-row", { timeout: 30000 })
   await back.waitForTimeout(1400)
   t("coming back opens on the question you last asked",

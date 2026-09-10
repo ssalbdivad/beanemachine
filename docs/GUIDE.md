@@ -32,7 +32,7 @@ it in, and the other routes are under **Other ways in**: read the league from it
 over from a local run, or type the three inputs by hand.
 
 Already have a league and want the guided setup back? **Set up a league** in the
-toolbar on League setup reopens it.
+toolbar on **Setup** reopens it.
 
 ## The first screen is the answer
 
@@ -109,7 +109,7 @@ which, because they are three different claims:
 1. **Your league's own free-agent list.** Exact, and about your league specifically.
    It needs a publicly viewable Yahoo league *and* the local server, so it is what you
    get running `npm run dev`, and not what you get on the hosted build.
-2. **How widely he is rostered across leagues** — under 70%, the same bar the Buy low
+2. **How widely he is rostered across leagues** — under 70%, the bar the retired Buy low card
    card uses. Weaker and global, but it comes off the snapshot with no server at all,
    which is the situation everybody reading the hosted build is in. Only figures that
    survived the forecast check are used (see the edge column below), so a player with
@@ -157,7 +157,7 @@ agents only** is the control that answers it in the meantime.
 
 The board is every MLB player, ranked by how much he would add to *your* team over the horizon you picked, in *your* league's scoring. The top card is Billy's pick, and it is deliberately **not** the number one row: the top of a bscore board is the best player in baseball, who is rostered in every league, and naming him is a fact rather than a recommendation. Billy names the best player on the board you can actually *get*, with the reasons spelled out as clauses assembled from numbers actually on the row. Under it, one row per player: how far he beats the field's price for him (**edge**), his value over replacement (**bscore**), his raw projected points, what a replacement at his slot projects, how confident the projection is, how many games his team actually plays in the window, and how unlucky he has been. Click any row to open the drill-down, which takes that projection apart into what was measured, what was modelled, and what is missing. The heading states how old the underlying data is and the exact date window being projected. Only the top 120 rows render; narrow the filters to see further down.
 
-Below the ranking sit two supporting reads, deliberately *below* it rather than above: **Buy low**, the handful of players hitting the ball better than their line says who are still cheap, and **Where it hurts to wait**, the drop-off at each slot. Both answer "where should I spend attention", which is a second question.
+Two supporting reads used to sit below the ranking — **Buy low** and **Where it hurts to wait** — and both are gone. They answered "where should I spend attention", which is a second question asked above the one the reader came with, and neither was ever measured to win anything: the only assertions that ever existed about Buy low pinned its own two thresholds, not that acting on it pays. The ranking is the screen.
 
 ## What is a bscore?
 
@@ -200,18 +200,12 @@ If a player is eligible at more than one slot, he is scored at whichever slot ma
 
 ### Draft day
 
-Leave **Rank by** on bscore — which is what the board opens on — leave the filters wide, and read down. The board is already telling you when to take the scarce position, so you do not need a separate "positional tier" exercise, because scarcity is priced into the number. **Where it hurts to wait**, under the board, is the same information as a shape: long bars are the slots you pay for early.
-
-Better still, use the **Draft** tab, which is built for exactly this. It knows what you
-have already taken, so it ranks by how much a pick improves *your* projected starting
-lineup rather than by raw value — once you hold three outfielders and no catcher, another
-outfielder is worth very little to you and the recommendation says so. Mark players as
-they go and the remaining pool, and the per-slot cliff, update as you draft.
-
-One thing to watch: the Draft tab prices every pick over the rest of the season, and
-the board's default tab over fourteen days from the last data capture — either way,
-early in a season the sample behind every row is thin and confidence will be low
-across the board.
+There is no draft screen any more, and the reason is measured rather than aesthetic:
+the published decompositions of what decides a points-league season put pre-draft
+ranking quality near the bottom of the list. Use **Wire** with the filters wide and
+**Rank by** on bscore — scarcity is already priced into that number, so the separate
+positional-tier exercise is not needed — and mark nothing. The screen this app is
+built around is the one you open in June, not in March.
 
 ### Weekly waivers
 
@@ -229,15 +223,16 @@ For pitchers generally, recent form is read over 5 and 21 days with the 5 weight
 
 ### Buying low
 
-The **Buy low** card under the board is the one place two independent signals are combined, and it only shows a player who clears both bars. He has to be hitting the ball better than his results say over the last three weeks — an expected-minus-actual wOBA gap above 0.035, with the sign flipped for pitchers — *and* still be rostered in under 70% of leagues. Either one alone is a trap: an unlucky player everyone already owns is not an opportunity, and a free player making weak contact is free for a reason. The score is the product of the two terms, not the sum, so being cheap cannot compensate for weak contact. At most three names appear, and often none do.
+**Buy low** used to combine two independent signals — a player hitting the ball
+better than his results say over the last three weeks, and still rostered in under 70%
+of leagues — and show at most three names. It has been removed along with the
+per-slot cliff chart. Both were real analyses and neither was ever shown to win
+anything; what they cost was two full-width cards between the reader and the ranking.
+The luck percentile survives as a column, where it can be sorted on.
 
-### Where it hurts to wait
+## Setup: your team, then your league
 
-The scarcity card shows, per slot, how far the best player you can still get sits above the next man up at that slot. A short bar is a slot you can punt; a long one is a slot worth paying for, because waiting costs you the whole gap. It is the same replacement level that sits under every bscore, drawn side by side — which is the only way to see it, since on any single row it is one number with nothing to compare against.
-
-## My team and trades
-
-The second view, **My team & trades**, is the one place the app knows what you hold. Add the players you own by name; they are stored in this browser under *this league's* key, so switching leagues switches teams and a roster never travels between them. Only ids are stored, so your team stays correct as the snapshot behind it is recaptured — and an id the current capture has no row for is named on screen rather than quietly dropped.
+The third screen, **Setup**, is the one place the app knows what you hold. Add the players you own by name; they are stored in this browser under *this league's* key, so switching leagues switches teams and a roster never travels between them. Only ids are stored, so your team stays correct as the snapshot behind it is recaptured — and an id the current capture has no row for is named on screen rather than quietly dropped.
 
 From that it fills your league's real startable spots, best legal lineup first, and shows every spot accounted for out loud: filled by one of yours, covered at the waiver bar because nobody you own is worth it there — either nobody left unseated is eligible, or the best one who is projects below the freely available body — or a hole nothing in the pool can fill. A hole is reported as a hole, not priced at zero.
 
@@ -327,7 +322,7 @@ the page you are looking at is not scraping.
 
 ### If your league is on ESPN
 
-1. Open **League setup**.
+1. Open **Setup**.
 2. Paste your league URL into "Import a league from its URL" and hit **Import**.
    Include `teamId=` if your URL has one — without it the app cannot know which of
    the teams is yours and asks for the number rather than assuming.
@@ -379,8 +374,7 @@ league this repo fetched back when the importer still worked, pasting it, and
 asserting the league that comes out is the same league. It works on a private league,
 which no import ever has.
 
-Your team page and your free-agent page paste the same way, on **My team &
-trades**.
+Your team page and your free-agent page paste the same way, on **Setup**.
 
 The alternative, if you would rather have the file: one local run.
 
@@ -401,7 +395,7 @@ Then the league is a file and goes anywhere:
   shadows the published asset with the one at the repo root — so a local run opens
   straight on your league, roster and free-agent list included. The deployed build
   ships no league, which is why beanemachine.com opens on the setup instead.
-- **League setup → Download** writes the leagues in your browser to a JSON file, and
+- **Setup → Download** writes the leagues in your browser to a JSON file, and
   **Load file** reads one back in on any other browser or machine — including
   beanemachine.com. That is the supported route for a Yahoo user onto the hosted
   site.
@@ -449,9 +443,9 @@ value against your own settings page before you trust a number that came out of 
 Be clear-eyed about the edges. It:
 
 - **Knows which pitcher your hitters face, but only about a week out.** MLB publishes probable starters roughly a week ahead, and where it has them the board rates a hitter against the men actually on the mound, blended with the opponent staff by innings share — a starter throws about 58% of *one game*, so his own quality carries that share of that game and the bullpen behind him carries the rest. Over a fortnight only a game or two is usually published, so in practice the named starters carry about 6% of the board's matchup number; the rest is the opponent staff. On Streaming the same names cover a shorter window, so they carry a larger share of it — how much larger depends on how much of your scoring period is left, which is why the number is scaled per team rather than fixed. Where no probable is published it falls back to the team-level number entirely. This one cannot be validated the way the rest can: probables are announced and then overwritten, and nothing archives what was announced at the time.
-- **Does not know your roster, on the board.** The ranking never accounts for who you already have, so it will happily rank three catchers at the top when you need one. **My team & trades** is the view that does know, and it is a separate view for that reason.
+- **Does not know your roster, on the board.** The ranking never accounts for who you already have, so it will happily rank three catchers at the top when you need one. **Today** is the screen that does know, because it prices every move against the seat it would actually take.
 - **Rates the Stash horizon against the right opponents now, at a weight nothing has measured over that horizon.** This entry used to say the **Stash** tab applied a fortnight of schedule strength over months, because the only opponent list any capture carried was the next two weeks. The snapshot now stores the whole slate to the end of the season, so Stash reads a genuine rest-of-season opponent list and the window mismatch is gone. What is left is the weight: the adjustment is still clamped to ±12% and still carried at half, and that half was set by playing five seasons of weekly waiver decisions out. Nothing here has measured what it should be over a months-long hold.
-- **Does not know your scoring period unless the league stated one.** Streaming ranks over the remainder of your league's period, and that period comes from the league's own `scoring_period` settings. Not every platform states it and not every import can derive it, and the platform templates a new league starts from carry none — so where it is missing the board falls back to a rolling seven days from today and says on the page that that is the assumption it made, rather than presenting it to you as your week. Where a league says it runs matchup periods but not which weekday they open on, the board assumes a Monday start — a Monday-to-Sunday week, unless the league gave a period length — and says that too. A printed assumption is not the same as a quiet one, and neither is the same as knowing. Anything an import could not read is listed under **Needs review** in League setup.
+- **Does not know your scoring period unless the league stated one.** Streaming ranks over the remainder of your league's period, and that period comes from the league's own `scoring_period` settings. Not every platform states it and not every import can derive it, and the platform templates a new league starts from carry none — so where it is missing the board falls back to a rolling seven days from today and says on the page that that is the assumption it made, rather than presenting it to you as your week. Where a league says it runs matchup periods but not which weekday they open on, the board assumes a Monday start — a Monday-to-Sunday week, unless the league gave a period length — and says that too. A printed assumption is not the same as a quiet one, and neither is the same as knowing. Anything an import could not read is listed under **Needs review** on **Setup**.
 - **Does not model keeper or dynasty value, and does not know your budget.** The **Stash** tab ranks over the rest of the season, which is the longest horizon here; nothing looks past this season at all.
 - **Knows multi-position eligibility for the players your platform prints it for.** This was the largest known accuracy gap and is now mostly closed: Yahoo prints real eligibility beside every name ("MIN - 1B,3B"), the same sweep that reads ownership captures it, and a player is valued at his *scarcest* eligible slot — so a catcher who also qualifies at first is finally worth what he is worth. Roughly 430 players come back with a genuine multi-position line. For anyone the platform did not list, the board still has only the one primary position StatsAPI reports, and it does not guess.
 - **Does not use park factors, weather, or lineup slot.** There was a park fetcher; Savant's park-factor endpoint returns HTML and ignores `csv=true`, so it produced rows of nulls that nothing consumed. It and the park term have been removed rather than left looking like a feature. No readable source has been found, so this is "not modelled", not "modelled quietly".

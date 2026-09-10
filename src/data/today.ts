@@ -164,6 +164,22 @@ export const SLATE_URL = (date: string): string =>
 	`&hydrate=lineups,probablePitcher,team`
 
 /**
+ * How long to wait for somebody else's API before deciding it is not coming.
+ *
+ * A hang is the one failure the try/catch below cannot turn into a state: the
+ * promise simply never settles, so `loading` stays true forever and the page waits
+ * on a request that has already effectively failed. Measured from outside the app
+ * during a test run — the request was still outstanding after 32 seconds with no
+ * error and no state change, which also made `waitUntil: "networkidle"` unusable
+ * against this page.
+ *
+ * Five seconds because the slate is a nice-to-have on top of a board that already
+ * works: a reader who has to wait five seconds to be told his shortstop is not on
+ * tonight's card has been told nothing worth five seconds.
+ */
+const SLATE_TIMEOUT_MS = 5_000
+
+/**
  * One request, no server, no key.
  *
  * Failure is a state, not an exception: the page is useful without a slate and must
@@ -172,14 +188,26 @@ export const SLATE_URL = (date: string): string =>
  */
 export const fetchSlate = async (
 	date: string = localDate(),
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	timeoutMs: number = SLATE_TIMEOUT_MS
 ): Promise<{ slate: Slate; error: string | null }> => {
+	// The caller's signal (unmount) OR the deadline, whichever comes first. Composed
+	// rather than replaced: a component that unmounts must still be able to cancel.
+	const deadline = AbortSignal.timeout(timeoutMs)
+	const abort = signal ? AbortSignal.any([signal, deadline]) : deadline
 	try {
-		const res = await fetch(SLATE_URL(date), { signal })
+		const res = await fetch(SLATE_URL(date), { signal: abort })
 		if (!res.ok) return { slate: EMPTY(date), error: `MLB answered HTTP ${res.status}` }
 		return { slate: readSlate(date, await res.json()), error: null }
 	} catch (e) {
-		return { slate: EMPTY(date), error: (e as Error).message }
+		const err = e as Error
+		return {
+			slate: EMPTY(date),
+			error:
+				deadline.aborted ?
+					`MLB did not answer within ${timeoutMs / 1000}s`
+				:	err.message
+		}
 	}
 }
 

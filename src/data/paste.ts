@@ -1,4 +1,6 @@
 import { normalizeName } from "./yahoo-pool.ts"
+import { slotsFor } from "../engine/bscore.ts"
+import type { PlayerSeason } from "./statsapi.ts"
 
 /**
  * Reading a team out of whatever the reader pasted.
@@ -197,7 +199,7 @@ export interface PastedRoster {
 export const rosterFromPaste = (
 	text: string,
 	snapshot: {
-		players: { id: number; name: string; group: string; team?: string | null; position?: string | null }[]
+		players: PlayerSeason[]
 		eligibility?: Record<string, string[]>
 	}
 ): PastedRoster => {
@@ -231,14 +233,26 @@ export const rosterFromPaste = (
 	 */
 	const spots = found.players
 		.filter(f => f.slot)
-		.map(f => ({
-			slot: f.slot!,
-			name: f.name,
-			positions:
-				snapshot.eligibility?.[String(f.id)] ??
-				(byId.get(f.id)?.position ? [byId.get(f.id)!.position!] : []),
-			team: byId.get(f.id)?.team ?? null
-		}))
+		.map(f => {
+			const p = byId.get(f.id)
+			return {
+				slot: f.slot!,
+				name: f.name,
+				/**
+				 * SLOTS, not MLB positions.
+				 *
+				 * These reach `legalSlotsFor` in src/auto/plan.ts, which asks whether any
+				 * of them appears in the league's `slot_accepts` list for a seat — and
+				 * those lists are written in the platform's slot names. A centre fielder
+				 * is "CF" to MLB and there is no CF seat in a fantasy league, so he never
+				 * matched an OF one. The eligibility grid covers about a fifth of the
+				 * capture, so most of every pasted roster fell through to that raw
+				 * position and could be seated nowhere.
+				 */
+				positions: p ? slotsFor(p, snapshot.eligibility?.[String(f.id)]) : [],
+				team: p?.team ?? null
+			}
+		})
 
 	const note =
 		!found.players.length ?

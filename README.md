@@ -134,29 +134,40 @@ what a freely available replacement at the same roster slot would produce, in *y
 league's* scoring. Points above replacement is the honest unit: a bscore of 40 means
 forty more points than the next man up, in your league's own currency.
 
-Four tabs. **Recommendations** is the board, and it opens on three horizons, which
-are three different questions rather than three filters: **Streaming** ranks over
-whatever is left of *your league's own* scoring period, against that period's real
-slate — the rest of this matchup in a weekly league, today in a daily one, the next
-period where lineups lock for the whole of the current one, and a rolling seven days
-only where the league scores no periods at all or has not said which it runs
-(`src/engine/period.ts`). The board prints which of those it used and where the
-window's edges came from, because there is no neutral default to fall back on
-silently. **This fortnight** is the standing 14-day board and the default, and
-**Stash** ranks over every game left in the regular season. Alongside the ranking
-the board carries **Buy low** (a rolling-window contact
-gap that the field has not priced) and **Where it hurts to wait** (the drop-off at
-each slot). The other three tabs are **League setup**, which everything else is priced
-in; **My team & trades**, which prices a deal by what it does to your starting lineup;
-and **Draft**, which ranks by what a pick adds to the lineup you have already taken.
-Draft is worth opening only once you start marking picks: measured 2026-09-04 on
-league 228947, with nothing marked its top seven *are* the board's top seven in the
-same order, and it diverges as the roster fills — mark five outfielders and no
-outfielder is left in its top five. Its **cliff** table has no counterpart on the
-board at all, because it prices *waiting* per slot rather than players: on that same
-league the drop between the best and second-best available spans 1.76 points at SS and
-22.07 at OF, a 12.5x spread. The tab is asserted against both facts in
-`test/draft.mjs`.
+Three screens, one job each.
+
+**Today** is the one you open before first pitch. It is the daily lineup as a *diff*
+— start these, bench these, and why — plus the seats that will score nothing tonight
+and the best gettable man who is actually on a card for each of them, plus at most a
+couple of add/drops with both sides named and the point gain. Nothing on it is a
+leaderboard. Where the schedule is knowable it is read live from MLB rather than from
+the shipped capture, so "no game today", "not in today's lineup" and "lineup not
+posted yet" are three different sentences instead of one guess (`src/data/today.ts`).
+
+**Wire** is everyone you can actually get, ranked. It opens on three horizons, which
+are three questions rather than three filters: **Streaming** ranks over whatever is
+left of *your league's own* scoring period, against that period's real slate — the
+rest of this matchup in a weekly league, today in a daily one, the next period where
+lineups lock for the whole of the current one, and a rolling seven days only where the
+league scores no periods at all or has not said which it runs (`src/engine/period.ts`).
+The board prints which of those it used and where the window's edges came from,
+because there is no neutral default to fall back on silently. **This fortnight** is
+the standing 14-day board and the default, and **Stash** ranks over every game left in
+the regular season. All three open filtered to players you can add: measured on the
+committed capture, 42 of the first 50 rows of the old unfiltered default were rostered
+in 90% of leagues or more, which is a leaderboard wearing a recommendation engine's
+name.
+
+**Setup** is your team and your league, in that order, and it is a screen you visit
+once a season. Everything the other two say is priced in the values on it.
+
+There used to be a fourth tab, **Draft**, and a trade evaluator beside the roster.
+Both are gone from the navigation for the same measured reason: the published
+decompositions of what wins a points league put pre-draft ranking quality near zero
+and trades close to it, while volume accumulation — never leaving an allowed slot
+unused — is roughly the magnitude of all in-season move quality combined. In this
+league's own scoring an empty hitter seat costs about 6.9 points a night; a realistic
+within-roster upgrade is worth 0.7 to 1.5. So the app leads with the seats.
 
 ### Getting your league in
 
@@ -258,7 +269,7 @@ From there the league is a file:
 
 - `npx vite` seeds a browser that has nothing stored from `scoring.json`, so a local
   run opens straight on your league.
-- **League setup → Download** in the app writes the leagues in your browser to a JSON
+- **Setup → Download** in the app writes the leagues in your browser to a JSON
   file; **Load file** on any other machine or browser reads it back, and so does
   dropping it anywhere on the page (`leagues.download` / `leagues.replace` in
   `src/client/leagues.ts`). That is how a Yahoo league gets onto the hosted site: read
@@ -871,11 +882,13 @@ most of the way to the wOBA it exists to disagree with. Barrel rate, exit veloci
 xBA and xSLG have no point-in-time equivalent, so they stay season-long and are
 labelled as such on every card rather than passed off as recent.
 
-**Buy low** is where the two independent signals meet: a player hitting the ball
-better than his line says *and* still rostered in under 70% of leagues. Either one
-alone is a trap — an unlucky player everyone owns is not an opportunity, and a free
-player making weak contact is free for a reason. Scored as a product so a candidate
-has to clear both bars.
+**Buy low** used to combine the two signals on a card of its own — a player hitting
+the ball better than his line says *and* still rostered in under 70% of leagues,
+scored as a product so a candidate had to clear both bars. The card is retired. It was
+a real analysis and nothing ever measured that acting on it wins anything; the only
+assertions it ever had pinned its own thresholds. What it cost was a full-width card
+between the reader and the ranking. The luck percentile survives as a sortable
+column, which is the same signal without the second screen.
 
 **Ranking and provenance.** "Best contact vs results" sorts the board on the raw
 21-day gap with the pitcher sign flipped, the luck column ranks it as a percentile

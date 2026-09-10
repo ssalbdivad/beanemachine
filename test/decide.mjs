@@ -5,13 +5,55 @@
 // team, and a test that needed a real person's roster could neither be committed
 // nor re-run by someone else. Every player named below is in data/snapshot.json,
 // so the projections behind the assertions are the ones the app really computes.
+//
+// ONE THING ABOUT THIS SUITE CHANGED IN KIND, and every bench assertion below is
+// written around it: the card's bench REASONS no longer come out of the committed
+// capture. They come from `src/data/today.ts`, which reads MLB's schedule live on
+// mount, so "no game today" / "not in today's lineup" / "not projected to play
+// today" / "a better man is projected for that seat today" / "he is not on the
+// board" depend on what is actually happening tonight and on what time of day it
+// is — before lineups are posted almost nobody is "not in today's lineup", after
+// they are posted several men can be. A test that pinned the sentence would be
+// green in the afternoon and red in the evening, which is a test that reports the
+// clock. So the assertions below are on the PROPERTIES of the reasons — one row
+// per distinct reason, every man named once, every man's own seat named, no reason
+// naming a man — and never on which reason a given man got.
 import { chromium } from "playwright-core"
 import { readFileSync } from "node:fs"
+// The same live read the card itself does, from the same module, so there is one
+// definition of "who is playing tonight" rather than a second one here that can
+// drift from it. See `nobody is seated whose club has no game today`.
+import { fetchSlate, localDate } from "../src/data/today.ts"
 
-const BASE = process.env.BASE ?? "http://127.0.0.1:5173"
+/*
+ * 5299, not 5173, and the wordmark is checked before anything else.
+ *
+ * This file defaulted BASE to http://127.0.0.1:5173 for as long as it has existed,
+ * which is not this repo's port — it belongs to another app on this machine, and a
+ * dev server there answers 200 just as happily. Every assertion below then failed as
+ * a selector timeout on `.decide`, which reads like a UI defect in this app and is
+ * not one; worse, the suite was quietly exercising somebody else's site. ui.mjs,
+ * board.mjs and journey.mjs all already carried the wordmark guard for exactly this
+ * reason, and this was the one file that did not, so it is the one file that could
+ * be wrong about which app it was testing. The guard stops the run outright rather
+ * than letting thirty downstream timeouts speak for it.
+ */
+const BASE = process.env.BASE ?? "http://127.0.0.1:5299"
 const browser = await chromium.launch({ args: ["--no-sandbox"] })
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
+
+{
+	const probe = await browser.newPage()
+	await probe.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	const wordmark = await probe
+		.waitForSelector("h1", { timeout: 15000 })
+		.then(h => h.textContent(), () => null)
+	t("the page under test is beanemachine", wordmark === "beanemachine",
+		`BASE=${BASE} served <h1>${wordmark}</h1> — start this repo's own vite, or set BASE to it`)
+	await probe.close()
+	if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
+}
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
 const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
@@ -49,6 +91,29 @@ const scrub = snap.players.find(
 )
 if (scrub) seat("BN", scrub, ["1B"])
 
+/**
+ * ONE MAN IN YAHOO'S SECOND INJURED SLOT, "IL+".
+ *
+ * New here, and it exists because of a real defect with a real shape: six places in
+ * this codebase asked "is this seat a reserve seat" by hand, as
+ * `slot !== "BN" && slot !== "IL" && slot !== "NA"`, and every one of them counted
+ * "IL+" as an ACTIVE seat. `isReserveSlot` in src/engine/bscore.ts now answers it in
+ * one place. On this card the consequence of getting it wrong is the worst kind of
+ * instruction: a man on the injured list is unrateable on purpose
+ * (`injuryPolicy: "exclude"`), so he can never be seated, so an active-looking seat
+ * holding him produces a row telling the reader to bench a player he cannot move.
+ *
+ * An injured hitter rather than a healthy one deliberately — with a healthy man the
+ * planner could legitimately seat him and the row would vanish for the wrong reason,
+ * and the test would pass on a bug. A name with no period in it, because the
+ * unpriceable note below is parsed up to the first full stop.
+ */
+const shelved = snap.players.find(
+	p => p.group === "hitting" && snap.injuries?.[String(p.id)] && !taken.has(p.name) &&
+		!p.name.includes(".") && (p.stats?.plateAppearances ?? 0) > 100
+)
+if (shelved) seat("IL+", shelved, [shelved.position ?? "Util"])
+
 /** A wire of good, unrostered bats — men the card should want. */
 const wire = snap.players
 	.filter(p => p.group === "hitting" && !taken.has(p.name) && (p.stats?.plateAppearances ?? 0) > 400)
@@ -63,6 +128,11 @@ const seedPool = {
 		positionsRead: ["1B", "OF"], note: "constructed by test/decide.mjs"
 	}
 }
+
+/** Yahoo writes its non-playing seats as BN, IL, IL+ and NA — the same question
+ *  `isReserveSlot` answers in src/engine/bscore.ts, asked here so the expectations
+ *  below cannot quietly disagree with the card about what an active seat is. */
+const reserve = slot => /^(BN|IL|NA)/i.test(slot)
 
 /**
  * @param seeds  what localStorage holds before the page loads
@@ -85,6 +155,10 @@ const open = async (seeds, opts = {}) => {
 	return page
 }
 
+/** The ages `readAgo` can print, as a set. Several assertions below want "it said
+ *  HOW OLD" without caring which bucket today's clock landed in. */
+const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
+
 /**
  * With a team and a wire, the card names both sides of every move.
  *
@@ -102,15 +176,78 @@ const open = async (seeds, opts = {}) => {
 	t("it answers for the league's own scoring period, not a fortnight",
 		/For <?b?>?(this matchup|this scoring period|today)/.test(text) || /For\s+(this matchup|this scoring period|today)/.test(text),
 		text.split("\n").slice(0, 3).join(" | "))
-	t("every move it proposes names the man who leaves",
-		[...text.matchAll(/^\+[\d.]+\nAdd .+, drop .+$/gm)].length ===
-			[...text.matchAll(/^Add /gm)].length,
-		text)
-	const adds = [...text.matchAll(/Add ([^,]+), drop (.+)/g)].map(m => [m[1], m[2]])
+	/*
+	 * "Every move names the man who leaves" now has to say WHICH adds it means.
+	 *
+	 * This counted every line beginning "Add" and required each to carry a ", drop".
+	 * The card has since grown a second kind of Add — the `Empty seats` list, which
+	 * offers a free agent for a seat that would otherwise score nothing tonight — and
+	 * those rows name no drop, so the old count made the original claim fail for a
+	 * reason that has nothing to do with it.
+	 *
+	 * The claim belongs to the waiver half and is asserted there, identified by the
+	 * `.decide-delta` badge that only a priced move carries. It is the reason this card
+	 * exists: a ranked list is not a decision, and a decision that does not say who
+	 * leaves cannot be carried out.
+	 */
+	const priced = await page.$$eval(".decide li", ns =>
+		ns
+			.filter(e => e.querySelector(":scope > .decide-delta"))
+			.map(e => e.textContent.replace(/\s+/g, " ").trim()))
+	t("every priced move names the man who leaves",
+		priced.filter(r => /^Add /.test(r)).every(r => /, drop \S/.test(r)),
+		JSON.stringify(priced))
+	/*
+	 * The empty-seat list is the other kind, and its own rules.
+	 *
+	 * It names no drop, which is new and which this suite deliberately does not assert
+	 * as correct — see the note returned with this run. What it must not do is offer a
+	 * man who is already his, or offer the same man for two seats: one man fills one
+	 * seat, and the measured bug was Sam Antonacci offered for 2B, 3B, OF and Util at
+	 * once — four adds that are really one, with three seats still empty after them.
+	 */
+	const fills = await page.$$eval(".decide-fill li", ns =>
+		ns.map(e => ({
+			slot: e.querySelector(".decide-slot")?.textContent?.trim(),
+			name: e.querySelector("b")?.textContent?.trim()
+		})))
+	t("a seat-filling add offers a man who is not already yours",
+		fills.every(f => f.name && !spots.some(s => s.name === f.name)), JSON.stringify(fills))
+	t("and one man is offered for one seat, not for every seat he is eligible at",
+		new Set(fills.map(f => f.name)).size === fills.length, JSON.stringify(fills))
+	/*
+	 * The seat phrase has to come off the name before the name is compared.
+	 *
+	 * A row reads "Add Yordan Alvarez for your 1B or OF or Util seat, drop Tyler
+	 * Locklear", and `Add ([^,]+), drop` captured "Yordan Alvarez for your 1B or OF or
+	 * Util seat" — a string that can never equal a roster name, so both assertions
+	 * below passed unconditionally and protected nothing. They are the two that catch
+	 * the card telling him to add a man he already owns or drop one he does not, so
+	 * they are worth having actually armed.
+	 */
+	const adds = [...text.matchAll(/Add (.+?)(?: for your [^,]*seat)?, drop (.+)/g)].map(m => [m[1], m[2]])
+	t("it proposes at least one move, so the two rules below are tested against something",
+		adds.length > 0 || /none clear the bar|None worth making/.test(text), text.slice(-400))
 	t("it never proposes adding a player already on the roster",
 		adds.every(([a]) => !spots.some(s => s.name === a)), JSON.stringify(adds))
 	t("it never proposes dropping a player who is not on the roster",
 		adds.every(([, d]) => spots.some(s => s.name === d)), JSON.stringify(adds))
+	/*
+	 * Availability is never silent, whichever way it was arrived at.
+	 *
+	 * This is what the old assertion in the no-team block ("it says up front that
+	 * availability will be an estimate") was really protecting, and it belongs HERE,
+	 * on the surface that actually proposes the adds, rather than on a card that
+	 * proposes nothing. Two sources and two sentences: a list read off the league,
+	 * dated, or the ownership estimate, labelled. A third state — moves proposed and
+	 * nothing said about where the candidates came from — is the one that must not
+	 * exist, because the reader cannot tell whether the man is really free.
+	 */
+	t("whether availability was read or estimated is said wherever adds are proposed",
+		!/Add .+, drop /.test(text) ||
+			/Who is free is an estimate/.test(text) ||
+			new RegExp(`free-agent list, read ${AGE.source}`).test(text),
+		text.slice(-500))
 	await page.close()
 }
 
@@ -131,10 +268,14 @@ const open = async (seeds, opts = {}) => {
 {
 	const page = await open({ lineup: seedLineup, pool: seedPool })
 	const text = await page.$eval(".decide", e => e.innerText)
+	/** Everything in the card including what is behind a closed fold. The card got
+	 *  shorter by FOLDING prose, not by deleting it, and several assertions below
+	 *  turn on that difference: a claim that is one tap away still has to be there. */
+	const deep = await page.$eval(".decide", e => e.textContent)
 	t("a daily-lock league is answered for TODAY, before the period", /\bToday\b/.test(text),
 		text.slice(0, 200))
 
-	const active = league.roster.slot_order.filter(sl => !/^(BN|IL|NA)/i.test(sl))
+	const active = league.roster.slot_order.filter(sl => !reserve(sl))
 	const rows = await page.$$eval(".decide-today li", ns =>
 		ns.map(e => ({
 			slot: e.querySelector(".decide-slot")?.textContent?.trim(),
@@ -152,52 +293,199 @@ const open = async (seeds, opts = {}) => {
 		JSON.stringify(rows.filter(r => r.empty !== (r.who === null))))
 
 	/*
-	 * Nobody is seated whose club is not playing. On a day when all thirty clubs have
-	 * a game this cannot fail, so it is computed off the slate rather than assumed —
-	 * on a Monday or a Thursday it is the whole point.
-	 */
-	const today = new Date().toISOString().slice(0, 10)
-	const playingClubs = new Set(
-		snap.slate.filter(g => g.date === today).flatMap(g => [g.home, g.away])
-	)
-	const clubOf = new Map(snap.players.map(p => [p.name, p.teamId]))
-	const seated = rows.filter(r => r.who).map(r => r.who)
-	/*
 	 * The card leads with the DIFFERENCE, not the lineup.
 	 *
 	 * He already has a lineup in Yahoo; what he needs is the handful of seats that
 	 * should change. Every row it asks him to change has to be a real change against
 	 * the seats it was given, or he is being sent to move a man who is already there.
+	 *
+	 * The shape of this list changed. Bench rows used to be one per man; they are now
+	 * ONE PER REASON, each naming every man it applies to, because on a real 27-man
+	 * roster on a five-game night it printed sixteen consecutive rows identical but
+	 * for the name. So the parse is per-row-and-per-name rather than per-row: reading
+	 * only `querySelector("b")` — which is what this test used to do — now sees the
+	 * first man in each group and silently stops checking the rest, which on that
+	 * same five-game night would have been fifteen unchecked names.
 	 */
-	const changes = await page.$$eval(".decide-changes li", ns =>
+	const changeRows = await page.$$eval(".decide-changes li", ns =>
 		ns.map(e => ({
-			// `textContent` runs the spans together as "SPBench Cristopher …", so there
-			// is no word boundary before the verb — \bBench\b never matches and every
-			// row read as a start. Matched on the trailing space instead.
-			// three verbs now: Bench, Move (a seat change for a man who stays in), Start
+			group: e.classList.contains("decide-bench-group"),
+			badge: e.querySelector(".decide-slot")?.textContent?.trim() ?? null,
+			// the bench reason, the "N projected today" on a start, the "from X to Y" on
+			// a move: one per row either way
+			why: e.querySelector("em.decide-why")?.textContent?.trim() ?? "",
 			verb:
-				/Bench /.test(e.textContent) ? "bench"
+				e.classList.contains("decide-bench-group") ? "bench"
 				: /Move /.test(e.textContent) ? "move"
 				: "start",
-			who: e.querySelector("b")?.textContent?.trim()
+			// every name in the row, each with the seat printed beside it — a grouped
+			// bench row carries one <b> and one <em class="decide-seat"> per man
+			men: [...e.querySelectorAll("b")].map(b => ({
+				name: b.textContent.trim(),
+				seat: b.parentElement?.querySelector("em.decide-seat")?.textContent?.trim() ?? null
+			}))
 		})))
 	const activeSeated = new Set(
 		seedLineup[KEY].spots.filter(sp => !/^(BN|IL|NA)/i.test(sp.slot)).map(sp => sp.name)
 	)
+	const benchRows = changeRows.filter(c => c.verb === "bench")
+	const benched = benchRows.flatMap(c => c.men)
+	const startRows = changeRows.filter(c => c.verb === "start")
+	const moveRows = changeRows.filter(c => c.verb === "move")
+
 	t("everyone it says to bench is currently in an active seat",
-		changes.filter(c => c.verb === "bench").every(c => activeSeated.has(c.who)),
-		JSON.stringify(changes.filter(c => c.verb === "bench" && !activeSeated.has(c.who))))
+		benched.every(m => activeSeated.has(m.name)),
+		JSON.stringify(benched.filter(m => !activeSeated.has(m.name))))
 	t("everyone it says to start is not already in one",
-		changes.filter(c => c.verb === "start").every(c => !activeSeated.has(c.who)),
-		JSON.stringify(changes.filter(c => c.verb === "start" && activeSeated.has(c.who))))
+		startRows.every(c => c.men.every(m => !activeSeated.has(m.name))),
+		JSON.stringify(startRows.filter(c => c.men.some(m => activeSeated.has(m.name)))))
 	// a man asked to change seat must be one who is already in the lineup — the row
 	// exists to free a seat for somebody else, and moving a man who is not there
 	// would be an instruction that cannot be followed
 	t("everyone it says to move seats is already in the lineup",
-		changes.filter(c => c.verb === "move").every(c => activeSeated.has(c.who)),
-		JSON.stringify(changes.filter(c => c.verb === "move" && !activeSeated.has(c.who))))
+		moveRows.every(c => c.men.every(m => activeSeated.has(m.name))),
+		JSON.stringify(moveRows.filter(c => c.men.some(m => !activeSeated.has(m.name)))))
+
+	/*
+	 * GROUPING, as four properties rather than as a sentence.
+	 *
+	 * What was measured, and what made the change: sixteen rows reading "Bench X — he
+	 * is not projected to play today", identical but for the name, sitting above the
+	 * two moves that were the point of the card. Sixteen rows of one sentence is not
+	 * sixteen decisions; it is one fact about the schedule and a list of who it applies
+	 * to. The properties that make that safe, each of which a naive grouping breaks:
+	 *
+	 *  · one row per DISTINCT reason — if two rows share a reason the grouping did not
+	 *    happen and the sixteen rows are back
+	 *  · every man named EXACTLY ONCE across the rows — a grouping keyed on the wrong
+	 *    thing duplicates men, and a reader shown a name twice cannot tell whether it
+	 *    is two seats
+	 *  · every man's own SEAT printed beside him — the row's badge is "×5" for a group,
+	 *    so without the per-man seat he has no way to find any of them in Yahoo
+	 *  · the badge IS the count for a group of several, and the man's own seat for a
+	 *    group of one
+	 *
+	 * None of these mentions which reasons came back, because that is tonight's
+	 * schedule talking.
+	 */
+	const reasons = benchRows.map(c => c.why)
+	t("bench rows are one per reason, not one per man",
+		new Set(reasons).size === reasons.length,
+		JSON.stringify(reasons))
+	t("and every man it benches is named exactly once across them",
+		new Set(benched.map(m => m.name)).size === benched.length,
+		JSON.stringify(benched.map(m => m.name)))
+	t("each man keeps his own seat beside his name, which is what he changes in Yahoo",
+		benched.every(m => m.seat && activeSeated.has(m.name) &&
+			seedLineup[KEY].spots.some(sp => sp.name === m.name && sp.slot === m.seat)),
+		JSON.stringify(benched))
+	t("the badge on a grouped row is the count, and on a single row his seat",
+		benchRows.every(c =>
+			c.men.length > 1 ? c.badge === `×${c.men.length}` : c.badge === c.men[0]?.seat),
+		JSON.stringify(benchRows.map(c => [c.badge, c.men.length])))
+	/*
+	 * A reason has to be a fact about the world, not about a man — which is the
+	 * precondition for grouping at all. If a reason ever carried a name in it, two men
+	 * could never share one, every group would be of size one, and the sixteen rows
+	 * would come back through the back door while this suite stayed green.
+	 */
+	t("no reason names a player, which is why men can share one",
+		reasons.every(r => r && ![...activeSeated].some(n => r.includes(n))),
+		JSON.stringify(reasons))
+
+	/*
+	 * Nobody is dropped on the floor by the grouping.
+	 *
+	 * The old one-row-per-man list could not lose a man: each had his own row. A
+	 * grouped list can — a reason the reducer does not handle, a man whose reason came
+	 * back undefined — and the symptom is the quiet one this card exists to prevent: a
+	 * seat that is neither "change this" nor "this is right", simply unmentioned. So
+	 * every man in an active seat must be in exactly one of the two lists the card
+	 * shows: the bench groups, or the seat-by-seat fold of the lineup it wants.
+	 */
+	const inFold = new Set(rows.filter(r => r.who).map(r => r.who))
+	const benchNames = new Set(benched.map(m => m.name))
+	const unaccounted = [...activeSeated].filter(n => inFold.has(n) === benchNames.has(n))
+	t("every man in an active seat is either benched or in tonight's lineup, never neither",
+		unaccounted.length === 0, JSON.stringify(unaccounted))
+
+	/*
+	 * A man in Yahoo's "IL+" seat is not a man to bench.
+	 *
+	 * See `shelved` above. The hand-written reserve check this card's helpers replaced
+	 * read "IL+" as an active seat, and an injured man in an active seat is unrateable
+	 * by design, so he lands in the bench list with a reason attached — an instruction
+	 * to make a move the platform will not allow, about a man whose absence the reader
+	 * already knows about. The correct answer is silence in the change list.
+	 */
+	if (shelved) {
+		t("a man on the injured list is not told to take a seat he cannot leave",
+			!benchNames.has(shelved.name) &&
+				!changeRows.some(c => c.men.some(m => m.name === shelved.name)),
+			`${shelved.name} appears in ${JSON.stringify(changeRows.filter(c => c.men.some(m => m.name === shelved.name)))}`)
+	}
+
+	/*
+	 * The age of the baseline, in one clause.
+	 *
+	 * This used to be two sentences — "Compared against your seats as read N hours
+	 * ago. Change your lineup in Yahoo since then and this list is against the old
+	 * one." The second restated the first for anybody who had already understood it,
+	 * and it is gone. What it protected is not: a diff is only as good as the age of
+	 * the seats it was diffed against, and the age is still on the card, which is the
+	 * part a reader acts on. So the assertion is that the AGE is stated, and — new —
+	 * that the dropped sentence really was dropped rather than folded away somewhere,
+	 * because a "shorter" card that still carries 277 words behind a summary has not
+	 * got shorter.
+	 */
 	t("and it says how old the seats it compared against are",
-		/as read .* (hour|day|in the last hour)/.test(text), text.slice(-400))
+		new RegExp(`as read ${AGE.source}`).test(text), text.slice(-400))
+	t("it says it once — the sentence restating it is gone, not folded",
+		!/Change your lineup in Yahoo since then/.test(deep), text.slice(-400))
+
+	/*
+	 * What the moves are denominated in is FOLDED, not deleted.
+	 *
+	 * The old paragraph was four sentences under every move: what the gain counts,
+	 * that everyone leaving is under the keep floor, that none is worth holding for the
+	 * season, and the arithmetic behind the ownership cut. All of it true, none of it
+	 * changing the next tap, and on a phone it was eight lines under each of two moves.
+	 * It is now a `<details class="decide-fine">` called "what these numbers are".
+	 *
+	 * Both halves are asserted deliberately. A reader who wants to know what "+38.8"
+	 * means must still be able to find out — so the text is present in the DOM — and a
+	 * reader who does not must not have to scroll past it — so it is not in the rendered
+	 * text of a card nobody has clicked. Deleting the explanation would pass half of
+	 * this and is the failure this is written against.
+	 */
+	if (/Add .+, drop /.test(text)) {
+		t("what the numbers mean is a tap away, not four sentences on the card",
+			/what these numbers are/i.test(text) &&
+				!/Each figure is what your starting lineup projects/.test(text),
+			text.slice(-600))
+		t("and the explanation still exists behind that fold rather than being deleted",
+			/Each figure is what your starting lineup projects/.test(deep) &&
+				/under the keep floor/.test(deep),
+			deep.slice(-900))
+	}
+
+	/*
+	 * Same shape, same reasoning, for the innings-floor caveat.
+	 *
+	 * The line can only count innings STILL TO COME — what has already been thrown is
+	 * on his team page, which nothing here reads — and that is a fact about this page
+	 * rather than about his week. It is the thing a reader has to know before acting,
+	 * so the clause stays on the line; why the page cannot do better is folded.
+	 */
+	if (/innings a week/.test(text)) {
+		t("the innings line says it counts only what is still to come",
+			/still to come only/.test(text), text.slice(-700))
+		t("and why it cannot count the rest is folded, not dropped",
+			/why not the whole week/i.test(text) &&
+				!/Innings already thrown this period are on your team page/.test(text) &&
+				/Innings already thrown this period are on your team page/.test(deep),
+			deep.slice(-900))
+	}
 
 	/*
 	 * A stale WIRE is worse than a stale lineup, and silently so: it goes on offering
@@ -207,13 +495,19 @@ const open = async (seeds, opts = {}) => {
 	 * when the list is a carried one rather than a live read, the card says how old.
 	 * This test blocks the live read, which is the only way to be sure which of the
 	 * two it is looking at.
+	 *
+	 * The SENTENCE changed and the claim did not. It read "your league's free-agent
+	 * list as it stood N hours ago"; the four sentences around it were folded away and
+	 * what is left on the line is "Your league's own free-agent list, read N hours
+	 * ago". So the assertion is on the age — which is the part that tells the reader
+	 * whether to trust it — rather than on the wording around it.
 	 */
 	{
 		const off = await open({ lineup: seedLineup, pool: seedPool }, { offline: true })
 		const t2 = await off.$eval(".decide", e => e.innerText)
 		t("a carried free-agent list is dated where the moves are proposed",
 			!/Add .+, drop /.test(t2) ||
-				/free-agent list as it stood .*(hour|day|in the last hour)/.test(t2),
+				new RegExp(`free-agent list, read ${AGE.source}`).test(t2),
 			t2.slice(-500))
 		await off.close()
 	}
@@ -240,6 +534,14 @@ const open = async (seeds, opts = {}) => {
 	 * the roster quietly shrinking: the lineup is planned as if he owned fewer men
 	 * than he does. On the shipped team that is two — an injured outfielder and a
 	 * pitcher with no projection — and an absence is stated as an absence.
+	 *
+	 * `shelved` above does NOT make this note appear, and it should not: a man parked
+	 * in an IL seat whom a source does list as hurt is accounted for, not missing, and
+	 * `planLineup` only reports a reserve seat when nothing lists him hurt — which is
+	 * the activatable case and a different thing to tell the reader. So on this
+	 * constructed roster the branch taken is the second one. It stays written both ways
+	 * because the assertion is about the note being HONEST, not about its being there:
+	 * a count without the names is the failure, and so is a note with nothing behind it.
 	 */
 	{
 		const watch = await page.$(".decide-watch")
@@ -250,16 +552,45 @@ const open = async (seeds, opts = {}) => {
 			const named = (txt.match(/could not be priced this period, so nothing above counts them: ([^.]+)\./) ?? [])[1]
 			t("it names every player it could not price, not just a count",
 				!!named && named.split(",").length === n, `${n} claimed, named: ${named}`)
+			if (shelved)
+				t("and the injured man this test seated is one of the names",
+					named?.includes(shelved.name) ?? false, `${shelved.name} not in: ${named}`)
 		} else {
 			t("with every player priced, no unpriceable note is invented", true,
 				"nothing on this roster was skipped")
 		}
 	}
 
+	/*
+	 * Nobody is seated whose club is not playing.
+	 *
+	 * The SOURCE of that fact changed, and the assertion had to follow it. This used
+	 * to be computed off `snapshot.slate` — the committed capture, stamped 2026-09-08,
+	 * which is right about a season and cannot be right about tonight. The card now
+	 * reads MLB's schedule live on mount (`src/client/useSlate.ts`) and lets it WIN
+	 * where the two disagree, which is the whole point: a club whose game was
+	 * postponed this afternoon is in the capture and not in tonight's slate. Checking
+	 * the card against the capture would therefore have been checking it against the
+	 * thing it deliberately overrides.
+	 *
+	 * So the test does the same live read, from the same module, and falls back to the
+	 * capture only if MLB will not answer — in which case the card fell back to it too,
+	 * and the two still agree about what is being asserted.
+	 *
+	 * On a day when all thirty clubs have a game this cannot fail, so it is computed
+	 * rather than assumed — on a Monday or a Thursday it is the whole point.
+	 */
+	const day = localDate()
+	const { slate: live, error: slateError } = await fetchSlate(day)
+	const playingClubs =
+		!slateError && live.playing.size ? live.playing
+		:	new Set(snap.slate.filter(g => g.date === day).flatMap(g => [g.home, g.away]))
+	const clubOf = new Map(snap.players.map(p => [p.name, p.teamId]))
+	const seated = rows.filter(r => r.who).map(r => r.who)
 	t("nobody is seated whose club has no game today",
 		seated.every(n => !clubOf.has(n) || playingClubs.has(clubOf.get(n))),
 		seated.filter(n => clubOf.has(n) && !playingClubs.has(clubOf.get(n))).join(", ") ||
-			`${playingClubs.size} clubs playing`)
+			`${playingClubs.size} clubs playing${slateError ? ` (live read failed: ${slateError}, fell back to the capture)` : ""}`)
 	await page.close()
 }
 
@@ -275,35 +606,104 @@ const open = async (seeds, opts = {}) => {
  * recommendations that follow are real. So that is what it offers, with a control
  * that actually goes there — a card that says "add your players" and does not take
  * you to them has told you to go and find something.
+ *
+ * WHAT THIS CARD SAYS NOW IS ONE SENTENCE. It was four paragraphs and a hundred and
+ * ten words, most of it about CORS: that availability would be estimated, that
+ * Yahoo cannot be read by any browser, and how to run a command line — all of it
+ * addressed to somebody who has not yet told the app who is on his team, and none
+ * of it changing his next tap. The assertions below moved with it: what is asserted
+ * here is the ASK and the ROUTE, and the claims that left are asserted where they
+ * are now made.
  */
 {
 	const page = await open({})
 	const text = await page.$eval(".decide", e => e.innerText)
+	const deep = await page.$eval(".decide", e => e.textContent)
+	/*
+	 * It asks, rather than answering. The sentence it asked with was "Tell me who is
+	 * on your team"; it is now the button's own label plus what pressing it buys. The
+	 * property is unchanged and is the one that matters: a card with no roster must
+	 * make a request, not an assertion about a team it does not have.
+	 */
 	t("with no team it asks for one rather than answering",
-		/Tell me who is on your team/.test(text), text.slice(0, 200))
+		/Add your players/.test(text) && !/projected/.test(text), text.slice(0, 200))
 	t("and it proposes no moves at all",
 		!/Add .+, drop /.test(text), text.slice(0, 200))
 	t("the way out is a control on the page, not an instruction to go elsewhere",
 		!!(await page.$(".decide-cta")), text.slice(0, 200))
-	t("and it says up front that availability will be an estimate",
-		/estimated|estimate/i.test(text), text.slice(0, 400))
+	/*
+	 * One sentence, and that is now a thing to assert rather than a thing to describe.
+	 *
+	 * The old card explained CORS to a stranger. Asserting the absence of the lecture
+	 * is what keeps it from growing back one well-meaning paragraph at a time, and
+	 * `deep` rather than `text` because folding it away would not fix the problem —
+	 * the reason it was wrong is that none of it helps before the first tap, not that
+	 * it took up room.
+	 */
+	const ps = await page.$$(".decide-blocked p")
+	t("the blocked state is one sentence and a button, not an essay about CORS",
+		ps.length === 1 && !/CORS/.test(deep) &&
+			text.trim().split(/\s+/).length <= 45,
+		`${ps.length} paragraphs, ${text.trim().split(/\s+/).length} words: ${text.slice(0, 300)}`)
+	/*
+	 * The estimate claim is not missing, it MOVED.
+	 *
+	 * "and it says up front that availability will be an estimate" used to live here.
+	 * It cannot: this card proposes nothing, so it makes no claim about availability
+	 * to qualify, and a warning about the accuracy of recommendations that do not
+	 * exist yet is noise in front of the only control on the screen. The claim is now
+	 * asserted on the surfaces that actually use the estimate — see "whether
+	 * availability was read or estimated is said wherever adds are proposed" in the
+	 * first block, and "it says plainly that who is available is an estimate" in the
+	 * roster-without-a-wire block below. What is asserted here is the inverse: a card
+	 * that promises nothing must not promise anything.
+	 */
+	t("a card that proposes nothing makes no claim about the wire either",
+		!/free-agent list/.test(deep) && !/rostered in/.test(deep), text.slice(0, 300))
+	/*
+	 * Yahoo is told nothing about being readable, because it is not.
+	 *
+	 * The ESPN block below asserts the other half. This is the branch: the platform
+	 * sentence is ESPN's alone, and a Yahoo reader who was told his platform answers a
+	 * browser directly would go looking for a button that cannot exist.
+	 */
+	if (league.meta.platform === "yahoo")
+		t("a Yahoo league is not told its platform can read the roster for it",
+			!/answers a browser directly/.test(deep), text.slice(0, 300))
 
 	/*
-	 * The command line survives as a footnote for the exact list, and only for a
-	 * platform a browser cannot read. Two things must hold: it is FOLDED, so it is
-	 * not what a visitor meets first, and it names a command that exists. It used to
-	 * print `node --experimental-strip-types src/cli.ts` — a flag node has not needed
-	 * since 22.18, and a path that only exists inside a clone.
+	 * THE COMMAND LINE IS GONE FROM THIS CARD, and three assertions went with it.
+	 *
+	 * They were: that the exact-list route is behind a `<details>`; that the command is
+	 * one a visitor could run (`npx`, not `node --experimental-strip-types src/cli.ts`,
+	 * which needs a clone nobody arriving at the site has); and that it carries his own
+	 * league and team id. Nothing on the decide card prints a command any more.
+	 *
+	 * Of the three, the second is covered elsewhere and was never really this card's:
+	 * test/leagues.mjs reads `IMPORT_COMMAND` out of panels.tsx and asserts it starts
+	 * `npx --yes github:` and does not name the flag. The third is a real loss and is
+	 * reported as one rather than quietly dropped — no surface now prints a command
+	 * with the reader's league and team already in it.
+	 *
+	 * What is asserted here instead is the property the first one protected, in the
+	 * strongest form the new card allows: a visitor meets no command line at all, and
+	 * the control he does meet lands on a screen where the exact list can actually be
+	 * got — by pasting, which needs no terminal, works on a private league, and is
+	 * the only route that ever reaches Yahoo's free-agent page.
 	 */
-	if (league.meta.platform === "yahoo") {
-		t("the exact-list route is folded away, not the headline",
-			!!(await page.$(".decide-blocked details")), "the command is not behind a fold")
-		const cmd = await page.$eval(".decide-cmd", e => e.textContent.replace(/\s+/g, " ").trim())
-		t("and it is a command a visitor could actually run",
-			/^npx /.test(cmd) && !/experimental-strip-types/.test(cmd), cmd)
-		t("with his own league in it, and the team, which is what carries the roster",
-			cmd.includes(String(league.meta.league_id)) &&
-				new RegExp(`/${league.meta.team_id}\\b`).test(cmd), cmd)
+	t("a visitor meets no command line on the card at all",
+		!(await page.$(".decide-cmd")) && !/npx |node --/.test(deep), deep.slice(0, 400))
+	await page.click(".decide-cta")
+	const landed = await page
+		.waitForSelector(".trade-team .paste-roster", { timeout: 15000 })
+		.then(() => true, () => false)
+	t("and the control on it really lands on the screen that takes a roster",
+		landed, "pressing Add your players did not reach My team")
+	if (landed) {
+		const team = await page.$eval(".trade-team", e => e.innerText)
+		t("which is also where the exact free-agent list is got, with no terminal",
+			/Paste your free agents/.test(team) && !/npx |node --/.test(team),
+			team.slice(0, 400))
 	}
 	await page.close()
 }
@@ -336,8 +736,19 @@ const open = async (seeds, opts = {}) => {
 	 */
 	t("the moves half answers from the ownership estimate rather than refusing",
 		/Add .+, drop /.test(text) || /none clear the bar/.test(text), text.slice(-600))
+	/*
+	 * The label shrank to three words and stayed on the line. It was a sentence
+	 * ending "is an estimate"; the arithmetic behind the cut — the percentage, the
+	 * depth, "some will already be taken in yours" — went into the fold, which is why
+	 * `deep` carries it and the line carries the warning. The warning itself is the
+	 * part that changes a decision, so it is the part that is still in front of him.
+	 */
+	const deep = await page.$eval(".decide", e => e.textContent)
 	t("and it says plainly that who is available is an estimate",
-		!/Add .+, drop /.test(text) || /is an estimate/.test(text), text.slice(-600))
+		!/Add .+, drop /.test(text) || /Who is free is an estimate/.test(text), text.slice(-600))
+	t("with the arithmetic behind the estimate still there, one tap down",
+		!/Add .+, drop /.test(text) || /rostered in \d+% of leagues or fewer/.test(deep),
+		deep.slice(-700))
 	await page.close()
 }
 
@@ -503,8 +914,19 @@ const open = async (seeds, opts = {}) => {
 	const text = await page.$eval(".decide", e => e.innerText)
 	t("an ESPN league is told its platform can read the roster for it",
 		/answers a browser directly/.test(text) && !/CORS/.test(text), text.slice(0, 400))
-	t("and is not handed a command line it does not need",
-		!(await page.$(".decide-cmd")), text.slice(0, 260))
+	/*
+	 * The second assertion here used to be `!(await page.$(".decide-cmd"))` — that an
+	 * ESPN reader is not handed a command line he does not need. No reader is handed
+	 * one now, Yahoo included, so that cannot fail and asserting it would be theatre.
+	 * What it protected is the BRANCH, and a branch needs both sides: the Yahoo block
+	 * above asserts the platform sentence is absent there, and this asserts the ESPN
+	 * card is still the same one sentence plus that clause rather than growing a
+	 * second route back.
+	 */
+	const ps = await page.$$(".decide-blocked p")
+	t("and the ESPN card is the same one sentence, plus that clause",
+		ps.length === 1 && !!(await page.$(".decide-cta")) && !(await page.$(".decide-cmd")),
+		`${ps.length} paragraphs: ${text.slice(0, 260)}`)
 	await page.close()
 }
 
@@ -544,8 +966,12 @@ const open = async (seeds, opts = {}) => {
 	await page.waitForTimeout(2500)
 	const text = await page.$eval(".decide", e => e.innerText)
 
+	// "Tell me who is on your team" is gone with the blocked card's four paragraphs;
+	// the sentence a hand-entered team must never see is the one claiming the page
+	// knows nothing about it, and the button that asks for a roster he has already
+	// given. Both are still the wrong answer here, so both are still asserted.
 	t("a hand-entered team is not told the page has not been told about it",
-		!/has not been told which players are yours|Tell me who is on your team/.test(text),
+		!/has not been told which players are yours|Add your players/.test(text),
 		text.slice(0, 240))
 	t("it produces a lineup for that team",
 		(await page.$$(".decide-changes li")).length > 0, text.slice(0, 400))
@@ -554,7 +980,7 @@ const open = async (seeds, opts = {}) => {
 	t("the adds are answered too, from the estimate",
 		/Add .+, drop |none clear the bar/.test(text), text.slice(-700))
 	t("and nothing on it claims a free-agent list was read",
-		!/read off your league|as it stood/.test(text), text.slice(-700))
+		!/read off your league|as it stood|free-agent list, read /.test(text), text.slice(-700))
 	await page.close()
 }
 

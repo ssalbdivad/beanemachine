@@ -13,7 +13,7 @@
 // snapshot and everything else is ignored — so a redesign, an advertisement, or a
 // different platform entirely costs nothing.
 import { readFileSync } from "node:fs"
-import { playersInText } from "../src/data/paste.ts"
+import { playersInText, rosterFromPaste } from "../src/data/paste.ts"
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
 const all = snap.players
@@ -141,6 +141,48 @@ const arms = pick("pitching", 3)
   const ms = Date.now() - t0
   t("a whole page of players is read, and quickly",
     r.players.length >= 380 && ms < 2000, `${r.players.length} in ${ms}ms`)
+}
+
+// ── the seats a pasted man may actually fill ──────────────────────────────────
+//
+// This is the bug that made the product look broken, and it was one mapping.
+//
+// `legalSlotsFor` in src/auto/plan.ts asks whether any of a man's `positions`
+// appears in the league's `slot_accepts` list for a seat, and those lists are
+// written in the PLATFORM's slot names — "OF", "SP", "RP", "Util". MLB's own
+// position is a different vocabulary: a centre fielder is "CF" and every pitcher
+// is "P". The league's eligibility grid, which does speak in slot names, covers
+// 328 of this capture's 1,446 players — so more than three quarters of every
+// pasted roster fell through to the raw MLB position and could be seated nowhere
+// at all.
+//
+// Measured on a hand-pasted 23-man roster against the committed capture: the daily
+// card seated ONE man and projected 16.41 points, and blamed the other seventeen on
+// projections that existed. With `slotsFor` applied the same roster seats three and
+// projects 31.92 on the same five-game night.
+{
+  const cf = all.find(p => p.position === "CF" && p.group === "hitting")
+  const sp = all.find(p => p.group === "pitching" && (p.stats?.gamesStarted ?? 0) > 3)
+  if (cf && sp) {
+    const r = rosterFromPaste(`OF\t${cf.name}\nSP\t${sp.name}`, snap)
+    const seatsOf = n => r.spots.find(s => s.name === n)?.positions ?? []
+    t("a centre fielder is given the OF seat, not MLB's CF",
+      seatsOf(cf.name).includes("OF") && !seatsOf(cf.name).includes("CF"),
+      `${cf.name}: ${seatsOf(cf.name).join(",")}`)
+    t("and the Util seat with it, because every batter is eligible there",
+      seatsOf(cf.name).includes("Util"), seatsOf(cf.name).join(","))
+    t("a starting pitcher is given SP and P, not MLB's bare P",
+      seatsOf(sp.name).includes("SP") && seatsOf(sp.name).includes("P"),
+      `${sp.name}: ${seatsOf(sp.name).join(",")}`)
+    // The check that would have caught it: nothing a paste produces may be a name
+    // no fantasy league has a seat for.
+    const NOT_SEATS = new Set(["CF", "LF", "RF", "DH"])
+    t("no man comes back holding a position no league has a seat for",
+      r.spots.every(s => s.positions.every(x => !NOT_SEATS.has(x))),
+      JSON.stringify(r.spots.map(s => s.positions)))
+  } else {
+    t("this capture holds no centre fielder and starter to seat", false, "fixture gap")
+  }
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

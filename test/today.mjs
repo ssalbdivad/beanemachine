@@ -150,5 +150,26 @@ t("the URL asks for the three hydrations this file reads and nothing else",
   }
 }
 
+// ── a hang is a failure too ──────────────────────────────────────────────────
+//
+// The try/catch above turns a refusal, a 500 and a malformed body into a state.
+// It cannot turn a HANG into one: if the connection is accepted and nothing ever
+// comes back, the promise never settles, `useSlate` stays `loading` forever, and
+// the page waits on a request that has already effectively failed. Measured from
+// outside the app during a test run — the request was still outstanding after 32
+// seconds with no error and no state change, which is also what made
+// `waitUntil: "networkidle"` unusable against this page.
+{
+  const t0 = Date.now()
+  const { slate, error } = await fetchSlate("2025-07-15", undefined, 1)
+  const ms = Date.now() - t0
+  t("a request that does not answer in time becomes an error, not a wait",
+    error !== null && ms < 3000, `${ms}ms, error=${error}`)
+  t("and the caller still gets a usable empty slate rather than a throw",
+    slate.games.length === 0 && slate.playing.size === 0)
+  t("the message says the deadline passed, so it is not read as a refusal",
+    /did not answer/.test(error ?? ""), String(error))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

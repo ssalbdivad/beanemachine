@@ -2,11 +2,22 @@
 //
 // Every other browser suite stands on one surface and asserts it deeply. Nothing
 // asserts that state carries ACROSS them, which is where the integration bugs
-// live: a horizon switched on the board, a player claimed on the draft page, a
-// team read back on the trade page, and all of it still there after a reload.
-// The claims here are therefore about continuity rather than about any single
-// screen — a filter that leaves a stale row behind, a draft pick that never
-// reaches the roster the trade page prices, a reload that quietly forgets.
+// live: a horizon switched on the board, a roster pasted on My team, the seats
+// that came with it read back by the card that gives the instructions, and all of
+// it still there after a reload. The claims here are therefore about continuity
+// rather than about any single screen — a filter that leaves a stale row behind, a
+// roster that never reaches the surface that plans a lineup out of it, a reload
+// that quietly forgets.
+//
+// The journey used to be four surfaces. It is three: the draft page, its engine and
+// its own suite were deleted, and with them the old middle of this file — a roster
+// was built by CLAIMING players on the draft board, and the integration point was
+// whether those claims reached the team the trade page prices. That route no longer
+// exists in the product, so the journey takes the one that replaced it: the blocked
+// card on Recommendations sends the reader to My team, he pastes his roster page
+// there, and the seats it carries come back as tonight's lineup. Same property under
+// test — a team entered on one surface is the team every other surface reasons about,
+// and no key drifts between them — through the route a reader actually has.
 //
 // It also runs a console-error trap for the whole journey rather than per page,
 // because the errors that matter are the ones a second view triggers in the
@@ -26,6 +37,12 @@ const num = s => Number(String(s).replace(/[^0-9.+-]/g, ""))
 // `beanemachine:view` remembers which question the reader last asked (mode, window,
 // moves). A suite that leaves it behind opens the NEXT run on somebody else's tab,
 // which is the class of cross-run contamination this list exists to prevent.
+//
+// `beanemachine:draft` is a key nothing in src/ reads or writes any more — the draft
+// page is gone. It stays on the list rather than being dropped, because the list's
+// job is to describe what a browser profile may be CARRYING, not what this build
+// writes: a profile that visited an older beanemachine still has one, and clearing it
+// costs a no-op. It is deliberately not asserted on anywhere below.
 const KEYS = [
   "beanemachine:config", "beanemachine:roster", "beanemachine:draft",
   "beanemachine:lineup", "beanemachine:pool", "beanemachine:view"
@@ -58,10 +75,10 @@ const NOT_OURS = /fonts\.(?:gstatic|googleapis)\.com/
  * text, so noise cannot be filtered by matching the message. It has to be
  * correlated with the response that caused it.
  *
- * Exactly one 404 is expected: the app probes `api/health` at startup because a
- * static host has no API and asking is how the client finds that out. Any OTHER
- * failing request makes the generic line ours again, so this cannot quietly
- * swallow a real broken asset.
+ * Exactly one failing request is expected: the app probes `api/health` at startup
+ * because a static host has no API and asking is how the client finds that out.
+ * Any OTHER failing request makes the generic line ours again, so this cannot
+ * quietly swallow a real broken asset.
  */
 const EXPECTED_404 = /\/api\/health$/
 const unexpectedFailures = []
@@ -135,6 +152,7 @@ await page.reload({ waitUntil: "domcontentloaded" })
 await arrive()
 
 const tab = name => page.locator(".views button", { hasText: name }).first().click()
+const current = () => page.$eval(".views button[aria-selected=true]", e => e.textContent.trim())
 const rows = () => page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
 const codes = () => page.$$eval(".board-row .who .code", n => n.map(e => e.textContent.trim()))
 const confs = () => page.$$eval(".board-row .conf-num", n => n.map(e => Number(String(e.textContent).replace("%", ""))))
@@ -146,7 +164,25 @@ const bscores = () => page.$$eval(".board-row .bscore", n => n.map(e => parseFlo
 const ranked = () =>
 	page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
 
-// --- 1. landing, and the three horizons ---------------------------------------
+// --- 1. landing, the surfaces, and the three horizons --------------------------
+
+/**
+ * Rewritten, not deleted: this file used to walk four tabs and reached the fourth
+ * by `tab("Draft")`, which is now a locator that matches nothing and times out 30
+ * seconds later as a stage failure naming a selector.
+ *
+ * The claim the walk made implicitly — every surface this app has is reachable
+ * from the nav, by name — is worth making explicitly, so it is made here once and
+ * the journey below visits exactly these three. The fourth is not "missing": the
+ * draft page, `src/engine/draft.ts` and `test/draft.mjs` were deleted, and an
+ * assertion that names a draft tab would now be asserting a surface back into
+ * existence.
+ */
+const tabs = await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))
+t("the nav names the three surfaces this app has, and none of them is a draft",
+	tabs.join("|") === "Recommendations|League setup|My team & trades", tabs.join(" | "))
+t("and the journey starts on the one a reader opens fifty times a season",
+	(await current()) === "Recommendations", await current())
 
 t("the journey starts on a board with a ranking on it", (await rows()).length > 50)
 const fortnight = (await rows()).slice(0, 10)
@@ -237,8 +273,38 @@ t("and switching back brings the start counts back rather than leaving the fallb
 	(await units()).includes("GS"))
 clean("across the three horizons")
 
-// --- 2. filtering, searching, re-ranking, raising the floor --------------------
-//
+// --- 2. who the board is FOR, then filtering on top of it ----------------------
+
+/**
+ * NEW, and it is the claim the rest of this section's baseline now rests on.
+ *
+ * `AVAILABLE_ONLY_DEFAULT.board` flipped from false to true: the board opens on the
+ * men a reader can actually add. Measured before the flip, 42 of the first 50 rows
+ * of the default board were rostered in 90% or more of leagues — a recommendation
+ * list whose top is unreachable is a ranking, not a recommendation.
+ *
+ * It is asserted as a journey claim rather than left to test/board.mjs because
+ * `fortnight` and `fortnightCount` above were captured THROUGH this filter, and
+ * every "the board came back unmoved" comparison below is against them. If the
+ * default silently reverted, those comparisons would go on passing against a
+ * different board; this is the one assertion that pins which board they mean.
+ */
+const availToggle = page.locator(".board-controls .toggle[data-avail] input").first()
+t("the board opens on the players this reader can actually add",
+	await availToggle.isChecked())
+await availToggle.uncheck()
+await page.waitForTimeout(400)
+const everyone = await ranked()
+t("and the restriction is really a restriction — unticking it widens the ranking",
+	everyone > fortnightCount, `${fortnightCount} available vs ${everyone} in all`)
+t("the wider board names men the opening board did not",
+	(await rows()).some(n => !fortnight.includes(n)), (await rows()).slice(0, 5).join(", "))
+await availToggle.check()
+await page.waitForTimeout(400)
+t("and reticking it gives back exactly the board the journey opened on",
+	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
+	`${await ranked()} vs ${fortnightCount}`)
+
 // Each control is applied on top of the last rather than in isolation: a filter
 // that silently drops out when the ranking changes only shows up in combination.
 
@@ -346,81 +412,313 @@ t("clearing every filter returns the board it opened on",
 	`${await ranked()} vs ${fortnightCount}`)
 clean("after filtering, searching, re-ranking and raising the floor")
 
-// --- 3. the draft, and whether it reaches the team the trade page prices -------
+// --- 3. the card that gives instructions, and the team it needs to give them ---
+//
+// This section replaces the draft leg of the journey. The draft page was where a
+// roster used to come from, and the integration point was "does a pick reach the
+// team the trade page prices". The product now has exactly one route from "I have
+// no team here" to "tell me what to do tonight", and it crosses two surfaces: the
+// blocked card on Recommendations sends the reader to My team, and what he enters
+// there comes back as tonight's seats. That hand-off is what is asserted here.
 
-at("the draft page opens with a recommendation on it")
-await tab("Draft")
-await page.waitForSelector(".draft-pick .pick-who b", { timeout: 30000 })
-const firstPick = (await page.textContent(".draft-pick .pick-who b")).trim()
+at("the card at the top of the board says what to do about having no team")
+const blocked = await page.waitForSelector(".decide.decide-blocked", { timeout: 30000 })
+const blockedText = (await blocked.textContent()).replace(/\s+/g, " ").trim()
+/**
+ * Rewritten from a claim this suite never made, because the surface it replaces is
+ * one this suite DID walk: the draft page was the answer to "this browser does not
+ * know who is on your team". It is gone, so the blocked state of `Decide` is the
+ * only thing standing in that place, and the journey asserts it is an instruction
+ * rather than an essay.
+ *
+ * The old blocked state was four paragraphs and about a hundred and ten words, most
+ * of it about CORS: that availability would be estimated, that Yahoo sends no
+ * headers a browser is allowed to read, and how to run a command line — to a reader
+ * who had not yet said who was on his team. None of it changed his next tap. The
+ * word count is asserted, not just the presence of the button, because "shorter"
+ * was the whole change and a paragraph can grow back one sentence at a time.
+ */
+t("the blocked card is one instruction, not a lecture about CORS",
+	blockedText.split(/\s+/).length < 50 && !/CORS|access-control|npx|command/i.test(blockedText),
+	`${blockedText.split(/\s+/).length} words: ${blockedText}`)
+t("it names the one action, and what it costs",
+	/Add your players/.test(blockedText) && /minute/.test(blockedText) && /this browser/.test(blockedText),
+	blockedText)
+t("and the action is a button, not a sentence telling him to go and find one",
+	await page.locator(".decide-blocked button.decide-cta").count() === 1)
 
-// "Gone" is somebody else's pick: off the board, and NOT onto your team.
-at("marking a player gone leaves a different recommendation behind")
-await page.click(".draft-pick .pick-acts button.ghost")
-await page.waitForFunction(
-	name => document.querySelector(".draft-pick .pick-who b")?.textContent.trim() !== name,
-	firstPick, { timeout: 15000 }
-)
-const secondPick = (await page.textContent(".draft-pick .pick-who b")).trim()
-t("marking a player taken changes who you are told to take next",
-	secondPick !== firstPick, `${firstPick} → ${secondPick}`)
-
-// "I took him" is both: off the board AND mine.
-at("claiming a player is counted as yours as well as gone")
-await page.click(".draft-pick .pick-acts button.primary")
-await page.waitForFunction(() => /·\s*1 yours/.test(document.querySelector(".draft-gone h3")?.textContent ?? ""),
-	{ timeout: 15000 })
-const tally = (await page.textContent(".draft-gone h3")).trim()
-t("the draft counts both marks and separates them", /^2 off the board · 1 yours$/.test(tally), tally)
-const drafted = await page.$$eval(".draft-mine .draft-picks .chip", n => n.map(e => e.textContent))
-t("the player you claimed is on what you have drafted",
-	drafted.some(c => c.includes(secondPick)), drafted.join(" | "))
-t("the player somebody else took is not",
-	!drafted.some(c => c.includes(firstPick)), drafted.join(" | "))
-
-// The two stores are separate on purpose — who is gone, and who is yours — so
-// the claim has to land in both and the strike in only one.
-const stored = await page.evaluate(() => ({
-	draft: JSON.parse(localStorage.getItem("beanemachine:draft") ?? "{}"),
-	roster: JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}")
-}))
-const leagueKey = Object.keys(stored.draft)[0]
-t("both marks are off the board, and only the claim is on the team",
-	stored.draft[leagueKey]?.length === 2 && stored.roster[leagueKey]?.length === 1,
-	JSON.stringify(stored))
-
-// back to the board, which must be unmoved by any of it
-at("the board comes back after the draft")
-await tab("Recommendations")
-await page.waitForSelector(".board-row", { timeout: 30000 })
-t("the board is still the board after a detour through the draft",
-	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
-	`${await ranked()} vs ${fortnightCount}`)
-
-// THE integration point: the draft wrote a roster, and this page is the one that
-// prices it. Nothing translates between them, so a drift in either key shows up
-// here as a team that is empty or as an id nobody can resolve.
-at("the trade page opens on the team the draft wrote")
-await tab(/trade/i)
+// THE hand-off. A card that says "add your players" and leaves the reader to find
+// the tab is a card that has told him to go away; the button has to land him on the
+// surface that takes them.
+at("the card's own button lands on the surface that takes a roster")
+await page.click(".decide-cta")
 await page.waitForSelector(".trade-team", { timeout: 30000 })
+t("the card's button opens My team itself", (await current()) === "My team & trades", await current())
+t("and the roster reader is on it",
+	(await page.$$("[data-ctl=paste-roster]")).length === 1)
+
+/**
+ * The paste, which is the route that always works.
+ *
+ * Not the platform read: Yahoo answers no browser at all and answers a server when
+ * it feels like it, and on 2026-09-09 it went 150 free agents → 25 → 0 → "Request
+ * denied" while the page went on offering the button. A paste cannot be revoked.
+ * test/paste.mjs owns what `playersInText` understands and test/trade-ui.mjs owns
+ * the control; this suite uses it for the one thing neither can see, which is what
+ * the SEATS it carries do on another tab.
+ *
+ * The men are taken off the board itself rather than written here, so the roster is
+ * real players from the committed capture and the seat beside each name is one this
+ * league actually has — and so the journey cannot drift out of sync with a recapture.
+ */
+at("a pasted roster page is read into this browser")
+await tab("Recommendations")
+await arrive()
+const mine = await page.$$eval(".board-row", r => r.slice(0, 14).map(row => ({
+	name: row.querySelector(".who b")?.textContent.trim(),
+	slot: row.querySelector(".who .code")?.textContent.trim()
+})))
+await tab(/trade/i)
+await page.waitForSelector("[data-ctl=paste-roster]", { timeout: 30000 })
+await page.fill("[data-ctl=paste-roster]",
+	`Fantasy Baseball My Team\nPos\tPlayer\tAction\n` +
+		mine.map(m => `${m.slot}\t${m.name} - ${m.slot}\tAdd/Drop`).join("\n"))
+await page.click(".paste-roster button")
+await page.waitForSelector(".paste-note", { timeout: 15000 })
+const pasteNote = (await page.textContent(".paste-note")).trim()
+t("the paste is read, and says how many men came with a seat",
+	new RegExp(`Found ${mine.length} players, ${mine.length} with the seat`).test(pasteNote), pasteNote)
 const team = await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()))
-t("the player claimed in the draft is on the team the trade page prices",
-	team.length === 1 && team[0] === secondPick, `${team.join(", ")} vs ${secondPick}`)
-t("the player someone else drafted never reached your team",
-	!team.includes(firstPick), team.join(", "))
+t("every man pasted is on the team this page prices",
+	team.length === mine.length && mine.every(m => team.includes(m.name)),
+	`${team.length} of ${mine.length}: ${team.join(", ")}`)
 t("no id crossed over that this page cannot resolve",
 	(await page.$$(".trade-unresolved li")).length === 0,
 	(await page.$$eval(".trade-unresolved li", n => n.map(e => e.textContent))).join(" | "))
-clean("after the draft-to-team hand-off")
 
-// --- 4. a trade, priced ------------------------------------------------------
+/**
+ * The two stores are separate on purpose and this is the one place that can tell.
+ *
+ * It used to read `beanemachine:draft` and `beanemachine:roster` and assert that a
+ * "gone" mark landed in the first and a claim in both — the draft store no longer
+ * exists. The pair that matters now is roster (WHO is mine, ids only) and lineup
+ * (WHICH SEAT each man was read in, with the time of the read). They are written by
+ * one action, they are read by different surfaces, and a drift in either key shows
+ * up on the next tab as an empty team or a diff against nothing.
+ */
+const stored = await page.evaluate(() => ({
+	roster: JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}"),
+	lineup: JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "{}")
+}))
+const leagueKey = Object.keys(stored.roster)[0]
+t("the paste wrote both stores under one league key — the ids, and the seats",
+	stored.roster[leagueKey]?.length === mine.length &&
+		stored.lineup[leagueKey]?.spots?.length === mine.length &&
+		typeof stored.lineup[leagueKey]?.at === "string",
+	JSON.stringify({ roster: stored.roster[leagueKey]?.length, lineup: stored.lineup[leagueKey]?.spots?.length }))
 
-at("a second player can be added to the team and priced")
+// back to the board, which must be unmoved by any of it
+at("the board comes back after the roster is entered")
+await tab("Recommendations")
+await arrive()
+t("the board is still the board after a detour through My team",
+	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
+	`${await ranked()} vs ${fortnightCount}`)
+
+// ── and now the payoff: the seats entered on one tab are tonight's instructions
+at("the card stops being blocked once it has a team")
+await page.waitForSelector(".decide:not(.decide-blocked)", { timeout: 30000 })
+await page.waitForSelector(".decide-read", { timeout: 30000 })
+const decide = () => page.$eval(".decide", e => e.textContent.replace(/\s+/g, " "))
+t("the card the journey started blocked on now plans a lineup",
+	(await page.$$(".decide.decide-blocked")).length === 0 && /What should I do\?/.test(await decide()))
+
+/**
+ * NEW, and it is the claim that could not be made before at all: the reasons on this
+ * card are facts about TONIGHT, read live from MLB, not artifacts of a capture.
+ *
+ * The committed snapshot is stamped 2026-09-08 and its slate ends there, so before
+ * `src/data/today.ts` existed this card believed clubs were idle that were playing.
+ * The game count in the heading can only come from the live read — a two-day-old
+ * capture cannot produce tonight's number — so it is the cheapest proof that the
+ * read happened and reached the render.
+ */
+const todayHead = (await page.textContent(".decide-head")).replace(/\s+/g, " ")
+const games = Number((todayHead.match(/(\d+) games today/) ?? [])[1])
+t("the card's own heading counts tonight's games, which only a live read knows",
+	Number.isFinite(games) && games >= 0 && /games today/.test(todayHead), todayHead)
+
+/**
+ * Grouped by REASON, one row per reason — not one row per man.
+ *
+ * Measured on a real 27-man roster on a five-game night: sixteen consecutive rows
+ * reading "Bench X — he is not projected to play today", identical but for the name,
+ * standing above the two moves that were the point of the card. Sixteen rows of one
+ * sentence is not sixteen decisions.
+ *
+ * The invariant is that no reason appears twice, which is what "grouped" means and
+ * what a regression to a row per man would break. Whether this particular night
+ * exercises the grouping — more men benched than reasons to bench them — is asserted
+ * SEPARATELY, so a night that happens to give every man his own reason fails a claim
+ * that says so instead of quietly making the one above vacuous.
+ */
+const benchGroups = await page.$$eval(".decide-bench-group", rows => rows.map(r => ({
+	why: r.querySelector(".decide-why")?.textContent.trim(),
+	men: [...r.querySelectorAll("b")].map(b => b.textContent.trim())
+})))
+t("some of the pasted seats are wrong for tonight, so there is a diff to group",
+	benchGroups.length > 0, `${benchGroups.length} bench rows`)
+t("every bench row is a different reason — one row per reason, never one per man",
+	new Set(benchGroups.map(g => g.why)).size === benchGroups.length,
+	benchGroups.map(g => g.why).join(" | "))
+t("and this night really does put several men behind one reason",
+	benchGroups.reduce((n, g) => n + g.men.length, 0) > benchGroups.length,
+	`${benchGroups.reduce((n, g) => n + g.men.length, 0)} men in ${benchGroups.length} rows`)
+/**
+ * The reasons themselves. "he is not projected to play today" was printed about
+ * Roman Anthony on 2026-09-08 — a man rateable at 4.14 points with Boston playing,
+ * who had simply been outranked for the last outfield seat. A ranking reported as a
+ * fact about the schedule is a claim the code cannot support, and a reader who checks
+ * it finds the app wrong about something he can see on his phone. So the blanket
+ * sentence is gone, and at least one row has to be carrying a fact only the live read
+ * can know.
+ */
+const LIVE_FACTS = ["no game today", "not in today's lineup"]
+t("no row dresses a ranking up as a fact about the schedule",
+	!benchGroups.some(g => /not projected to play today/.test(g.why)),
+	benchGroups.map(g => g.why).join(" | "))
+t("at least one reason is tonight's card or tonight's lineup, not the capture",
+	benchGroups.some(g => LIVE_FACTS.includes(g.why)), benchGroups.map(g => g.why).join(" | "))
+
+/**
+ * The baseline line, and it is the one sentence on the card that changes what the
+ * reader should do with everything above it.
+ *
+ * It used to read "Compared against your seats as read N hours ago. Change your
+ * lineup in Yahoo since then and this list is against the old one." — the second
+ * sentence restating the first for anyone who had already understood it. One clause
+ * now. The age still has to be IN it: a diff against a stale baseline that does not
+ * say it is stale is silently authoritative, which is the failure this line exists
+ * to prevent.
+ *
+ * And it is a journey claim, not a Decide claim, because the read it dates happened
+ * on the OTHER TAB: the `at` stamp this sentence renders was written by the paste on
+ * My team a moment ago, so "in the last hour" is the two surfaces agreeing.
+ */
+const readLine = (await page.textContent(".decide-read")).replace(/\s+/g, " ").trim()
+t("the diff dates itself against the read that happened on the other tab",
+	/^vs your seats as read (in the last hour|\d+ hours? ago|\d+ days? ago)$/.test(readLine), readLine)
+t("and it no longer repeats itself about changing your lineup in Yahoo",
+	!/Change your lineup/i.test(readLine), readLine)
+
+/**
+ * The fine print that used to be body copy.
+ *
+ * Four sentences sat under the moves — what the gain is denominated in, that every
+ * man leaving is under the keep floor, that none is worth holding for the season,
+ * and how the ownership cut was drawn. All true; none of it changes a tap. It is one
+ * clause plus a disclosure now, and the disclosure is asserted to be CLOSED, because
+ * a `<details>` that ships open is the paragraph again with a triangle on it.
+ */
+/**
+ * Two of these, and which ones are on screen depends on the night — the moves
+ * paragraph only renders where a move cleared the bar, and the innings line only
+ * where the league sets an innings floor. So the assertion is over whichever
+ * disclosures DID render: every one is shut, and each is one of the two known
+ * titles rather than a new paragraph that has grown a triangle.
+ *
+ * Found by title rather than by position: taking `.first()` here read "why not the
+ * whole week" on a night where no move cleared the bar, and then reported the
+ * innings caveat as if it were the moves fine print.
+ */
+const fines = await page.$$eval(".decide .decide-fine", ds => ds.map(d => ({
+	title: d.querySelector("summary")?.textContent.trim(),
+	open: d.open,
+	words: d.textContent.trim().split(/\s+/).length
+})))
+const FINE_TITLES = ["what these numbers are", "why not the whole week"]
+t("the card's fine print is in disclosures, all of them shut",
+	fines.length > 0 && fines.every(f => FINE_TITLES.includes(f.title) && !f.open),
+	fines.map(f => `${f.title}${f.open ? " (OPEN)" : ""}`).join(" | ") || "no disclosure rendered at all")
+// The body it came out of is the thing being protected: four sentences of it under the
+// moves, and a four-sentence innings caveat. A disclosure is only a win while the
+// paragraph is inside it, so the card outside the folds is asserted to be short.
+const spoken = (await decide()).length
+const folded = fines.reduce((n, f) => n + f.words, 0)
+t("and the paragraphs really are inside them rather than beside them",
+	folded > 40 && spoken > 0, `${folded} words folded away, card is ${spoken} chars`)
+clean("after the roster hand-off, on the card that uses it")
+
+// --- 4. the third surface, and what is the same under all of them --------------
+
+at("League setup opens on the league the board was ranked in")
+await tab("League setup")
+await page.waitForSelector("input[aria-label='Teams in this league']", { timeout: 30000 })
+const teamCount = Number(await page.inputValue("input[aria-label='Teams in this league']"))
+// The board ranked something, and replacement level is teams x seats — so a board
+// with a ranking on it and a blank team count here would mean one of the two
+// surfaces is reading a different league than it claims to.
+t("the team count the board's replacement level needs is set, and on this tab",
+	Number.isFinite(teamCount) && teamCount >= 2, String(teamCount))
+
+/**
+ * NEW, and cross-surface by construction: the colophon renders under EVERY tab, so
+ * it is the one piece of the page no single-surface suite sees three times.
+ *
+ * It was four paragraphs and 277 words of backtest results — folds, Spearman rho,
+ * z-scores, and a line saying market edge is known broken — under each of them.
+ * Measured on the first screen a new visitor sees, it was 67% of the words on the
+ * page, and it had also drifted: it quoted "48 of 50 hitting folds" from a
+ * configuration this app no longer ships. One sentence now, with the results behind
+ * a link to docs/METHODOLOGY.md, which is where they can be kept true.
+ */
+const colophon = async () => ({
+	links: await page.$$eval(".colophon .links a", n => n.map(a => a.textContent.trim())),
+	note: (await page.textContent(".colophon .tiny-note")).replace(/\s+/g, " ").trim(),
+	methodology: (await page.$$eval(".colophon .links a", n => n.map(a => a.getAttribute("href")))).some(h =>
+		/METHODOLOGY\.md$/.test(h ?? ""))
+})
+const onLeague = await colophon()
+t("the footer is three links and one sentence, not a statistics essay",
+	onLeague.links.length === 3 && onLeague.note.split(/\s+/).length < 60 &&
+		!/Spearman|fold|z[- ]score|p-value/i.test(onLeague.note),
+	`${onLeague.links.length} links, ${onLeague.note.split(/\s+/).length} words: ${onLeague.note}`)
+t("the one sentence is the one a decision depends on — a bscore is not a forecast",
+	/ranking, not a forecast/i.test(onLeague.note), onLeague.note)
+t("and the results it no longer prints are linked rather than dropped",
+	onLeague.methodology, onLeague.links.join(" | "))
+
+at("the board comes back after League setup")
+await tab("Recommendations")
+await arrive()
+const onBoard = await colophon()
+t("nothing was edited, so the board is the board it was before League setup",
+	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
+	`${await ranked()} vs ${fortnightCount}`)
+t("and the same footer is under the board, rather than a second wording of it",
+	onBoard.note === onLeague.note, `${onBoard.note}\n  vs\n  ${onLeague.note}`)
+clean("across all three surfaces")
+
+// --- 5. a trade, priced ------------------------------------------------------
+
+at("a player can be added to the team by hand and priced")
+await tab(/trade/i)
+await page.waitForSelector(".trade-team", { timeout: 30000 })
 await page.fill("[data-ctl=own-search]", "a")
 await page.waitForSelector('.trade-results .trade-line button:text-is("Add")', { timeout: 15000 })
+const byHand = await page.$eval(".trade-results .trade-line .who b", e => e.textContent.trim())
 await page.locator('.trade-results .trade-line button:text-is("Add")').first().click()
-await page.waitForFunction(() => document.querySelectorAll(".trade-own").length === 2, { timeout: 15000 })
+await page.waitForFunction(
+	n => document.querySelectorAll(".trade-own").length === n,
+	mine.length + 1, { timeout: 15000 }
+)
+// `mine.length` came off the board and through a paste two surfaces ago; this is
+// still the same team, one man bigger.
+t("a man added by hand joins the pasted team rather than replacing it",
+	(await page.$$(".trade-own")).length === mine.length + 1,
+	`${(await page.$$(".trade-own")).length} vs ${mine.length + 1}`)
 const lineupTotal = num(await page.textContent(".lineup-total"))
-t("a two-man team produces a real lineup total", Number.isFinite(lineupTotal) && lineupTotal > 0, String(lineupTotal))
+t("the team produces a real lineup total", Number.isFinite(lineupTotal) && lineupTotal > 0, String(lineupTotal))
 
 /*
  * This league's trade window shut on 2026-08-06, so the deal form is retired behind
@@ -453,7 +751,7 @@ t("the verdict names the player arriving",
 	((await page.textContent(".verdict-why")) ?? "").includes(arriving.split(" ").pop()), arriving)
 clean("after pricing a trade")
 
-// --- 5. a reload, and what survives it ---------------------------------------
+// --- 6. a reload, and what survives it ---------------------------------------
 //
 // Everything above lives in this browser rather than on a server, so a reload is
 // the only thing that proves it was ever written. A half-built offer is the one
@@ -467,6 +765,46 @@ await arrive()
 t("a reload lands back on a working board", (await rows()).length > 50)
 t("and on the ranking it opened on", (await ranked()) === fortnightCount, `${await ranked()} vs ${fortnightCount}`)
 
+/**
+ * Rewritten from "the draft board survived the reload, and now counts the man added
+ * on the trade page". That assertion protected one property: a roster written on one
+ * surface is the SAME roster every other surface reads, with nothing translating
+ * between keys, and it still holds after the store is the only copy left.
+ *
+ * The draft tally is gone, so the card that plans tonight's lineup takes its place —
+ * and it carries the stronger half of the claim, because it reads BOTH stores. The
+ * seats it diffs against were written by a paste on My team before the reload, and
+ * the ids were written twice (paste, then one add by hand).
+ */
+at("the board's card still plans the lineup that was read before the reload")
+await page.waitForSelector(".decide:not(.decide-blocked)", { timeout: 30000 })
+await page.waitForSelector(".decide-read", { timeout: 30000 })
+t("the seats read on the other tab survived the reload, and are still dated",
+	/^vs your seats as read /.test((await page.textContent(".decide-read")).replace(/\s+/g, " ").trim()),
+	(await page.textContent(".decide-read")).replace(/\s+/g, " ").trim())
+/**
+ * And the honest edge of it, stated rather than assumed.
+ *
+ * The card accounts for exactly the seats that were READ — every starter it names
+ * plus every man it benches — and the man added by hand on My team is in the roster
+ * store but in nobody's seat, so he is not among them. That is the truthful answer
+ * rather than a bug in this assertion: no seat was ever read for him and inventing
+ * one would be the card claiming a baseline it does not have. It is asserted so that
+ * a future change which DOES seat him has to come past this line and say so.
+ */
+const seated = await page.$$eval(".decide", cards => {
+	const card = cards[0]
+	const starters = [...card.querySelectorAll(".decide-today li:not(.decide-empty) b")].map(b => b.textContent.trim())
+	const benched = [...card.querySelectorAll(".decide-bench-group b")].map(b => b.textContent.trim())
+	const moved = [...card.querySelectorAll(".decide-changes li:not(.decide-bench-group) b")].map(b => b.textContent.trim())
+	return [...new Set([...starters, ...benched, ...moved])]
+})
+t("the card accounts for every seat the paste carried, and invents none",
+	seated.length === mine.length && mine.every(m => seated.includes(m.name)),
+	`${seated.length} of ${mine.length}: ${mine.filter(m => !seated.includes(m.name)).map(m => m.name).join(", ")}`)
+t("the man added by hand has no seat, so the card does not pretend to know one",
+	!seated.includes(byHand), `${byHand} appears in the lineup plan`)
+
 at("the trade page still opens after the reload")
 await tab(/trade/i)
 await page.waitForSelector(".trade-team", { timeout: 30000 })
@@ -474,22 +812,12 @@ t("the team survived the reload",
 	(await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()).sort())).join() === teamBefore.join(),
 	teamBefore.join(", "))
 t("the half-built offer did not", (await page.$$(".trade-verdict")).length === 0)
-
-at("the draft page still opens after the reload")
-await tab("Draft")
-await page.waitForSelector(".draft-gone h3", { timeout: 30000 })
-const tallyAfter = (await page.textContent(".draft-gone h3")).trim()
-t("the draft board survived the reload, and now counts the man added on the trade page",
-	/^2 off the board · 2 yours$/.test(tallyAfter), tallyAfter)
-const goneChips = await page.$$eval(".draft-gone .draft-picks .chip-btn", n => n.map(e => e.textContent.replace(/\s*×$/, "").trim()))
-t("both players marked in the draft are still off the board",
-	goneChips.includes(firstPick) && goneChips.includes(secondPick), goneChips.join(", "))
-t("nothing marked has become an id the capture cannot resolve",
-	(await page.$$(".draft-unresolved li")).length === 0,
-	(await page.$$eval(".draft-unresolved li", n => n.map(e => e.textContent))).join(" | "))
+t("nothing stored has become an id the capture cannot resolve",
+	(await page.$$(".trade-unresolved li")).length === 0,
+	(await page.$$eval(".trade-unresolved li", n => n.map(e => e.textContent))).join(" | "))
 clean("after the reload")
 
-// --- 6. leave the browser as it was found ------------------------------------
+// --- 7. leave the browser as it was found ------------------------------------
 
 await page.evaluate(keys => keys.forEach(k => localStorage.removeItem(k)), KEYS)
 const left = await page.evaluate(keys => keys.filter(k => localStorage.getItem(k) !== null), KEYS)

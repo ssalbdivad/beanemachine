@@ -10,6 +10,7 @@ import { pool as poolStore } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
+import { slotsFor } from "../engine/bscore.ts"
 import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
 import "./trade.css"
 import { tradesClosed } from "./panels.tsx"
@@ -312,9 +313,12 @@ export const Trade = ({ snapshot, league, leagueKey, error, onOpenBoard }: Trade
 				yahooId: String(f.id),
 				name: f.name,
 				team: byId.get(f.id)?.team ?? null,
-				positions:
-					snapshot.eligibility?.[String(f.id)] ??
-					(byId.get(f.id)?.position ? [byId.get(f.id)!.position!] : [])
+				// Slot names, not MLB positions — `legalSlotsFor` compares these against the
+				// league's own `slot_accepts` lists, and "CF" is not a seat anybody rosters.
+				positions: (() => {
+					const p = byId.get(f.id)
+					return p ? slotsFor(p, snapshot.eligibility?.[String(f.id)]) : []
+				})()
 			})),
 			positionsRead: [],
 			note: `Pasted from your league's own free-agent page: ${found.players.length} players.`

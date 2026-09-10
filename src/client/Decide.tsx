@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
-import { ownershipCut, rateAll } from "../engine/bscore.ts"
+import { ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
 import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
@@ -134,8 +134,24 @@ export const Decide = ({
 			if (!p) return []
 			return [{
 				slot: "BN",
+				/**
+				 * SLOTS, not positions.
+				 *
+				 * `legalSlotsFor` in src/auto/plan.ts asks whether any of these appears in
+				 * the league's `slot_accepts` list for a seat, and those lists are written
+				 * in the platform's slot names — "OF", "SP", "RP". MLB's own position is
+				 * not one of them: a centre fielder is "CF" and a pitcher is "P", so
+				 * neither ever matched an OF or an SP seat.
+				 *
+				 * The league's own eligibility grid covers 328 of the capture's 1,446
+				 * players, so more than three quarters of every hand-entered roster fell
+				 * through to that raw position — and the daily card, the surface this app
+				 * is named for, seated one man out of eighteen and blamed a projection
+				 * that existed. `slotsFor` is the mapping the engine already uses to build
+				 * `Rated.slots`; calling it here is what makes the two agree.
+				 */
 				name: p.name,
-				positions: elig[String(p.id)] ?? (p.position ? [p.position] : []),
+				positions: slotsFor(p, elig[String(p.id)]),
 				team: p.team ?? null
 			}]
 		})
@@ -213,7 +229,9 @@ export const Decide = ({
 			const pct = ownership.get(p.id)
 			if (pct === undefined || pct > cut.cut) return []
 			if (mine.has(normalizeName(p.name))) return []
-			const positions = elig[String(p.id)] ?? (p.position ? [p.position] : [])
+			// Same mapping as the roster above, and for the same reason: these go to
+			// `legalSlotsFor`, which compares against the league's slot names.
+			const positions = slotsFor(p, elig[String(p.id)])
 			return positions.length ? [{ name: p.name, positions }] : []
 		})
 		return players.length ? { players, cut } : null

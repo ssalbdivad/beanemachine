@@ -648,7 +648,7 @@ export const PresetNote = ({
  */
 export const IMPORT_COMMAND = "npx --yes github:ssalbdivad/beanemachine <your league URL>"
 
-export type View = "board" | "league" | "trade"
+export type View = "board" | "wire" | "league" | "trade"
 
 /**
  * The four tabs, in DOM order — which is deliberately not the order a season is
@@ -690,69 +690,27 @@ export const tradesClosed = (
 export const VIEWS: { id: View; label: string; purpose: string; season: number }[] = [
 	{
 		id: "board",
-		label: "Recommendations",
-		season: 4,
+		label: "Today",
+		season: 3,
 		purpose:
-			"The wire ranked in this league's scoring, over the next week, the standing fortnight, or the rest of the season. The tab you come back to."
+			"Who to start before first pitch, which of your seats scores nothing, and the one move worth making."
 	},
 	{
-		id: "league",
-		label: "League setup",
-		season: 1,
+		id: "wire",
+		label: "Wire",
+		season: 4,
 		purpose:
-			"Scoring, roster slots and team count — read off the platform or entered by hand. Everything the other tabs say is priced in these."
+			"Everyone you can actually get, ranked in this league's scoring, over the window you pick."
 	},
 	{
 		id: "trade",
-		label: "My team & trades",
-		season: 3,
-		purpose: "Your roster and starting lineup in points, and what a proposed deal does to it."
+		label: "Setup",
+		season: 1,
+		purpose:
+			"Your league's scoring, slots and team count, and the men on your team. Everything the other two screens say is priced in these."
 	}
 ]
 
-/**
- * The orientation a beginner needs before the first number, and nothing more.
- *
- * The definitions of every column already exist in-page: `COLUMN_HELP` in
- * `Board.tsx` writes them into each header's `title` and into the "How this
- * ranking was built" disclosure under the table. What did not exist was
- * anything at the top saying what kind of thing the list IS, so the first
- * screen was a ranked table of numbers with no unit stated anywhere on it.
- *
- * This is therefore a pointer, not a second glossary — two copies of the same
- * definitions drift, and this file has already been burned by that (see the
- * note on `VIEWS`). It says what the ordering means and where the full
- * definitions are; the disclosure under the table keeps owning them.
- */
-export const BoardPrimer = ({ mode }: { mode?: string }) => {
-	/**
-	 * Not on the streaming list, for two reasons and the second is the serious one.
-	 *
-	 * It costs 78px above an answer that already starts 1,286px down the page. And
-	 * it describes the WRONG NUMBER there: streaming ranks by projected points over
-	 * the window, not by bscore, so a reader who took this at its word would be
-	 * reading the column beside the one the list is ordered by. A primer that is
-	 * inaccurate on the view it appears above is worse than no primer.
-	 */
-	/**
-	 * "minus the best free agent at the same slot" is what this said, and it is not
-	 * what the engine does. The bar is drawn from the men you could actually get —
-	 * your league's own wire where it has been read, an ownership cut otherwise —
-	 * but at the (teams x seats)-th of them, not the first. The best free agent is a
-	 * higher bar than replacement level and always was; that sentence described a
-	 * number nothing computed.
-	 */
-	if (mode === "stream") return null
-	return (
-		<p className="primer">
-			Every row is a player, ranked on <b>points above a free replacement</b>: what this
-			league scores with him in a slot, minus what a man you could still pick up at that
-			slot is worth, over the window you pick below. That is a <b>bscore</b>;{" "}
-			<b>uscore</b> discounts it by how widely he is already rostered. Full definitions
-			are on each column header, and under the table.
-		</p>
-	)
-}
 
 /**
  * How a visitor gets from this page to a board ranked in THEIR league.

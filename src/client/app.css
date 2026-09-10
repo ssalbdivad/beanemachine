@@ -1011,3 +1011,8 @@ kbd{
   .onboard-steps{gap:var(--sp-4)}
   .onboard-step{gap:var(--sp-2)}
 }
+
+/* The way from Today to Wire. A link, not a tab: the two screens are one after the
+   other in the order a decision is made, and the reader who needs the second one
+   has just finished the first. */
+.next-screen{grid-column:1/-1;margin:0;display:flex;justify-content:flex-end}

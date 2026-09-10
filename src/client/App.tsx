@@ -78,9 +78,10 @@ type StoreState = "reading" | "read" | "unreadable"
 
 /** The league picker is one control doing four jobs, so it says which one. */
 const LEAGUE_LABEL: Record<View, string> = {
-	board: "Scoring these picks against",
+	board: "Deciding for",
+	wire: "Scoring these picks against",
 	league: "League being edited",
-	trade: "Team being managed",
+	trade: "League and team"
 }
 
 export const App = () => {
@@ -302,7 +303,7 @@ export const App = () => {
 							`preset — check its values in League setup`
 					)
 				} else {
-					setView("league")
+					setView("trade")
 					show(`Created ${k} — every field is blank until you fill it in`)
 				}
 			}),
@@ -378,7 +379,10 @@ export const App = () => {
 		// unexplained set of the same buttons — New, Remove, Download, Load file and
 		// a URL field — to the one reader who has no idea which of them is for them.
 		!onboarding &&
-		(view === "league" ||
+		// "league" was its own tab and is now the second half of Setup, so the league
+		// management chrome — New, Remove, Download, Load file, import by URL — belongs
+		// on the screen where a league is set up.
+		(view === "trade" ||
 		// nothing to work with yet: importing or creating one is the only move left
 		(store === "read" && !Object.keys(config?.leagues ?? {}).length) ||
 			// and the unreadable-store card below points at Load file as the way out
@@ -468,15 +472,11 @@ export const App = () => {
 						{v.label}
 					</button>
 				))}
-				<a
-					className="views-link"
-					href="https://github.com/ssalbdivad/beanemachine/blob/main/docs/GUIDE.md"
-					target="_blank"
-					rel="noreferrer"
-					title="How to read the board, and how it was validated"
-				>
-					How to read this →
-				</a>
+				{/* "How to read this →" used to sit here. It is the same link the colophon
+				    already carries, and on a 390px phone it pushed the three tabs into a
+				    horizontal scroll and cut itself off mid-word. A duplicate link that
+				    breaks the navigation is worse than no link, and the navigation is the
+				    one thing on the page that has to fit. */}
 			</nav>
 
 			<Toolbar
@@ -522,7 +522,7 @@ export const App = () => {
 			<Status
 				league={league ?? null}
 				store={store}
-				detail={view === "league"}
+				detail={view === "trade"}
 				snapshot={snapshot}
 				snapshotError={snapshotError}
 				wire={wire}
@@ -582,7 +582,7 @@ export const App = () => {
 					onLoadFile={() => openPicker.current?.()}
 					onOpenSetup={() => {
 						setOnboarding(false)
-						setView("league")
+						setView("trade")
 					}}
 					onDone={() => {
 						setOnboarding(false)
@@ -602,7 +602,7 @@ export const App = () => {
 					preset={preset?.label ?? null}
 					onUsePreset={preset ? () => void create(preset.key) : undefined}
 					onLoadFile={() => openPicker.current?.()}
-					onOpenSetup={view === "league" ? undefined : () => setView("league")}
+					onOpenSetup={view === "trade" ? undefined : () => setView("trade")}
 				/>
 			)}
 
@@ -612,7 +612,7 @@ export const App = () => {
 			{league && isPreset(league) && key && (
 				<PresetNote
 					league={league}
-					onOpenSetup={view === "league" ? undefined : () => setView("league")}
+					onOpenSetup={view === "trade" ? undefined : () => setView("trade")}
 					onChecked={() =>
 						void run(async () => {
 							if (
@@ -649,7 +649,7 @@ export const App = () => {
 			)}
 
 			{/* Nothing below can say anything until a league exists — the board is
-			    empty, the draft is empty, and a trade has no prices — so on a first
+			    empty and a trade has no prices — so on a first
 			    visit the setup above is the page rather than a card on top of four
 			    empty ones. Keyed on the LEAGUE rather than on whether the setup is
 			    open, because those come apart: the setup stays open while a
@@ -657,43 +657,85 @@ export const App = () => {
 			    a board worth seeing underneath it. */}
 			{!league ? null
 			: view === "board" ?
-				<>
-					{/* The answer first, the ranking under it. `Decide` names both sides of
-					    every move and can be carried out without reading anything else; the
-					    board below it is for looking things up. A reader who wants only to be
-					    told what to do should never have to scroll to be told. */}
-					<div className="grid">
-						<Decide
-							snapshot={snapshot}
-							league={league ?? null}
-							leagueKey={key}
-							error={snapshotError}
-							onOpenTeam={() => setView("trade")}
-						/>
-					</div>
-					{/* The primer moved into Board, which is the only place that knows which
-					    ranking is on screen — it defines bscore, and the streaming list is
-					    ordered by projected points. */}
-					<div className="grid">
-						<Board
-							key={wireKey}
-							snapshot={snapshot}
-							league={league ?? null}
-							error={snapshotError}
-						/>
-					</div>
-				</>
-			: view === "trade" ?
+				/*
+				  TODAY is its own screen now, and the ranked board is its own screen.
+				  
+				  They used to share one tab called "Recommendations": the decision card,
+				  then a thousand-row table under it. Measured at phone width, that put the
+				  first ranked row 1,600px down and the answer and the lookup in a single
+				  8,400px scroll — two questions asked at different moments (before first
+				  pitch; when you have a move to spend) stacked on one another because they
+				  happen to share an engine. A reader who came to be told what to do had to
+				  scroll past nothing; a reader who came to look somebody up had to scroll
+				  past everything.
+				  
+				  One screen, one question. Today is the decision. Wire is the lookup, and
+				  it is one tap away with a link at the foot of this one.
+				*/
 				<div className="grid">
-					<Trade
-						key={wireKey}
+					<Decide
 						snapshot={snapshot}
 						league={league ?? null}
 						leagueKey={key}
 						error={snapshotError}
-						onOpenBoard={() => setView("board")}
+						onOpenTeam={() => setView("trade")}
+					/>
+					<p className="next-screen">
+						<button type="button" className="chip-btn" onClick={() => setView("wire")}>
+							Everyone you can get →
+						</button>
+					</p>
+				</div>
+			: view === "wire" ?
+				<div className="grid">
+					<Board
+						key={wireKey}
+						snapshot={snapshot}
+						league={league ?? null}
+						error={snapshotError}
 					/>
 				</div>
+			: view === "trade" ?
+				/*
+				  SETUP is one screen: your team, then your league.
+				  
+				  They were two tabs — "My team & trades" and "League setup" — out of four,
+				  and both are things one person does once a season from a laptop. Half the
+				  navigation was furniture, and the tab bar did not fit the phone the app is
+				  actually opened on. They are also the same job: everything the other two
+				  screens say is priced in the values below, and the men above are who those
+				  prices are about.
+				  
+				  Team first, because a league with no roster produces a board and no
+				  decision, and because the paste is the step people abandon.
+				*/
+				<>
+					<div className="grid">
+						<Trade
+							key={wireKey}
+							snapshot={snapshot}
+							league={league ?? null}
+							leagueKey={key}
+							error={snapshotError}
+							onOpenBoard={() => setView("board")}
+						/>
+					</div>
+					{league && key ?
+						<LeagueEditor
+							key={key}
+							leagueKey={key}
+							league={league}
+							snapshot={snapshot}
+							onSaved={next => {
+								adopt(next, key)
+								acknowledge()
+								show("Saved to this browser")
+							}}
+							onError={m => show(m, true)}
+							run={run}
+						/>
+					:	null}
+				</>
 			: league && key ?
 				<LeagueEditor
 					key={key}

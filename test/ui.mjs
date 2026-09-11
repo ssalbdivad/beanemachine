@@ -184,7 +184,18 @@ const toSetupBar = async pg => {
 // "Set up my league" and "Close" — so it is addressed by its place in the bar rather
 // than by text that is only ever half of what you are looking for.
 const DOCK_TOGGLE = ".dock-bar button"
+/** The other way in, and with a league the only one: pressing it is what puts the
+ *  dock on the page at all. See the exclusive-or assertion further down — the bar and
+ *  this button are one switch, and exactly one of them is ever on screen. */
+const TOOLBAR_SETUP = '.bar button:text-is("Set up a league")'
 const openDock = async pg => {
+  // With no league the bar is always there; with one it appears only after the
+  // toolbar's button is pressed, and vanishes again when the sheet is closed. So the
+  // helper takes whichever handle is on screen rather than assuming the bar.
+  if (!(await pg.locator(".dock-bar").count())) {
+    await pg.waitForSelector(TOOLBAR_SETUP)
+    await pg.click(TOOLBAR_SETUP)
+  }
   await pg.waitForSelector(DOCK_TOGGLE)
   // The button TOGGLES, so an open-it helper that clicks unconditionally closes the
   // sheet for any caller that already had it up — a silent wrong turn that would show
@@ -515,24 +526,29 @@ t("closing it takes the form off the page entirely, not merely out of sight",
   (await fp.locator(".dock-sheet").count()) === 0 &&
     (await fp.locator(".onboard").count()) === 0,
   `${await fp.locator(".dock-sheet").count()} sheets, ${await fp.locator(".onboard").count()} onboard cards`)
-// The bar has to OUTLIVE the sheet: it is the only thing left on screen that remembers
-// the setup is available, and a reader who put it away and found no way back would be
-// in exactly the state the toolbar button exists to fix. Its one line also has to stay
-// truthful about WHICH league pressing it would edit, because by here this browser
-// holds two and editing the wrong one silently is the failure the whole Setup screen
-// is careful about elsewhere.
-const dockSay = (await fp.textContent(".dock-say")).replace(/\s+/g, " ").trim()
-const activeName = await fp.evaluate(k => {
-  const c = JSON.parse(localStorage.getItem(k))
-  return c.leagues[c.active_league]?.meta?.league_name ?? c.active_league
-}, STORE)
-t("but leaves the one-line bar, saying which league pressing it would edit",
-  (await fp.locator(".dock-bar").count()) === 1 &&
-    (await fp.locator(DOCK_TOGGLE).textContent()) === "Set up my league" &&
-    dockSay.includes(activeName),
-  `"${dockSay}" vs ${activeName}`)
+/*
+ * With a league, closing the sheet takes the WHOLE dock away and gives the toolbar
+ * back, and that is a deliberate reversal of what this suite asserted first.
+ *
+ * The first version required the bar to outlive the sheet, because it was the only
+ * handle left: `manage` was gated on `!onboarding`, so pressing the toolbar's "Set up
+ * a league" removed the toolbar — that button included — and closing the sheet did
+ * not bring it back. Measured the hard way here: reaching for the button a second
+ * time timed out at 30s.
+ *
+ * The fix was not to keep the bar. A reader who already HAS a league and has just
+ * finished looking at the setup should have his ordinary chrome back, not a bar
+ * across the foot of every screen until he reloads — the bar is for somebody who has
+ * no league and needs the way in. So closing the sheet clears the onboarding state,
+ * the dock goes with it, and the route back is the SETUP TAB, which is one of three
+ * and is called Setup. What has to hold is that the toolbar really does return.
+ */
+t("but the toolbar comes back, so there is still a way in",
+  (await fp.locator(".dock-bar").count()) === 0 &&
+    (await fp.locator('.bar button:text-is("Set up a league")').count()) === 1,
+  `${await fp.locator(".dock-bar").count()} bars, ${await fp.locator('.bar button:text-is("Set up a league")').count()} buttons`)
 await openDock(fp)
-t("and the bar itself opens it again, with the form in it",
+t("and that button opens it again, with the form in it",
   (await fp.locator(".dock-sheet .onboard").count()) === 1,
   String(await fp.locator(".dock-sheet").count()))
 // Escape is the second way out, and it is bound on the document rather than on the
@@ -543,20 +559,31 @@ await fp.keyboard.press("Escape")
 await fp.waitForSelector(".dock-sheet", { state: "detached", timeout: 5000 })
 t("Escape closes it too, from focus anywhere, and still leaves the way back",
   (await fp.locator(".dock-sheet").count()) === 0 &&
-    (await fp.locator(".dock-bar").count()) === 1)
+    (await fp.locator('.bar button:text-is("Set up a league")').count()) === 1)
 /**
- * And the bar surviving is not a nicety, it is THE handle: `manage` in
- * src/client/App.tsx is gated on `!onboarding`, so the moment the toolbar's "Set up a
- * league" is pressed the toolbar itself — that button included — leaves the page, and
- * closing the sheet does not bring it back (`onboarding` stays true; only finishing the
- * setup clears it). Measured here the hard way: reaching for the toolbar button a second
- * time after an Escape timed out at 30s. So a dock that closed without leaving its bar
- * would strand a reader with no route to the setup at all, which is the bug the toolbar
- * button was itself added to fix.
+ * The dock and the toolbar are one switch, never two: they must never both be
+ * offering the way in, and there must never be neither.
+ *
+ * That is the property worth pinning, because it is easy to break in either
+ * direction — `manage` is gated on whether the dock is up, and the dock is gated on
+ * whether the reader has a league or has asked for the setup, so a change to either
+ * gate can leave a reader with two ways in or none. Asserted as an exclusive-or on
+ * the two handles rather than on one of them.
  */
-t("and that bar is the only handle left, because asking for the setup hid the toolbar",
-  (await fp.locator('.bar button:text-is("Set up a league")').count()) === 0,
-  String(await fp.locator('.bar button:text-is("Set up a league")').count()))
+{
+  const handles = async () => ({
+    bar: await fp.locator(".dock-bar").count(),
+    toolbar: await fp.locator('.bar button:text-is("Set up a league")').count()
+  })
+  const shut = await handles()
+  t("with the sheet shut there is exactly one way back in, and it is the toolbar",
+    shut.bar === 0 && shut.toolbar === 1, JSON.stringify(shut))
+  await openDock(fp)
+  const open = await handles()
+  t("and with it open the toolbar is gone, so the two never both offer it",
+    open.bar === 1 && open.toolbar === 0, JSON.stringify(open))
+  await closeDock(fp)
+}
 
 // Back in for the route assertions below, through the only door there now is.
 await openDock(fp)

@@ -761,7 +761,21 @@ export const App = () => {
 			{docked && (
 				<Dock
 					open={setupOpen}
-					onToggle={setSetupOpen}
+					/*
+					 * Closing the sheet when a league EXISTS also ends the onboarding state, and
+					 * the two are not the same switch by accident.
+					 *
+					 * `onboarding` is what puts the dock on the page and takes the management
+					 * toolbar off it — they must never both offer the way in. So a reader who
+					 * pressed "Set up a league" in that toolbar, looked at the sheet and closed
+					 * it again used to be left with neither: the dock closed, `onboarding` still
+					 * true, and the row holding the button he had just pressed gone. With no
+					 * league there is nothing to go back to, so the dock stays.
+					 */
+					onToggle={next => {
+						setSetupOpen(next)
+						if (!next && league) setOnboarding(false)
+					}}
 					summary={
 						league ?
 							<>

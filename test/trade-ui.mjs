@@ -693,16 +693,26 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 				))[0] === SCREEN.setup,
 			`${(await page.$$(".trade-team")).length} team panels`)
 
-		// Escape is the documented dismissal (Dock.tsx binds it on the document so it
-		// works wherever focus is). The BAR is meant to survive it as the way back in —
-		// closing the sheet must not strand a reader who meant to reopen it.
+		/*
+		 * Escape is the documented dismissal (Dock.tsx binds it on the document so it
+		 * works wherever focus is), and with a league it takes the WHOLE dock away.
+		 *
+		 * This asserted that the bar survives, on the reasoning that it was the only
+		 * handle left — which was true and was the bug rather than the design. A reader
+		 * who already HAS a league and has just looked at the setup should get his
+		 * ordinary chrome back, not a bar across the foot of every screen until he
+		 * reloads; the bar is for somebody with no league who needs the way in. So
+		 * closing clears the onboarding state and the toolbar's own button returns,
+		 * which is what must not be stranded.
+		 */
 		await page.keyboard.press("Escape")
 		await page.waitForSelector(".dock-sheet", { state: "detached", timeout: 10000 }).catch(() => {})
-		t("Escape puts the setup away and leaves the bar as the way back",
+		t("Escape puts the setup away and gives the toolbar back as the way in",
 			(await page.$$(".dock-sheet")).length === 0 &&
 				(await page.$$(".onboard")).length === 0 &&
-				(await page.$$(".dock-bar")).length === 1,
-			`${(await page.$$(".dock-sheet")).length} sheets, ${(await page.$$(".dock-bar")).length} bars`)
+				(await page.$$(".dock-bar")).length === 0 &&
+				(await page.$$('.bar button:text-is("Set up a league")')).length === 1,
+			`${(await page.$$(".dock-sheet")).length} sheets, ${(await page.$$(".dock-bar")).length} bars, ${(await page.$$('.bar button:text-is("Set up a league")')).length} buttons`)
 		t("no page errors from opening and closing the setup", oops.length === 0, oops.join(" | "))
 	}
 	await page.close()

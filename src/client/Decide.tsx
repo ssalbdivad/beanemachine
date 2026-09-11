@@ -1334,7 +1334,12 @@ export const Decide = ({
 						{rules.floor !== null && rules.projected !== null && (
 							<li>
 								<span className="decide-note">·</span>
-								<span>
+								{/* A <div>, not a <span>, because it holds a <details>. React only warns
+								    about <details> inside <p>, so this one passed quietly — but <span> is
+								    phrasing content and cannot legally contain flow content either, and
+								    the rule is about what the markup MEANS, not about which violations a
+								    framework happens to log. */}
+								<div>
 									Your league requires <b>{rules.floor} innings a week</b>. Your pitchers
 									project <b>{rules.projected} more</b> over what is left of this period
 									{rules.after !== null && rules.after !== rules.projected && (
@@ -1362,7 +1367,7 @@ export const Decide = ({
 										you will clear the floor. The turns themselves are MLB&rsquo;s
 										published probables, which are an announcement about a plan.
 									</details>
-								</span>
+								</div>
 							</li>
 						)}
 						{/* Men on his roster the model could not price at all. They are neither

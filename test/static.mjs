@@ -1141,9 +1141,21 @@ t("and the button that opened it now offers to close it, so it is not a one-way 
   await p.$eval(".dock-bar button", e => e.textContent))
 await p.keyboard.press("Escape")
 await p.waitForSelector(".onboard", { state: "detached", timeout: 10000 })
-t("and Escape closes the sheet without closing the way back to it",
+/*
+ * Escape takes the whole dock away here, and gives the toolbar back.
+ *
+ * This required the bar to survive, on the reasoning that it was the only handle
+ * left — which was true and was the bug. A reader who HAS a league and has just
+ * looked at the setup should get his ordinary chrome back rather than a bar across
+ * the foot of every screen until he reloads; the bar is for somebody with no league.
+ * The property that matters is unchanged and is now stated as what it always was: at
+ * any moment there is exactly one way in, and never none.
+ */
+t("and Escape closes the sheet, leaving exactly one way back — the toolbar",
   (await p.$$eval(".onboard", n => n.length)) === 0 &&
-    (await p.$$eval(".dock-bar", n => n.length)) === 1)
+    (await p.$$eval(".dock-bar", n => n.length)) === 0 &&
+    (await p.$$eval('.bar [data-ctl="onboard"]', n => n.length)) === 1,
+  `${await p.$$eval(".dock-bar", n => n.length)} bars, ${await p.$$eval('.bar [data-ctl="onboard"]', n => n.length)} buttons`)
 
 t("no page errors after all of that", errs.length===0, errs.join(" | "))
 

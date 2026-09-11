@@ -1021,7 +1021,7 @@ t("ownership for fewer players than the league can hold is refused",
  * named the two window lengths and was read NOWHERE — not even by `hydrate`; the
  * lengths are `RECENT_WINDOW_WEIGHTS`' own keys. `sources` is provenance for whoever
  * runs `refresh`, and now comes back beside the snapshot rather than on it, so the
- * developer keeps the print and no browser is sent 1,342 bytes to discard. The reader's
+ * developer keeps the print and no browser is sent 1,226 bytes to discard (464 gzipped). The reader's
  * version of that table is the source table in docs/METHODOLOGY.md.
  *
  * This asserts the shipped file, because a field can only be removed from the type

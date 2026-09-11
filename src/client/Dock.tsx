@@ -75,6 +75,32 @@ export const Dock = ({
 		} else if (wasOpen.current) bar.current?.focus()
 	}, [open])
 
+	/*
+	 * BACK STILL LEAVES THE SITE, and the attempt to fix it is recorded here because the
+	 * next person will reach for the same shape and it does not work.
+	 *
+	 * The defect is real and measured: nothing in this app pushes a history entry, so with
+	 * the sheet open and eighteen lines typed, Back goes to about:blank. On a phone Back is
+	 * how people dismiss a keyboard and undo a tap. HALF of the cost is fixed above — the
+	 * sheet stays mounted, so closing it by any route no longer discards what he typed —
+	 * and the navigation itself is not.
+	 *
+	 * The obvious shape is an effect keyed on `open` that pushes an entry on open and pops
+	 * it in its cleanup. It passes against the production build and fails against the dev
+	 * server, which is the tell: `StrictMode` double-invokes effects in development, so the
+	 * sequence is setup, CLEANUP, setup — and a cleanup that calls `history.back()` fires
+	 * `popstate`, which closes the sheet the moment it opens. An effect whose teardown
+	 * navigates cannot be idempotent, and idempotent is exactly what React requires.
+	 *
+	 * What would work is pushing in the GESTURE rather than in an effect: the bar button
+	 * and Escape both call something that pushes or pops, and a permanently-mounted
+	 * `popstate` listener only ever closes. That needs `App` to route its own "Set up a
+	 * league" button through the same pair — it currently sets `setupOpen` directly — and
+	 * it is the kind of change that wants a full suite run rather than the end of a
+	 * session.
+	 */
+
+
 	return (
 		<aside className={`dock${open ? " on" : ""}`} aria-label="Set up your league">
 			{/*
@@ -95,19 +121,31 @@ export const Dock = ({
 			  the Close button are the ways out, both of them already here.
 			*/}
 			{open && <div className="dock-scrim" aria-hidden="true" />}
-			{open && (
-				<div
-					className="dock-sheet"
-					id="dock-sheet"
-					ref={sheet}
-					tabIndex={-1}
-					role="dialog"
-					aria-modal="false"
-					aria-label="Set up your league"
-				>
-					{children}
-				</div>
-			)}
+			{/*
+			  MOUNTED WHILE CLOSED, and hidden — because unmounting threw away what he typed.
+			  
+			  This was `{open && <div …>}`, so closing the sheet unmounted everything inside
+			  it and React discarded the state with it. Measured: eighteen lines typed, press
+			  Close (or Escape, or now Back), reopen — an empty box. On a phone that is two
+			  minutes of typing gone to the gesture people use to dismiss a keyboard.
+			  
+			  `hidden` rather than `display:none` in CSS, because `hidden` also takes it out
+			  of the accessibility tree and out of the tab order, which is what a closed sheet
+			  owes a screen reader. The focus effect above keys on `open`, not on mounting, so
+			  it is unaffected.
+			*/}
+			<div
+				className="dock-sheet"
+				id="dock-sheet"
+				ref={sheet}
+				tabIndex={-1}
+				role="dialog"
+				aria-modal="false"
+				aria-label="Set up your league"
+				hidden={!open}
+			>
+				{children}
+			</div>
 			<div className="dock-bar">
 				<p className="dock-say">{summary}</p>
 				<button

@@ -51,15 +51,20 @@ state its own age.
 | Baseball Savant — Statcast | `/leaderboard/statcast?min=1&csv=true` | barrel rate, hard-hit rate, average exit velocity, sweet-spot rate | joined onto the above by `player_id` |
 | Yahoo | public league player pages | "% Ros", the market's price; the eligibility Yahoo prints beside each name; and (server only) who is still available in your league | 1,110 rows read, 880 of the pool priced; 411 multi-position lines, 328 matched into the pool |
 
-Every count in that last column is re-derivable from `data/snapshot.json` itself rather
-than only from the `sources` array the capture writes beside them: the pooled 651 + 795
+Every count in that last column is re-derivable from `data/snapshot.json` itself: the
+pooled 651 + 795
 by grouping `players` on `group`, 198 from `injuries`, 30 from `teamGamesPlayed`, 265
 games and the 35 carrying a published starter by walking `slate`, 654 / 851 and the
 rolling 468 / 535 by counting `underlying.hitting` / `underlying.pitching` and their
-`window` field, 880 from `ownership` and 328 from `eligibility`. The two that are **not**
-independently re-derivable are the 736 / 851 raw StatsAPI rows and the 1,110 Yahoo rows
-read with their 411 multi-position lines: those are counted before the filters that build
-the file, so `sources` is the only record of them.
+`window` field, 880 from `ownership` and 328 from `eligibility`.
+
+The two that are **not** re-derivable from the file are the 736 / 851 raw StatsAPI rows
+and the 1,110 Yahoo rows read with their 411 multi-position lines: those are counted
+before the filters that build it. A `sources` array used to carry them in the snapshot
+itself, and it was removed — eleven rows shipped to every browser that no screen renders,
+read only by a developer's `refresh` print, which still prints them. So both figures are
+**historical here**, recorded from the 2026-09-08 capture, and the way to check them today
+is to run the capture again and read what `refresh` prints.
 
 Everything above is **observed**. The snapshot stores no projections and no
 bscores, because those depend on a league's scoring and have to be recomputed

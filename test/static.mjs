@@ -71,7 +71,10 @@ await p.waitForSelector(".dock-bar", { timeout: 25000 })
  */
 const openDock = async (page = p) => {
   await page.waitForSelector(".dock-bar", { timeout: 25000 })
-  if (!(await page.$(".onboard")))
+  /* VISIBLE, not merely present. The sheet is mounted and `hidden` while closed now — it
+     had to be, or closing it discarded everything the reader had typed — so `page.$`
+     finds it either way and this helper stopped pressing the button that opens it. */
+  if (!(await page.locator(".onboard").isVisible()))
     await page.click(".dock-bar button")
   await page.waitForSelector(".onboard", { timeout: 25000 })
 }
@@ -135,9 +138,15 @@ t("but the board says whose scoring it is on, on the board itself",
  * until it is asked for; the way to it is nonetheless on the page, saying what is
  * borrowed; and the ranking comes first.
  */
-t("the setup is not in the way: the form is not even mounted until it is asked for",
-  (await p.$$eval(".onboard", n => n.length)) === 0,
-  `${await p.$$eval(".onboard", n => n.length)} onboarding cards on a first visit`)
+/* "not mounted" was the proxy and it stopped being the claim. The sheet stays mounted and
+   `hidden` now, because unmounting it discarded everything the reader had typed — see the
+   Back block at the foot of this file. What the claim was always about is whether the form
+   is IN THE WAY, so that is what is asserted: nothing of it is visible, it is out of the
+   accessibility tree, and it is out of the tab order, which `hidden` gives all three of. */
+t("the setup is not in the way: none of the form is visible until it is asked for",
+  (await p.$$eval(".onboard", n => n.filter(e => e.checkVisibility()).length)) === 0 &&
+    (await p.evaluate(() => document.querySelector(".dock-sheet")?.hidden !== false)),
+  `${await p.$$eval(".onboard", n => n.filter(e => e.checkVisibility()).length)} visible onboarding cards; sheet hidden: ${await p.evaluate(() => document.querySelector(".dock-sheet")?.hidden)}`)
 /*
  * The bar says what the reader GETS, and the caveat lives on the numbers it is about.
  *
@@ -1862,6 +1871,40 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   t("and they sit below the tab strip rather than under it",
     stuck.navBottom !== null && stuck.headTop >= stuck.navBottom - 1, JSON.stringify(stuck))
   await page.close()
+}
+
+/**
+ * WHAT THE READER TYPED SURVIVES THE SHEET CLOSING.
+ *
+ * The sheet was `{open && <div>…</div>}`, so closing it unmounted everything inside and
+ * React discarded the state with it. Measured: eighteen lines typed, press Close, reopen —
+ * an empty box. On a phone that is two minutes of typing gone to the gesture people use to
+ * dismiss a keyboard.
+ *
+ * Back itself still leaves the site, and that is a known defect rather than an oversight —
+ * see the long note in src/client/Dock.tsx for the shape that does not work and why. This
+ * asserts the half that is fixed, which is the half that cost the typing.
+ */
+{
+  const p = await b.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  await p.goto(BASE, { waitUntil: "domcontentloaded" })
+  await p.waitForSelector(".board-row", { timeout: 30000 })
+  await p.click(".dock-bar button")
+  await p.waitForSelector("[data-ctl=onboard-team]")
+  const typed = "OF Aaron Judge\nSP Tarik Skubal\nC Cal Raleigh"
+  await p.fill("[data-ctl=onboard-team]", typed)
+  await p.waitForTimeout(200)
+  await p.click(".dock-bar button")
+  await p.waitForTimeout(300)
+  t("closing the sheet hides it rather than throwing it away",
+    await p.evaluate(() => document.querySelector(".dock-sheet")?.hidden === true),
+    String(await p.evaluate(() => document.querySelector(".dock-sheet")?.hidden)))
+  await p.click(".dock-bar button")
+  await p.waitForTimeout(300)
+  t("and what he had typed is still in the box when he comes back to it",
+    (await p.inputValue("[data-ctl=onboard-team]")) === typed,
+    JSON.stringify(await p.inputValue("[data-ctl=onboard-team]")))
+  await p.close()
 }
 
 await b.close()

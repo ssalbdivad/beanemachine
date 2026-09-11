@@ -388,6 +388,49 @@ const runs = (line: string): string[] => {
  * checkable: test/paste.mjs runs this same function at 2 over the same 1,445 men to
  * re-derive why 2 was rejected. Nothing ships calling it with anything but 1.
  */
+/**
+ * A ONE-WORD LINE THAT IS SOMEBODY'S UNIQUE SURNAME.
+ *
+ * "Judge", "Skubal", "Witt" — how most people write a roster from memory, and the
+ * matcher refuses every one of them, correctly: a surname is not a name, and accepting
+ * one would silently put a man on a team the reader never chose. But refusing was the
+ * end of the road, and a stranger typing six surnames on a phone got six failures and
+ * advice about selecting a roster page.
+ *
+ * So it is OFFERED, never accepted — the same contract as `nearestName`, and the reason
+ * the risk is tolerable is that a tap is the only thing that can act on it.
+ *
+ * Measured over the committed capture (`.sur.mjs`): of 1,445 men, 1,143 distinct
+ * surnames, 984 of them unique — so 984 men, 68%, are reachable this way and NONE can be
+ * resolved to the wrong man, because a unique surname belongs to exactly one. The other
+ * 461 share theirs and are refused with nothing offered, which is the same answer the
+ * ambiguity path already gives.
+ *
+ * ONE WORD is what makes it safe on a paste. `nearestName`'s edit-distance rule was
+ * measured against this repo's own prose and asked about 2 lines in 2,700; this rule
+ * would be far worse on multi-word text, because an ordinary English word is somebody's
+ * surname often enough ("Price", "Short", "May", "Keys"). Restricted to a line that is
+ * a single word, it fires on 0 of the 44 one-word lines in README.md and docs/ — a
+ * pasted roster page has columns, so its lines are never one word either.
+ */
+export const uniqueSurname = (
+	line: string,
+	players: { id: number; name: string; group: string }[]
+): { id: number; name: string; group: "hitting" | "pitching" } | null => {
+	const word = normalizeName(line)
+	if (!word || word.includes(" ")) return null
+	let hit: { id: number; name: string; group: string } | null = null
+	for (const p of players) {
+		const parts = normalizeName(p.name).split(" ")
+		if (parts.length < 2 || parts[parts.length - 1] !== word) continue
+		if (hit && hit.id !== p.id) return null
+		hit ??= p
+	}
+	return hit ?
+			{ id: hit.id, name: hit.name, group: hit.group === "pitching" ? "pitching" : "hitting" }
+		:	null
+}
+
 export const nearestName = (
 	line: string,
 	players: { id: number; name: string; group: string }[],
@@ -544,9 +587,9 @@ export const rosterFromPaste = (
 			looksPasted ?
 				"No players found in that. Select your whole roster page — the names are what " +
 				"this matches on, so extra columns and adverts do no harm."
-			:	"No players found in that. Write each man's first and last name, one to a line — " +
-				"a surname on its own matches too many people to be safe, and a nickname matches " +
-				"none."
+			:	"No players found in that. Write each man's first and last name, one to a line. " +
+				"A surname on its own is not enough to add anybody, though where only one man " +
+				"in baseball has it you will be offered him below; a nickname matches nobody."
 		:	`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
 			(spots.length ?
 				`, ${spots.length} with the seat they were in — the daily lineup on Recommendations can diff against that.`
@@ -584,7 +627,11 @@ export const rosterFromPaste = (
 	const already = new Set(found.players.map(f => f.id))
 	const suggestions: PasteSuggestion[] = []
 	for (const line of unmatched) {
-		const guess = nearestName(line, snapshot.players)
+		/* A typo first, then a bare surname. Both only ever OFFER — see each function's
+		   note for what was measured before it was allowed to. A line that is one typo
+		   from a full name is a stronger signal than one that is somebody's surname, so
+		   it wins where both could answer. */
+		const guess = nearestName(line, snapshot.players) ?? uniqueSurname(line, snapshot.players)
 		if (!guess || already.has(guess.id)) continue
 		already.add(guess.id)
 		suggestions.push({ line, name: guess.name, id: guess.id, group: guess.group })

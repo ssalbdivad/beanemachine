@@ -241,13 +241,50 @@ const arms = pick("pitching", 3)
     // those 34 land on the wrong one. At distance 2 it is 19 wrong of 120, which is
     // one of the two reasons 2 was not taken.
     for (const [label, line] of [
-      ["a surname on its own", "Raleigh"],
       ["a nickname", "Vladdy"],
       ["another nickname", "Big Dumper"],
       ["an initial and a surname", "A. Judge"]
     ])
       t(`${label} is still refused, with no guess attached`,
         sug(line).length === 0, JSON.stringify(sug(line)))
+
+    /*
+     * A SURNAME ON ITS OWN MOVED from this list to its own rule, and the distinction is
+     * the one that makes it safe: the edit-distance rule above GUESSES which man a
+     * misspelling meant, and a unique surname IDENTIFIES one. It cannot land on the
+     * wrong man, because a unique surname belongs to exactly one.
+     *
+     * Measured over the committed capture: 1,445 men, 1,143 distinct surnames, 984 of
+     * them unique — so 68% of the pool is reachable this way with nothing wrong by
+     * construction, and the other 461 share a surname and are refused with nothing
+     * offered, exactly as before. Restricted to a line that is ONE WORD, which is what
+     * keeps it off prose and off a pasted page: 0 of the 44 one-word lines in README.md
+     * and docs/ look like a unique surname, and a roster page's lines carry columns.
+     *
+     * Still an OFFER. It never puts anybody on a team; the reader taps the name.
+     */
+    t("a unique surname on its own is offered — never accepted, and never a wrong man",
+      sug("Raleigh").length === 1 && sug("Raleigh")[0].name === "Cal Raleigh",
+      JSON.stringify(sug("Raleigh")))
+    t("and it still puts nobody on the team by itself",
+      rosterFromPaste("Raleigh", snap).players.length === 0,
+      JSON.stringify(rosterFromPaste("Raleigh", snap).players))
+    {
+      // A surname two men share says nothing, and says it by offering nothing.
+      const bySur = new Map()
+      for (const p of snap.players) {
+        const parts = p.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(" ")
+        if (parts.length < 2) continue
+        const k = parts[parts.length - 1]
+        bySur.set(k, new Set([...(bySur.get(k) ?? []), p.id]))
+      }
+      const shared = [...bySur].find(([, ids]) => ids.size > 1)?.[0]
+      t("a surname two men share is refused, with no guess attached",
+        !shared || sug(shared).length === 0, `${shared}: ${JSON.stringify(sug(shared ?? "zzz"))}`)
+    }
+    // and it is one word or nothing: two words that are not a name stay refused
+    t("a two-word line that is nobody is still refused",
+      sug("Big Dumper").length === 0, JSON.stringify(sug("Big Dumper")))
 
     // A man the paste already produced is not offered as a correction to another
     // line: he is on the team, and asking about him reads as a failure.

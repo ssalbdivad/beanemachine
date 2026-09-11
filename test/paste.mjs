@@ -511,5 +511,42 @@ const arms = pick("pitching", 3)
 		pasted.players.length === 0 && /roster page/i.test(pasted.note), pasted.note)
 }
 
+/*
+ * TWO SILENCES, both of them the same rule: an absence is stated as an absence.
+ *
+ * A man listed twice is counted once — correct, and it used to say nothing, so a reader
+ * whose pasted page prints somebody in a lineup section AND a bench section got a count he
+ * could not reconcile with what he could see.
+ *
+ * And `unmatched` had a three-character floor, which is right for a copied page (a column
+ * of ordinals, a stray "OF", an advert's "x") and wrong for a list somebody typed, where
+ * every line is his. Typing "asdfgh / 12345 / ???" quoted only «asdfgh» back while saying
+ * "Nothing in THEM is counted anywhere" — a plural about a list the reader cannot see. The
+ * floor now applies only where the text looks pasted, by the same test that picks which
+ * advice to give.
+ */
+{
+	/* Named here rather than borrowed: `judge` above is scoped to another block. */
+	const who = snap.players.find(p => /^Aaron Judge$/.test(p.name)).name
+	const thrice = rosterFromPaste(`${who}\n${who}\n${who}`, snap)
+	t("a man listed three times is counted once, and the note says he was",
+		thrice.players.length === 1 && /3 times/.test(thrice.note) && /counted once/.test(thrice.note),
+		thrice.note)
+	t("and a man listed once is not accused of being listed twice",
+		!/more than once/.test(rosterFromPaste(who, snap).note),
+		rosterFromPaste(who, snap).note)
+
+	const typed = rosterFromPaste("asdfgh\n12345\n???", snap)
+	t("every line of a TYPED list that matched nobody is quoted back, short ones included",
+		typed.unmatched.includes("asdfgh") && typed.unmatched.includes("12345"),
+		JSON.stringify(typed.unmatched))
+	/* The floor still holds on a paste, which is what it is for: a page's worth of tab-
+	   separated rows must not have its furniture quoted back line by line. */
+	const page = Array.from({ length: 14 }, (_, i) => `${i + 1}\tNobody Atall ${i}\tSEA\t0.0`).join("\n")
+	const pasted = rosterFromPaste(page, snap)
+	t("and a pasted page is still judged by the floor, so its furniture is not quoted",
+		pasted.unmatched.every(l => l.length > 3), JSON.stringify(pasted.unmatched.slice(0, 3)))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

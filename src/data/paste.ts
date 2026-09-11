@@ -544,6 +544,29 @@ export const rosterFromPaste = (
 	 * sheet echoed one name. A reader checking eighteen typed names against what the board
 	 * then holds finds the two numbers disagree and has nothing on screen explaining it.
 	 */
+	/*
+	 * A man listed twice is counted once, and that is now said.
+	 *
+	 * `playersInText` dedupes by id, so three lines reading "Aaron Judge" produce one
+	 * player and the confirmation reads "Found 1 player" — correct, and silent about the
+	 * other two lines. A reader who pasted a page that happens to print a man twice (a
+	 * roster table with a totals row, a lineup and a bench section) is told a count he
+	 * cannot reconcile with what he can see.
+	 */
+	const listedTwice = [
+		...new Map(
+			found.players
+				.map(f => {
+					const n = norm(f.name)
+					const times = text
+						.split(/\r?\n/)
+						.filter(l => norm(l).includes(n) || n.split(" ").every(w => norm(l).includes(w))).length
+					return [f.name, times] as const
+				})
+				.filter(([, times]) => times > 1)
+		)
+	]
+
 	const twoWay = found.players
 		.filter(f => snapshot.players.filter(p => p.id === f.id).length > 1)
 		.map(f => f.name)
@@ -611,6 +634,11 @@ export const rosterFromPaste = (
 			(spots.length ?
 				`, ${spots.length} with the seat they were in — tonight's lineup can be given to you as the CHANGES to make, rather than as a lineup to set from scratch.`
 			:	". No seats were in that text, so tonight's lineup comes back as the lineup to SET rather than as the changes to make.") +
+			(listedTwice.length ?
+				` ${andNames(listedTwice.map(([name, times]) => `${name} (${times} times)`))} ` +
+					`${listedTwice.length === 1 ? "appears" : "appear"} more than once in that text and ` +
+					`${listedTwice.length === 1 ? "was" : "were"} counted once.`
+			:	"") +
 			(twoWay.length ?
 				` ${andNames(twoWay)} ${twoWay.length === 1 ? "is a two-way player" : "are two-way players"}` +
 					`, counted as both a hitter and a pitcher — which is how your league lists ` +
@@ -632,10 +660,20 @@ export const rosterFromPaste = (
 	 * something the app failed to read would bury the two lines that matter.
 	 */
 	const seen = found.players.map(f => norm(f.name))
+	/*
+	 * The length floor applies to a PASTE and not to a typed list.
+	 *
+	 * `l.length > 3` exists because a copied roster page is full of three-character
+	 * furniture — a column of ordinal numbers, a stray "OF", an advert's "x" — and quoting
+	 * those back would bury the two lines that matter. On a list somebody typed, every line
+	 * is his, and dropping one silently is the failure this whole field exists to prevent:
+	 * pasting "asdfgh / 12345 / ???" reported only «asdfgh» while saying "Nothing in THEM
+	 * is counted anywhere", which is a plural about a list the reader cannot see.
+	 */
 	const unmatched = text
 		.split(/\r?\n/)
 		.map(l => l.trim())
-		.filter(l => l.length > 3 && /[a-z]/i.test(l))
+		.filter(l => (looksPasted ? l.length > 3 : l.length > 0) && /[\w]/.test(l))
 		.filter(l => {
 			const line = norm(l)
 			return !seen.some(name => line.includes(name) || name.split(" ").every(w => line.includes(w)))

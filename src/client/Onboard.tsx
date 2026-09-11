@@ -191,7 +191,7 @@ export const Onboard = ({
 				*/}
 				<h2>Set up your league</h2>
 				<p className="sub">
-					The board below is on <b>standard</b> scoring. A player is only worth what{" "}
+					The board behind this is on <b>standard</b> scoring. A player is only worth what{" "}
 					<i>your</i> league pays for what he does — tell it three things and every
 					number changes: what each stat is worth, how many roster slots you fill, and
 					how many teams you are up against. Two minutes, once, and it all stays in
@@ -241,7 +241,7 @@ export const Onboard = ({
 								Start from these values
 							</button>
 							<span className="sub">
-								Keeps the scoring the board below is already using — <b>{preset.label}</b>{" "}
+								Keeps the scoring the board behind this is already using — <b>{preset.label}</b>{" "}
 								— so you can add your team now and correct the values later. The page
 								goes on saying they were not read from your league until you check them.
 							</span>
@@ -474,7 +474,7 @@ export const Onboard = ({
 					     is the reason to do any of this, is that none of it is about his team
 					     yet. */
 						<span className="sub">
-							The board below is already running &mdash; on standard values, with no
+							The board behind this is already running &mdash; on standard values, with no
 							team behind it. Any of these makes it yours.
 						</span>
 					}

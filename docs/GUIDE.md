@@ -394,7 +394,8 @@ Then the league is a file and goes anywhere:
 - `npx vite` locally serves the `scoring.json` you just wrote — the dev server
   shadows the published asset with the one at the repo root — so a local run opens
   straight on your league, roster and free-agent list included. The deployed build
-  ships no league, which is why beanemachine.com opens on the setup instead.
+  ships no league, which is why beanemachine.com opens on a board running the preset,
+  with the setup hovering at the foot of it, instead of on your own league.
 - **Setup → Download** writes the leagues in your browser to a JSON file, and
   **Load file** reads one back in on any other browser or machine — including
   beanemachine.com. That is the supported route for a Yahoo user onto the hosted
@@ -429,9 +430,10 @@ football roster slots.
 
 Your leagues live in the browser you set them up in, never on a server. **Download**
 takes the lot out as a `scoring.json`; **Load file** reads one back in, replacing what
-that browser holds. A first visit starts on the guided setup, not on a board: the
-published build ships no league at all, so nothing you see is ever somebody else's
-team.
+that browser holds. A first visit starts on a ranked board running the shipped
+preset — standard values, nobody's team, and the board says so — with the guided
+setup hovering at the foot of the page. The published build ships no league at all,
+so nothing you see is ever somebody else's team.
 
 You can also press **New** to start from a template and type the values in by hand.
 A template is a **stated assumption, not a reading of your league**: it arrives with

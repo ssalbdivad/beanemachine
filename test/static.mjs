@@ -43,7 +43,38 @@ p.on("pageerror", e => errs.push(String(e)))
 const requested = []
 p.on("request", r => requested.push(r.url()))
 await p.goto(BASE, { waitUntil:"networkidle" })
-await p.waitForSelector(".onboard", { timeout: 25000 })
+/**
+ * The app is UP when `.dock-bar` is up, not when `.onboard` is.
+ *
+ * The setup used to be a card in the page flow, so a browser holding no league
+ * rendered `<Onboard/>` on the first paint and waiting for `.onboard` was the same
+ * thing as waiting for the app. It is a DOCK now — a fixed bar across the foot of the
+ * viewport, src/client/Dock.tsx — and on a first visit that bar is CLOSED, which means
+ * `<Onboard/>` is not mounted at all. This is the no-league suite, so that is the
+ * state of every page it opens, and this line is exactly where it died: 25s waiting
+ * for a selector that the new first visit is defined by NOT having.
+ */
+await p.waitForSelector(".dock-bar", { timeout: 25000 })
+/**
+ * The gesture that reaches the setup, written once.
+ *
+ * Closed, the dock is one line of summary and one button; the `<Onboard/>` card only
+ * enters the DOM when that button is pressed. Six blocks below this read the
+ * onboarding and every one of them now has to ask for it first, so the gesture is a
+ * named helper rather than a click repeated at each site — the next change to how the
+ * setup is opened is one line here.
+ *
+ * Idempotent on purpose: `onboard()` is called from places that may already have the
+ * sheet open, and pressing the bar button there would read "Close" and shut it.
+ * Parameterised by page because the storage-promise block reads it off a second,
+ * clean browser.
+ */
+const openDock = async (page = p) => {
+  await page.waitForSelector(".dock-bar", { timeout: 25000 })
+  if (!(await page.$(".onboard")))
+    await page.click('.dock-bar button:text-is("Set up my league")')
+  await page.waitForSelector(".onboard", { timeout: 25000 })
+}
 let pass=0, fail=0
 const t=(n,ok,x="")=>{ok?pass++:fail++; console.log(`${ok?"PASS":"FAIL"}  ${n}${ok?"":"  "+x}`)}
 t("no page errors", errs.length===0, errs.join(" | "))
@@ -89,8 +120,91 @@ t("and Billy's pick is on it, because a pick is the shortest demonstration there
 t("but the board says whose scoring it is on, on the board itself",
   /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
   await p.$eval(".preview-note", e => e.innerText))
-t("and the setup is beside it, not behind it",
-  await p.locator(".onboard").isVisible())
+/*
+ * The setup is UNDER the ranking now, not beside it.
+ *
+ * This used to read "and the setup is beside it, not behind it" and assert `.onboard`
+ * was visible the moment the page arrived. That was the previous pass's truth: the
+ * setup was a card in the page flow, so a first visit rendered the whole two-minute
+ * form and the board together. It moved into the dock for the same reason the board
+ * moved onto the first visit at all — the numbers are the argument for spending the
+ * two minutes, so a form shown before them asks for the two minutes first.
+ *
+ * The claim splits into three, and all three are asserted, because any one of them on
+ * its own would pass on a page that had lost the point: the form is not in the way
+ * until it is asked for; the way to it is nonetheless on the page, saying what is
+ * borrowed; and the ranking comes first.
+ */
+t("the setup is not in the way: the form is not even mounted until it is asked for",
+  (await p.$$eval(".onboard", n => n.length)) === 0,
+  `${await p.$$eval(".onboard", n => n.length)} onboarding cards on a first visit`)
+t("but the way to it is on the page, in one line that says whose scoring is on the board",
+  /standard scoring/i.test(await p.$eval(".dock-say", e => e.innerText)) &&
+    /not your league/i.test(await p.$eval(".dock-say", e => e.innerText)),
+  await p.$eval(".dock-say", e => e.innerText))
+t("and the button next to it says what pressing it gets you",
+  await p.locator('.dock-bar button:text-is("Set up my league")').isVisible(),
+  await p.$eval(".dock-bar button", e => e.textContent))
+/*
+ * THE POINT OF THE WHOLE CHANGE, and until this assertion nothing checked it.
+ *
+ * "The ranked list has to be the first thing a first-time visitor sees" is a claim
+ * about ORDER, and every other assertion in this file is about presence — the board
+ * renders, the setup renders — so all of them would have gone on passing if the setup
+ * went back above the board tomorrow.
+ *
+ * Pinned twice, because the two ways it can be wrong are different failures:
+ *
+ *  · In the DOCUMENT. A screen reader, a keyboard tab order and a no-CSS render all
+ *    meet this page in source order, so the board has to come before the setup there.
+ *    The dock is the last thing in `.wrap` (src/client/App.tsx) and that is what this
+ *    holds in place.
+ *  · On the SCREEN. `.dock` is `position:fixed`, so source order alone would also be
+ *    satisfied by a bar painted straight over the top of the board. The bar has to be
+ *    at the FOOT of the viewport, and — the thing fixed bars get wrong — the page has
+ *    to reserve its height instead of letting it cover the end of the page, which is
+ *    what `--dock-h` in app.css is for.
+ */
+t("the ranking comes before the setup in the document, which is the entire point of the dock",
+  await p.evaluate(() => {
+    const row = document.querySelector(".board-row")
+    const dock = document.querySelector(".dock")
+    return !!row && !!dock &&
+      !!(row.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }))
+t("and the bar sits at the foot of the viewport rather than over the rows",
+  await p.evaluate(() => {
+    const bar = document.querySelector(".dock-bar").getBoundingClientRect()
+    return Math.abs(bar.bottom - window.innerHeight) <= 1
+  }),
+  JSON.stringify(await p.evaluate(() => ({
+    bar: document.querySelector(".dock-bar").getBoundingClientRect().bottom,
+    viewport: window.innerHeight
+  }))))
+/*
+ * Measured as the gap the page leaves below its own last element, NOT by scrolling to
+ * the end and looking.
+ *
+ * Scrolling to the end was the obvious way to check this and it cannot work here: the
+ * board reveals its later rows through an IntersectionObserver (src/client/Board.tsx),
+ * so scrolling to the bottom makes the page taller — measured, `.wrap` went from
+ * 4,525px to 7,963px on one scroll — and the bottom is never where it was when it was
+ * asked for. The claim does not need the scroll anyway: what must hold is that the
+ * document is taller than its last in-flow element by at least the height of the bar
+ * that hovers over it, which is `.wrap`'s bottom padding in app.css.
+ */
+t("and the page reserves the bar's height, so the end of the page is not stuck under it",
+  await p.evaluate(() => {
+    const last = document.querySelector(".colophon").getBoundingClientRect()
+    const bar = document.querySelector(".dock-bar").getBoundingClientRect()
+    const reserved = document.documentElement.scrollHeight - (last.bottom + window.scrollY)
+    return reserved >= bar.height
+  }),
+  JSON.stringify(await p.evaluate(() => ({
+    reserved: document.documentElement.scrollHeight -
+      (document.querySelector(".colophon").getBoundingClientRect().bottom + window.scrollY),
+    bar: document.querySelector(".dock-bar").getBoundingClientRect().height
+  }))))
 t("and this browser holds no league until the visitor puts one in it",
   await p.evaluate(() =>
     Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length === 0))
@@ -210,7 +324,9 @@ t("but the measured results are still one click off the page, by absolute URL th
  * stuck, rather than a card that only appeared while a stranger's demo league was
  * active.
  */
-await p.waitForSelector(".onboard .chip-btn")
+// The setup is a fold now, so this block asks for it — see `openDock`. It used to be
+// on screen already, which is why none of these lines opened anything.
+await openDock()
 t("and the first question is which platform, with Yahoo among the answers",
   (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).includes("Yahoo"),
   (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).join(" | "))
@@ -287,7 +403,9 @@ const SETTINGS_PASTE = [
 /** A league in this browser, got the way a reader gets one. Used wherever this
  *  suite used to be able to assume the seed had put one there. */
 const onboard = async () => {
-  await p.waitForSelector(".onboard", { timeout: 25000 })
+  // Opens the dock first. This was a bare wait on `.onboard`, which was on screen
+  // whenever this browser held no league; the form is behind the dock's button now.
+  await openDock()
   await p.click('.onboard .chip-btn:text-is("Yahoo")')
   await p.fill('textarea[data-ctl="paste-settings"]', SETTINGS_PASTE)
   await p.click('.onboard button:text-is("Read that")')
@@ -488,7 +606,10 @@ await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
   const fresh = await b.newPage({ viewport: { width: 1280, height: 1000 } })
   await fresh.route("**/api/**", r => r.abort())
   await fresh.goto(BASE, { waitUntil: "networkidle" })
-  await fresh.waitForSelector(".onboard", { timeout: 25000 })
+  // Same gesture on the second browser: the promise is inside the fold now, not on
+  // the first paint. That it takes a gesture to read is worth saying out loud — see
+  // the note below about what is no longer promised anywhere visible.
+  await openDock(fresh)
   const note = (await fresh.$eval(".onboard", e => e.innerText)).replace(/\s+/g, " ")
   t("the first screen still promises the league stays in this browser",
     /stays in this browser/i.test(note), note.slice(0, 200))
@@ -777,7 +898,7 @@ await p.reload({ waitUntil: "networkidle" })
 // Load file / a URL field to somebody who has no league is five unexplained
 // buttons where one question belongs. It is folded under "Other ways in", which
 // is the ranking this app believes: paste your own page first, borrow second.
-await p.waitForSelector(".onboard", { timeout: 25000 })
+await openDock()
 await p.click('.onboard .chip-btn:text-is("Yahoo")')
 await p.click(".onboard-alts summary")
 await p.click('.onboard-alts button:text-is("Use the preset")')
@@ -815,10 +936,12 @@ const file = await p.evaluate(() => localStorage.getItem("beanemachine:config"))
 const sent = Object.keys(JSON.parse(file).leagues)
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-// No board to wait for: an emptied browser opens on the setup now. The drop works
-// from there, which is the case that matters — somebody who ran the CLI locally
-// arrives here with a file and nothing else.
-await p.waitForSelector(".onboard", { timeout: 25000 })
+// An emptied browser opens on the preset board with the setup docked SHUT, and the
+// drop is asserted from exactly that state rather than from an opened sheet: somebody
+// who ran the CLI locally arrives here with a file and nothing else, and has no reason
+// to have pressed anything first. Waited on `.dock-bar`, which is all a first visit
+// renders of the setup now.
+await p.waitForSelector(".dock-bar", { timeout: 25000 })
 p.on("dialog", d => d.accept())
 const dt = await p.evaluateHandle(text => {
   const d = new DataTransfer()
@@ -924,7 +1047,9 @@ withWire.pools = {
 }
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-await p.waitForSelector(".onboard", { timeout: 25000 })
+// Waited on the dock BAR, not on the onboarding: an emptied browser renders the setup
+// shut, and nothing here needs it opened — the file is dropped on the window.
+await p.waitForSelector(".dock-bar", { timeout: 25000 })
 const wireDt = await p.evaluateHandle(text => {
   const d = new DataTransfer()
   d.items.add(new File([text], "scoring.json", { type: "application/json" }))
@@ -962,7 +1087,9 @@ t("which is a different list from the one the estimate produced",
 // follows when it falls back to a Monday and says so.
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-await p.waitForSelector(".onboard", { timeout: 25000 })
+// Waited on the dock BAR, not on the onboarding: an emptied browser renders the setup
+// shut, and nothing here needs it opened — the file is dropped on the window.
+await p.waitForSelector(".dock-bar", { timeout: 25000 })
 withWire.pools[WIRE_KEY].at = new Date(Date.now() - 7 * 86_400_000).toISOString()
 const staleDt = await p.evaluateHandle(text => {
   const d = new DataTransfer()
@@ -985,6 +1112,38 @@ t("a week-old free-agent list is shown as a week old, and flagged",
 t("and it is still USED, because a stale exact list beats an estimate that is not one",
   /8 free/.test((await p.$eval(".toggle", e => e.textContent)).replace(/\s+/g, " ")),
   (await p.$eval(".toggle", e => e.textContent)).replace(/\s+/g, " ").trim())
+
+/**
+ * ── The way BACK to the setup, for a reader who already has a league ────────────
+ *
+ * New, because the dock is new and nothing else here reaches it from this direction.
+ * The dock exists for the stranger, and it opens SHUT for him so the ranking is the
+ * first thing he sees — which leaves the opposite reader, the one with a league who
+ * wants the guided setup again, needing a way to open it deliberately. That is the
+ * "Set up a league" button in the Setup toolbar, and what it must do is open the
+ * sheet ALREADY EXPANDED: a button that only put a collapsed bar at the foot of the
+ * screen would read as a button that did nothing.
+ *
+ * Escape is asserted in the same breath because it is the only way out of the sheet
+ * that does not involve finding a particular button, and a fixed panel you cannot
+ * dismiss without hunting is the failure this shape of UI has.
+ *
+ * Run last, on the league this file has already built, because opening the setup sets
+ * `onboarding` — which hides the very toolbar the import assertions above fill in.
+ */
+await go("Setup")
+await p.click('.bar [data-ctl="onboard"]')
+await p.waitForSelector(".onboard", { timeout: 15000 })
+t("a reader who has a league can ask for the setup back, and gets it already open",
+  await p.locator(".dock.on .dock-sheet .onboard").isVisible())
+t("and the button that opened it now offers to close it, so it is not a one-way door",
+  /^Close$/.test((await p.$eval(".dock-bar button", e => e.textContent.trim()))),
+  await p.$eval(".dock-bar button", e => e.textContent))
+await p.keyboard.press("Escape")
+await p.waitForSelector(".onboard", { state: "detached", timeout: 10000 })
+t("and Escape closes the sheet without closing the way back to it",
+  (await p.$$eval(".onboard", n => n.length)) === 0 &&
+    (await p.$$eval(".dock-bar", n => n.length)) === 1)
 
 t("no page errors after all of that", errs.length===0, errs.join(" | "))
 

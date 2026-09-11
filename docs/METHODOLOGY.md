@@ -782,8 +782,12 @@ each view, so the board and the trade panel cannot invent two different ones, an
 
 **It invalidates nothing.** `addValue` is an added field: every bscore value, and
 the order `rateAll` returns them in, is identical to what the 20 stored runs in
-`data/results/` were measured against, and `src/auto/plan.ts`, `src/engine/trade.ts`
-and `src/engine/draft.ts` are untouched.
+`data/results/` were measured against, and `src/auto/plan.ts` and
+`src/engine/trade.ts` are untouched. (`src/engine/draft.ts` was named here too and
+has since been deleted with the Draft screen — the published decompositions of what
+decides a points-league season put pre-draft ranking quality near the bottom of the
+list, and the app leads with the seats instead. Nothing in `data/results/` was
+measured against it.)
 
 Three alternatives were considered and rejected, each on a measurement:
 
@@ -1509,10 +1513,14 @@ side**, with the pitcher sign flipped, because a positive gap means opposite thi
 for the two. Ranking both in one pool, as an earlier version did, produced a number
 with no meaning.
 
-**Buy low** is the only place two independent signals are multiplied: a rolling-window
-gap above 0.035 *and* ownership under 70%, scored as `gap × (100 − %Ros)` so a
-candidate has to clear both bars. A sum would let being free compensate for weak
-contact.
+**Buy low** was the only place two independent signals were multiplied: a
+rolling-window gap above 0.035 *and* ownership under 70%, scored as
+`gap × (100 − %Ros)` so a candidate had to clear both bars — a sum would have let
+being free compensate for weak contact. The card is **retired**. The reasoning was
+sound and nothing ever measured that acting on it wins anything: the only assertions
+it carried pinned its own two thresholds. The luck percentile survives as a sortable
+column, which is the same signal without a second surface between the reader and the
+ranking.
 
 **A trade** (`src/engine/trade.ts`) is priced as `startingLineup(after) −
 startingLineup(before)`, in projected points. Not "who has the higher bscore": bench
@@ -1591,9 +1599,10 @@ every one matches the true maximum. On the reference league the gain is real but
 narrow: a best-available roster is seated identically by both, because there every
 spot gets its own best man anyway, and across 200 rosters carrying bench depth the
 matching wins on 28, by 4.28 points on average and 77.51 at most. That is the
-honest size of it. What changed is not mainly the number but the claim: Trade and
-Draft totals were a lower bound on the best legal lineup and are now the best legal
-lineup.
+honest size of it. What changed is not mainly the number but the claim: the lineup
+totals a trade and a draft were priced against were a lower bound on the best legal
+lineup and are now the best legal lineup. (The Draft screen has since been deleted;
+the matching still seats every lineup the app prices.)
 
 ### 11.1 One window, applied over another
 

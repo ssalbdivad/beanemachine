@@ -629,6 +629,85 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	await page.close()
 }
 
+/**
+ * The way back into the setup, from the screen that owns the way back.
+ *
+ * The setup left the page flow: it is a bar fixed to the foot of the viewport now
+ * (src/client/Dock.tsx), shown to a reader who has no league — and this suite's
+ * reader HAS one, which is why every assertion above runs with no `.dock` in the
+ * document at all and needed no new gesture to keep working. That is the half worth
+ * stating out loud, because a bar that appeared here unasked would cover the foot of
+ * a screen made of forms.
+ *
+ * The other half is the only dock gesture that starts on Setup: `[data-ctl=onboard]`
+ * ("Set up a league") is the guided route in, and it is the one route a reader with a
+ * league has — the dock opens by itself on a first visit and never again. journey.mjs
+ * asserts the button EXISTS on this screen and on neither other; nothing asserted it
+ * arrives anywhere. A button that sets `onboarding` but not `setupOpen` would render
+ * a closed one-line bar with the setup still hidden behind a second press, and the
+ * reader who pressed "Set up a league" would have been handed a bar that says
+ * "Set up my league" — which is indistinguishable from a no-op.
+ *
+ * Its own page, because opening the dock changes app-wide state and everything above
+ * shares one; same reason the paste block has one.
+ */
+{
+	const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+	const oops = []
+	page.on("pageerror", e => oops.push(String(e)))
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+
+	/** The gesture, named once: press the guided-setup button in the Setup toolbar and
+	 *  wait for the sheet, NOT for the bar. `.dock-bar` exists whenever the dock does,
+	 *  open or shut, so waiting on it would pass on exactly the bug below. */
+	const askForSetup = async () => {
+		await page.click("[data-ctl=onboard]")
+		return page
+			.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
+			.then(() => true, () => false)
+	}
+
+	if (await toScreen(page, SCREEN.setup)) {
+		await page.waitForSelector(".trade-team", { timeout: 30000 })
+		t("a reader who already has a league is not shown the setup bar unasked",
+			(await page.$$(".dock")).length === 0 && (await page.$$(".onboard")).length === 0,
+			await page.$$eval(".dock", n => n.map(e => e.className).join(" | ")))
+
+		const opened = await askForSetup()
+		t("pressing Set up a league opens the setup already expanded, not a bar to press again",
+			opened, "no .dock-sheet with the setup in it after the click")
+		t("and the button in the bar now offers the way out rather than the way in",
+			opened &&
+				(await page.$$eval(".dock-bar button", n =>
+					n.map(e => `${e.textContent.trim()}/${e.getAttribute("aria-expanded")}`)
+				)).join(",") === "Close/true",
+			await page.$$eval(".dock-bar button", n => n.map(e => e.textContent.trim()).join(",")))
+		// It hovers OVER this screen, it does not replace it: the roster and the league
+		// editor underneath have to still be there, or "set up my league" has quietly
+		// become a navigation and the reader has lost the team he was editing.
+		t("the setup hovers over Setup rather than navigating off it",
+			(await page.$$(".trade-team")).length === 1 &&
+				(await page.$$eval(".views button[aria-selected=true]", n =>
+					n.map(e => e.textContent.trim())
+				))[0] === SCREEN.setup,
+			`${(await page.$$(".trade-team")).length} team panels`)
+
+		// Escape is the documented dismissal (Dock.tsx binds it on the document so it
+		// works wherever focus is). The BAR is meant to survive it as the way back in —
+		// closing the sheet must not strand a reader who meant to reopen it.
+		await page.keyboard.press("Escape")
+		await page.waitForSelector(".dock-sheet", { state: "detached", timeout: 10000 }).catch(() => {})
+		t("Escape puts the setup away and leaves the bar as the way back",
+			(await page.$$(".dock-sheet")).length === 0 &&
+				(await page.$$(".onboard")).length === 0 &&
+				(await page.$$(".dock-bar")).length === 1,
+			`${(await page.$$(".dock-sheet")).length} sheets, ${(await page.$$(".dock-bar")).length} bars`)
+		t("no page errors from opening and closing the setup", oops.length === 0, oops.join(" | "))
+	}
+	await page.close()
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

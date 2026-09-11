@@ -11,6 +11,7 @@ import { Board } from "./Board.tsx"
 import { Trade } from "./Trade.tsx"
 import { Decide } from "./Decide.tsx"
 import { Onboard } from "./Onboard.tsx"
+import { Dock } from "./Dock.tsx"
 import { leagues } from "./leagues.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
@@ -102,6 +103,16 @@ export const App = () => {
 	 * now I want to add my roster" is a thing people come back for.
 	 */
 	const [onboarding, setOnboarding] = useState(false)
+	/**
+	 * Whether the setup sheet is OPEN, which is not the same as whether it exists.
+	 *
+	 * `onboarding` says the reader has no league, or has asked for the setup back —
+	 * that is when the bar is on the page at all. This says whether the sheet above it
+	 * is showing. They are separate on purpose: a first visit has the bar and a closed
+	 * sheet, so the ranking is the first thing on the page; pressing "Set up a league"
+	 * from the toolbar opens the sheet immediately, because that reader asked for it.
+	 */
+	const [setupOpen, setSetupOpen] = useState(false)
 	/** True while a file is over the window. A drop target nobody can see is a
 	 *  feature nobody uses, so the page says it will take the file. */
 	const [dragging, setDragging] = useState(false)
@@ -178,7 +189,7 @@ export const App = () => {
 		 * cannot tell whether this is worth two minutes of setup until he has seen what
 		 * it produces, and the ask that loses him is "fill in seventeen point values and
 		 * then I will show you". So he lands on Wire — the screen that ranks, and the
-		 * one Billy's pick is on — with the setup card above it and the board itself
+		 * one Billy's pick is on — with the setup hovering at the foot of it and the board
 		 * saying whose scoring it is on.
 		 *
 		 * Set here rather than in an effect so it is true on the first paint and never
@@ -413,20 +424,24 @@ export const App = () => {
 	 * and importing one is the only thing left to do. Elsewhere all that survives is
 	 * the switcher, and only when there is more than one league to switch between.
 	 */
+	/** Whether the setup dock is on the page at all — see the note where it renders. */
+	const docked = !loadError && !loading && (onboarding || !league)
 	const manage =
-		// The first-run setup IS the way in, and it names every route in the order
-		// they are worth trying. Leaving the toolbar above it offered a second,
-		// unexplained set of the same buttons — New, Remove, Download, Load file and
-		// a URL field — to the one reader who has no idea which of them is for them.
-		!onboarding &&
-		// "league" was its own tab and is now the second half of Setup, so the league
-		// management chrome — New, Remove, Download, Load file, import by URL — belongs
-		// on the screen where a league is set up.
-		(view === "trade" ||
-		// nothing to work with yet: importing or creating one is the only move left
-		(store === "read" && !Object.keys(config?.leagues ?? {}).length) ||
-			// and the unreadable-store card below points at Load file as the way out
-			store === "unreadable")
+		/*
+		 * Never while the dock is up, and that is stronger than the rule it replaces.
+		 *
+		 * The toolbar is the same five unexplained buttons the dock exists to stand in
+		 * for — New, Remove, Download, Load file and a URL field — and this used to be
+		 * gated on `!onboarding`, which is not the same thing: clicking a tab turns
+		 * `onboarding` off, so a reader with no league who pressed Today got the dock
+		 * AND the toolbar, which is the maze the dock was built to end. Gated on
+		 * whether the dock is on screen, the two can never both be offering the way in.
+		 *
+		 * "league" was its own tab and is now the second half of Setup, so the league
+		 * management chrome belongs on the screen where a league is set up — and on the
+		 * unreadable-store screen, where Load file is the only way out.
+		 */
+		!docked && (view === "trade" || store === "unreadable")
 
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
@@ -542,7 +557,10 @@ export const App = () => {
 						show("Removed")
 					})
 				}
-				onOnboard={() => setOnboarding(true)}
+				onOnboard={() => {
+					setOnboarding(true)
+					setSetupOpen(true)
+				}}
 				onDownload={() => {
 					if (!config) return
 					const file = leagues.download(config)
@@ -584,51 +602,6 @@ export const App = () => {
 						</p>
 					</section>
 				</div>
-			)}
-
-			{/* First run, and any time the reader asks for it back. It replaces `Setup`
-			    rather than sitting beside it: two cards both headed "you have no league"
-			    is how a first visit becomes a maze. */}
-			{!loadError && !loading && (onboarding || !league) && (
-				<Onboard
-					config={config}
-					snapshot={snapshot}
-					leagueKey={key}
-					league={league ?? null}
-					canImport={getMode() !== "static"}
-					preset={preset ? { key: preset.key, label: preset.label } : null}
-					onCreateLeague={(platform, made) =>
-						void run(async () => {
-							if (!config) return
-							// The settings page prints the league's own id, so a pasted league is
-							// keyed exactly as an imported one is — the same league read by the
-							// two routes lands in the same place instead of twice.
-							const k =
-								made.meta.league_id ?
-									`${made.meta.platform}:${made.meta.league_id}`
-								:	leagues.suggestKey(config, platform)
-							adopt(leagues.save(k, made), k)
-							show(`Read ${made.meta.league_name ?? "your league"} from that page`)
-						})
-					}
-					onUsePreset={() => preset && void create(preset.key)}
-					onImportUrl={url =>
-						void run(async () => {
-							const { key: k, league: got } = await api.import(url)
-							adopt(leagues.save(k, got), k)
-							show(`Imported ${got.meta.league_name ?? k}`)
-						})
-					}
-					onLoadFile={() => openPicker.current?.()}
-					onOpenSetup={() => {
-						setOnboarding(false)
-						setView("trade")
-					}}
-					onDone={() => {
-						setOnboarding(false)
-						setView("board")
-					}}
-				/>
 			)}
 
 			{/* A league that exists but cannot rank yet: this names the gaps in place,
@@ -778,6 +751,78 @@ export const App = () => {
 					:	null}
 				</>
 			:	null}
+
+			{/*
+			  The setup hovers at the foot of the page rather than sitting above the
+			  board, and the reason is the whole first-visit problem in one line: the
+			  numbers are the argument for spending two minutes, and a form shown before
+			  them asks for the two minutes first. See src/client/Dock.tsx.
+			*/}
+			{docked && (
+				<Dock
+					open={setupOpen}
+					onToggle={setSetupOpen}
+					summary={
+						league ?
+							<>
+								Editing <b>{league.meta.league_name ?? key}</b>.
+							</>
+						:	/* Short enough for one line on a phone: the bar is fixed, so every line
+						     it takes is a line of ranking it covers. Two facts earn the space —
+						     that the numbers above are not about his league, and where a league
+						     goes if he gives one. The second used to be in the masthead and then
+						     inside the sheet, which means a reader who never pressed the button
+						     never saw it; "does this upload my team somewhere" is a question
+						     people decide on before they press anything. */
+							<>
+								<b>Standard scoring</b> — not your league yet. Yours stays in this
+								browser.
+							</>
+					}
+				>
+<Onboard
+					config={config}
+					snapshot={snapshot}
+					leagueKey={key}
+					league={league ?? null}
+					canImport={getMode() !== "static"}
+					preset={preset ? { key: preset.key, label: preset.label } : null}
+					onCreateLeague={(platform, made) =>
+						void run(async () => {
+							if (!config) return
+							// The settings page prints the league's own id, so a pasted league is
+							// keyed exactly as an imported one is — the same league read by the
+							// two routes lands in the same place instead of twice.
+							const k =
+								made.meta.league_id ?
+									`${made.meta.platform}:${made.meta.league_id}`
+								:	leagues.suggestKey(config, platform)
+							adopt(leagues.save(k, made), k)
+							show(`Read ${made.meta.league_name ?? "your league"} from that page`)
+						})
+					}
+					onUsePreset={() => preset && void create(preset.key)}
+					onImportUrl={url =>
+						void run(async () => {
+							const { key: k, league: got } = await api.import(url)
+							adopt(leagues.save(k, got), k)
+							show(`Imported ${got.meta.league_name ?? k}`)
+						})
+					}
+					onLoadFile={() => openPicker.current?.()}
+					onOpenSetup={() => {
+						setOnboarding(false)
+						setSetupOpen(false)
+						setView("trade")
+					}}
+					onDone={() => {
+						setOnboarding(false)
+						setSetupOpen(false)
+						setView("board")
+					}}
+				/>
+				</Dock>
+			)}
 
 			<Colophon />
 

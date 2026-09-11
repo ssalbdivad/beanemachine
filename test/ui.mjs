@@ -165,6 +165,54 @@ const toSetupBar = async pg => {
   await pg.waitForSelector('.bar button:text-is("Download")')
 }
 
+/**
+ * ── The setup is a DOCK now, and reaching it is a GESTURE ────────────────────────
+ *
+ * `<Onboard/>` used to be a card in the page flow, so waiting for `.onboard` after a
+ * load or a button press was enough to have it. It is now the contents of
+ * `.dock-sheet` — a sheet over a bar fixed to the foot of the viewport, see
+ * src/client/Dock.tsx — and while that sheet is CLOSED the card is not rendered at
+ * all: `.onboard` does not exist and `.dock-bar` is the whole of it. A first visit
+ * lands closed on purpose, because the ranked board is the argument for filling the
+ * form in, and a form shown before the numbers asks for the two minutes first.
+ *
+ * So every route to the setup now ends in a gesture, and the gestures live here rather
+ * than being clicked inline at each site: there are three callers below, and the next
+ * time that button is relabelled it should be one line in this file.
+ */
+// The bar's single button both opens and closes the sheet, and its label flips between
+// "Set up my league" and "Close" — so it is addressed by its place in the bar rather
+// than by text that is only ever half of what you are looking for.
+const DOCK_TOGGLE = ".dock-bar button"
+const openDock = async pg => {
+  await pg.waitForSelector(DOCK_TOGGLE)
+  // The button TOGGLES, so an open-it helper that clicks unconditionally closes the
+  // sheet for any caller that already had it up — a silent wrong turn that would show
+  // up forty lines later as a missing `.onboard`. It asks first.
+  if ((await pg.locator(DOCK_TOGGLE).getAttribute("aria-expanded")) !== "true")
+    await pg.click(DOCK_TOGGLE)
+  // Waited for INSIDE the sheet. A bare `.onboard` would also be satisfied by the card
+  // having drifted back into the page flow above the board, which is the exact
+  // regression the dock exists to prevent and the one a screenshot would not show.
+  await pg.waitForSelector(".dock-sheet .onboard")
+}
+const closeDock = async pg => {
+  await pg.click(DOCK_TOGGLE)
+  await pg.waitForSelector(".dock-sheet", { state: "detached" })
+}
+/**
+ * The toolbar's "Set up a league" is the route back for a reader who already has one,
+ * and it opens the sheet ALREADY EXPANDED rather than dropping a closed bar at the foot
+ * of the page for him to notice — `onOnboard` in src/client/App.tsx sets both
+ * `onboarding` (the bar exists at all) and `setupOpen` (the sheet is up). Waiting on
+ * `.onboard` alone cannot tell those apart, so the wait is on the sheet: a press that
+ * produced only the bar would be a reader who asked for the setup and got a sentence.
+ */
+const setupFromToolbar = async pg => {
+  await pg.click('.bar button:text-is("Set up a league")')
+  await pg.waitForSelector(".dock-sheet .onboard")
+}
+
 await toLeagueSetup(page)
 
 await page.screenshot({ path: "/tmp/bc-light.png", fullPage: true })
@@ -425,12 +473,93 @@ t("the ready-made preset is what it lands on, not the blank one",
  * every way into your own league is named, in one place, and the file route prints
  * a command the reader could actually run.
  *
- * Reached here through "Set up a league", which is the route back for somebody who
- * already has one — the setup opens by itself only on a first visit, and without
- * this button a reader who set the wrong league up had no way to it at all.
+ * Reached here through the dock — the toolbar's "Set up a league" opened it a few
+ * assertions up, which is the route back for somebody who already has one (the setup
+ * opens by itself only on a first visit, and without that button a reader who set the
+ * wrong league up had no way to it at all). The card is the same `<Onboard/>` it always
+ * was; only its container moved, from the page flow into `.dock-sheet`.
  */
-await fp.click('.bar button:text-is("Set up a league")')
-await fp.waitForSelector(".onboard")
+/**
+ * ── The setup can be PUT AWAY, and got back ─────────────────────────────────────
+ *
+ * A new claim about a surface that did not exist when this file was last touched: the
+ * setup is a dock, and a dock that cannot be dismissed is worse than the card it
+ * replaced, because the card at least scrolled away. The whole bet of moving it here is
+ * that a reader meets the ranking first and opens the form once the ranking has earned
+ * it — which holds only if opening and closing are each one press, and if closing does
+ * not cost him the way back. Every way that goes wrong is invisible in a screenshot: a
+ * sheet that closes and takes its bar with it (no route back at all, which is what the
+ * toolbar button was added to fix in the first place), a bar that reopens an empty
+ * sheet, an Escape that does nothing, a close that leaves the page scroll-locked.
+ *
+ * Checked on the reader who ALREADY HAS A LEAGUE, because he is the one for whom this
+ * is optional furniture — on a first visit the bar is simply part of the page.
+ */
+await setupFromToolbar(fp)
+t("the toolbar's way back opens the setup inside the dock, already expanded",
+  (await fp.locator(".dock.on .dock-sheet .onboard").count()) === 1 &&
+    (await fp.locator(DOCK_TOGGLE).getAttribute("aria-expanded")) === "true" &&
+    (await fp.locator(DOCK_TOGGLE).textContent()) === "Close",
+  `${await fp.locator(".dock-sheet .onboard").count()} onboard in sheet, button "${await fp.locator(DOCK_TOGGLE).textContent()}"`)
+// The sheet is not a modal and must not start behaving like one: it scrolls inside
+// itself (`overscroll-behavior:contain` in app.css) precisely so the board goes on
+// scrolling behind it, because "let me look at that row again" is the commonest thing a
+// reader does half way through setting a league up. A page-level scroll lock is the
+// cheapest possible way to break that and would look identical on screen.
+t("and the page behind it still scrolls, because the sheet is not a modal",
+  await fp.evaluate(() =>
+    getComputedStyle(document.body).overflow !== "hidden" &&
+    getComputedStyle(document.documentElement).overflow !== "hidden"))
+await closeDock(fp)
+t("closing it takes the form off the page entirely, not merely out of sight",
+  (await fp.locator(".dock-sheet").count()) === 0 &&
+    (await fp.locator(".onboard").count()) === 0,
+  `${await fp.locator(".dock-sheet").count()} sheets, ${await fp.locator(".onboard").count()} onboard cards`)
+// The bar has to OUTLIVE the sheet: it is the only thing left on screen that remembers
+// the setup is available, and a reader who put it away and found no way back would be
+// in exactly the state the toolbar button exists to fix. Its one line also has to stay
+// truthful about WHICH league pressing it would edit, because by here this browser
+// holds two and editing the wrong one silently is the failure the whole Setup screen
+// is careful about elsewhere.
+const dockSay = (await fp.textContent(".dock-say")).replace(/\s+/g, " ").trim()
+const activeName = await fp.evaluate(k => {
+  const c = JSON.parse(localStorage.getItem(k))
+  return c.leagues[c.active_league]?.meta?.league_name ?? c.active_league
+}, STORE)
+t("but leaves the one-line bar, saying which league pressing it would edit",
+  (await fp.locator(".dock-bar").count()) === 1 &&
+    (await fp.locator(DOCK_TOGGLE).textContent()) === "Set up my league" &&
+    dockSay.includes(activeName),
+  `"${dockSay}" vs ${activeName}`)
+await openDock(fp)
+t("and the bar itself opens it again, with the form in it",
+  (await fp.locator(".dock-sheet .onboard").count()) === 1,
+  String(await fp.locator(".dock-sheet").count()))
+// Escape is the second way out, and it is bound on the document rather than on the
+// sheet so that it works with focus anywhere — including left in the page behind, which
+// is where a reader who was comparing rows will have put it.
+await fp.click("h1")
+await fp.keyboard.press("Escape")
+await fp.waitForSelector(".dock-sheet", { state: "detached", timeout: 5000 })
+t("Escape closes it too, from focus anywhere, and still leaves the way back",
+  (await fp.locator(".dock-sheet").count()) === 0 &&
+    (await fp.locator(".dock-bar").count()) === 1)
+/**
+ * And the bar surviving is not a nicety, it is THE handle: `manage` in
+ * src/client/App.tsx is gated on `!onboarding`, so the moment the toolbar's "Set up a
+ * league" is pressed the toolbar itself — that button included — leaves the page, and
+ * closing the sheet does not bring it back (`onboarding` stays true; only finishing the
+ * setup clears it). Measured here the hard way: reaching for the toolbar button a second
+ * time after an Escape timed out at 30s. So a dock that closed without leaving its bar
+ * would strand a reader with no route to the setup at all, which is the bug the toolbar
+ * button was itself added to fix.
+ */
+t("and that bar is the only handle left, because asking for the setup hid the toolbar",
+  (await fp.locator('.bar button:text-is("Set up a league")').count()) === 0,
+  String(await fp.locator('.bar button:text-is("Set up a league")').count()))
+
+// Back in for the route assertions below, through the only door there now is.
+await openDock(fp)
 await fp.click('.onboard .chip-btn:text-is("Yahoo")')
 await fp.click(".onboard-alts summary")
 const routes = await fp.$$eval(".onboard-alts dt", n => n.map(e => e.textContent))

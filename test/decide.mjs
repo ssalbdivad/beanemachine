@@ -157,9 +157,14 @@ const tab = async (page, label) => {
  *               path is exercised deterministically. Without it this case passes or
  *               fails on whether a dev API server happens to be running — which is
  *               exactly how it stopped testing anything the moment one was.
+ *               `logs` is an array the page's own console.errors are pushed into,
+ *               attached before the first render because React's DOM-nesting
+ *               complaint is a console.error and nothing else — see the folds block
+ *               at the foot of this file.
  */
 const open = async (seeds, opts = {}) => {
 	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	if (opts.logs) page.on("console", m => m.type() === "error" && opts.logs.push(m.text()))
 	if (opts.offline) await page.route("**/api/available", r => r.abort())
 	/** Cut the two LIVE MLB reads — the schedule and the transactions feed — so the
 	 *  card has to fall back to the shipped capture. See the block at the foot of this
@@ -1144,6 +1149,69 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		t("and how old the thing it fell back to is",
 			/from the capture, \d+[hd] ago/.test(text), text)
 	}
+	await page.close()
+}
+
+/* ── the folds are legal HTML, and that is not a cosmetic matter here ─────────
+ *
+ * Four <details> hang off prose on this card. Two of them used to be illegal: "what
+ * these numbers are" sat inside `<p class="sub decide-rest">`, and "why not the whole
+ * week" sat INSIDE the `<em class="decide-why">` whose clause it explains. <details>
+ * is flow content and neither a <p> nor an <em> may contain it. The `<p>` is a <div>
+ * now and the innings fold is the <em>'s SIBLING.
+ *
+ * A browser handed the old markup does not refuse it — it closes the <p>/<em> early
+ * and reparents the fold after it, so the fold renders outside the element it is
+ * styled inside, and the only protest is a validateDOMNesting console.error nobody
+ * reads. That is worth a test in THIS file specifically, because the way this suite
+ * checks a fold is `text` (innerText, what the reader sees) against `deep`
+ * (textContent, the folds included) — and both still find the words after a silent
+ * reparent. So "what the numbers mean is a tap away" and "why it cannot count the
+ * rest is folded, not dropped" would have stayed green through it, which makes them
+ * exactly the assertions that need this one underneath them.
+ *
+ * Asserted from both ends: the browser's own parse of where the folds ended up, and
+ * React's silence about it.
+ */
+{
+	const logs = []
+	const page = await open({ lineup: seedLineup, pool: seedPool }, { logs })
+	// with no fold on the card the three assertions below are all vacuously true, so
+	// the count comes first — this is the same trap as the `!board || cardIsFirst`
+	// assertion described in the first block
+	const folds = await page.$$eval(".decide details", ns => ns.length)
+	t("the card still folds things away, so the nesting below is asserted about something",
+		folds > 0, `${folds} <details> on the card`)
+	t("no fold sits inside a <p> or an <em>, where a browser would quietly move it out",
+		(await page.$$eval(".decide p details, .decide em details", ns => ns.length)) === 0,
+		await page.$$eval(".decide p details, .decide em details", ns =>
+			ns.map(e => e.parentElement?.outerHTML.slice(0, 140)).join(" | ")))
+	/*
+	 * The innings fold is a SIBLING of its clause, not a child, and the two are
+	 * distinguishable only here: reparented or not, `.decide-watch`'s textContent
+	 * reads the same, and the assertion above would pass either way because the
+	 * reparent is what REMOVES it from the <em>. So this is the one that catches the
+	 * markup being written back the nested way: the clause and the fold share a
+	 * parent, and the clause contains nothing.
+	 */
+	const innings = await page.$$eval(".decide-watch em.decide-why", ns =>
+		ns.map(e => ({
+			nested: !!e.querySelector("details"),
+			sibling: e.nextElementSibling?.tagName === "DETAILS"
+		})))
+	if (innings.length)
+		t("the innings clause keeps its fold beside it rather than inside it",
+			innings.every(i => !i.nested) && innings.some(i => i.sibling),
+			JSON.stringify(innings))
+	/*
+	 * React's own complaint, filtered rather than "no console errors at all": this page
+	 * reads MLB live and a blocked or slow feed logs a 502 of its own, so a bare
+	 * zero-errors assertion would be red on somebody else's outage and tell him
+	 * nothing about his card.
+	 */
+	t("and React logs no nesting complaint about the card",
+		!logs.some(l => /validateDOMNesting|cannot (?:appear|contain|be a (?:child|descendant))/i.test(l)),
+		logs.join(" | "))
 	await page.close()
 }
 

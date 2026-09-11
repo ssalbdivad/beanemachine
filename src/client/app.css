@@ -1081,3 +1081,198 @@ kbd{
   font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--muted);
 }
 .preview-note b{color:var(--ink)}
+
+/* ---------- the setup dock ----------
+   The ranking is the page; this hovers at the foot of it. One line until it is
+   asked for, then a sheet that scrolls inside itself over a board the reader can
+   still see. See src/client/Dock.tsx for why it is a bar and not a card.
+   ------------------------------------------------------------------------- */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;pointer-events:none}
+.dock>*{pointer-events:auto}
+.dock-bar{
+  display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  max-width:940px;width:100%;margin:0 auto;
+  padding:var(--sp-3) var(--sp-5);
+  border-top:1px solid var(--edge-line);
+  /* Opaque, not glass. A translucent bar over a ranked table puts player names and
+     numbers through the middle of its own sentence, which is illegible in both
+     directions — measured on the wire at 1280px, three rows read through it. Glass
+     is right for chrome that floats over whitespace and wrong for chrome that floats
+     over data. */
+  background:var(--paper);
+  box-shadow:0 -2px 14px rgba(40,34,24,.10);
+}
+.dock-say{margin:0;flex:1 1 220px;min-width:0;font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--muted)}
+.dock-say b{color:var(--ink)}
+.dock-bar button{flex:none}
+/* The sheet sits ON the bar rather than over the whole viewport: a reader half way
+   through deciding looks back at the board constantly, and a full-screen modal is
+   how that gets taken away from him. */
+.dock-sheet{
+  max-width:940px;width:100%;margin:0 auto;
+  max-height:min(74vh,760px);overflow-y:auto;overscroll-behavior:contain;
+  padding:0 var(--sp-5);
+  background:var(--paper);
+  border-top:1px solid var(--edge-line);
+  border-radius:var(--r-lg) var(--r-lg) 0 0;
+  box-shadow:0 -6px 30px rgba(40,34,24,.13);
+}
+.dock-sheet:focus{outline:none}
+/* The card inside loses its own chrome — it is already in a panel — and its top
+   margin, which would otherwise stack two gaps. */
+.dock-sheet .grid{margin-top:0}
+.dock-sheet .card{border:0;background:transparent;box-shadow:none;backdrop-filter:none}
+/* The bar reserves its own height instead of covering the last rows. 96px is two
+   lines of bar plus the rhythm below it; the page already carried 130px of tail
+   padding for the save bar, so this only has to beat that on a phone. */
+@media(max-width:640px){
+  .dock-bar{padding:var(--sp-3) var(--sp-4)}
+  .dock-sheet{padding:0 var(--sp-4);max-height:min(70vh,620px)}
+  .dock-say{font-size:var(--fs-2)}
+}
+
+/* Billy's working, one tap away. Inline, so the clause it follows reads as a
+   sentence with a link at the end rather than as a control. */
+.pick-more{display:inline}
+.pick-more>summary{
+  display:inline;cursor:pointer;list-style:none;margin-left:.4em;
+  color:var(--faint);text-decoration:underline;text-underline-offset:2px;font-size:var(--fs-2);
+}
+.pick-more>summary::-webkit-details-marker{display:none}
+.pick-more[open]>summary{display:block;margin:var(--sp-2) 0 2px}
+
+/* The masthead chips are a status line, not a paragraph: one row that scrolls if it
+   has to, rather than three rows of stacked pills pushing the ranking down a phone. */
+@media(max-width:640px){
+  .wrap>.chips{
+    flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+    mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+  }
+  .wrap>.chips::-webkit-scrollbar{display:none}
+  .wrap>.chips>*{flex:none}
+}
+
+/* Billy's pick as a strip: robot, name, number, and whether you can have him, on one
+   line. The working folds. See the note in Board.tsx for the 449px it replaces. */
+.card.pick.pick-strip{
+  display:flex;align-items:center;gap:var(--sp-4);
+  padding:var(--sp-3) var(--sp-4);
+}
+.pick-strip .pick-bot{width:46px;flex:none}
+.pick-strip .pick-bot svg{width:46px;height:36px}
+.pick-strip .pick-body{display:flex;align-items:baseline;gap:var(--sp-2) var(--sp-3);flex-wrap:wrap;flex:1;min-width:0}
+.pick-strip .pick-body h2{margin:0;flex:none}
+.pick-strip .pick-name{
+  margin:0;font-family:var(--serif);font-size:var(--fs-6);line-height:var(--lh-tight);
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0;
+}
+.pick-pos{
+  font-family:var(--mono);font-size:var(--fs-1);letter-spacing:.06em;
+  color:var(--faint);text-transform:uppercase;
+}
+.pick-strip .pick-avail{margin:0;flex:1 1 220px;min-width:0;font-size:var(--fs-2);color:var(--muted);line-height:var(--lh-snug)}
+.pick-strip .pick-score{flex:none}
+.pick-strip .pick-score b{font-size:var(--fs-7)}
+.pick-worry{font-style:normal;color:var(--flag);display:block;margin-top:2px}
+@media(max-width:640px){
+  .card.pick.pick-strip{gap:var(--sp-3);padding:var(--sp-3)}
+  .pick-strip .pick-bot{width:34px}
+  .pick-strip .pick-bot svg{width:34px;height:26px}
+  .pick-strip .pick-name{font-size:var(--fs-5)}
+  .pick-strip .pick-score b{font-size:var(--fs-6)}
+}
+
+/* The gap between the status chips and the first control was two margins stacked —
+   the grid's own top margin and the toolbar's — for 70px of nothing on the screen
+   whose job is to show ranked rows. */
+.wrap>.chips{padding:var(--sp-3) 0 0}
+.board-controls{margin-top:var(--sp-3)}
+/* The dock is fixed, so the page has to reserve its height or the last rows sit
+   under it. 130px already covered the save bar; the dock is taller on a phone. */
+@media(max-width:640px){ .wrap{padding-bottom:180px} }
+
+/* One scrolling row of position chips, not two stacked ones. Eleven slots is a
+   vocabulary, not a paragraph, and wrapping it cost 40px above the ranking on the
+   device this is opened on. Same treatment as the horizon strip: it scrolls and it
+   says it scrolls. */
+@media(max-width:640px){
+  .board-controls>.chips{
+    flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+    mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+  }
+  .board-controls>.chips::-webkit-scrollbar{display:none}
+  .board-controls>.chips>*{flex:none}
+  /* The masthead is identity, and on a phone it is 120px of it above a ranking.
+     Billy shrinks with the wordmark rather than sitting in his own band. */
+  header{padding-top:var(--sp-3)}
+  .bot{width:52px;height:40px}
+  .mark h1{font-size:var(--fs-8)}
+}
+
+/* On a phone the pick's four parts stack, and the availability sentence is the one
+   that can afford to be short: "probably free" is the fact, the percentage behind it
+   is working, and the working already folds one line below. */
+@media(max-width:640px){
+  .pick-strip .pick-avail{flex-basis:100%;font-size:var(--fs-1)}
+  .pick-strip .pick-body{gap:2px var(--sp-2)}
+  .card.pick.pick-strip{padding:var(--sp-2) var(--sp-3)}
+}
+
+/* One toolbar row on a wide screen. Four stacked rows — horizon, positions, search
+   and availability, more filters — are four rows of chrome above the ranking, and at
+   940px they fit on two. Ordered by how often each is reached for, left to right. */
+@media(min-width:901px){
+  .board-controls{
+    flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--sp-3) var(--sp-4);
+  }
+  .board-controls>.modes{margin:0}
+  .board-controls>.chips{flex:1 1 auto}
+  .board-controls .filters{flex:0 0 auto;align-items:center;gap:var(--sp-3)}
+  .board-controls .ctl-search input[type=text]{width:190px}
+  .board-controls>.more{flex:0 0 auto;margin:0}
+}
+
+/* On a phone every band of whitespace above the table is a row of ranking pushed off
+   the screen, and the grid's own top margin stacked with the toolbar's for 48px of
+   nothing between the status chips and the first control. */
+@media(max-width:640px){
+  .grid{margin-top:var(--sp-3)}
+  .views{margin-top:var(--sp-3)}
+}
+
+/* The wire card's own header — heading, the borrowed-scoring note, the count line —
+   is 180px on a phone between Billy's pick and the first ranked row. Tightened, not
+   removed: each of the three says something the reader needs once. */
+@media(max-width:640px){
+  .board-controls+.grid .card.full>h2,.card.full>h2{margin-bottom:var(--sp-2)}
+  .preview-note{padding:6px 9px;font-size:var(--fs-2)}
+  .card.full>.sub{margin-bottom:var(--sp-2)}
+}
+
+/* Last of the phone tightening, and the rule at the top of the toolbar goes with it:
+   a horizontal rule between the status chips and the first control separates two
+   things nobody was confusing, and costs a row of ranking to do it. */
+@media(max-width:640px){
+  .board-controls{border-top:0;padding-top:0;margin-top:var(--sp-2);gap:var(--sp-2)}
+  .board-controls>.more{margin-top:0}
+  .card.pick.pick-strip{margin-top:var(--sp-2)}
+}
+
+/* A card heading and its count on one line. The count is a caption for the heading,
+   not a second subject, and as two rows plus a margin it cost 40px above a table. */
+.card-head{display:flex;align-items:baseline;gap:var(--sp-2) var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-2)}
+.card-head h2{margin:0;flex:none}
+.card-head-count{margin:0;flex:1 1 220px;min-width:0}
+
+/* The column heads ran into one another — "GAMES CONFIDENCE LUCK/100" reads as one
+   word at 10px of gap with letter-spaced micro-caps — and the obvious fix is wrong:
+   a wider gap on `.board-head` alone MISALIGNS it from `.board-row`. The two share
+   one `grid-template-columns` whose second track is `minmax(0,1fr)`, so widening
+   only the head's gap shrinks only the head's name column. Measured at 1280px the
+   head computed `30px 362px 84px …` against the row's `30px 398px 84px …` and the
+   "uscore" heading sat 24px left of the uscore numbers — which is exactly what
+   "every heading sits over the cells it names" exists to catch. So the crowding is
+   solved in the LABELS instead: the head is the one place a shorter word costs
+   nothing, and the full definition is on its own tooltip either way. */

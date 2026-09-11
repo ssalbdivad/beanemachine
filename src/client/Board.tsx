@@ -1015,36 +1015,19 @@ export const Board = ({
 				</div>
 				)}
 				<div className="filters">
+					{/* No label above it: "Search" over a box that says "Player name…" is a
+					    line of type saying what the box already says, and this row sits
+					    between a reader and the ranking. The accessible name is on the
+					    input. */}
 					{filters.mode !== "stream" && (
-					<label className="ctl">
-						<span>Search</span>
+					<label className="ctl ctl-search">
 						<input
 							type="text"
 							value={filters.search}
 							placeholder="Player name…"
+							aria-label="Search by player name"
 							onChange={e => set("search", e.currentTarget.value)}
 						/>
-					</label>
-					)}
-					{/* One question, one ranking. The streaming list is ordered by what a man
-					    projects over the window you picked, which is the only ordering that
-					    answers "who should I add"; the other five are board questions and are
-					    a click away under "more filters". */}
-					{filters.mode !== "stream" && (
-					<label className="ctl">
-						<span>Rank by</span>
-						<select
-							data-ctl="sort"
-							value={sort}
-							onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
-						>
-							<option value="bscore">bscore (value over replacement)</option>
-							<option value="uscore">uscore (value you can actually get)</option>
-							<option value="points">projected points</option>
-							<option value="marketEdge">market edge (what the field is wrong about)</option>
-							<option value="undervaluation">most undervalued (above replacement)</option>
-							<option value="contact">best contact vs results (last 21 days)</option>
-						</select>
 					</label>
 					)}
 					{/* Not `disabled` any more, and that is the whole point of this change.
@@ -1099,6 +1082,34 @@ export const Board = ({
 						{narrowed.length > 0 && <em> · {narrowed.join(", ")}</em>}
 					</summary>
 					<div className="filters">
+						{/*
+						  Ordering lives here now, not above the table.
+						  
+						  Every column head on the board is already a sort control, and four of
+						  the six orderings this select offers ARE columns — so most of what it
+						  did was a second way to do a thing one tap away on the thing itself.
+						  Standing permanently above the ranking it cost 66px on a phone, on the
+						  one screen whose job is to show ranked rows. What it still earns its
+						  place for is the two orderings that have no column: market edge, and
+						  contact against results.
+						*/}
+						{filters.mode !== "stream" && (
+						<label className="ctl">
+							<span>Rank by</span>
+							<select
+								data-ctl="sort"
+								value={sort}
+								onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
+							>
+								<option value="bscore">bscore (value over replacement)</option>
+								<option value="uscore">uscore (value you can actually get)</option>
+								<option value="points">projected points</option>
+								<option value="marketEdge">market edge (what the field is wrong about)</option>
+								<option value="undervaluation">most undervalued (above replacement)</option>
+								<option value="contact">best contact vs results (last 21 days)</option>
+							</select>
+						</label>
+						)}
 						<label className="ctl">
 							<span>Side</span>
 							<select
@@ -1148,7 +1159,29 @@ export const Board = ({
 			    cards below re-rank with it too, but this is the ranking itself, and
 			    the sibling cards can't be wrapped without breaking the page grid. */}
 			<section className="card full" id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(filters.mode)}>
-				<h2>The wire</h2>
+				{/* The heading and the count share a line. Separately they were two rows and
+				    a margin above a table on the one screen whose job is showing ranked
+				    rows — and the count is a caption for the heading, not a second subject.
+				    `.card-head` is the flex row; the heading keeps its own marker. */}
+				<div className="card-head">
+					<h2>The wire</h2>
+					<p className="sub card-head-count">
+						<b className="count">{rows.length}</b> players · {span.range}
+						{budget.moves !== null && (
+							<>
+								{" · "}
+								<b className="count">{budget.moves}</b> add{budget.moves === 1 ? "" : "s"} a
+								week
+							</>
+						)}
+						{budget.innings !== null && (
+							<>
+								{" · "}
+								<b className="count">{budget.innings}</b> IP floor
+							</>
+						)}
+					</p>
+				</div>
 				{filters.sort === "marketEdge" && edgeCoverage < 0.35 && (
 					<p className="sub warn-note">
 						Yahoo listed ownership for only {Math.round(edgeCoverage * 100)}% of this
@@ -1176,22 +1209,7 @@ export const Board = ({
 						it is about your league yet — set yours up and they all move.
 					</p>
 				)}
-				<p className="sub">
-					<b className="count">{rows.length}</b> players · {span.range}
-					{budget.moves !== null && (
-						<>
-							{" · "}
-							<b className="count">{budget.moves}</b> add{budget.moves === 1 ? "" : "s"} a
-							week
-						</>
-					)}
-					{budget.innings !== null && (
-						<>
-							{" · "}
-							<b className="count">{budget.innings}</b> IP floor
-						</>
-					)}
-				</p>
+
 				{/*
 				  How much of this window MLB has actually named, MEASURED off the window
 				  on screen rather than quoted. Coverage is a property of the capture as
@@ -1343,7 +1361,12 @@ export const Board = ({
 						>
 							{filters.mode === "stream" ? "starts" : "games"}
 						</span>
-						<SortHead col="conf" field="confidence" filters={filters} setFilters={setFilters}>confidence</SortHead>
+						{/* "conf", not "confidence": at 10px of letter-spaced micro-caps the full word
+						    ran into its neighbours, and the head is the one place a shorter word
+						    costs nothing — the definition is on the tooltip either way, and
+						    widening the head's own gap silently misaligns it from the rows,
+						    which share its template. */}
+						<SortHead col="conf" field="confidence" filters={filters} setFilters={setFilters}>conf</SortHead>
 						{/* The number is a percentile, and nothing said so: 88 read as a quantity of
 						    luck rather than as "unluckier than 88% of his side". The denominator
 						    belongs in the heading, read once, rather than on 1,235 rows. */}
@@ -1486,33 +1509,61 @@ const BillysPick = ({
 			`Confidence is only ${Math.round(r.confidence.value * 100)}% — ${r.confidence.reasons.join(", ")}.`
 		:	null
 	return (
-		<section className="card full pick">
+		/*
+		 * A strip, not a card.
+		 *
+		 * Billy's pick is a hook and it was a 449px one: a 92px robot, a heading, a
+		 * serif name, an availability sentence and a four-clause paragraph of working,
+		 * standing between a first-time reader and the ranked list that is the actual
+		 * argument for this app. Measured on a 390px phone, nothing ranked appeared in
+		 * the first screen at all.
+		 *
+		 * Everything that made it a hook survives — the robot, the name, the number,
+		 * and whether the man is free — on one line. The working is a tap below it, and
+		 * the list starts immediately under.
+		 */
+		<section className="card full pick pick-strip">
 			<span className="pick-bot" aria-hidden>
 				<Billy />
 			</span>
 			<div className="pick-body">
 				<h2>Billy&rsquo;s pick</h2>
-				<p className="pick-name">{r.player.name}</p>
+				<p className="pick-name">
+					{r.player.name}
+					<span className="pick-pos">
+						{r.slot} · {r.player.team ?? "—"}
+					</span>
+				</p>
 				{/*
-				  It printed "Rostered in null% of leagues" whenever the estimate picked
-				  a man Yahoo never listed — which is now a live case rather than a
-				  hypothetical: the ownership tier counts an unlisted player as gettable
-				  precisely because the sweep never reached him, so the card's own
-				  recommendation is the row most likely to have no percentage on it. An
-				  absence is stated as an absence.
+				  It printed "Rostered in null% of leagues" whenever the estimate picked a
+				  man Yahoo never listed — which is a live case rather than a hypothetical:
+				  the ownership tier counts an unlisted player as gettable precisely because
+				  the sweep never reached him, so the card's own recommendation is the row
+				  most likely to have no percentage on it. An absence is stated as an
+				  absence.
 				*/}
-				<p className="pick-avail">
+				{/* A <div>, not a <p>: it holds a <details>, and details is flow content —
+				    React logs "In HTML, <details> cannot be a descendant of <p>" and the
+				    browser silently closes the paragraph early, which puts the fold outside
+				    the element it is styled inside. */}
+				<div className="pick-avail">
 					{basis === "pool" ? "Free agent in your league."
 					: basis === "ownership" ?
 						r.rosteredPct === null ?
 							"Probably free — Yahoo lists no rostered share for him, so this is an estimate."
 						:	`Probably free — rostered in ${r.rosteredPct}% of leagues, below what a league this size takes.`
 					:	"Best bscore on this board — availability unknown."}
-				</p>
-				<p className="pick-why">
-					{clauses.join(" · ")}.
-					{worry && <em> {worry}</em>}
-				</p>
+					{/*
+					  The working, one tap away. A WORRY is never folded: it is the reason not
+					  to act, and a reason not to act that has to be opened is a reason nobody
+					  reads.
+					*/}
+					<details className="pick-more">
+						<summary>why him</summary>
+						{clauses.join(" · ")}.
+					</details>
+					{worry && <em className="pick-worry"> {worry}</em>}
+				</div>
 			</div>
 			<span className="pick-score">
 				<b>{r.bscore}</b>

@@ -55,6 +55,36 @@ const screen = async (p, label) => {
   await p.click(`.views button:has-text("${label}")`)
   await p.waitForTimeout(200)
 }
+
+/**
+ * MORE FILTERS, and why reaching the ordering control is a named gesture.
+ *
+ * "Rank by" used to stand in the always-visible filter row. It is now inside
+ * `<details class="more">`, which ships CLOSED — four of its six orderings are also
+ * sortable column heads, so most of what it offered was a second way to do a thing
+ * one tap away on the thing itself, and it cost 66px above the one screen whose job
+ * is to show ranked rows. Every `selectOption("[data-ctl=sort]", …)` below then
+ * failed in the most misleading way a selector can: Playwright RESOLVED the select
+ * and then spent thirty seconds reporting "element is not visible", which reads like
+ * a dead control rather than a folded one.
+ *
+ * The open state is NOT ours to track, which is the whole reason this is a helper and
+ * not a click at each site. Board.tsx renders the disclosure as
+ * `open={narrowed.length > 0}`, so choosing "batters only" opens it for us and
+ * putting the side back to "batters + pitchers" closes it again underneath us. Ask
+ * the DOM every time.
+ */
+const moreFilters = async p => {
+  if (!(await p.$eval(".board-controls details.more", d => d.open)))
+    await p.click(".board-controls details.more > summary")
+  await p.waitForSelector(".board-controls details.more[open]")
+}
+// The ordering control, reached the way a reader reaches it.
+const rankBy = async (p, value) => {
+  await moreFilters(p)
+  await p.selectOption("[data-ctl=sort]", value)
+  await p.waitForTimeout(350)
+}
 await screen(page, "Wire")
 
 await page.waitForSelector(".board-row", { timeout: 30000 })
@@ -178,10 +208,24 @@ await page.evaluate(() => window.scrollTo(0, 0))
  * input must be reported once.
  */
 const headers = await page.$$eval(".board-head > *", n => n.map(e => e.textContent.trim()))
+/* "conf", not "confidence", and the abbreviation is the point rather than an
+ * accident. At 10px of letter-spaced micro-caps the full word ran into its
+ * neighbours — "GAMES CONFIDENCE LUCK/100" read as one word — and the obvious fix
+ * (a wider gap on the head alone) MISALIGNS every heading from the cells it names,
+ * because the head and the rows share one template whose name track is
+ * `minmax(0,1fr)`: widening the head's gap shrinks only the head's name column.
+ * That is the failure the assertion two below exists to catch, so the crowding was
+ * solved in the label instead. The full definition is on the head's own tooltip. */
 t("the board shows the seven decision columns",
-  ["#", "Player", "uscore", "bscore", "games", "confidence", "luck"]
+  ["#", "Player", "uscore", "bscore", "games", "conf", "luck"]
     .every(h => headers.some(x => x.startsWith(h))) && headers.length === 7,
   headers.join(" | "))
+// The definition, not the word: the tooltip says what confidence MEANS — how much
+// real data stands behind the projection — which is what an abbreviated head owes
+// its reader, and is more than spelling the word out would have given him.
+t("and the shortened head still carries its definition on itself",
+  (await page.$eval('.board-head [data-col=conf]', e => e.getAttribute("title") ?? "")).length > 40,
+  await page.$eval('.board-head [data-col=conf]', e => (e.getAttribute("title") ?? "").slice(0, 80)))
 t("and no longer restates bscore's own arithmetic beside it",
   !headers.some(h => /proj pts|waiver pts/.test(h)), headers.join(" | "))
 t("ownership is no longer a column of its own",
@@ -234,8 +278,34 @@ t("choosing uscore orders by uscore",
 const usB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("uscore ranks only players above replacement", usB.every(v => v > 0), String(usB.slice(0, 5)))
 
-await page.selectOption("[data-ctl=sort]", "bscore")
-await page.waitForTimeout(300)
+/**
+ * A control that MOVED must not be a control that quietly retired.
+ *
+ * Nothing in this file noticed the fold as a fold — every sort assertion simply timed
+ * out — so the three claims the move actually has to satisfy are pinned here: the
+ * ordering control is HIDDEN until the reader asks for more filters (that is the
+ * point of the move, and the 66px it bought back), it is REACHABLE with that one
+ * gesture, and it still ORDERS the board once reached.
+ *
+ * Ordering is proved on `contact`, deliberately. Four of the six orderings are also
+ * column heads, so a select that had stopped being wired to anything would still look
+ * alive when tested on those: the board would already be sorted that way from the
+ * head-click above. `contact` and `marketEdge` are the two orderings with NO column of
+ * their own — the only reason the select still earns its place at all — so they are
+ * what proves it is alive.
+ */
+t("the ordering control is off screen until the reader asks for more filters",
+  !(await page.locator("[data-ctl=sort]").isVisible()),
+  "rank-by is back in the always-visible filter row")
+const beforeOrder = await page.$$eval(".board-row .who b", n => n.slice(0, 8).map(e => e.textContent.trim()))
+await rankBy(page, "contact")
+const afterOrder = await page.$$eval(".board-row .who b", n => n.slice(0, 8).map(e => e.textContent.trim()))
+t("one gesture reaches it, and it still re-orders the board",
+  (await page.locator("[data-ctl=sort]").isVisible()) &&
+    (await page.$eval("[data-ctl=sort]", e => e.value)) === "contact" &&
+    afterOrder.length > 5 && afterOrder.join() !== beforeOrder.join(),
+  `${beforeOrder.slice(0, 3)} then ${afterOrder.slice(0, 3)}`)
+await rankBy(page, "bscore")
 
 /**
  * The window column is per SIDE, and it says which of the two units it is in.
@@ -300,13 +370,11 @@ t("a row showing own starts says starts out loud, and never calls them team game
   JSON.stringify(spokenWindow.filter(r => r.gs).slice(0, 2)))
 
 // Market edge keeps its ranking without keeping a column — same as `contact`.
-await page.selectOption("[data-ctl=sort]", "marketEdge")
-await page.waitForTimeout(300)
+await rankBy(page, "marketEdge")
 t("market edge is still selectable and still ranks",
   (await page.$$eval(".board-row", n => n.length)) > 0)
 
-await page.selectOption("[data-ctl=sort]", "bscore")
-await page.waitForTimeout(300)
+await rankBy(page, "bscore")
 const byB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("sorting by bscore still orders by bscore",
   byB.every((v, i) => i === 0 || byB[i - 1] >= v), String(byB.slice(0, 5)))
@@ -393,8 +461,7 @@ await page.waitForTimeout(400)
 t("the buy-low card is gone from the board",
   (await page.$(".buylow")) === null && (await page.$$(".buylow-card")).length === 0,
   "a buy-low panel is back under the board")
-await page.selectOption("[data-ctl=sort]", "undervaluation")
-await page.waitForTimeout(450)
+await rankBy(page, "undervaluation")
 const luckRanked = await page.$$eval(".board-row [data-col=luck]", n =>
   n.slice(0, 12).map(e => Number(String(e.textContent).replace(/[^0-9.\-]/g, ""))))
 t("the luck half of buy-low still ranks the board on its own",
@@ -402,15 +469,13 @@ t("the luck half of buy-low still ranks the board on its own",
     luckRanked.every((v, i) => i === 0 || luckRanked[i - 1] >= v) && luckRanked[0] > 80,
   String(luckRanked.slice(0, 5)))
 // and the cheapness half, which is the other axis the card crossed with it
-await page.selectOption("[data-ctl=sort]", "uscore")
-await page.waitForTimeout(450)
+await rankBy(page, "uscore")
 const cheapOwn = await page.$$eval(".board-row [data-col=uscore] .us-own", n =>
   n.slice(0, 12).map(e => Number(String(e.textContent).replace(/[^0-9.]/g, ""))))
 t("the cheapness half does too, and says the ownership it priced",
   cheapOwn.length > 5 && cheapOwn.every(Number.isFinite),
   String(cheapOwn.slice(0, 5)))
-await page.selectOption("[data-ctl=sort]", "bscore")
-await page.waitForTimeout(400)
+await rankBy(page, "bscore")
 
 // The three horizons must actually be three different questions. A stash ranking
 // that matches the streaming ranking is a tab that does nothing.
@@ -1064,7 +1129,37 @@ t("the drill-down states whether the Statcast adjustment was applied",
  * board actually ranked, not that he is first.
  */
 await page.waitForSelector(".card.pick")
-const pickName = (await page.textContent(".pick-name")).trim()
+/**
+ * THE PICK'S NAME, and why reading it is no longer `textContent`.
+ *
+ * `.pick-name` held the name and nothing else. Billy's pick is a STRIP now — a 449px
+ * hook stood between a first-time reader and the ranked list that is this app's actual
+ * argument — and folding the strip put the slot and the club inside that same element
+ * as `<span class="pick-pos">RP · Chicago White Sox</span>`. So `textContent` returns
+ * "Grant TaylorRP · Chicago White Sox", and a name-matching assertion reported a
+ * missing PLAYER ("Grant TaylorRP · Chicago White Sox not found") rather than a
+ * changed element, which is the most expensive way for this to fail.
+ *
+ * Read the first text node: it is the name, only the name, and it stays the name if
+ * another fact is folded in beside the position tomorrow.
+ */
+const pickOf = p =>
+  p.$eval(".pick-name", e => (e.firstChild?.textContent ?? "").trim()).catch(() => "")
+/**
+ * ...and THE WORKING, which is folded now.
+ *
+ * The four-clause "why" paragraph was `<p class="pick-why">`. It is the body of
+ * `<details class="pick-more">`, summary "why him" — so `.pick-why` does not exist at
+ * all, and three assertions below died on a thirty-second wait for a selector instead
+ * of on a claim about Billy's reasoning.
+ *
+ * No click: `textContent` reads a closed `<details>` perfectly well, and the claim
+ * these assertions make is that the working is THERE and cites real numbers, not that
+ * it is on screen. Whether it starts closed is a separate claim, asserted as one
+ * directly below.
+ */
+const pickWhy = p => p.textContent(".pick-more")
+const pickName = await pickOf(page)
 /**
  * Checked against the RANKING, not against what is painted.
  *
@@ -1082,7 +1177,7 @@ t("Billy's pick is a player the board actually ranked",
   found.includes(pickName), `${pickName} not found; search returned ${found.slice(0, 4).join(", ")}`)
 await search.fill("")
 await page.waitForTimeout(400)
-const why = await page.textContent(".pick-why")
+const why = await pickWhy(page)
 const pickScore = Number(await page.textContent(".pick-score b"))
 t("Billy's reasoning cites the actual bscore",
   why.includes(String(pickScore)) && /more points than the best/.test(why), why)
@@ -1093,6 +1188,36 @@ t("Billy's reasoning cites a real count of what is scheduled",
   /plays \d+ games/.test(why) || /down for [\d.]+ starts/.test(why), why)
 t("Billy uses the right volume unit for the side",
   /plate appearances per team game|outs recorded per team game/.test(why), why)
+
+/**
+ * ...and the working is FOLDED, not buried.
+ *
+ * Exactly the claim the ordering control needs: a thing moved behind a disclosure must
+ * still be a thing the reader reaches. While the paragraph stood on screen nothing here
+ * had to say it was readable. It starts shut now, and the only evidence that "why him"
+ * is a fold rather than a coffin is that one tap on it shows the clauses the three
+ * assertions above just read out of the DOM.
+ *
+ * The WORRY is deliberately outside the fold, and that is asserted rather than assumed:
+ * it is the reason NOT to act, and a reason not to act that has to be opened is a reason
+ * nobody reads.
+ */
+const fold = ".card.pick details.pick-more"
+t("Billy's working starts folded, under a summary that says what it is",
+  (await page.$eval(fold, d => d.open)) === false &&
+    /why him/i.test(await page.textContent(`${fold} > summary`)),
+  `open=${await page.$eval(fold, d => d.open)}, summary "${await page.textContent(`${fold} > summary`)}"`)
+await page.click(`${fold} > summary`)
+await page.waitForTimeout(200)
+t("and one tap opens it on the clauses, so the fold is a fold and not a deletion",
+  (await page.$eval(fold, d => d.open)) === true &&
+    /more points than the best/.test(await pickWhy(page)),
+  (await pickWhy(page)).slice(0, 90))
+await page.click(`${fold} > summary`)
+await page.waitForTimeout(200)
+t("and the worry is never folded away with it",
+  (await page.$$eval(".card.pick .pick-more .pick-worry", n => n.length)) === 0,
+  "the reason not to act is behind a disclosure")
 
 /**
  * Billy's pick must not follow the sort DIRECTION, and must never be below
@@ -1106,16 +1231,16 @@ t("Billy uses the right volume unit for the side",
  * board, so the pick has to survive it unchanged; bscore <= 0 is a player who costs
  * you points, so he can never be the pick in any order or any horizon.
  */
-// $eval rather than textContent: when nothing clears replacement the card renders
-// its "Nobody." variant with no score badge, and a missing badge has to read as a
-// failed assertion rather than as a 30-second selector timeout that aborts the run.
-const pickOf = () => page.$eval(".pick-name", e => e.textContent.trim()).catch(() => "")
+// `pickOf` is up with the strip's other readers, and it is a $eval that catches:
+// when nothing clears replacement the card renders its "Nobody." variant with no
+// score badge, and a missing badge has to read as a failed assertion rather than as a
+// 30-second selector timeout that aborts the run. Same for the score.
 const pickBscore = () =>
   page.$eval(".pick-score b", e => Number(String(e.textContent).replace(/[^0-9.\-]/g, ""))).catch(() => NaN)
 const sortDir = () =>
   page.$eval(".board-head .sort-head.active", e => /ascending/.test(e.getAttribute("aria-label") ?? "") ? "asc" : "desc")
 
-const descPick = await pickOf()
+const descPick = await pickOf(page)
 const descScore = await pickBscore()
 t("the pick is above replacement descending", descScore > 0, `${descPick} bscore ${descScore}`)
 
@@ -1125,7 +1250,7 @@ await page.waitForTimeout(350)
 const ascFirst = await page.$eval(".board-row .bscore", e => Number(e.textContent))
 t("clicking the active header really does flip the board to worst-first",
   (await sortDir()) === "asc" && ascFirst < descScore, `top row ${ascFirst}, ${await sortDir()}`)
-const ascPick = await pickOf()
+const ascPick = await pickOf(page)
 const ascScore = await pickBscore()
 t("Billy's pick does not follow the sort direction", ascPick === descPick,
   `descending ${descPick} (${descScore}) vs ascending ${ascPick} (${ascScore})`)
@@ -1135,17 +1260,17 @@ t("Billy never recommends a player below replacement", ascScore > 0,
 await page.click(".board-head .sort-head:has-text('bscore')")
 await page.waitForTimeout(350)
 t("and it comes back unchanged when the board is flipped again",
-  (await pickOf()) === descPick, `${await pickOf()} vs ${descPick}`)
+  (await pickOf(page)) === descPick, `${await pickOf(page)} vs ${descPick}`)
 
 // Every horizon, both directions. The pick is re-derived per horizon (journey.mjs
 // pins that it changes), so the bar has to hold on each of the three.
 for (const mode of ["Streaming", "This fortnight", "Stash"]) {
   await page.click(`.modes .mode:has-text('${mode}')`)
   await page.waitForTimeout(350)
-  const a = { name: await pickOf(), score: await pickBscore() }
+  const a = { name: await pickOf(page), score: await pickBscore() }
   await page.click(".board-head .sort-head:has-text('bscore')")
   await page.waitForTimeout(350)
-  const b = { name: await pickOf(), score: await pickBscore() }
+  const b = { name: await pickOf(page), score: await pickBscore() }
   await page.click(".board-head .sort-head:has-text('bscore')")
   await page.waitForTimeout(350)
   t(`${mode}: the pick is the same player in both sort directions`, a.name === b.name,
@@ -1160,19 +1285,19 @@ await page.waitForTimeout(350)
 // to name the best catcher you can get, in either direction.
 await page.click('.chip-btn:text-is("C")')
 await page.waitForTimeout(400)
-const cPick = await pickOf()
+const cPick = await pickOf(page)
 const cSlots = await page.$$eval(".board-row .who .code", n => n.map(e => e.textContent))
 // The card names the slot it priced him against — "the best C you could add off
 // waivers" — so that clause is the pick's own slot, not the board's.
-const cWhy = await page.textContent(".pick-why")
+const cWhy = await pickWhy(page)
 t("filtering to catchers moves the pick to a catcher",
   cSlots.length > 0 && cSlots.every(x => x === "C") && /best C you could add/.test(cWhy),
   `${cPick}: ${cWhy.slice(0, 90)} (on ${cSlots.length} C rows)`)
 t("the filtered pick is still above replacement", (await pickBscore()) > 0, cPick)
 await page.click(".board-head .sort-head:has-text('bscore')")
 await page.waitForTimeout(350)
-t("and the filtered pick ignores direction too", (await pickOf()) === cPick,
-  `${await pickOf()} vs ${cPick}`)
+t("and the filtered pick ignores direction too", (await pickOf(page)) === cPick,
+  `${await pickOf(page)} vs ${cPick}`)
 await page.click(".board-head .sort-head:has-text('bscore')")
 await page.waitForTimeout(350)
 await page.click('.chip-btn:text-is("All")')
@@ -1199,7 +1324,18 @@ await page.waitForFunction(
   () => document.querySelector(".filters .toggle[data-avail]") !== null,
   { timeout: 30000 }
 ).catch(() => {})
-const availLine = (await page.textContent(".pick-avail")).trim()
+/*
+ * The availability sentence, and NOT everything that now sits beside it.
+ *
+ * `.pick-avail` was a <p> holding one sentence; it is a <div> holding that sentence,
+ * the folded "why him" working and any WORRY — a <details> is flow content and cannot
+ * live inside a <p>, which React was logging. `textContent` on the container therefore
+ * returns the working too, and the claim below is about which of three availability
+ * statements the card chose: a phrase matched out of the clauses would be a false
+ * pass. So read the container's own text nodes and nothing its children hold.
+ */
+const availLine = (await page.$eval(".pick-avail", e =>
+  [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(" "))).trim()
 const tier = await page.$eval(".filters .toggle[data-avail]", e => e.dataset.avail)
 t("Billy's card says which claim it is making",
   tier === "pool" ? /free agent in your league/i.test(availLine)
@@ -1231,7 +1367,7 @@ if (poolRead) {
   await page.check(availByLabel)
   await page.waitForTimeout(400)
   const freeNames = await page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
-  const pickedName = (await page.textContent(".pick-name")).trim()
+  const pickedName = await pickOf(page)
   t("Billy's pick is a player you can actually add",
     freeNames.includes(pickedName), `${pickedName} not among ${freeNames.length} free agents`)
   // and it is genuinely a different answer from the top of the board, or the
@@ -1288,20 +1424,20 @@ if (!process.env.BASE || /127\.0\.0\.1|localhost/.test(process.env.BASE)) {
 }
 
 // "most undervalued" must surface buy-low candidates, not replacement-level noise
-await page.selectOption("[data-ctl=sort]", "undervaluation")
-await page.waitForTimeout(500)
+await rankBy(page, "undervaluation")
 const uvScores = await page.$$eval(".board-row .bscore", n => n.slice(0,10).map(e => Number(e.textContent)))
 t("most-undervalued only ranks players above replacement",
   uvScores.length > 0 && uvScores.every(v => v > 0), String(uvScores.slice(0,4)))
-await page.selectOption("[data-ctl=sort]", "bscore")
-await page.waitForTimeout(400)
+await rankBy(page, "bscore")
 
 // filters actually filter
 // Side, min-confidence and hide-injured now sit behind "More filters" — they are
 // reached for rarely and permanently on screen they pushed the ranking below the
 // fold. The disclosure has to be opened before they can be driven, which is the
 // same thing a reader does.
-await page.click(".board-controls details.more > summary")
+// ...through the same helper the sort assertions use, because by now the disclosure
+// may already be open and a second click on the summary would shut it.
+await moreFilters(page)
 await page.waitForSelector("[data-ctl=group]", { state: "visible" })
 const before = await page.$$eval(".board-row", n => n.length)
 await page.selectOption("[data-ctl=group]", "hitting")
@@ -1398,8 +1534,7 @@ t("no column on the phone board is empty",
 t("the page does not scroll sideways at 390px",
   (await phone.evaluate(() => document.documentElement.scrollWidth)) <= 390,
   String(await phone.evaluate(() => document.documentElement.scrollWidth)))
-await phone.selectOption("[data-ctl=sort]", "uscore")
-await phone.waitForTimeout(400)
+await rankBy(phone, "uscore")
 const sorted = await cols()
 t("ranking by uscore brings its column back on a phone",
   sorted.names.includes("uscore") && sorted.head.join() === sorted.row.join(),

@@ -407,7 +407,23 @@ const horizon = async label => {
 	await page.waitForSelector(".board-row", { timeout: 30000 })
 	return (await rows()).slice(0, 10)
 }
-const pickName = async () => (await page.textContent(".pick-name")).trim()
+/**
+ * The NAME ALONE, which now has to be extracted rather than read off the element.
+ *
+ * `.pick-name` used to contain nothing but the name, so `textContent` was the name.
+ * Billy's pick is a strip now and the same cell also carries
+ * `<span class="pick-pos">RP · Chicago White Sox</span>`, so `textContent` read
+ * "Grant TaylorRP · Chicago White Sox" — and every comparison against a board row,
+ * which prints the name by itself, stopped matching. The surname this suite feeds to
+ * the search box came out as "Sox" and found nobody.
+ *
+ * The FIRST TEXT NODE is the name, and reading that rather than subtracting the span's
+ * text means a second thing added to the cell cannot silently rejoin the string
+ * either. The empty-pick copy ("Nobody.") still reads correctly through this, as a
+ * text node with no span beside it.
+ */
+const pickName = async () =>
+	(await page.$eval(".pick-name", e => e.firstChild?.textContent ?? "")).trim()
 const fortnightPick = await pickName()
 const stream = await horizon("Streaming")
 /**
@@ -524,6 +540,33 @@ t("and reticking it gives back exactly the board the journey opened on",
 const search = page.locator(".board-controls .filters input[type=text]")
 const settle = () => page.waitForTimeout(400)
 
+/**
+ * THE GESTURE, because two of the controls below are no longer on screen.
+ *
+ * "Rank by" joined the confidence floor inside `<details class="more">`, which ships
+ * SHUT — four of its six orderings are already sortable column heads, so standing
+ * permanently above the ranking it was a second way to do a thing one tap away on the
+ * thing itself. A `selectOption` against a control inside a shut `<details>` does not
+ * fail fast: it waits thirty seconds and then reports a selector, which is how this
+ * suite broke on the restructure and why the gesture is a named helper rather than an
+ * inline click at each of the four sites that need it.
+ *
+ * IDEMPOTENT on purpose. The fold opens itself whenever one of the filters inside it
+ * is narrowed (`open={narrowed.length > 0}` in Board.tsx), so a blind click on the
+ * summary is a TOGGLE and would shut it again at the second call site — and it really
+ * does reopen and reclose during this section: raising the confidence floor opens it,
+ * and dropping the floor back to 0 closes it again underneath the sort that follows.
+ */
+const openMoreFilters = async () => {
+	const more = page.locator(".board-controls details.more")
+	if (!(await more.evaluate(d => d.open))) await more.locator("> summary").click()
+	await page.waitForSelector("[data-ctl=confidence]", { state: "visible" })
+}
+/** Both of these live behind that fold now, so every use of them is the gesture plus
+ *  the select — never the select alone. */
+const rankBy = value => openMoreFilters().then(() => page.selectOption("[data-ctl=sort]", value))
+const confidenceFloor = value => openMoreFilters().then(() => page.selectOption("[data-ctl=confidence]", value))
+
 await page.click('.board-controls .chip-btn:text-is("C")')
 await settle()
 const catchers = await rows()
@@ -545,8 +588,13 @@ t("and the position filter survives the search",
 
 // Re-ranking is where a stale row shows up: the sort runs over the filtered set,
 // so a filter that was dropped on the way through would put strangers back.
+//
+// Named as a stage because the sort is behind a fold now: when this timed out it was
+// reported under "the link on Today opens the ranking", the last `at` six claims
+// earlier, which pointed at a screen that was fine.
+at("the ranking can be re-ordered from behind More filters")
 const searched = new Set(await rows())
-await page.selectOption("[data-ctl=sort]", "bscore")
+await rankBy("bscore")
 await settle()
 const reranked = await bscores()
 t("changing the ranking re-orders by that column",
@@ -564,7 +612,7 @@ await search.fill("")
 // default: market edge can only rank players it has a price for, and the handful
 // that survives a position filter are all well-established, so every one of them
 // clears the floor and the assertion below would be vacuous.
-await page.selectOption("[data-ctl=sort]", "bscore")
+await rankBy("bscore")
 await settle()
 const floorless = await rows()
 const floorlessConf = await confs()
@@ -582,11 +630,7 @@ t("clearing the search restores a full board rather than the searched subset",
 // every catcher cleared it would make both claims below vacuously true.
 t("the whole filtered ranking is on screen, so the two sets are comparable",
 	floorless.length <= 120, `${floorless.length} rendered`)
-// The confidence floor lives behind "More filters" now — reached for rarely, and
-// on screen permanently it was part of what pushed the ranking below the fold.
-await page.click(".board-controls details.more > summary")
-await page.waitForSelector("[data-ctl=confidence]", { state: "visible" })
-await page.selectOption("[data-ctl=confidence]", "0.7")
+await confidenceFloor("0.7")
 await settle()
 const kept = new Set(await rows())
 const mustStay = floorless.filter((_, i) => floorlessConf[i] >= 71)
@@ -614,10 +658,10 @@ t("a filter nobody matches empties the board and says why",
 
 // and the whole thing unwinds back to where it started
 await search.fill("")
-await page.selectOption("[data-ctl=confidence]", "0")
+await confidenceFloor("0")
 // bscore, because that is what the board now opens on: market edge divides by a
 // "% Ros" sweep that mostly returns the game's weather line (test/ownership.mjs).
-await page.selectOption("[data-ctl=sort]", "bscore")
+await rankBy("bscore")
 await page.click('.board-controls .chip-btn:text-is("All")')
 await settle()
 t("clearing every filter returns the board it opened on",

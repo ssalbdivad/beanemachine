@@ -65,16 +65,24 @@ has to explain that its main screen is not about you is showing the wrong screen
 
 `publishSnapshot` in `vite.config.ts` now empties `leagues` on the way into the
 published asset, alongside the roster, lineup and pool it already stripped. What
-still ships is nobody's: the presets, the canonical stat list, the schema version. A
-first visit opens on `src/client/Onboard.tsx`, which asks three questions — where do
-you play, what does your league score, who is on your team — and gets the first two
-out of one paste of the league's own settings page.
+still ships is nobody's: the presets, the canonical stat list, the schema version.
+
+A first visit gets a **ranked board** — on the shipped preset, standard head-to-head
+points values, nobody's team — with Billy's pick above it and the setup hovering at
+the foot of the page in `src/client/Dock.tsx`. The board says whose scoring it is on,
+on its own face. That shape is the answer to two failures, not one: seeding a real
+person's league passed somebody else's team off as yours, and showing a form first
+asks two minutes of typing from a stranger who has not yet seen a single number —
+and the numbers are the entire argument for typing. `src/client/Onboard.tsx` is the
+sheet the dock opens: where do you play, what does your league score, who is on your
+team, with the first two out of one paste of the league's own settings page.
 
 Running this repo is the deliberate exception. `npx vite` serves the `scoring.json`
 that `src/cli.ts` just wrote, roster and free-agent list included, because that file
 is *yours*: the dev server has a middleware that shadows the published asset with the
 one at the repo root. That is why the browser suites still open on a real league and
-`test/static.mjs`, which runs against the build, opens on the setup instead.
+`test/static.mjs`, which runs against the build, opens on the preset board with the
+dock at its foot.
 
 ## Billy
 

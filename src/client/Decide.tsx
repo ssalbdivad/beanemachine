@@ -1287,7 +1287,9 @@ export const Decide = ({
 					  in front: whether the availability is read or estimated. That stays on the
 					  line; the rest is one tap away.
 					*/}
-					<p className="sub decide-rest">
+					{/* A <div>, not a <p>, because it holds a <details> — see the same note in
+					    Board.tsx. */}
+					<div className="sub decide-rest">
 						{estimatedWire ?
 							<b>Who is free is an estimate</b>
 						: wireAge ?
@@ -1312,7 +1314,7 @@ export const Decide = ({
 								<> Anyone picked up or dropped since is not in it.</>
 							:	null}
 						</details>
-					</p>
+					</div>
 				</>
 			}
 
@@ -1346,16 +1348,20 @@ export const Decide = ({
 									    to know before acting is that this counts only what is STILL TO
 									    COME; why it cannot count the rest is a fact about this page, not
 									    about his week. */}
+									{/* The clause is an <em> and the fold is its SIBLING, not its child:
+									    <details> is flow content and cannot live inside phrasing content,
+									    and a browser handed that quietly closes the <em> early — which
+									    puts the fold outside the element it is styled inside. */}
 									<em className="decide-why">
 										still to come only, from their scheduled turns
-										<details className="decide-fine">
-											<summary>why not the whole week</summary>
-											Innings already thrown this period are on your team page, which
-											nothing here reads — so this can tell you what is left, not
-											whether you will clear the floor. The turns themselves are MLB&rsquo;s
-											published probables, which are an announcement about a plan.
-										</details>
 									</em>
+									<details className="decide-fine">
+										<summary>why not the whole week</summary>
+										Innings already thrown this period are on your team page, which
+										nothing here reads — so this can tell you what is left, not whether
+										you will clear the floor. The turns themselves are MLB&rsquo;s
+										published probables, which are an announcement about a plan.
+									</details>
 								</span>
 							</li>
 						)}

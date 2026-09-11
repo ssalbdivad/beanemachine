@@ -81,10 +81,40 @@ const set = (league: string, spots: StoredLineup["spots"], at: string): StoredLi
 	return write({ ...stored, [league]: { at, spots } })[league]!
 }
 
+/**
+ * Drop this league's seats, and leave every other league's alone.
+ *
+ * Its first caller arrived on 2026-09-11. Until then `grep -rn lineupStore src/`
+ * found this function referenced nowhere, and the consequence was measurable on
+ * the dev server: paste twenty names into My league, press "Clear team", accept
+ * the confirm, and `beanemachine:roster` became `{}` while this store kept all
+ * 1,858 characters of its twenty spots. A seat is only true about the roster it
+ * was read off, so it must not outlive it.
+ */
 const clear = (league: string): null => {
 	const { [league]: _, ...kept } = read()
 	write(kept)
 	return null
 }
 
-export const lineupStore = { of, set, clear }
+/**
+ * Every league's seats at once — the counterpart to `roster.reset`.
+ *
+ * `clear` has to parse the store before it can spare the other leagues, and the
+ * one place that calls this is the escape hatch offered beside an unreadable
+ * ROSTER: that path drops the whole roster key rather than one league's, so
+ * clearing one league's seats here would leave every other league's seats
+ * describing a roster that no longer exists. `read` is forgiving where roster.ts
+ * throws, but "forgiving" is not the same as "cleared", so the key goes outright.
+ */
+const reset = (): void => {
+	try {
+		storage().removeItem(STORE_KEY)
+		// tell the screens to look again — see src/client/stores.ts
+		stored()
+	} catch (e) {
+		throw new LineupError(`This browser refused to clear the lineup: ${(e as Error).message}`)
+	}
+}
+
+export const lineupStore = { of, set, clear, reset }

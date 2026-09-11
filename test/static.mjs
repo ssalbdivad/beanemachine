@@ -118,7 +118,7 @@ t("a first visit ranks players, so a stranger can see what the setup buys him",
 t("and Billy's pick is on it, because a pick is the shortest demonstration there is",
   await p.locator(".card.pick").isVisible())
 t("but the board says whose scoring it is on, on the board itself",
-  /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
+  /one real league.s scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
   await p.$eval(".preview-note", e => e.innerText))
 /*
  * The setup is UNDER the ranking now, not beside it.
@@ -156,7 +156,7 @@ t("but the way to it is on the page, saying what pressing it gets you",
     /start tonight/i.test(await p.$eval(".dock-say", e => e.innerText)),
   await p.$eval(".dock-say", e => e.innerText))
 t("and the borrowed-values caveat is on the board, attached to the numbers",
-  /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
+  /one real league.s scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
   await p.$eval(".preview-note", e => e.innerText))
 /* Matched on a regex rather than `text-is`, and the apostrophe is why: this button
    ships a straight one ("Who's on my team", Dock.tsx) while every other string in the
@@ -366,7 +366,7 @@ t("the colophon is one sentence, and it points at the working rather than explai
   colophon.split(" ").length < 90 && /methodology/i.test(colophon),
   `${colophon.split(" ").length} words: ${colophon.slice(0, 140)}`)
 t("and with no league it does not claim the numbers are in the reader's own points",
-  /standard scoring/i.test(colophon) && !/your league.s own points/i.test(colophon),
+  /borrowed from one real league/i.test(colophon) && !/your league.s own points/i.test(colophon),
   colophon.slice(0, 200))
 /*
  * The claim the footer used to carry, asserted where it now lives.
@@ -534,9 +534,15 @@ t("a first visit is told the board behind the sheet is already running, on borro
  */
 // The card and the board must agree about whose scoring this is: two different
 // answers on one screen is worse than either answer alone.
-t("and the card and the board agree that the scoring is standard, not the reader's",
-  /standard/i.test(await p.$eval(".onboard", e => e.innerText)) &&
-    /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)))
+/* "standard" was the word and it was false: the preset is league 228947's own settings
+   page, copied, and Yahoo's own H2H-points default pays 1 for a run and 4 for a home run
+   where this pays 1.9 and 10.4. What the assertion is for is unchanged — the card and the
+   board must not give two different answers about whose scoring this is — so it now holds
+   both to saying the values are borrowed and not the reader's. */
+t("and the card and the board agree that the scoring is borrowed, not the reader's",
+  /one real (Yahoo )?league/i.test(await p.$eval(".onboard", e => e.innerText)) &&
+    /one real league.s scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
+  `${(await p.$eval(".preview-note", e => e.innerText)).slice(0, 90)}`)
 /*
  * The tabs work on a first visit now, and that is the same change as the one above.
  *
@@ -1288,6 +1294,57 @@ t("and the line that matched nobody is quoted back verbatim, not silently droppe
   (await p.$eval(".onboard-missed", e => e.innerText)).includes(JUNK),
   await p.$eval(".onboard-missed", e => e.innerText))
 /*
+ * A TYPO IS ONE TAP, not a retype.
+ *
+ * `rosterFromPaste` measures the one man a failed line is a single typo from — 99.1%
+ * right and 0.0% wrong on real typos across the whole capture, and it refuses on
+ * anything that says too little. The note has asked "Did you mean Juan Soto?" since that
+ * landed, and the only way to answer was to retype the line on a phone keyboard, which
+ * is where people quit.
+ *
+ * Three things have to hold together and any one alone would pass on a broken flow: the
+ * name is OFFERED, tapping it puts the man in the ROSTER, and it puts him in the LINEUP
+ * too — a man in the roster and absent from the seats is one `Decide` silently never
+ * considers, so roster-only would have been worse than nothing. And afterwards his line
+ * must stop being described as uncounted, because it is now counted.
+ *
+ * The junk line above must NOT produce an offer: it says too little to be answered, and
+ * a suggestion that fires on anything is the silent correction this must never make.
+ */
+await p.fill("[data-ctl=onboard-team]", "OF Juan Sot\nSP Tarik Skubl")
+await p.click(".onboard-go button")
+await p.waitForSelector(".onboard-meant", { timeout: 15000 })
+const meant = await p.$$eval(".onboard-meant .chip-btn", n => n.map(e => e.textContent.trim()))
+t("a line one typo off is offered the name it is one typo from, as something to press",
+  meant.join(",") === "Juan Soto,Tarik Skubal", meant.join(",") || "(nothing offered)")
+const beforeTap = await p.evaluate(k => JSON.parse(localStorage.getItem("beanemachine:roster"))[k].length, typedKey)
+await p.locator('.onboard-meant .chip-btn:text-is("Juan Soto")').click()
+await p.waitForTimeout(400)
+t("and pressing it puts that man in the team",
+  (await p.evaluate(k => JSON.parse(localStorage.getItem("beanemachine:roster"))[k].length, typedKey)) ===
+    beforeTap + 1,
+  `${beforeTap} then ${await p.evaluate(k => JSON.parse(localStorage.getItem("beanemachine:roster"))[k].length, typedKey)}`)
+t("and gives him a seat, because a man with none is one the card never considers",
+  await p.evaluate(k => {
+    const l = JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "{}")[k]
+    return !!l?.spots?.some(s => s.name === "Juan Soto" && s.slot === "BN")
+  }, typedKey),
+  await p.evaluate(k => JSON.stringify(JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "{}")[k]?.spots?.map(s => `${s.slot} ${s.name}`)), typedKey))
+t("and his line stops being described as counted nowhere, because it now is",
+  !(await p.$$eval(".onboard-missed", n => n.map(e => e.innerText).join(" "))).includes("Juan Sot\u00bb"),
+  await p.$$eval(".onboard-missed", n => n.map(e => e.innerText.slice(0, 90)).join(" | ")))
+// and the offer never fires on text that says too little to be answered
+await p.fill("[data-ctl=onboard-team]", JUNK)
+await p.click(".onboard-go button")
+await p.waitForTimeout(600)
+t("but a line that says too little is refused with no guess attached",
+  (await p.locator(".onboard-meant").count()) === 0,
+  await p.$$eval(".onboard-answer > *", n => n.map(e => e.innerText.slice(0, 70)).join(" | ")))
+// put the four typed names back, which is the state the rest of this walk assumes
+await p.fill("[data-ctl=onboard-team]", PLACEHOLDER)
+await p.click(".onboard-go button")
+await p.waitForSelector(".onboard-got", { timeout: 15000 })
+/*
  * The second question, and it only appears once there is a league to write it to. The
  * bar every player is measured against is the (teams x seats)-th best man, so the team
  * count moves every row on the board — which is why it is asked at all, and why it is a
@@ -1332,6 +1389,28 @@ t("and answering it is written to the league, not only to the chip",
  * cannot answer: the question is on the sheet, the answer reaches the league with a
  * source naming who said it, and the card that follows HAS a Today section.
  */
+/*
+ * AND IT IS REACHABLE. The button that ends setup is `position:sticky;bottom:0` once a
+ * league exists, and it used to pin from that moment — on top of the two chip questions
+ * that come AFTER it in the document. Measured on this build at 390x844: the button at
+ * y=701, "How many teams" at 757, "Can you change your lineup every day?" at 894, fifty
+ * pixels past the bottom of the screen. The natural gesture is to press the big button
+ * you can see, and it skipped the question.
+ *
+ * It pins only once the questions are answered now, so this asserts the ORDER rather than
+ * any particular pixel: everything the sheet still wants sits above the way out of it.
+ */
+const layout = await p.evaluate(() => ({
+  exit: Math.round(document.querySelector(".onboard-done").getBoundingClientRect().top),
+  questions: [...document.querySelectorAll(".onboard-teams h3")].map(e => [
+    e.textContent.trim().slice(0, 30),
+    Math.round(e.getBoundingClientRect().top)
+  ])
+}))
+t("and every question it still wants sits above the button that ends it",
+  layout.questions.length === 2 && layout.questions.every(([, y]) => y < layout.exit),
+  `exit at ${layout.exit}, ${layout.questions.map(([t2, y]) => `${t2} at ${y}`).join(", ")}`)
+
 t("the sheet asks the one thing a preset cannot know about tonight",
   /change your lineup every day/i.test(await p.$eval(".onboard", e => e.innerText)),
   (await p.$$eval(".onboard-teams h3", n => n.map(e => e.textContent.trim()))).join(" | "))
@@ -1387,8 +1466,14 @@ t("a Yahoo preset ranks a full board with no server and no import",
   (await p.$$eval(".board-row", n => n.length)) > 50,
   String(await p.$$eval(".board-row", n => n.length)))
 const presetNote = await p.locator(".preset-note").first().textContent()
+/* Same claim, the sentence now also says where they DID come from. "not read from your
+   league" left a reader to assume they were Yahoo's defaults, which they are not: the
+   preset is league 228947's settings page copied, paying 10.4 for a home run against
+   Yahoo's own default of 4. */
 t("and the page says those values were not read from the visitor's league",
-  /not read from your league/i.test(presetNote), presetNote.slice(0, 140))
+  /not read from yours|not read from your league/i.test(presetNote) &&
+    /one real Yahoo league/i.test(presetNote),
+  presetNote.slice(0, 160))
 t("and the league it made is marked unverified, not read-from-source",
   await p.evaluate(() => {
     const c = JSON.parse(localStorage.getItem("beanemachine:config"))
@@ -1468,11 +1553,30 @@ const streamHead = async (n = 6) => {
 const estimated = await streamHead()
 t("the streaming tab ranks somebody before any free-agent list is carried",
   estimated.length === 6, estimated.join(", "))
-// Nothing is carried yet, so the masthead has to say so — and say it as the way to
-// fix it, on every tab, rather than as a disabled checkbox three controls down.
+/* Nothing is carried yet, so the masthead has to say so — and say it as the way to fix
+   it, on every tab, rather than as a disabled checkbox three controls down.
+
+   The words and the destination both changed and the claim did not. It read "none
+   carried — load a file" and opened a file picker, which is the route for somebody who
+   has run this project's command line on a desktop — nobody arriving at the published
+   build. To a reader with no file that is a dead end wearing a button, and "a file" is
+   the app talking about itself. It now says the availability is an estimate and goes to
+   the screen holding the paste control every reader can use. Asserted on the words a
+   reader reads rather than on the class alone, because the class survived the old
+   wording and would have survived a dead end too. */
 t("with no pool carried, the masthead says so and offers the way to get one",
-  await p.locator('[data-wire="none"]').isVisible(),
+  (await p.locator('[data-wire="none"]').isVisible()) &&
+    /estimated/i.test(await p.locator('[data-wire="none"]').textContent()) &&
+    !/\bfile\b/i.test(await p.locator('[data-wire="none"]').textContent()),
   await p.locator(".wrap > .chips").textContent())
+// and pressing it lands somewhere a reader can actually act
+await p.locator('[data-wire="none"]').click()
+await p.waitForSelector(".trade-team", { timeout: 20000 })
+t("and pressing it reaches the screen that takes your league's own free-agent list",
+  /paste your free agents/i.test(await p.textContent("main")),
+  (await p.textContent("main")).replace(/\s+/g, " ").slice(0, 160))
+await go("Pickups")
+await p.waitForSelector(".board-row", { timeout: 20000 })
 
 /**
  * The carried pool. Its players are taken from DEEP in this same streaming list —

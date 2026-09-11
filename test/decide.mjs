@@ -301,6 +301,27 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("and one man is offered for one seat, not for every seat he is eligible at",
 		new Set(fills.map(f => f.name)).size === fills.length, JSON.stringify(fills))
 	/*
+	 * THE HEADING COUNTS SEATS AND THE LIST NAMES MEN, and the two are not the same
+	 * number. Observed on the dev server with a fourteen-man roster: "4 seats score
+	 * nothing tonight" over a list of two, because two of the four had no free man both
+	 * eligible there and on a card — and one man can only take one seat. A list shorter
+	 * than its own heading reads as the app having run out of room, so the difference is
+	 * now stated. Asserted as an identity between the two numbers rather than against a
+	 * fixed count, since how many seats are open is tonight's schedule and not this
+	 * code's business.
+	 */
+	const openSeats = Number(
+		(/(\d+) seats? scores? nothing/.exec(
+			(await page.textContent(".decide-fill-head")) ?? ""
+		) ?? [])[1] ?? NaN
+	)
+	const rest = (await page.$$eval(".decide-fill-rest", n => n.map(e => e.textContent.trim())))[0] ?? ""
+	t("every seat the heading counts is either offered a man or explained",
+		Number.isNaN(openSeats) ||
+			openSeats === fills.length ||
+			new RegExp(`other ${openSeats - fills.length}\\b|other seat`).test(rest),
+		`${openSeats} open, ${fills.length} offered, rest: ${rest || "(nothing said)"}`)
+	/*
 	 * The seat phrase has to come off the name before the name is compared.
 	 *
 	 * A row reads "Add Yordan Alvarez for your 1B or OF or Util seat, drop Tyler
@@ -310,13 +331,59 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * the card telling him to add a man he already owns or drop one he does not, so
 	 * they are worth having actually armed.
 	 */
-	const adds = [...text.matchAll(/Add (.+?)(?: for your [^,]*seat)?, drop (.+)/g)].map(m => [m[1], m[2]])
+	/*
+	 * NOBODY IS DROPPED WHILE A SEAT IS FREE.
+	 *
+	 * The most expensive sentence this product ever printed, found by a stranger walking
+	 * the published build: holding 12 of 27 seats, the card said "Add Dominic Canzone for
+	 * your Util seat, drop Trevor Megill" — with fifteen seats free, three of which the
+	 * SAME card was listing as scoring nothing tonight. A reader told to drop a man he
+	 * does not have to drop stops believing every other number on the page.
+	 *
+	 * Asserted against the league's own seat count rather than a fixed number, because how
+	 * many men this browser holds is whatever the suite pasted. `planSwaps` offers the add
+	 * with nobody removed through the same evaluation as a swap, so it wins on merit when
+	 * it is legal: measured, the same add went from +10.18 paired with a drop to +21.54
+	 * standing alone, because the lineup keeps both men.
+	 */
+	const room = await page.evaluate(() => {
+		const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+		const l = c.leagues[c.active_league]
+		const seats = Object.values(l.roster.slots).reduce((a, n) => a + n, 0)
+		const held = (JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}")[c.active_league] ?? []).length
+		return { seats, held, free: seats - held }
+	})
+	t(
+		room.free > 0 ?
+			"with seats free, no move asks anybody to be dropped"
+		:	"every seat is taken, so a move may pair an add with a drop",
+		room.free <= 0 || !/, drop /.test(text),
+		`${room.held} of ${room.seats} seats held; ${
+			(text.match(/, drop [^.]{0,40}/g) ?? []).join(" | ") || "no drop proposed"
+		}`)
+	t("and where there is room the card says that is why nobody comes out",
+		room.free <= 0 ||
+			!/Add /.test(text) ||
+			/free seat, so nobody comes out|seats are free/.test(text),
+		text.slice(-300))
+
+	/* Two shapes now: paired with a drop, and standing alone into a free seat. The two
+	   assertions below are about the man arriving and the man leaving, so a pure add
+	   contributes only an arrival and `drop` is null for it. */
+	const adds = [
+		...[...text.matchAll(/Add (.+?)(?: for your [^,]*seat)?, drop (.+)/g)].map(m => [m[1], m[2]]),
+		/* `innerText`, so the seat clause and the reason can arrive on separate lines —
+		   `.decide-why` is its own block. `[\s\S]` rather than `.` for that reason. */
+		...[...text.matchAll(/Add ([^\n]+?)(?:[\s\S]{0,60}?seat)?[\s\S]{0,4}you have a free seat/g)].map(
+			m => [m[1], null]
+		)
+	]
 	t("it proposes at least one move, so the two rules below are tested against something",
 		adds.length > 0 || /none clear the bar|None worth making/.test(text), text.slice(-400))
 	t("it never proposes adding a player already on the roster",
 		adds.every(([a]) => !spots.some(s => s.name === a)), JSON.stringify(adds))
 	t("it never proposes dropping a player who is not on the roster",
-		adds.every(([, d]) => spots.some(s => s.name === d)), JSON.stringify(adds))
+		adds.every(([, d]) => d === null || spots.some(s => s.name === d)), JSON.stringify(adds))
 	/*
 	 * Availability is never silent, whichever way it was arrived at.
 	 *
@@ -845,8 +912,14 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 *
 	 * So the assertion is the one that matters: an answer, and the estimate declared.
 	 */
+	/* "Add X, drop Y" was the only shape a move had. A roster with a free seat now gets
+	   an add with nobody removed — see the room block above — so the claim is stated as
+	   what it always meant: the half ANSWERS rather than refusing. */
 	t("the moves half answers from the ownership estimate rather than refusing",
-		/Add .+, drop /.test(text) || /none clear the bar/.test(text), text.slice(-600))
+		/Add .+, drop /.test(text) ||
+			/Add [\s\S]{0,80}free seat, so nobody comes out/.test(text) ||
+			/none clear the bar/.test(text),
+		text.slice(-600))
 	/*
 	 * The label shrank to three words and stayed on the line. It was a sentence
 	 * ending "is an estimate"; the arithmetic behind the cut — the percentage, the
@@ -1123,8 +1196,14 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		(await page.$$(".decide-changes li")).length > 0, text.slice(0, 400))
 	t("and it says the seats are unknown rather than inventing a comparison",
 		/lineup to set, not the changes to make/.test(text), text.slice(0, 900))
+	/* Both shapes of a move count as an answer. This roster has free seats, so the adds
+	   arrive with nobody removed — see the room block above for why that is the whole
+	   point. The claim is that the half ANSWERS. */
 	t("the adds are answered too, from the estimate",
-		/Add .+, drop |none clear the bar/.test(text), text.slice(-700))
+		/Add [\s\S]{0,80}, drop |Add [\s\S]{0,120}free seat, so nobody comes out|none clear the bar/.test(
+			text
+		),
+		text.slice(-700))
 	t("and nothing on it claims a free-agent list was read",
 		!/read off your league|as it stood|free-agent list, read /.test(text), text.slice(-700))
 	await page.close()

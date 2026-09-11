@@ -12,6 +12,9 @@ import { Decide } from "./Decide.tsx"
 import { Onboard } from "./Onboard.tsx"
 import { Dock } from "./Dock.tsx"
 import { leagues } from "./leagues.ts"
+import { roster } from "./roster.ts"
+import { lineupStore } from "./lineup.ts"
+import { slotsFor } from "../engine/bscore.ts"
 import { useStored } from "./stores.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
@@ -67,7 +70,7 @@ const templateOptions = (config: Config | null): TemplateOption[] =>
 			// type it names, or the fact that it names nothing at all.
 			label:
 				stats > 0 ?
-					`a ${name}${tpl?.meta?.scoring_type ?? ""} league (standard values)`.replace(/\s+/g, " ")
+					`a ${name}${tpl?.meta?.scoring_type ?? ""} league (borrowed values)`.replace(/\s+/g, " ")
 				:	`a blank ${name}league (nothing filled in)`
 		}
 	})
@@ -410,7 +413,8 @@ export const App = () => {
 	 * ask that loses him. What was actually wrong before was seeding somebody's REAL
 	 * league and letting it pass for his own.
 	 *
-	 * So the board runs on the shipped PRESET — standard head-to-head points values,
+	 * So the board runs on the shipped PRESET — one real head-to-head points league's
+	 * values, copied from its settings page and labelled as copied,
 	 * nobody's team, labelled as borrowed on the card above it and in the board's own
 	 * heading — and the setup sits beside it rather than in front of it. Every number
 	 * moves the moment a real league arrives, which is the argument for setting one
@@ -615,7 +619,14 @@ export const App = () => {
 				snapshot={snapshot}
 				snapshotError={snapshotError}
 				wire={wire}
-				onLoadFile={() => openPicker.current?.()}
+				/* The paste control, not the file picker — see the note on `WireChip`. It
+				   lives on My league, so this is a navigation; the reader lands on the screen
+				   that holds it rather than on a dialog he has nothing to put in. */
+				onFixWire={() => {
+					setOnboarding(false)
+					setSetupOpen(false)
+					setView("trade")
+				}}
 			/>
 
 			{/* A store that can't be read is not an empty store, and every tab's own
@@ -915,6 +926,42 @@ export const App = () => {
 							)
 						})
 					}
+					/*
+					 * One accepted suggestion, and it goes into BOTH stores.
+					 *
+					 * The roster is the list of men who are yours; the lineup is where they sit.
+					 * A tapped name has a roster entry and no seat — the line it came from was
+					 * misspelled, so whatever position it carried was never read — and "BN" is
+					 * the honest seat for a man you own and have not placed. Tonight then treats
+					 * him as a bench player it may seat, which is what he is.
+					 *
+					 * Roster only would have been worse than nothing: `Decide` plans from the
+					 * stored seats where it has them, so a man in the roster and absent from the
+					 * lineup is a man the card silently never considers.
+					 */
+					onAddSuggested={(id, group, name) =>
+						void run(async () => {
+							if (!key || !snapshot) return
+							roster.add(key, `${id}:${group}`)
+							const p = snapshot.players.find(x => x.id === id && x.group === group)
+							const seats = lineupStore.of(key)
+							if (p)
+								lineupStore.set(
+									key,
+									[
+										...(seats?.spots ?? []),
+										{
+											slot: "BN",
+											name: p.name,
+											positions: slotsFor(p, (snapshot.eligibility ?? {})[String(p.id)]),
+											team: p.team ?? null
+										}
+									],
+									seats?.at ?? new Date().toISOString()
+								)
+							show(`Added ${name}`)
+						})
+					}
 					onTeamCount={teams =>
 						void run(async () => {
 							if (!league || !key) return
@@ -998,12 +1045,19 @@ export const App = () => {
  * where the backtest, the negative results and the caveats live and nothing on
  * screen mentioned it at all.
  *
- * The three caveats here are the ones that change how a number on this page
- * should be read, so they belong on the page and not only in a doc:
+ * WHAT THIS COMPONENT RENDERS is three links and one sentence about the unit the
+ * numbers are in. It does NOT render the caveats below, and this comment said it did —
+ * "they belong on the page and not only in a doc", above a footer that has never
+ * carried one. They are kept because they are the reason the Methodology link is here
+ * at all: a reader who follows it is owed them, and a reader who does not should not be
+ * given a win count with no p-value on the way past.
  *
  * - Ranking, docs/METHODOLOGY.md §6.5: mean Spearman rho 0.6759 vs a naive
  *   0.5743 for hitting (+17.7%, 48 of 50 folds) and 0.5318 vs 0.4697 for
- *   pitching (+13.2%, 49 of 50), 14-day horizon, 2016-2026.
+ *   pitching (+13.2%, 49 of 50), 14-day horizon, 2016-2026 — and these belong to the
+ *   SINGLE-WINDOW ancestor of the shipped model, which §6.5 says and a comment twenty
+ *   lines below this one used to contradict. The shipped multi-window blend measures
+ *   17.7% on hitters and 13.9% on pitchers against the same naive baseline.
  * - The human comparison, §9: 63/111 weeks is 63W-47L with ties excluded,
  *   z 1.53, one-sided p 0.064 — short of the 5% bar this project applies to
  *   its other results, and quoting the win count without the p-value is the
@@ -1075,7 +1129,7 @@ const Colophon = ({ own }: { own: boolean }) => (
 		<p className="tiny-note">
 			{own ?
 				"Every number is in your league's own points. "
-			:	"Every number is in the standard scoring this board is running, not yours yet. "}
+			:	"Every number is in the scoring this board borrowed from one real league, not yours yet. "}
 			How the projections were built and measured, and the parts that could not be,
 			are in Methodology.
 		</p>
@@ -1212,7 +1266,7 @@ const Toolbar = ({
 				<button
 					title={
 						templates.find(t => t.key === template)?.filled ?
-							"Start from standard values you then check against your own league — nothing here was read from it"
+							"Start from one real league's values, which you then check against your own — nothing here was read from yours"
 						:	"Start an empty league you fill in yourself — no values are invented"
 					}
 					onClick={() => onCreate(template)}
@@ -1315,7 +1369,7 @@ const Status = ({
 	snapshot,
 	snapshotError,
 	wire,
-	onLoadFile
+	onFixWire
 }: {
 	league: League | null
 	store: StoreState
@@ -1327,7 +1381,8 @@ const Status = ({
 	snapshotError: string | null
 	/** The exact free-agent list this browser holds for the active league, or null. */
 	wire: StoredPool | null
-	onLoadFile: () => void
+	/** Where the masthead sends a reader whose availability is still an estimate. */
+	onFixWire: () => void
 }) => {
 	const age = freshness(snapshot?.capturedAt, Date.now())
 	const data =
@@ -1346,7 +1401,7 @@ const Status = ({
 			<span className={data.className} title="Age of the MLB and Statcast capture the ranking is computed from">
 				player data <b>{data.value}</b>
 			</span>
-			<WireChip league={league} wire={wire} onLoadFile={onLoadFile} />
+			<WireChip league={league} wire={wire} onFix={onFixWire} />
 		</div>
 	)
 }
@@ -1383,11 +1438,13 @@ const STALE_WIRE_HOURS = 24
 const WireChip = ({
 	league,
 	wire,
-	onLoadFile
+	onFix
 }: {
 	league: League | null
 	wire: StoredPool | null
-	onLoadFile: () => void
+	/** Where a reader goes to answer this. See the note on the button below for why it
+	 *  is no longer the file picker. */
+	onFix: () => void
 }) => {
 	if (league?.meta.platform !== "yahoo") return null
 	if (wire) {
@@ -1415,13 +1472,24 @@ const WireChip = ({
 			className="chip warn"
 			data-wire="none"
 			style={{ font: "inherit", fontSize: "var(--fs-3)", cursor: "pointer" }}
-			onClick={onLoadFile}
-			/* A tooltip is not a place to explain anything — a phone cannot open one —
-			   and this held five sentences about access-control headers and a shell
-			   command. What it needs to say is what the chip beside it already means. */
-			title="Who is free is a guess from how widely each player is rostered, not your league's own list. Click to load a file if you have one."
+			onClick={onFix}
+			/*
+			  A tooltip is not a place to explain anything — a phone cannot open one — and
+			  this held five sentences about access-control headers and a shell command.
+			  What it needs to say is what the chip beside it already means.
+
+			  AND THE ACTION CHANGED. It read "none carried — load a file" and opened a file
+			  picker: the route for somebody who has run this project's own command line on a
+			  desktop, which is nobody arriving at beanemachine.com. To a reader with no file
+			  it is a dead end wearing a button, and "a file" is the app talking about itself.
+			  What EVERY reader can actually do is paste his league's free-agent page, which
+			  is a control on My league — so that is where this goes now. The file route has
+			  not gone anywhere; it is in the toolbar on that same screen, where somebody who
+			  has a file will look for it.
+			*/
+			title="Who is free is an estimate from how widely each player is rostered across all of Yahoo, not your league's own list. Your league's own list makes it exact."
 		>
-			free agents <b>none carried</b> — load a file
+			free agents <b>estimated</b> &mdash; make it exact
 		</button>
 	)
 }
@@ -1655,12 +1723,18 @@ const ScoringPeriodPanel = ({
 	return (
 		<>
 			<p className="sub">
+				{/* The second sentence quoted "7.4 games a club when 4.7 remained", measured on
+				    "the shipped league" — and the published build ships no league at all
+				    (public/scoring.json carries `leagues: {}`), so the figure is not
+				    reproducible from anything a reader has. What it was there to convey is why
+				    these two fields are worth filling in, which is sayable without a number
+				    nobody can check: a window that runs past the reset counts games that score
+				    for somebody else's matchup. */}
 				Which days a matchup is scored over, and whether the lineup can still be changed
 				inside it — two facts that do not follow from each other. The period decides
-				where the streaming window ends; the lock decides which period you can still
-				act on. Ranked as a rolling seven days instead, on a Wednesday against the
-				shipped league, the board counted 7.4 games a club when 4.7 remained in the
-				matchup.
+				where the streaming window ends; the lock decides which period you can still act
+				on. Get the period wrong and the board counts games played after your matchup has
+				already been settled.
 			</p>
 
 			<div className="period">

@@ -625,7 +625,15 @@ export const PresetNote = ({
 				    that holds the league's own values holds no board. "Every number you are
 				    shown" is true on all three, and it is also the larger truth — the trade
 				    and tonight answers are priced in these same three inputs. */}
-				<b>These are standard defaults, not read from your league.</b> Every number you
+					{/* NOT "standard". The shipped preset is league 228947's own settings page,
+					    copied — R 1.9, HR 10.4, SB 4.2 — and Yahoo's own H2H-points default pays
+					    1 for a run and 4 for a home run. A reader told these are "standard
+					    defaults" who then opens his settings page to compare, which four separate
+					    sentences tell him to do, finds not one number that matches and concludes
+					    the app is broken. The app's own "values to check" drawer has been saying
+					    the true thing all along: these point values are another league's. */}
+				<b>These values are copied from one real Yahoo league, not read from yours.</b>{" "}
+				Every number you
 				are shown is priced on {stats} scored stats, {seats} roster seats and{" "}
 				{league.meta.max_teams ?? "no stated number of"} teams, all copied from a league
 				that was read off its own settings page. A wrong point value silently reprices

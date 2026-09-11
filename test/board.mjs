@@ -2355,6 +2355,117 @@ await phone.close()
   await dm.close()
 }
 
+/* ── A LEAGUE THAT SCORES ONE SIDE OF THE BALL ───────────────────────────────
+ *
+ * Yahoo prints its two stat tables under separate headers, so a settings page
+ * copied from a league that pays batters only — or a copy that caught one table and
+ * missed the other — lands here as `scoring.pitching: {}`. `rateAll` has always
+ * been right about it, marking every pitcher `rateable: false` with the reason "this
+ * league scores nothing on the pitching side". Nothing DREW that reason, because an
+ * unrateable player is not a row.
+ *
+ * Reproduced on the published build before the fix: the board fell from 1,009 rows
+ * to 481, the word "pitch" appeared nowhere on the screen, and SP, RP and P were
+ * still offered — each answering "0 players. Try a different position or a wider
+ * window", which blames the reader for a filter that could not have matched. My
+ * league said it twice on its own screen the whole time ("No pitching stats scored",
+ * and "The paste carried no pitching scoring" under Needs review), which is what
+ * makes the board's silence a disagreement between two screens rather than a gap.
+ *
+ * THE LEAGUE IS BUILT THROUGH THE PASTE, not injected into storage, because the
+ * paste is the only way a reader reaches this state and the parser is what decides
+ * what "no pitching scoring" means. `scoring.json` is stripped in flight rather than
+ * by rebuilding dist: the dev server serves the repo's own file, which carries a
+ * seeded league, and the dock this flow starts from only exists on a first visit.
+ */
+{
+  const sp = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+  await sp.route("**/scoring.json", async route => {
+    const j = await (await route.fetch()).json()
+    j.leagues = {}
+    j.active_league = null
+    delete j.pools
+    delete j.rosters
+    delete j.lineups
+    await route.fulfill({ json: j })
+  })
+  await sp.goto(BASE, { waitUntil: "domcontentloaded" })
+  await sp.waitForSelector(".dock button", { timeout: 30000 })
+  await sp.click(".dock button")
+  await sp.waitForSelector("summary:has-text('My league scores differently')", { timeout: 15000 })
+  await sp.click("summary:has-text('My league scores differently')")
+  await sp.click(".onboard-where button:has-text('Yahoo')")
+  await sp.fill(
+    'textarea[data-ctl="paste-settings"]',
+    [
+      "Max Teams\t10",
+      "Scoring Type\tHead-to-Head - Points",
+      "Roster Positions\tC, 1B, 2B, 3B, SS, OF, OF, OF, Util, SP, SP, RP, RP, P, P, BN, BN, BN",
+      "Batters Stat Category\tValue",
+      "Runs (R)\t1",
+      "Hits (H)\t1",
+      "Home Runs (HR)\t4",
+      "Runs Batted In (RBI)\t1",
+      "Walks (BB)\t1",
+      "Stolen Bases (SB)\t2"
+    ].join("\n")
+  )
+  await sp.click("button:text-is('Read that')")
+  await sp.waitForTimeout(1200)
+  await sp.click('.views button:has-text("Pickups")')
+  await sp.waitForSelector(".board-row", { timeout: 30000 })
+  await sp.waitForTimeout(800)
+
+  // The parser really did produce the state under test, rather than the test having
+  // quietly pasted something the board could rank.
+  const sides = await sp.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("beanemachine:config"))
+    const L = s.leagues[s.active_league]
+    return { bat: Object.keys(L.scoring.batting).length, pit: Object.keys(L.scoring.pitching).length }
+  })
+  t("a Batters table with no Pitchers table really does make a league that scores one side",
+    sides.bat > 0 && sides.pit === 0, JSON.stringify(sides))
+
+  const note = await sp.$eval("#horizon-panel .warn-note", e => e.innerText).catch(() => "")
+  t("the board says the league scores nothing for pitchers",
+    /scores nothing for pitchers/i.test(note), note || "(no note on the board)")
+  // The remedy names the card that fixes it. Not the tab label typed out — Board.tsx
+  // reads that through `tab()`, and this suite has already lost an hour to three
+  // renamed tabs, so the assertion is on the substantive half.
+  t("and names where to fix it", /Pitching/.test(note), note)
+
+  const chips = await sp.$$eval(".board-controls .chips[aria-label=Position] button",
+    n => n.map(e => e.textContent.trim()))
+  t("the pitching positions are not offered as chips that cannot match",
+    !chips.includes("SP") && !chips.includes("RP") && !chips.includes("P"), chips.join(" "))
+  t("and the batting ones still are",
+    ["All", "C", "1B", "OF", "Util"].every(c => chips.includes(c)), chips.join(" "))
+  // Its three options are "batters + pitchers" (a label for a list holding no
+  // pitchers), "batters" (the same list again) and "pitchers" (always nothing).
+  await moreFilters(sp)
+  t("and the Side control, which has nothing left to ask, is gone",
+    (await sp.$("[data-ctl=group]")) === null)
+
+  const slots = await sp.$$eval(".board-row [data-col=who] .code",
+    n => n.map(e => e.textContent.trim()))
+  t("every ranked row is a batter",
+    slots.length > 20 && !slots.some(x => ["SP", "RP", "P"].includes(x)),
+    slots.slice(0, 8).join(" "))
+
+  /* Streaming is a list of pitchers by construction — `startersOnly` keeps only men
+     the schedule has starting — so this one tab is empty on every visit in such a
+     league, whatever window the reader picks. "Try a different position or a wider
+     window" under it sends him round the horizon chips after a cause that is not in
+     them. */
+  await sp.click('.modes button:has-text("Streaming")')
+  await sp.waitForTimeout(1000)
+  const empty = await sp.$eval("#horizon-panel .empty", e => e.innerText).catch(() => "")
+  t("an empty Streaming list blames the scoring rather than the reader's filters",
+    /scores nothing for pitchers/i.test(empty) && !/wider window/i.test(empty),
+    empty || "(no empty message)")
+  await sp.close()
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

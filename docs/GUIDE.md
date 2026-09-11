@@ -146,8 +146,8 @@ that is the only one you can still act on. This is the tab to use on waiver day:
 rewards a pitcher with two starts booked and a hitter whose team plays six games
 instead of four. The exact dates, and where those edges came from, are printed under
 the heading every time. A **Window** strip beside it offers the same control with a
-nearer far edge — 3 to 7 days — and it stops at seven because that is where the
-schedule data stops paying.
+nearer far edge — today, 2, 3, 5 or 7 days — and it stops at seven because that is
+where the schedule data stops paying.
 
 Streaming is also the one horizon that does **not** rank by bscore. It ranks by
 **points**, because a streamer is filling one seat for a few days, and comparing a
@@ -259,9 +259,11 @@ Three more appear when they mean something:
   a hole at catcher makes a mediocre one worth a great deal. Blank where nobody you own
   is eligible for a seat he could take.
 - **one generic cell** whenever you order the board by something that has no column of
-  its own — `edge`, `luck`, `contact`, `free man`, `conf`, `gettable`. A board ordered
-  by a number printed nowhere on it is asking to be taken on trust, which is the one
-  thing this app is not for.
+  its own. With the orderings the screen now offers, that cell is headed `points` (off
+  Streaming, where points has a column already), `edge` or `luck` — the code can head it
+  `contact`, `free man`, `conf` or `gettable` as well, but nothing on the page selects
+  those orderings any more. A board ordered by a number printed nowhere on it is asking
+  to be taken on trust, which is the one thing this app is not for.
 
 `proj pts`, `waiver pts`, `owned`, `confidence` and `luck` were columns and are not any
 more: bscore is one of the first two minus the other, so the table stated the same fact
@@ -328,7 +330,7 @@ shipped capture, in the reference 10-team league over the fortnight:
 That pair happens to agree, because Crow-Armstrong is genuinely the better player by
 more than the gap between the bars. The disagreement shows up a row or two down:
 Baldwin is 43rd in baseball by raw projected points and 27th by bscore, because the
-thirty-odd players he passes are ones you can replace almost for free. Drop the 43rd
+sixteen players he passes are ones you can replace almost for free. Drop the 43rd
 best outfielder and you can pick up an 88.5-point outfielder; drop Baldwin and you can
 pick up a 75.0-point catcher. Those thirteen points are the position rather than the
 man.
@@ -365,10 +367,11 @@ you would drop. The difference between those two numbers is the actual gain from
 move, in points, over two weeks. With a roster entered, the **for you** column does
 that subtraction for you against the man he would really displace.
 
-There was a **Min confidence** floor here and it is gone. Measured on the committed
-capture with the reference league: it removed 42% of the rateable list at 40%+ and 58.5%
-at 70%+, but **0 of the top 60** by "ahead by", 56 of which sit at exactly 100%.
-Everything it cut was deep-bench men who were never candidates, and it filtered on a
+There was a **Min confidence** floor here and it is gone. Re-measured on the committed
+capture with the reference league: it removes 42.0% of the rateable list at 40%+ and
+58.5% at 70%+, but **none of the top 60** by "ahead by" at the 40% setting and **two** at
+the 70% one — 55 of those 60 sit at exactly 100%. Everything it cut was deep-bench men
+who were never candidates, and it filtered on a
 number the board has not drawn since the four-column pass — a filter you cannot see the
 effect of. Confidence is still printed on every player's drill-down, with the reasons
 behind it, which is where a small sample is worth checking.
@@ -414,9 +417,12 @@ it is the one that stays comparable with both sides on the list.
 
 ### A trade or a swap
 
-On **My league**, pick who leaves and who arrives, and the verdict is **what your
-starting lineup projects afterwards, minus what it projects now**. That is deliberately
-not "who has the higher bscore": bench depth is worth nothing until it starts, so a
+On **My league**, under *The deal*, press **Price a trade** — it is folded away until you
+do, because most visits have no deal on the table. Then pick who leaves and who arrives,
+and the verdict is **what your starting lineup projects afterwards, minus what it
+projects now**. (If your league's trade deadline has passed the card says so and the
+button reads **Price one anyway**.) That is deliberately not "who has the higher
+bscore": bench depth is worth nothing until it starts, so a
 player who arrives and doesn't crack your lineup adds nothing to the number, and a
 player you give up who wasn't starting costs nothing. Both cases are stated on screen
 rather than left as an unexplained zero, alongside the spot-by-spot changes and
@@ -440,26 +446,30 @@ perfectly good hold. Same player, same data, different question.
 Above the ranking, in the order you meet them:
 
 - **the horizon tabs** — Streaming / This fortnight / Stash, and on Streaming a
-  **Window** strip: rest of period, or 3 to 7 days.
+  **Window** strip: rest of period, today, 2 days, 3 days, 5 days or 7 days.
 - **Only players I can add**, with a note beside it saying which tier answered — "N
-  free" off your league's real wire, "est. over 35% is taken" off the ownership
-  estimate, or "can't tell". On by default on Streaming and the fortnight, off on
-  Stash, which is about players you already hold. Touch it once and your answer follows
-  you across tabs.
+  free" off your league's real wire, an ownership estimate, or "can't tell". The
+  Streaming copy spells the estimate out ("est. over 35% is taken"); the copy in the
+  general filter row is narrower and says only "estimated", so the number itself is on
+  the Streaming strip and in the tooltip both of them carry. On by default on Streaming
+  and the fortnight, off on Stash, which is about players you already hold. Touch it
+  once and your answer follows you across tabs.
 - **Only players with a start** — Streaming only.
 - **position chips** and a **name box** — not on Streaming, where every row is already
   a pitcher with a start and the chips would separate P from RP and nothing else.
 - **More filters**, which holds **Rank by** (how far ahead of a free man he is · the
   points he should score · how far he beats his own ownership · who has been unluckiest),
-  **Side** (batters + pitchers / batters / pitchers) and **Hide injured**. The fold names
-  any of them that is on, because a filter you cannot see must not be one you cannot
-  escape — which is also why the confidence floor and the uscore ordering are gone.
+  **Side** (batters + pitchers / batters / pitchers) and **Hide injured**. **Rank by** is
+  not rendered on Streaming — that horizon ranks by points by decision, and the only
+  reordering offered there is the column headings themselves. The fold names any of them
+  that is on, because a filter you cannot see must not be one you cannot escape — which
+  is also why the confidence floor and the uscore ordering are gone.
 
   Whichever ordering is in force, the board **draws the number it is ordered by**: when
   the sort is not one of the standing columns, a column appears beside the name carrying
   its value, headed with its own short name, and the sentence under the headings names
-  that column. Four of the six orderings used to reorder the rows by a figure printed
-  nowhere on them.
+  that column. Four of the six orderings the list used to carry reordered the rows by a
+  figure printed nowhere on them.
 
 Every column heading sorts except **games**; clicking the active one flips direction.
 

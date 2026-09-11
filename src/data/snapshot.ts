@@ -48,11 +48,70 @@ export interface Snapshot {
 	/** Volume per team game over the recent window, keyed "id:group". The backtest
 	 *  showed recent playing time is the strongest predictor available. */
 	recentVolumeByWindow: Record<string, Record<number, number>>
-	recentWindow: { hitting: number[]; pitching: number[] }
-	/** Recent lines, keyed "id:group". Populated for pitchers only, who are the
-	 *  only side where blending the recent rate measured as a real improvement. */
+	/**
+	 * Recent lines, keyed "id:group". Populated for pitchers only, who are the
+	 * only side where blending the recent rate measured as a real improvement.
+	 *
+	 * SPARSE, by `trimRecentLine` below: a field is present only where the rate
+	 * blend can actually read it and its value is not zero. An absent field reads
+	 * back as zero at the one place that reads these lines, so the two encodings
+	 * are the same numbers — see the transform note on `trimRecentLine`.
+	 */
 	recentStats: Record<string, StatLine>
-	sources: { name: string; url: string; rows: number }[]
+}
+
+/** One upstream read, with how many rows it returned. Provenance for whoever runs
+ *  the capture — it is NOT part of the snapshot, because no screen renders it and
+ *  every browser was being sent 1,226 bytes of it (464 gzipped) to discard. The
+ *  user-facing version of this table lives in docs/METHODOLOGY.md. */
+export interface SourceRead {
+	name: string
+	url: string
+	rows: number
+}
+
+/**
+ * Fields a recent line can never be read through, so carrying them is pure weight.
+ *
+ * `project.ts` blends the recent rate inside a loop over the SEASON line's own keys,
+ * skipping anything in its `NOT_VOLUME_SCALED` set, and reads the recent value as
+ * `recentStats[key] ?? 0`. Three consequences, and this function is all three:
+ *
+ *  · a key the season line does not carry is never asked for (MLB returns `rbi` on a
+ *    pitcher's window line and not on his season line, so it was never read);
+ *  · a rate — avg, obp, slg, ops, era, whip — is skipped before the recent value is
+ *    touched, so those six were never read either;
+ *  · a zero is indistinguishable from an absence, because of the `?? 0`. 41.8% of the
+ *    values on these lines were zero — a 21-day window is full of pitchers with no
+ *    complete games, no balks and no steals against.
+ *
+ * A line left with nothing on it is dropped whole. On the committed capture that is
+ * exactly 20 of 535 lines, and all 20 are the ones whose "id:group" is not in
+ * `players` at all — a window row for somebody the pool filters out, about whom the
+ * blend is never asked. No line belonging to a rated player lost its last field.
+ *
+ * Measured on data/snapshot.json, 2026-09-11, by `zlib.gzipSync(buf, { level: 9 })`
+ * on the exact bytes written: raw 1,504,819 → 1,338,444 (−166,375, 11.06%), gzipped
+ * 191,990 → 181,137 (−10,853, 5.65%). This field alone went 295,502 → 129,127 bytes,
+ * 19.6% of the capture down to 9.7%, averaging 39 fields per line down to 16.3.
+ *
+ * Proved to change no number by running `rateAll` over the old file and the new one
+ * across three windows and both injury policies and diffing every field of every rated
+ * row: 8,676 rows, 182,196 fields, 0 differ. The same harness, run again with one READ
+ * field (`strikeOuts`) additionally removed, reports 109,989 differences — so it is a
+ * comparison that can fail.
+ */
+const RECENT_RATES_NEVER_READ = new Set(["avg", "obp", "slg", "ops", "era", "whip"])
+
+export const trimRecentLine = (line: StatLine, seasonKeys: Set<string>): StatLine => {
+	const out: StatLine = {}
+	for (const [k, v] of Object.entries(line)) {
+		if (v === 0) continue
+		if (RECENT_RATES_NEVER_READ.has(k)) continue
+		if (!seasonKeys.has(k)) continue
+		out[k] = v
+	}
+	return out
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10)
@@ -64,7 +123,7 @@ export const buildSnapshot = async (
 	/** Whose market prices to read. Ownership is league-platform-specific, so it is
 	 *  a parameter rather than a constant. */
 	leagueId = "228947"
-): Promise<Snapshot> => {
+): Promise<{ snapshot: Snapshot; sources: SourceRead[] }> => {
 	const start = iso(now)
 	const end = iso(new Date(now.getTime() + horizonDays * 86400_000))
 
@@ -159,7 +218,19 @@ export const buildSnapshot = async (
 		)
 	]
 
-	return {
+	// Drop from every recent line the fields the rate blend cannot reach — see
+	// `trimRecentLine`. Done here rather than in the loop above because the rule is
+	// "what the SEASON line carries", and the pooled season lines exist only now.
+	const seasonKeys = new Map<string, Set<string>>()
+	for (const pl of players) seasonKeys.set(`${pl.id}:${pl.group}`, new Set(Object.keys(pl.stats)))
+	for (const [key, line] of Object.entries(recentStats)) {
+		const trimmed = trimRecentLine(line, seasonKeys.get(key) ?? new Set())
+		// a line with nothing left on it is a line the blend would read no value from
+		if (Object.keys(trimmed).length === 0) delete recentStats[key]
+		else recentStats[key] = trimmed
+	}
+
+	const snapshot: Snapshot = {
 		season,
 		capturedAt: now.toISOString(),
 		horizon: { start, end },
@@ -188,8 +259,21 @@ export const buildSnapshot = async (
 			})
 		),
 		recentVolumeByWindow,
-		recentStats,
-		recentWindow: { hitting: WINDOWS.hitting, pitching: WINDOWS.pitching },
+		recentStats
+	}
+
+	/* `recentWindow` used to be returned here, carrying the two window lengths. It was
+	   typed and written and read NOWHERE — not by `hydrate`, not by the engine, not by a
+	   screen. The windows it named are `RECENT_WINDOW_WEIGHTS`' own keys, which every
+	   reader already imports.
+
+	   It saved no bytes to remove, and that is worth stating rather than rounding up:
+	   the COMMITTED capture does not contain it at all, so it was a field the type
+	   promised and the shipped file did not keep. It would have cost about 55 bytes on
+	   the next capture. Removed for the discrepancy, not for the size. */
+
+	return {
+		snapshot,
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },

@@ -1,4 +1,4 @@
-import { isReserveSlot, startableSeats, type Rated } from "../engine/bscore.ts"
+import { isReserveSlot, rosterCounts, startableSeats, type Rated } from "../engine/bscore.ts"
 import type { RosterSpot } from "./roster.ts"
 import { normalizeName } from "../data/yahoo-pool.ts"
 
@@ -17,11 +17,23 @@ import { normalizeName } from "../data/yahoo-pool.ts"
  */
 
 export interface Move {
-	kind: "add-drop"
+	/**
+	 * `add` when the roster has a free seat, `add-drop` when somebody has to come out.
+	 *
+	 * There was only ever `add-drop`, and on a roster with room that produced the most
+	 * expensive sentence in the product. Measured by a stranger walking the published
+	 * build: 18 men against 27 seats, and the card said "4 seats score nothing tonight"
+	 * twelve inches above "Add JJ Bleday for your OF or Util seat, drop Aaron Judge".
+	 * Five seats were open. Nothing had to come out, the card had already said so in its
+	 * own words, and a reader told to drop Aaron Judge for JJ Bleday closes the tab — and
+	 * is right to.
+	 */
+	kind: "add" | "add-drop"
 	add: string
 	addScore: number
-	drop: string
-	dropScore: number
+	/** Null on an `add`: the seat was empty, so nobody is displaced. */
+	drop: string | null
+	dropScore: number | null
 	gain: number
 	reason: string
 	/**
@@ -632,6 +644,54 @@ export const planMoves = (
 
 	const moves: Move[] = []
 	const usedAdds = new Set<string>()
+
+	/*
+	 * ROOM FIRST. Nobody comes out while a seat is free.
+	 *
+	 * `room` is every seat the league lets you hold — active, bench and injured — minus
+	 * the men actually held. On the walk that found this it was 27 minus 18, and the card
+	 * proposed dropping Aaron Judge anyway, twelve inches under its own sentence saying
+	 * four seats were scoring nothing.
+	 *
+	 * The gain is quoted as the arriving man's bscore, which UNDERSTATES it: bscore is
+	 * measured against the man who would be left at his spot, and an empty seat scores
+	 * zero rather than replacement level. Understating is the safe direction — anybody
+	 * who clears the bar against a replacement clears it against nothing — and it keeps
+	 * every number in this planner in one unit. Saying the true, larger figure would mean
+	 * mixing bscore and raw points in one list, which is the defect the board spent a
+	 * whole pass removing.
+	 */
+	const room = Math.max(0, rosterCounts(input.shape.slots).total - input.roster.length)
+	for (const a of addable) {
+		if (moves.length >= Math.min(room, options.maxMoves)) break
+		if (usedAdds.has(a.player.id.toString())) continue
+		if (a.bscore < options.minGain) continue
+		usedAdds.add(a.player.id.toString())
+		moves.push({
+			kind: "add",
+			add: a.player.name,
+			addScore: a.bscore,
+			drop: null,
+			dropScore: null,
+			gain: a.bscore,
+			reason:
+				`${a.player.name} projects ${a.bscore} points above the man left at ${a.slot}, ` +
+				`and you are holding ${input.roster.length} of ${rosterCounts(input.shape.slots).total} ` +
+				`seats — so nobody has to come out for him.`,
+			seats: a.slots
+		})
+	}
+	if (room > 0 && moves.length < room)
+		notes.push(
+			`${room} of your ${rosterCounts(input.shape.slots).total} seats are free, so an add ` +
+				`costs you nobody — ${
+					moves.length ?
+						`${moves.length} free agent${moves.length === 1 ? "" : "s"} clear the ` +
+						`${options.minGain}-point bar`
+					:	`no free agent clears the ${options.minGain}-point bar`
+				}`
+		)
+
 	let bestSeen: { gain: number; add: string; drop: string } | null = null
 	for (const drop of droppable) {
 		if (moves.length >= options.maxMoves) break
@@ -719,32 +779,50 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 
 	if (result.moves.length > options.maxMoves)
 		out.push(`${result.moves.length} moves proposed, above the cap of ${options.maxMoves}`)
+	/* Recomputed rather than taken from the planner, which is the point of a rail: it is
+	   the same arithmetic done independently, so a planner that got it wrong is caught. */
+	const room = Math.max(0, rosterCounts(input.shape.slots).total - input.roster.length)
 	const seenAdd = new Set<string>()
 	const seenDrop = new Set<string>()
 	for (const m of result.moves) {
 		const add = normalizeName(m.add)
-		const drop = normalizeName(m.drop)
-		const rated = byName.get(drop)
-		if (rated && rated.bscore >= options.keepFloor)
-			out.push(`${m.drop} is at ${rated.bscore}, at or above the ${options.keepFloor} keep floor`)
-		if (m.dropScore >= options.keepFloor)
-			out.push(`${m.drop} is reported at ${m.dropScore}, at or above the keep floor`)
+		/* Every rail about the man coming out is skipped when nobody is coming out — and
+		   skipped by asking, not by a null slipping through a comparison. A keep floor has
+		   nothing to hold on an empty seat, and `addScore - dropScore` is not the gain of a
+		   move with no second side. The rails about the man coming IN apply either way, and
+		   they are the ones that stop the planner offering somebody it cannot have. */
+		if (m.kind === "add-drop" && m.drop !== null && m.dropScore !== null) {
+			const drop = normalizeName(m.drop)
+			const rated = byName.get(drop)
+			if (rated && rated.bscore >= options.keepFloor)
+				out.push(`${m.drop} is at ${rated.bscore}, at or above the ${options.keepFloor} keep floor`)
+			if (m.dropScore >= options.keepFloor)
+				out.push(`${m.drop} is reported at ${m.dropScore}, at or above the keep floor`)
+			if (r2(m.addScore - m.dropScore) !== m.gain)
+				out.push(`${m.add} for ${m.drop} reports a gain of ${m.gain} that is not ${m.addScore} − ${m.dropScore}`)
+			if (reserved.has(drop)) out.push(`${m.drop} sits in a reserve slot and must not be dropped`)
+			if (!onRoster.has(drop)) out.push(`${m.drop} is not on the roster`)
+			if (seenDrop.has(drop)) out.push(`${m.drop} is dropped twice`)
+			seenDrop.add(drop)
+		} else if (m.kind === "add") {
+			// The one rail a pure add owes: there was actually room for him.
+			if (room <= 0) out.push(`${m.add} is added with no seat free`)
+			if (m.drop !== null || m.dropScore !== null)
+				out.push(`${m.add} is an add with no drop but reports one (${m.drop})`)
+		}
 		if (m.gain < options.minGain)
-			out.push(`${m.add} for ${m.drop} gains ${m.gain}, below the ${options.minGain} bar`)
-		if (r2(m.addScore - m.dropScore) !== m.gain)
-			out.push(`${m.add} for ${m.drop} reports a gain of ${m.gain} that is not ${m.addScore} − ${m.dropScore}`)
+			out.push(`${m.add}${m.drop ? ` for ${m.drop}` : ""} gains ${m.gain}, below the ${options.minGain} bar`)
 		if (!input.availableNames.has(add)) out.push(`${m.add} is not in the free-agent pool`)
 		if (onRoster.has(add)) out.push(`${m.add} is already on the roster`)
 		if (byName.get(add)?.injury) out.push(`${m.add} is on the IL (${byName.get(add)!.injury})`)
-		if (reserved.has(drop)) out.push(`${m.drop} sits in a reserve slot and must not be dropped`)
-		if (!onRoster.has(drop)) out.push(`${m.drop} is not on the roster`)
 		if (seenAdd.has(add)) out.push(`${m.add} is added twice`)
-		if (seenDrop.has(drop)) out.push(`${m.drop} is dropped twice`)
 		// the two halves of a plan must agree about the same man
-		if (result.lineup.starters.some(s => normalizeName(s.name) === drop))
+		if (
+			m.drop !== null &&
+			result.lineup.starters.some(s => normalizeName(s.name) === normalizeName(m.drop!))
+		)
 			out.push(`${m.drop} is started and dropped in the same plan`)
 		seenAdd.add(add)
-		seenDrop.add(drop)
 	}
 
 	const accepts = input.shape.slot_accepts
@@ -886,6 +964,9 @@ export const planSwaps = (
 	}
 
 	const moves: Move[] = []
+	/** Every seat the league lets him hold — active, bench and injured. A move only has
+	 *  to take somebody out once these are all full; see the note on `d: null` below. */
+	const capacity = rosterCounts(input.shape.slots).total
 	let roster = input.roster
 	let base = planLineup({ ...input, roster }).pointsPlanned
 
@@ -970,15 +1051,43 @@ export const planSwaps = (
 		const addValue = new Map(usable.map(a => [a, points(withAdd(a)) - base]))
 		const dropCost = new Map(droppable.map(d => [d, base - points(withoutDrop(d))]))
 
-		const shortlist = usable
-			.flatMap(a => droppable.map(d => ({ a, d, est: addValue.get(a)! - dropCost.get(d)! })))
+		/*
+		 * `d: null` is an add with nobody removed, and it is offered first whenever the
+		 * roster still has a seat.
+		 *
+		 * This paired every candidate add with a man to drop and had no other shape, so on
+		 * a roster with room it invented a victim. Measured on the dev server, holding 12
+		 * of 27 seats: "Add Dominic Canzone for your Util seat, drop Trevor Megill" — with
+		 * fifteen seats free, three of which the same card was listing as scoring nothing
+		 * tonight. A reader told to drop a man he does not have to drop stops trusting
+		 * every other number on the page, and he is right to.
+		 *
+		 * It rides through the same `points(after)` evaluation as a swap rather than being
+		 * special-cased, so the gain is the same quantity — what the lineup projects with
+		 * him in it, minus what it projects now — and the two are directly comparable. A
+		 * pure add is simply the case where nothing comes out, which is why it almost
+		 * always wins when it is legal: it costs nothing.
+		 */
+		const roomLeft = capacity - roster.length
+		const shortlist = [
+			...(roomLeft > 0 ?
+				usable.map(a => ({ a, d: null as Resolved | null, est: addValue.get(a)! }))
+			:	[]),
+			...usable.flatMap(a =>
+				droppable.map(d => ({ a, d: d as Resolved | null, est: addValue.get(a)! - dropCost.get(d)! }))
+			)
+		]
 			.sort((x, y) => y.est - x.est)
 			.slice(0, 12)
 
-		let best: { gain: number; add: (typeof candidates)[number]; drop: Resolved } | null = null
+		let best:
+			| { gain: number; add: (typeof candidates)[number]; drop: Resolved | null }
+			| null = null
 		for (const { a, d } of shortlist) {
 			const after = [
-				...roster.filter(sp => normalizeName(sp.name) !== normalizeName(d.spot.name)),
+				...(d ?
+					roster.filter(sp => normalizeName(sp.name) !== normalizeName(d.spot.name))
+				:	roster),
 				{
 					slot: "BN",
 					name: a.rated.player.name,
@@ -1005,10 +1114,16 @@ export const planSwaps = (
 			 * and kept Sean Manaea at 13.0, because Anthony's bar happened to be 23 points
 			 * higher. Points over the same horizon are one scale for everybody.
 			 */
+			/* And on a tie, taking nobody out beats taking somebody out — a free seat is
+			   worth more than the same points bought with a man. */
 			if (
 				!best ||
 				gain > best.gain ||
-				(gain === best.gain && (d.rated?.points ?? 0) < (best.drop.rated?.points ?? 0))
+				(gain === best.gain && !d && best.drop) ||
+				(gain === best.gain &&
+					!!d &&
+					!!best.drop &&
+					(d.rated?.points ?? 0) < (best.drop.rated?.points ?? 0))
 			)
 				best = { gain, add: a, drop: d }
 		}
@@ -1016,19 +1131,22 @@ export const planSwaps = (
 		if (!best) break
 		if (best.gain < options.minGain) {
 			notes.push(
-				`the best remaining swap, ${best.add.rated.player.name} for ${best.drop.spot.name}, ` +
-					`is worth ${best.gain} points — below the ${options.minGain}-point bar`
+				best.drop ?
+					`the best remaining swap, ${best.add.rated.player.name} for ${best.drop.spot.name}, ` +
+						`is worth ${best.gain} points — below the ${options.minGain}-point bar`
+				:	`the best remaining add, ${best.add.rated.player.name}, is worth ${best.gain} ` +
+					`points — below the ${options.minGain}-point bar, even into a free seat`
 			)
 			break
 		}
 
 		const seats = legalSlotsFor(best.add.positions, accepts)
 		moves.push({
-			kind: "add-drop",
+			kind: best.drop ? "add-drop" : "add",
 			add: best.add.rated.player.name,
 			addScore: best.add.rated.points,
-			drop: best.drop.spot.name,
-			dropScore: best.drop.rated!.points,
+			drop: best.drop ? best.drop.spot.name : null,
+			dropScore: best.drop ? best.drop.rated!.points : null,
 			gain: best.gain,
 			seats: [...new Set(seats)],
 			// Written for the reader, not for the model. "bscore -22.62, below the 25
@@ -1045,12 +1163,17 @@ export const planSwaps = (
 				// clear of the slot's bar — plus the season-long protect set. "Well below
 				// what a free agent is worth" claimed the first without the qualifier, and
 				// on the shipped roster it said so about a man whose bscore was +5.61.
-				`${best.drop.spot.name} is the man to give up for him: he is within ` +
-				`${options.keepFloor} points of what the wire offers at his own slot over this ` +
-				`window, and is not worth holding over the rest of the season either.`
+				(best.drop ?
+					`${best.drop.spot.name} is the man to give up for him: he is within ` +
+					`${options.keepFloor} points of what the wire offers at his own slot over this ` +
+					`window, and is not worth holding over the rest of the season either.`
+				:	`You are holding ${roster.length} of ${capacity} seats, so nobody has to come ` +
+					`out for him.`)
 		})
 		roster = [
-			...roster.filter(sp => normalizeName(sp.name) !== normalizeName(best.drop.spot.name)),
+			...(best.drop ?
+				roster.filter(sp => normalizeName(sp.name) !== normalizeName(best.drop!.spot.name))
+			:	roster),
 			{
 				slot: "BN",
 				name: best.add.rated.player.name,

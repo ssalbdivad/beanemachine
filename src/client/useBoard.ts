@@ -197,10 +197,12 @@ export const DEFAULT_FILTERS: Filters = {
  * recommendation.
  *
  * The standing board opened OFF, on the reasoning that "the standing board is the
- * standing board". Measured on the committed capture: 42 of the first 50 rows are
- * rostered in 90% or more of leagues and not one is under 50%, so the default screen
- * — the first thing a reader sees, on the tab this app exists for — ranked fifty men
- * he cannot have. A ranking of everyone in baseball is a fine thing to be able to
+ * standing board". Re-measured on the committed capture 2026-09-11, fortnight, ranked by
+ * bscore, unfiltered: 38 of the first 50 rows are rostered in 90% or more of leagues and
+ * three are under 50% — the comment said 42 and "not one". The point stands and is if
+ * anything the same size: three quarters of the default screen
+ * — the first thing a reader sees, on the tab this app exists for — is men he cannot
+ * have. A ranking of everyone in baseball is a fine thing to be able to
  * ask for; it is the wrong thing to open on.
  *
  * Stash stays OFF because it is explicitly about players you already hold.
@@ -671,6 +673,36 @@ export const useBoard = (
 	)
 
 	/**
+	 * Which position chips can ever return a row, read off the ranking itself.
+	 *
+	 * A league that scores one side of the ball only — a real and reachable state,
+	 * since a Yahoo settings paste with a Batters table and no Pitchers table
+	 * produces exactly it — leaves every pitcher unrateable, with `unrateable`
+	 * saying so. The board was still offering SP, RP and P, and each of them
+	 * answered "0 players. Try a different position or a wider window", which is a
+	 * filter that cannot match dressed up as a filter the reader chose badly.
+	 * Measured on the published build with such a paste: the board fell from 1,009
+	 * rows to 481 and the word "pitch" appeared nowhere on the screen.
+	 *
+	 * DERIVED, not a hardcoded slot-to-side table, because the two would drift and
+	 * the crossover is real: on the committed capture five pitching-group players
+	 * carry infield or outfield eligibility (see `slotsFor`), so "SP, RP and P are
+	 * the pitching chips" is true and "2B is a batting chip" is not quite. Taking
+	 * the set off the rateable pool asks the only question that matters — is there
+	 * a row this chip could show — and it answers it in the ranking's own terms.
+	 *
+	 * The reader's OWN filters are deliberately not applied: a chip empty because
+	 * he ticked "only players I can add" is a chip he can un-empty, and hiding it
+	 * would be the hidden-filter defect this file already carries two comments
+	 * about. Only a slot no rateable player holds at all is withheld.
+	 */
+	const slotsRanked = useMemo(() => {
+		const out = new Set<string>()
+		for (const r of rated) if (r.rateable) for (const slot of r.slots) out.add(slot)
+		return out
+	}, [rated])
+
+	/**
 	 * Is there enough market data for market edge to be the DEFAULT ranking?
 	 *
 	 * Ownership is read from Yahoo's public pages, and how much comes back depends
@@ -886,8 +918,8 @@ export const useBoard = (
 	// `sort` is returned resolved, so the Rank-by control shows what the view is
 	// actually ranked by rather than an empty box when the reader has not chosen.
 	return {
-		rated: board, rows, rankable, scored, edgeCoverage, period, streaming, teamNames,
-		availability, sort, injuryError
+		rated: board, rows, rankable, scored, slotsRanked, edgeCoverage, period, streaming,
+		teamNames, availability, sort, injuryError
 	}
 }
 

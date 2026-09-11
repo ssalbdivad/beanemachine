@@ -521,10 +521,32 @@ export const rosterFromPaste = (
 			}
 		})
 
+	/*
+	 * WHICH ADVICE, decided by what he actually gave us.
+	 *
+	 * One sentence answered both routes and it was written for the paste: "Select your
+	 * whole roster page — extra columns and adverts do no harm." Measured by a stranger on
+	 * a phone who typed six surnames into a box whose own heading says "First and last
+	 * name, one to a line": six failures, then advice for a route his device does not
+	 * have, as the second sentence he reads.
+	 *
+	 * A paste is recognisable and does not need a threshold argued over: a copied roster
+	 * page carries tabs or runs to many lines, and a typed list is a handful of short
+	 * ones. Where it is ambiguous the typed advice is the safer of the two, because it is
+	 * also true of a paste — a page whose names do not match will not match them under any
+	 * instruction — while the paste advice is simply inapplicable to a phone.
+	 */
+	const typedLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+	const looksPasted =
+		/\t/.test(text) || typedLines.length > 12 || typedLines.some(l => l.length > 60)
 	const note =
 		!found.players.length ?
-			"No players found in that. Select your whole roster page — the names are what " +
-			"this matches on, so extra columns and adverts do no harm."
+			looksPasted ?
+				"No players found in that. Select your whole roster page — the names are what " +
+				"this matches on, so extra columns and adverts do no harm."
+			:	"No players found in that. Write each man's first and last name, one to a line — " +
+				"a surname on its own matches too many people to be safe, and a nickname matches " +
+				"none."
 		:	`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
 			(spots.length ?
 				`, ${spots.length} with the seat they were in — the daily lineup on Recommendations can diff against that.`

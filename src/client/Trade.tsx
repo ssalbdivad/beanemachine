@@ -411,8 +411,19 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			return
 		}
 		persist(() => store.set(leagueKey, read.keys))
-		if (read.spots.length)
-			lineupStore.set(leagueKey, read.spots, new Date().toISOString())
+		/*
+		 * A read REPLACES the roster, so it has to replace the seats too — including
+		 * with nothing.
+		 *
+		 * The `if` used to guard only the write. A paste that carried no slot column —
+		 * a list of names typed by hand, which this box explicitly invites — therefore
+		 * installed a new team and left the PREVIOUS team's seats standing beside it,
+		 * under their original "read at" timestamp. Tonight would then diff a lineup
+		 * against men it no longer holds. Seats are only true about the roster they
+		 * came off, so where this paste has none, the old ones go.
+		 */
+		if (read.spots.length) lineupStore.set(leagueKey, read.spots, new Date().toISOString())
+		else lineupStore.clear(leagueKey)
 		setPasteNote(read.note)
 		setPasted("")
 	}
@@ -450,6 +461,31 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		} catch (e) {
 			setStoreError(e instanceof ApiError ? e.message : String(e))
 		}
+	}
+
+	/**
+	 * Drop this league's team — BOTH halves of it.
+	 *
+	 * Who you own and which seat each man is in are two stores (see ./lineup.ts for
+	 * why they are separate), and every path on this screen that ended a team used to
+	 * touch only the first. Measured 2026-09-11 on the dev server with nothing corrupt:
+	 * paste twenty names, press "Clear team", accept the confirm — `beanemachine:roster`
+	 * became `{}` while `beanemachine:lineup` kept all 1,858 characters of its twenty
+	 * spots, and `lineupStore.clear` had no caller anywhere in src/.
+	 *
+	 * Tonight was fixed at its own end last commit — it will not start a man who is no
+	 * longer owned — so nothing was RENDERING the stale seats. This is the other half:
+	 * the seats are a statement about a roster, and a statement whose subject is gone
+	 * is not kept around waiting for the next reader to trust it.
+	 *
+	 * The seats go first because they are the half that cannot be reconstructed from
+	 * the other. If the store refuses, the roster they describe is still there, the
+	 * error says so, and pressing again is safe.
+	 */
+	const dropTeam = (): string[] => {
+		if (!leagueKey) return []
+		lineupStore.clear(leagueKey)
+		return store.clear(leagueKey)
 	}
 
 	if (error)
@@ -508,9 +544,12 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		)
 
 	const held = new Set(owned)
-	/** Men this capture could not project. Named in the fold's summary because a
+	/** Men the model cannot put a number on. Named in the fold's summary because a
 	 *  roster whose count looks right while two of it are unpriceable is the one
-	 *  thing a collapsed list could hide. */
+	 *  thing a collapsed list could hide. Not "could not project": on a league that
+	 *  scores nothing on one side of the ball a projection was made for every man on
+	 *  it, and there is simply nothing to score it with. The five specific reasons
+	 *  are in `unpriceable` below, where there is room for them. */
 	const unrateable = mine.filter(r => !r.rateable).length
 	const lineup = startingLineup(league, mine, bars)
 	/** Who your lineup actually starts. The Verdict already reduces over this to
@@ -523,6 +562,56 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		.sort((a, b) => b.points - a.points)
 		.filter(r => !giveNeedle || r.player.name.toLowerCase().includes(giveNeedle))
 	/**
+	 * The men the model could not price, under the reason it actually had.
+	 *
+	 * This was ONE group labelled "N with no projection in this capture", and on a
+	 * league that scores nothing on the pitching side that sentence is false twice
+	 * over: the capture holds rows for all eight pitchers, and a projection was made
+	 * for every one of them. What is missing is a points total to rank them by,
+	 * because the league pays nothing for what they do. Measured 2026-09-11 on the
+	 * dev server with `scoring.pitching` emptied: all eight were filed under "with no
+	 * projection in this capture", which sends a reader to look for missing data that
+	 * is not missing instead of to the scoring he has not entered.
+	 *
+	 * `rateAll` already writes the true reason on each player — `Rated.unrateable`,
+	 * src/engine/bscore.ts:517 — and there are five of them: he is on the injured
+	 * list, MLB has published a starter for every game of the window and he is not
+	 * one of them, this league scores nothing on his side of the ball, no projection
+	 * was possible, or his projected volume rounds to none. So the men are grouped BY
+	 * that reason, the way Decide.tsx's bench card now does it, rather than by one
+	 * sentence this file invented for all five.
+	 *
+	 * The fallback is the same one Decide uses, and covers the same gap: the field's
+	 * contract says null means rateable, and measured on the committed capture 1 of
+	 * 200 unrateable men over the fortnight still carries no reason.
+	 *
+	 * "unknown, not zero" survives every label, because that is the claim the split
+	 * exists to make — filed under "costs you nothing" these men read as the cheapest
+	 * on the roster to trade, and the model did not weigh them and find them wanting,
+	 * it could not weigh them.
+	 */
+	const unpriceable = (() => {
+		const byReason = new Map<string, Ranked[]>()
+		for (const r of giveable) {
+			if (r.rateable) continue
+			const why = r.unrateable ?? "no projection could be made for him over this window."
+			byReason.set(why, [...(byReason.get(why) ?? []), r])
+		}
+		return [...byReason].map(([why, men]) => ({
+			// the class trade.css styles is `give-unrated`, and trade.css is not this
+			// change's file; React needs the reason in the key to tell two apart
+			key: "unrated",
+			reactKey: `unrated:${why}`,
+			why,
+			men,
+			// a colon rather than a dash: four of the five engine reasons carry an em
+			// dash of their own, and two in one sentence read as one clause too many
+			label: (n: number) =>
+				`${n} the model cannot price: ${why} What giving one up costs is unknown, not zero.`
+		}))
+	})()
+
+	/**
 	 * The give-up side, split by the one thing that decides who you can spare.
 	 *
 	 * A man who is not in your starting lineup costs the lineup nothing to trade —
@@ -530,13 +619,20 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 * On the shipped team it is 12 of 24, so the split covers half the roster and the
 	 * wall's order answers "who can I lose" before you click anything.
 	 *
-	 * Three groups, not two, because an unrateable player is not a spare one. On the
-	 * shipped team Byron Buxton and Nick Kurtz have no projection in this capture, so
-	 * they are absent from the starting lineup for a reason the model never reached:
-	 * it did not weigh them and find them wanting, it could not weigh them. Filed
-	 * under "costs you nothing" they would have read as the cheapest men to trade.
+	 * More than two groups, because an unrateable player is not a spare one. On the
+	 * shipped team Byron Buxton and Nick Kurtz cannot be priced, so they are absent
+	 * from the starting lineup for a reason the model never reached: it did not weigh
+	 * them and find them wanting, it could not weigh them. Filed under "costs you
+	 * nothing" they would have read as the cheapest men to trade. The unpriceable are
+	 * split again by WHY — see `unpriceable` above — so the count is two or more.
 	 */
-	const giveGroups = [
+	const giveGroups: {
+		key: string
+		reactKey?: string
+		why?: string
+		men: Ranked[]
+		label: (n: number) => string
+	}[] = [
 		{
 			key: "spare",
 			men: giveable.filter(r => r.rateable && !starting.has(rosterKey(r.player))),
@@ -548,12 +644,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			men: giveable.filter(r => r.rateable && starting.has(rosterKey(r.player))),
 			label: (n: number) => `${n} you are starting — trading one leaves a spot to refill`
 		},
-		{
-			key: "unrated",
-			men: giveable.filter(r => !r.rateable),
-			label: (n: number) =>
-				`${n} with no projection in this capture — what giving one up costs is unknown, not zero`
-		}
+		...unpriceable
 	].filter(g => g.men.length > 0)
 	const found = (query: string, exclude: Set<string>) => {
 		const needle = query.trim().toLowerCase()
@@ -634,6 +725,12 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							className="ghost"
 							onClick={() => {
 								try {
+									// The seats too, and for the same reason `dropTeam` takes them: this
+									// button drops the whole ROSTER key, not one league's, so seats left
+									// behind here would describe rosters that no longer exist in ANY
+									// league. They go first — if the browser refuses, the unreadable
+									// roster is still there and the message below still applies.
+									lineupStore.reset()
 									store.reset()
 									setOwned([])
 									setStoreError(null)
@@ -821,7 +918,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							className="ghost"
 							onClick={() =>
 								confirm(`Clear all ${owned.length} players from this team?`) &&
-								persist(() => store.clear(leagueKey))
+								persist(dropTeam)
 							}
 						>
 							Clear team
@@ -868,7 +965,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							    that wrapped to two rows was spending the height the fold saved. */}
 							<summary>
 								{mine.length} player{mine.length === 1 ? "" : "s"} on this team
-								{unrateable > 0 && ` · ${unrateable} with no projection`}
+								{unrateable > 0 && ` · ${unrateable} the model cannot price`}
 							</summary>
 							{mine
 								.slice()
@@ -1007,7 +1104,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 									// the gap between groups is what makes them read as groups, and
 									// trade.css is not this change's file
 									<div
-										key={g.key}
+										key={g.reactKey ?? g.key}
 										className={`give-group give-${g.key}`}
 										style={i ? { marginTop: 14 } : undefined}
 									>
@@ -1022,8 +1119,10 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 														className={`chip-btn${give.includes(k) ? " on" : ""}`}
 														aria-pressed={give.includes(k)}
 														title={
-															g.key === "unrated" ?
-																"No projection was possible for him over this horizon, so he starts nowhere and counts in no total here. What giving him up costs cannot be read off a number nothing produced."
+															g.why ?
+																// the engine's own sentence, not a second one written here that
+																// could disagree with the label directly above the chip
+																`${g.why.charAt(0).toUpperCase()}${g.why.slice(1)} He starts nowhere and counts in no total here, so what giving him up costs cannot be read off a number nothing produced.`
 															: g.key === "spare" ?
 																`${pts(r.points)} projected points, bscore ${r.bscore}. He is not in your starting lineup, so trading him changes nothing below unless somebody else moves.`
 															:	`${pts(r.points)} projected points, bscore ${r.bscore}. He is starting for you, so trading him leaves a spot to refill.`

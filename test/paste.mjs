@@ -449,5 +449,30 @@ const arms = pick("pitching", 3)
     ms < 3000, `${ms}ms`)
 }
 
+/*
+ * THE ADVICE MATCHES THE ROUTE HE TOOK.
+ *
+ * One sentence answered both and it was written for the paste. Measured by a stranger on
+ * a phone who typed six surnames into a box headed "First and last name, one to a line":
+ * six failures, then "Select your whole roster page — extra columns and adverts do no
+ * harm", which is advice for a route a phone does not have, as the second sentence he
+ * reads after failing.
+ */
+{
+	const typed = rosterFromPaste("Judge\nVladdy\nSkubal\nWitt Jr", snap)
+	t("a typed list that matches nobody is told how to write a name",
+		typed.players.length === 0 &&
+			/first and last name/i.test(typed.note) &&
+			!/roster page/i.test(typed.note),
+		typed.note)
+	// A real paste still gets the paste advice: tabs, or a page's worth of lines.
+	const pasted = rosterFromPaste(
+		Array.from({ length: 14 }, (_, i) => `Bench\tNobody Atall ${i}\tSEA\t0.0`).join("\n"),
+		snap
+	)
+	t("and a pasted page that matches nobody is still told to take the whole page",
+		pasted.players.length === 0 && /roster page/i.test(pasted.note), pasted.note)
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

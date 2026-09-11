@@ -239,8 +239,22 @@ export interface SlateGame {
 	 *  "not announced", never "nobody is pitching". */
 	homeProbable: number | null
 	awayProbable: number | null
-	/** True once the game is final, so a played-only count can be taken from the same
-	 *  rows a forward-looking one is. */
+	/**
+	 * True once the game is final, so a played-only count can be taken from the same
+	 * rows a forward-looking one is.
+	 *
+	 * KEPT, having been measured rather than assumed. On the committed capture all 265
+	 * rows are `false`, and `windowFrom`'s `playedOnly` path — the only reader — is not
+	 * called with `true` anywhere in `src/`, only in test/period.mjs against a fixture.
+	 * So today the field feeds nothing the site renders. That argues for deleting it
+	 * until you price it: emitting it only where it is true saves 3,710 raw bytes and
+	 * **48 gzipped** (zlib level 9, on the exact bytes written, 2026-09-11) — 0.03% of
+	 * what a reader's connection pays. It is all zeroes in a row, which is what gzip is
+	 * for. Removing it would buy nothing and would cost the one honest answer the slate
+	 * can give to "has this game been played", which is not always no: a capture taken
+	 * in the evening carries finished games, because the slate starts at the capture
+	 * date. Cheap and sometimes true beats tidy.
+	 */
 	final: boolean
 }
 

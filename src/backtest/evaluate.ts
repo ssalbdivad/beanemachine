@@ -143,7 +143,8 @@ export const scoreVariants = (
 		}
 		// paired comparison: a mean difference of 0.001 across 50 noisy folds is not
 		// evidence of anything, so report how often each variant actually wins
-		const shippedName = group === "hitting" ? "SHIPPED_hit_d7_w0.75" : "SHIPPED_pit_d21_w0.75"
+		// the grid's own baseline, not the shipped configuration — see the note above
+		const shippedName = group === "hitting" ? "w0.75_hit_d7" : "w0.75_pit_d21"
 		const shipped = perVariantRho[shippedName] ?? []
 		byGroup[group] = variants
 			.map(v => {
@@ -175,10 +176,28 @@ if (import.meta.filename === process.argv[1]) {
 	const folds = await buildCorpus(seasons, horizon, perSeason, m => console.log(m))
 	console.log(`\n${folds.length} folds built\n`)
 
-	// shipped configuration per side, plus the rate-blend hypothesis
+	/*
+	 * THE BASELINE THESE VARIANTS ARE SCORED AGAINST IS NOT THE SHIPPED ONE, and the
+	 * names used to say it was.
+	 *
+	 * Every variant below holds `recentWeight: 0.75` fixed, and the window-combination
+	 * loop sweeps w in [0.6, 0.75, 0.9]. The shipped blend is 0.5 — and model.json's own
+	 * `recentForm` note RETRACTS 0.75, at 22.6 points a week over 111 paired weeks, going
+	 * 38W-73L. So the two baselines were called `SHIPPED_hit_d7_w0.75` and
+	 * `SHIPPED_pit_d21_w0.75` while being the one weight the model does not use, and two
+	 * shipped values are justified in model.json by fold counts taken from this grid.
+	 *
+	 * The names are corrected here because a name is a claim. The SCIENCE is not
+	 * corrected, because it cannot be from a rename: what these folds establish is an
+	 * ordering AMONG variants at w=0.75, and whether that ordering survives at w=0.5 has
+	 * not been measured. It plausibly does — the blend weight and the window shape are
+	 * different knobs — but plausibly is the word, and model.json now says so beside the
+	 * two numbers that rest on it. Re-running the grid with `recentWeight: 0.5` is the
+	 * work that would settle it, and it is a corpus build rather than a one-line change.
+	 */
 	const variants: Variant[] = [
-		{ name: "SHIPPED_hit_d7_w0.75", recentDays: 7, recentWeight: 0.75, qualityWeight: 0, shrink: false },
-		{ name: "SHIPPED_pit_d21_w0.75", recentDays: 21, recentWeight: 0.75, qualityWeight: 0, shrink: false }
+		{ name: "w0.75_hit_d7", recentDays: 7, recentWeight: 0.75, qualityWeight: 0, shrink: false },
+		{ name: "w0.75_pit_d21", recentDays: 21, recentWeight: 0.75, qualityWeight: 0, shrink: false }
 	]
 	for (const d of [7, 14, 21, 30])
 		for (const rw of [0.15, 0.3, 0.5])
@@ -198,7 +217,9 @@ if (import.meta.filename === process.argv[1]) {
 			name: `d7_rate${rw}@7`, recentDays: 7, recentWeight: 0.75,
 			qualityWeight: 0, shrink: false, recentRateWeight: rw, rateDays: 7
 		})
-	// SHIPPED configuration, plus the next questions worth asking
+	// The shipped window SHAPES — these two are genuinely what ships — plus the next
+	// questions worth asking. The weight they are scored at is not the shipped one; see
+	// the note on `variants` above.
 	const COMBOS: [string, Record<number, number>][] = [
 		["SHIPPED_hit", { 3: 2, 7: 1, 21: 1 }],
 		["SHIPPED_pit", { 5: 2, 21: 1 }],

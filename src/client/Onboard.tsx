@@ -89,6 +89,7 @@ export const Onboard = ({
 	onAdoptPreset,
 	onTeamCount,
 	onLineupLock,
+	onAddSuggested,
 	onImportUrl,
 	onLoadFile,
 	onOpenSetup,
@@ -110,6 +111,9 @@ export const Onboard = ({
 	/** Whether this league's lineup can be changed daily. Only the reader knows — no
 	 *  platform preset can say, because one platform hosts both kinds. */
 	onLineupLock: (lock: "daily" | "period") => void
+	/** Accept one "did you mean" — the reader has read the name and tapped it, which is
+	 *  the only way a suggestion is ever allowed to become a roster entry. */
+	onAddSuggested: (id: number, group: "hitting" | "pitching", name: string) => void
 	/** How many teams this league has. It is the second and last question, because the
 	 *  bar every player is measured against is the (teams x seats)-th best man — so the
 	 *  count moves every row on the board. */
@@ -128,7 +132,13 @@ export const Onboard = ({
 	/** The last read of the team box, kept so the sheet can name every player back and
 	 *  quote every line that produced nobody. */
 	const [read, setRead] = useState<PastedRoster | null>(null)
+	/** Which suggested names this reader has already accepted, so a tapped chip does
+	 *  not sit there inviting a second tap that would do nothing. */
+	const [added, setAdded] = useState<number[]>([])
 
+	/** Everything the sheet still wants. The lock is the one that decides whether Tonight
+	 *  is a list of changes or a plan for the period, so it is what "done" means here. */
+	const answered = !!league?.scoring_period?.lineup_lock
 	const gaps = league ? leagueGaps(league) : []
 	const missing = gaps.filter(g => g.have === null)
 	const ready = !!league && missing.length === 0
@@ -181,12 +191,13 @@ export const Onboard = ({
 	 * Pressing it now makes the preview real first. That is the right moment for it —
 	 * a reader who has typed his players has told us he wants this to be his, and the
 	 * scoring he is adopting is the scoring he has been looking at for the last
-	 * minute, still labelled as standard on the board behind the sheet.
+	 * minute, still labelled as borrowed on the board behind the sheet.
 	 */
 	const readTeam = () => {
 		if (!snapshot) return
 		const got = rosterFromPaste(team, snapshot)
 		setRead(got)
+		setAdded([])
 		if (!got.players.length) return setTeamNote(got.note)
 		const key = leagueKey ?? onAdoptPreset()
 		if (!key)
@@ -273,26 +284,73 @@ export const Onboard = ({
 				  notices, and two mistyped names would otherwise be missing from every
 				  recommendation for the rest of the season with nothing on screen about it.
 				*/}
-				{read && (
+				{/* A line whose suggestion the reader has accepted is no longer missing, and
+				    saying "Nothing in them is counted anywhere" about it would be false the
+				    moment he taps. */}
+				{read && (() => {
+					const accepted = read.suggestions.filter(g => added.includes(g.id))
+					const acceptedLines = new Set(accepted.map(g => g.line))
+					const stillMissed = read.unmatched.filter(l => !acceptedLines.has(l))
+					return (
 					<div className="onboard-answer">
-						{read.players.length > 0 && (
+						{/* ONE READOUT OF THE TEAM, not two. Accepting a suggestion used to leave
+						    this line saying "Got them. 1 player: Vladimir Guerrero Jr." with
+						    "Added: Cal Raleigh" printed separately below it — two counts of the
+						    same roster on one screen, the first of them stale the moment he taps. */}
+						{(read.players.length > 0 || accepted.length > 0) && (
 							<p className="onboard-got">
 								<b>
-									Got them. {read.players.length}{" "}
-									{read.players.length === 1 ? "player" : "players"}:
+									Got them. {read.players.length + accepted.length}{" "}
+									{read.players.length + accepted.length === 1 ? "player" : "players"}:
 								</b>{" "}
-								{read.players.map(p => p.name).join(", ")}
+								{[...read.players.map(p => p.name), ...accepted.map(g => g.name)].join(", ")}
 							</p>
 						)}
-						{read.unmatched.length > 0 && (
+						{stillMissed.length > 0 && (
 							<p className="onboard-missed">
 								I couldn&rsquo;t find a player in{" "}
-								{read.unmatched.length === 1 ? "this line" : "these lines"}:{" "}
-								{read.unmatched.slice(0, 6).map(l => `\u00ab${l}\u00bb`).join(", ")}
-								{read.unmatched.length > 6 && ` and ${read.unmatched.length - 6} more`}.
+								{stillMissed.length === 1 ? "this line" : "these lines"}:{" "}
+								{stillMissed.slice(0, 6).map(l => `\u00ab${l}\u00bb`).join(", ")}
+								{stillMissed.length > 6 && ` and ${stillMissed.length - 6} more`}.
 								Nothing in them is counted anywhere.
 							</p>
 						)}
+						{/*
+						  THE SUGGESTION, AS A TAP.
+						  
+						  `rosterFromPaste` measures the one man each failed line is a single typo
+						  from — 99.1% right and 0.0% wrong on real typos across the whole capture,
+						  and it refuses rather than guessing on anything that says too little (see
+						  `nearestName`). The note already ASKS "Did you mean Aaron Judge?", and the
+						  only way to answer was to retype the line on a phone keyboard, which is
+						  where people quit. This is the answer: one tap per name.
+						  
+						  It stays an explicit tap and it prints the name it is about to add, full
+						  size, because the parser must never correct anybody silently — a reader who
+						  accepts a plausible name without reading it ends up owning a roster he did
+						  not assemble, which is worse than the typo.
+						*/}
+						{read.suggestions.filter(g => !added.includes(g.id)).length > 0 && (
+							<p className="onboard-missed onboard-meant">
+								<span>Did you mean</span>{" "}
+								{read.suggestions
+									.filter(g => !added.includes(g.id))
+									.map(g => (
+										<button
+											key={`${g.id}:${g.group}`}
+											type="button"
+											className="chip-btn"
+											onClick={() => {
+												onAddSuggested(g.id, g.group, g.name)
+												setAdded(a => [...a, g.id])
+											}}
+										>
+											{g.name}
+										</button>
+									))}
+							</p>
+						)}
+
 						{read.ambiguous.length > 0 && (
 							<p className="onboard-missed">
 								Two different players share {read.ambiguous.join(" and ")}, so neither was
@@ -313,7 +371,8 @@ export const Onboard = ({
 							<p className="onboard-missed">{teamNote}</p>
 						)}
 					</div>
-				)}
+					)
+				})()}
 				{/* And the same note when there is no `read` to hang it on — a throw before the
 				    parser returned anything. */}
 				{teamNote && !read && <p className="onboard-missed">{teamNote}</p>}
@@ -401,7 +460,9 @@ export const Onboard = ({
 				<details className="onboard-alts">
 					<summary>My league scores differently</summary>
 					<p className="sub">
-						The numbers you are looking at are standard point values. If your league
+						The numbers you are looking at come from one real Yahoo league&rsquo;s settings
+						page, copied &mdash; they are not Yahoo&rsquo;s defaults and they are not yours.
+						If your league
 						pays differently, every ranking shifts &mdash; here is how to tell it.
 					</p>
 					<div className="chips onboard-where">
@@ -519,13 +580,30 @@ export const Onboard = ({
 				  something nobody has to act on — and would push "That’s my team" under it on a
 				  360px phone, which is the same bug one step earlier.
 				*/}
-				<p className={`onboard-done${league ? " onboard-foot" : ""}`}>
+				{/*
+				  STICKY ONLY WHEN THERE IS NOTHING LEFT BELOW IT.
+
+				  Pinned from the moment a league exists, this sat ON TOP of the two chip
+				  questions that come after it in the document — measured on the published
+				  build at 390x844: the button at y=701, "How many teams" at 757, "Can you
+				  change your lineup every day?" at 894, fifty pixels past the bottom of the
+				  screen. The natural gesture is to press the big button you can see, and it
+				  skipped the question the whole Tonight screen turns on.
+
+				  A finish action that hides the remaining work is worse than one that scrolls
+				  away, so it only pins once the work is done. Until then it sits in the flow
+				  and the reader reaches the questions on his way to it. (Tonight no longer
+				  DEPENDS on the answer either — see the note on `today` in Decide.tsx — but a
+				  question the reader never sees is still a question he cannot answer.)
+				*/}
+				<p className={`onboard-done${league && answered ? " onboard-foot" : ""}`}>
 					{league ?
 						<button type="button" className={ready ? "primary" : ""} onClick={onDone}>
 							{read && read.players.length ? "Show me tonight" : "Show me the board"}
 						</button>
 					:	<span className="sub">
-							The board behind this is already running, on standard values, with no team
+							The board behind this is already running, on one real league&rsquo;s values,
+							with no team
 							behind it. Answering the question above makes it yours.
 						</span>
 					}

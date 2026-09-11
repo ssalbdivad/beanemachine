@@ -50,10 +50,15 @@
   --amb-1:rgba(47,125,91,.34); --amb-2:rgba(0,45,114,.30);
   --amb-3:rgba(255,89,16,.22); --amb-4:rgba(47,125,91,.11);
 
-  /* Aliases the newer components were written against. They were referenced before
-     they existed, so `.chip-btn`, `.scar .bar` and `.modes .mode b` silently got
-     nothing at all. Defined as aliases rather than as literals so they follow every
-     theme automatically — there is no second place for them to drift out of sync. */
+  /* Aliases the newer components were written against — `--card`, `--accent-wash`,
+     `--text`, `--line` and `--panel`, five lines below. They were referenced before
+     they existed, so `.chip-btn` and `.modes .mode b` silently got nothing at all.
+     Defined as aliases rather than as literals so they follow every theme
+     automatically — there is no second place for them to drift out of sync.
+
+     This listed `.scar .bar` as a third casualty. The scarcity panel's markup was
+     removed some time ago (test/board.mjs:686 asserts it stays gone) and its CSS
+     went with this pass, so naming it here described nothing. */
   /* The one colour a primary button's label is allowed to be. `button.primary` sets
      a green ground and inherited ink on it measured 2.39:1 in dark mode — the app's
      only conversion action, failing AA. 6.5:1 light, 10.0:1 dark. */
@@ -241,8 +246,10 @@ input:focus-visible,select:focus-visible,button:focus-visible{
   box-shadow:inset 0 1px 0 var(--edge), var(--ring);
 }
 
-/* a goggle lens, reused wherever something reports state */
-.lens,h2::before,.chip.ok::before,.chip.warn::before{
+/* A goggle lens, reused wherever something reports state. `.lens` led this list
+   and is gone: nothing has worn that class since the state chips grew their own
+   ::before, and the three pseudo-elements are now the whole of it. */
+h2::before,.chip.ok::before,.chip.warn::before{
   content:"";width:9px;height:9px;border-radius:50%;flex:none;
   background:
     radial-gradient(circle at 32% 30%, var(--glint) 0 26%, transparent 27%),
@@ -253,7 +260,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{
 /* One uppercase-mono label, everywhere something is named rather than said. */
 .board-head,.ctl>span,h2,.tot span,.savebar .msg,summary,.views button,
 .detail h3,.bench h3,.slot-changes h3,.deal-side h3,.trade-verdict h3,
-.vn span,.card.pick .pick-score span,.views-link{
+.vn span,.card.pick .pick-score span{
   font-family:var(--mono);letter-spacing:var(--caps);text-transform:uppercase;
 }
 
@@ -274,8 +281,6 @@ h1{
   font-size:var(--fs-9);font-weight:600;letter-spacing:-.024em;line-height:var(--lh-tight);
 }
 h1 b{font-weight:600;color:var(--accent)}
-/* aligned under the wordmark, not under Billy: 76px of robot plus the 11px gap */
-.tag{margin:var(--sp-2) 0 0 87px;color:var(--muted);font-size:var(--fs-4);max-width:66ch}
 /* The wordmark's subtitle: h1's serif, and --ink rather than --muted so the
    header steps accent wordmark → subtitle → muted description. At --muted it
    would tie with the description line directly below it, leaving the header
@@ -287,22 +292,10 @@ h1 b{font-weight:600;color:var(--accent)}
 .tagline{margin:0;font-family:var(--serif);font-size:var(--fs-4);color:var(--faint);
   line-height:var(--lh-tight);flex:1 1 auto;min-width:0}
 @media(max-width:700px){.tagline{display:none}}
-.static-note{
-  margin-top:var(--sp-2);font-size:var(--fs-3);color:var(--flag);
-  background:var(--flag-soft);border:1px solid var(--edge-line);
-  border-left:2.5px solid var(--flag);
-  border-radius:0 var(--r-md) var(--r-md) 0;padding:var(--sp-2) var(--sp-3);display:inline-block;
-  backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
-}
-.static-note code{
-  font-family:var(--mono);font-size:var(--fs-3);
-  background:var(--glass-strong);padding:1px 6px;border-radius:5px;
-}
 @media(max-width:640px){
   header{padding:var(--sp-6) 0 var(--sp-4)}
   h1{font-size:var(--fs-8)}
   .tagline{font-size:var(--fs-5)}
-  .tag{margin-left:0}
 }
 
 /* ---------- toolbar ---------- */
@@ -486,7 +479,7 @@ dd{margin:0;min-width:0;font-weight:500;font-variant-numeric:tabular-nums;overfl
 .field{display:inline-flex;align-items:center;flex-wrap:wrap;gap:7px;margin-right:10px}
 .field input.val{width:58px;flex:none;text-align:center;font-size:var(--fs-4)}
 .unit{color:var(--muted);font-weight:400;font-size:var(--fs-3)}
-dd code,.mono{font-family:var(--mono);font-size:var(--fs-3)}
+dd code{font-family:var(--mono);font-size:var(--fs-3)}
 
 /* ---------- scoring period ----------
    A league's own week, entered by hand for a league whose period could not be read
@@ -571,7 +564,7 @@ pre{
 @media(max-width:640px){
   .savebar .inner{padding:var(--sp-2) var(--sp-3);flex-wrap:nowrap}
   .savebar .msg{min-width:0;flex:1 1 auto}
-  .rows .row input,.rows .row button,.slot-row input,input.val{scroll-margin-bottom:96px}
+  .rows .row input,.rows .row button,input.val{scroll-margin-bottom:96px}
 }
 
 /* ---------- toast ---------- */
@@ -607,13 +600,6 @@ pre{
   background:var(--glass-strong);border-color:var(--edge-line);color:var(--ink);
   box-shadow:inset 0 1px 0 var(--edge);
 }
-.views-link{
-  align-self:center;margin-left:auto;padding:var(--sp-2) var(--sp-3);border-radius:8px;
-  font-size:var(--fs-2);letter-spacing:.09em;
-  color:var(--accent);text-decoration:none;white-space:nowrap;
-}
-.views-link:hover{background:var(--accent-soft)}
-@media(max-width:700px){.views-link{margin-left:0}}
 
 /* ---------- the example league ----------
    Deliberately not a `.card`: it is a caption on the whole page rather than one
@@ -635,20 +621,11 @@ pre{
 .preset-note b{color:var(--ink)}
 .preset-note button{flex:none}
 
-/* ---------- board primer ----------
-   One line above the ranking, at the altitude the table cannot speak from: the
-   table can define a column, but not say what kind of thing the list is. Sized
-   to read as prose rather than as a control. */
-.primer{
-  margin:var(--sp-5) 0 0;
-  max-width:78ch;font-size:var(--fs-4);line-height:var(--lh-snug);color:var(--muted);
-}
-.primer b{color:var(--ink);font-weight:600}
-/* On a phone this and the example note are the only things between the masthead
-   and the first control, so they are held to the smaller step and tighter air —
-   orientation that buries the board it is orienting you to has failed. */
+/* On a phone the preset note is the only thing between the masthead and the
+   first control, so it is held to the smaller step and tighter air. This read
+   "this and the example note" and set `.primer` too — a one-line preamble above
+   the ranking whose markup went and whose CSS stayed behind until this pass. */
 @media(max-width:640px){
-  .primer{margin:var(--sp-4) 0 0;font-size:var(--fs-3)}
   .preset-note{padding:var(--sp-3);gap:var(--sp-3)}
   .preset-note p{font-size:var(--fs-3)}
 }
@@ -741,7 +718,6 @@ pre{
   .views{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .views::-webkit-scrollbar{display:none}
   .views button{flex:none}
-  .views-link{flex:none;margin-left:var(--sp-2)}
 }
 
 /* ---------- filters ----------
@@ -835,8 +811,7 @@ pre{
 .who .code{font-size:var(--fs-1);padding:2px 6px;min-width:auto;margin-right:6px}
 .hurt{font-style:normal;color:var(--neg);font-size:var(--fs-2)}
 /* every column of digits is tabular, because the column IS the comparison */
-.board-row .uscore,.board-row .bscore,.board-row .dim,.board-row .games,.board-row .gap,
-.board-row .conf-num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.board-row .uscore,.board-row .bscore,.board-row .dim,.board-row .games,.board-row .gap{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .board-row .uscore{font-size:var(--fs-4);color:var(--muted)}
 .board-row .uscore.up{color:var(--accent);font-weight:600}
 .bscore{font-size:var(--fs-5);font-weight:600;color:var(--accent)}
@@ -844,13 +819,6 @@ pre{
 .board-row .games{font-size:var(--fs-3);color:var(--muted)}
 .gap{font-size:var(--fs-3);color:var(--faint)}
 .gap.up{color:var(--flag);font-weight:600}
-/* confidence as a filling lens — the same motif Billy wears */
-.conf{position:relative;display:block;height:16px;border-radius:5px;
-  background:var(--well);border:1px solid var(--well-line);overflow:hidden}
-.conf-fill{position:absolute;inset:0 auto 0 0;background:var(--accent-soft);
-  border-right:1px solid var(--accent)}
-.conf-num{position:relative;display:block;text-align:center;line-height:14px;
-  font-size:var(--fs-1);color:var(--muted)}
 .sort-head{
   background:transparent;border:0;box-shadow:none;padding:0;cursor:pointer;
   backdrop-filter:none;-webkit-backdrop-filter:none;
@@ -898,23 +866,6 @@ pre{
 /* the team number is a short field, and it sits inline beside the button */
 .pull-roster .ctl{flex:0 0 auto}
 .pull-roster .ctl input[type=text]{width:7rem}
-/* The one card that proposes rather than prices: the gain leads, the swap reads as
-   one line, and the planner's own reasoning sits under it rather than in a tooltip. */
-.advice-moves{list-style:none;margin:var(--sp-3) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-3)}
-.advice-moves li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--sp-1) var(--sp-3);align-items:baseline}
-.advice-gain{grid-row:1/3;font-family:var(--mono);font-size:var(--fs-6);font-weight:600;color:var(--accent);
-  font-variant-numeric:tabular-nums}
-.advice-swap{font-size:var(--fs-4)}
-.advice-score{font-family:var(--mono);font-size:var(--fs-2);color:var(--muted);font-variant-numeric:tabular-nums}
-.advice-arrow{color:var(--faint)}
-.advice-reason{grid-column:2;font-size:var(--fs-3);color:var(--muted);line-height:var(--lh-snug)}
-.advice-notes,.advice-skipped{margin-top:var(--sp-3)}
-@media(max-width:640px){.advice-moves li{grid-template-columns:1fr}.advice-gain{grid-row:auto}}
-.legend{margin-top:var(--sp-4)}
-.legend dl{margin-top:10px;grid-template-columns:minmax(0,110px) minmax(0,1fr);gap:var(--sp-2) var(--sp-4)}
-.legend dt{color:var(--accent);font-weight:500;text-transform:none}
-.legend dd{font-family:inherit;font-size:var(--fs-3);font-weight:400;color:var(--muted);line-height:var(--lh-snug)}
-@media(max-width:560px){.legend dl{grid-template-columns:minmax(0,1fr)}}
 
 /* ---------- Billy's pick ---------- */
 .card.pick{
@@ -951,24 +902,6 @@ pre{
 }
 .card.pick .pick-bot .bot circle[r="3.8"]{animation-delay:1.2s}
 
-/* Scarcity. A bar chart because the comparison IS the point — the numbers alone
-   make you do the ranking in your head. */
-.scarcity{display:flex;flex-direction:column;gap:7px;margin-top:var(--sp-3)}
-.scar{display:grid;grid-template-columns:44px minmax(0,1fr) 52px minmax(0,1.1fr);
-  gap:11px;align-items:center;font-size:var(--fs-3)}
-.scar b{font-family:var(--mono);font-size:var(--fs-3);font-weight:600;letter-spacing:.04em}
-/* `.bar` is also the toolbar's own class, which was setting display:flex and
-   22px of padding on this 8px track and collapsing it to nothing. */
-.scar .bar{
-  display:block;padding:0;height:8px;border-radius:var(--r-pill);
-  background:var(--well);border:1px solid var(--well-line);overflow:hidden;
-}
-.scar .bar i{display:block;height:100%;border-radius:var(--r-pill);background:var(--accent)}
-.scar .val{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;
-  color:var(--text);font-weight:600}
-/* `.who` is the board's two-line player cell; here it is one line that elides */
-.scar .who{display:block;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media(max-width:640px){.scar{grid-template-columns:38px minmax(0,1fr) 46px}.scar .who{display:none}}
 
 /* Motion is decoration everywhere on this page — none of it carries meaning, so
    all of it goes when it is unwelcome. */
@@ -1025,29 +958,16 @@ kbd{
   background:var(--sunken);color:var(--ink);white-space:nowrap;
 }
 
-/* The first-run setup. It is the whole page on a first visit, so it is laid out
-   as a sequence with a live position in it rather than as another card of prose —
-   a reader who has chosen a platform should be able to see, without reading, that
-   one thing is done and what the next one is. */
-.onboard-steps{list-style:none;margin:var(--sp-4) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-5)}
-.onboard-step{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--sp-3);align-items:start}
-.onboard-n{
-  width:26px;height:26px;flex:none;display:grid;place-items:center;border-radius:50%;
-  font-family:var(--mono);font-size:var(--fs-2);font-weight:600;
-  color:var(--muted);background:var(--glass-2);border:1px solid var(--line);
-}
-.onboard-step.done .onboard-n{color:var(--accent);border-color:transparent;background:var(--accent-soft)}
-.onboard-body{min-width:0}
-.onboard-body h3{margin:2px 0 var(--sp-2);font-size:var(--fs-5);font-weight:600;letter-spacing:-.01em}
-.onboard-body .sub{margin:0 0 var(--sp-2)}
+/* The "did you mean" row: the question reads as prose and each name is a chip, because
+   each name is a thing to press. Wrapped and gap-spaced so three names on a phone are
+   three targets rather than a sentence with buttons in it. */
+.onboard-meant{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2);margin:var(--sp-2) 0 0}
+.onboard-meant .chip-btn{font-size:var(--fs-3)}
+
 .onboard-alts{margin-top:var(--sp-4)}
 .onboard-alts dl{margin-top:var(--sp-3)}
 .onboard-url{display:flex;gap:var(--sp-2);margin-top:var(--sp-2);flex-wrap:wrap}
 .onboard-url input{flex:1 1 220px;min-width:0}
-@media(max-width:640px){
-  .onboard-steps{gap:var(--sp-4)}
-  .onboard-step{gap:var(--sp-2)}
-}
 
 /* The way from Today to Wire. A link, not a tab: the two screens are one after the
    other in the order a decision is made, and the reader who needs the second one

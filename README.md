@@ -132,8 +132,10 @@ Exploration rounds that got here live in `logo/round*.mjs` with contact sheets i
 
 - **[docs/GUIDE.md](docs/GUIDE.md)** — how to read the board and use it on draft day,
   waiver day and for daily streaming, including why a catcher outranks a better
-  hitter. The app links here from "How to read this →" in the nav and from the
-  footer.
+  hitter. The app links here from "How to read this" in the footer (`Colophon` in
+  `src/client/App.tsx`), and from there only. The same link used to sit in the nav
+  beside the three tabs as well; on a 390px phone it pushed them into a horizontal
+  scroll and cut itself off mid-word, so the duplicate went and the navigation stayed.
 - **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — how a bscore is computed, worked
   through with real numbers, plus the backtest design, what is built on top of a
   bscore, and the negative-results ledger. The app's footer (`Colophon` in
@@ -179,13 +181,17 @@ already hold.
 **My league** is your team and your league, in that order, and it is a screen you visit
 once a season. Everything the other two say is priced in the values on it.
 
-There used to be a fourth tab, **Draft**, and a trade evaluator beside the roster.
-Both are gone from the navigation for the same measured reason: the published
-decompositions of what wins a points league put pre-draft ranking quality near zero
-and trades close to it, while volume accumulation — never leaving an allowed slot
-unused — is roughly the magnitude of all in-season move quality combined. In this
-league's own scoring an empty hitter seat costs about 6.9 points a night; a realistic
-within-roster upgrade is worth 0.7 to 1.5. So the app leads with the seats.
+There used to be a fourth tab, **Draft**, and a trade evaluator standing open beside the
+roster. They were demoted for the same measured reason: the published decompositions of
+what wins a points league put pre-draft ranking quality near zero and trades close to
+it, while volume accumulation — never leaving an allowed slot unused — is roughly the
+magnitude of all in-season move quality combined. In this league's own scoring an empty
+hitter seat costs about 6.9 points a night; a realistic within-roster upgrade is worth
+0.7 to 1.5. So the app leads with the seats. **Draft** is deleted outright, screen and
+`src/engine/draft.ts` both. The evaluator is not deleted — it is folded behind a **Price
+a trade** button on **My league** (`dealOpen` in `src/client/Trade.tsx`), because it
+still answers a real question for anyone holding a real offer; what it lost was 718px of
+standing height between the reader's lineup and his league's scoring.
 
 ### Getting your league in
 

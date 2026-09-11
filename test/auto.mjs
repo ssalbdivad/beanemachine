@@ -278,6 +278,22 @@ t("an already-optimal lineup reports no gain, so it cannot be printed as one hel
 
 /* ---------------- rail: the keep floor ---------------- */
 
+/*
+ * A FULL ROSTER, which is what every assertion in this block was always about and what
+ * none of them said.
+ *
+ * `planSwaps` now fills a free seat before it offers anybody up — measured on the
+ * published build, a reader holding 18 men against 27 seats was told to drop Aaron Judge
+ * while the same card said four seats were scoring nothing. These fixtures held three men
+ * against SHAPE's ten seats, so with the new rule every one of them correctly produced a
+ * pure add and stopped testing the drop choice at all.
+ *
+ * The claims below are about WHO COMES OUT when somebody must, so the fixture now says
+ * somebody must: `slots` is trimmed to exactly the seats these men occupy. The
+ * assertions themselves are unchanged. The room case is asserted in its own block below.
+ */
+const FULL = { ...SHAPE, slots: { C: 1, OF: 2 }, slot_order: ["C", "OF", "OF"] }
+
 const wire = {
 	roster: [
 		spot("C", "Andy Mask", ["C"]), spot("OF", "Stu Stud", ["OF"]), spot("OF", "Wes Weak", ["OF"])
@@ -289,7 +305,7 @@ const wire = {
 		rated("Free Agent", { points: 90, bscore: 70, slots: ["OF"] })
 	],
 	availableNames: new Set(["free agent"]),
-	shape: SHAPE,
+	shape: FULL,
 	options: opts({ minGain: 5, keepFloor: 25, maxMoves: 1 })
 }
 const wirePlan = planMoves(wire)
@@ -297,11 +313,88 @@ t("the best add takes the worst man's spot, never the keeper's",
 	wirePlan.moves.length === 1 && wirePlan.moves[0].drop === "Wes Weak" &&
 		wirePlan.moves[0].add === "Free Agent",
 	JSON.stringify(wirePlan.moves))
-t("nobody at or above the keep floor is ever offered up",
-	planMoves({ ...wire, roster: wire.roster.filter(s => s.name !== "Wes Weak") }).moves.length === 0)
-t("and the empty move list explains itself rather than looking like a failed read",
-	planMoves({ ...wire, roster: wire.roster.filter(s => s.name !== "Wes Weak") })
-		.notes.some(n => /keep floor/.test(n)))
+/* Taking Wes Weak off leaves two men in three seats, so there is now ROOM — and the
+   claim has to be stated as what it always meant. It read "0 moves", which was a proxy
+   for "nobody was dropped" that only held while a full roster was the only case. With a
+   seat free the planner correctly offers a pure add, and the thing that must never
+   happen is a man at or above the keep floor being offered up for it. */
+{
+	const spared = planMoves({ ...wire, roster: wire.roster.filter(s => s.name !== "Wes Weak") })
+	t("nobody at or above the keep floor is ever offered up",
+		spared.moves.every(m => m.drop === null), JSON.stringify(spared.moves))
+	t("and the explanation says which of the two reasons it is",
+		spared.notes.some(n => /keep floor/.test(n)) || spared.notes.some(n => /seats are free/.test(n)),
+		JSON.stringify(spared.notes))
+}
+
+/* ---------------- rail: nobody comes out while a seat is free ---------------- */
+
+/*
+ * THE MOST EXPENSIVE SENTENCE THE PRODUCT EVER PRINTED.
+ *
+ * Measured by a stranger walking the published build on a phone: 18 men, 27 seats
+ * (18 active + 5 bench + 4 injured, read off My league), and the card said
+ *
+ *     Empty seats — 4 seats score nothing tonight
+ *     Make these moves — +20.76  Add JJ Bleday for your OF or Util seat, drop Aaron Judge
+ *
+ * twelve inches apart. Five seats were open. Nobody had to come out, the card had
+ * already said so in its own words, and a reader told to drop Aaron Judge for JJ Bleday
+ * closes the tab and is right to.
+ *
+ * `planSwaps` and `planMoves` never asked how many men the roster may hold. They do now,
+ * and they fill the free seats first. The gain on a pure add is quoted as the arriving
+ * man's bscore, which UNDERSTATES it — an empty seat scores zero, not replacement level
+ * — and understating is the safe direction as well as the one that keeps every number in
+ * the planner in one unit.
+ */
+{
+	const room = {
+		roster: [spot("C", "My Catcher", ["C"]), spot("OF", "My Fielder", ["OF"])],
+		rated: [
+			rated("My Catcher", { points: 40, bscore: 30, slots: ["C"] }),
+			rated("My Fielder", { points: 40, bscore: 30, slots: ["OF"] }),
+			rated("Free Bat", { points: 70, bscore: 40, slots: ["OF"] })
+		],
+		availableNames: new Set(["free bat"]),
+		// four seats, two men
+		shape: shape({ C: 1, OF: 2, BN: 1 }, { C: ["C"], OF: ["OF"], BN: "any" },
+			["C", "OF", "OF", "BN"]),
+		options: opts({ minGain: 5, keepFloor: 25, maxMoves: 1 })
+	}
+	const p = planMoves(room)
+	t("with a seat free the add is an add, and nobody is offered up for it",
+		p.moves.length === 1 && p.moves[0].kind === "add" && p.moves[0].drop === null,
+		JSON.stringify(p.moves))
+	t("and it says so, rather than leaving the reader to count his own seats",
+		p.notes.some(n => /seats are free/.test(n)), JSON.stringify(p.notes))
+	/* The rails have to agree with the planner, or the audit is checking a different rule
+	   from the one that ships. `railViolations` wants a whole plan, so this asks for one. */
+	const whole = plan(room)
+	t("the audit passes a move with no drop",
+		railViolations(whole, room).length === 0, railViolations(whole, room).join(" | "))
+	t("and catches one that claims a drop it does not have",
+		railViolations(
+			{ ...whole, moves: [{ ...whole.moves[0], drop: "My Catcher", dropScore: null }] },
+			room
+		).length > 0,
+		railViolations(
+			{ ...whole, moves: [{ ...whole.moves[0], drop: "My Catcher", dropScore: null }] },
+			room
+		).join(" | "))
+	// and the same roster with every seat taken goes back to trading one man for another
+	const full = {
+		...room,
+		// two seats, two men — and My Fielder at 30 has to be under the keep floor for
+		// anyone to be offered up at all, which is the OTHER rail and is asserted above
+		rated: room.rated.map(r => (r.player.name === "My Fielder" ? { ...r, bscore: 4 } : r)),
+		shape: shape({ C: 1, OF: 1 }, { C: ["C"], OF: ["OF"] }, ["C", "OF"])
+	}
+	const q = planMoves(full)
+	t("with every seat taken it trades, which is the case it was always tested on",
+		q.moves.length === 1 && q.moves[0].kind === "add-drop" && q.moves[0].drop === "My Fielder",
+		JSON.stringify({ moves: q.moves, notes: q.notes }))
+}
 
 /* ---------------- rail: the move cap ---------------- */
 
@@ -505,7 +598,11 @@ const contradiction = {
 		rated("Better Catcher", { points: 90, bscore: 41, slots: ["C"] })
 	],
 	availableNames: new Set(["better catcher"]),
-	shape: SHAPE
+	/* Exactly these five seats. SHAPE has ten, so five men left five free, and
+	   `planSwaps` now fills a free seat before it offers anybody up — which is right, and
+	   turns every assertion in this block into a test of a case it is not about. Every
+	   claim below is about WHO COMES OUT when somebody must. */
+	shape: { ...SHAPE, slots: { C: 1, "1B": 1, OF: 2, Util: 1 }, slot_order: ["C", "1B", "OF", "OF", "Util"] }
 }
 const both = plan(contradiction)
 const startedNames = new Set(both.lineup.starters.map(s => s.name))
@@ -541,6 +638,12 @@ t("protecting a starter does not block a move against anyone else", (() => {
 	const spare = {
 		...contradiction,
 		roster: [...contradiction.roster, spot("BN", "Hot Bat", ["OF"])],
+		// six men, six seats — still full, so this stays a test of the drop choice
+		shape: {
+			...contradiction.shape,
+			slots: { ...contradiction.shape.slots, BN: 1 },
+			slot_order: [...contradiction.shape.slot_order, "BN"]
+		},
 		rated: [
 			...contradiction.rated.map(r => (r.player.name === "Gil Ok" ? { ...r, bscore: 3 } : r)),
 			rated("Hot Bat", { points: 70, bscore: 50, slots: ["OF"] }),
@@ -595,8 +698,12 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
       { name: "Free Catcher", positions: ["C"] },
       { name: "Free Bench Bat", positions: ["1B"] }
     ],
-    shape: shape({ C: 1, "1B": 1, BN: 2 }, { C: ["C"], "1B": ["1B"], BN: "any" },
-      ["C", "1B", "BN", "BN"]),
+    /* Two seats, two men — FULL, which is what this block has always been about. It
+       carried two bench seats as well, so with `planSwaps` now filling a free seat before
+       it takes anybody out (see the room block above) the right answer became a pure add
+       and the claim below stopped being exercised at all. The bench seats are gone; the
+       assertions are unchanged. */
+    shape: shape({ C: 1, "1B": 1 }, { C: ["C"], "1B": ["1B"] }, ["C", "1B"]),
     options: { ...DEFAULTS, maxMoves: 1 }
   }
 
@@ -609,9 +716,14 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
 
   // planMoves, on the same input, declines it and says so
   const old = planMoves(input, new Set([normalizeName("My Catcher")]))
+  /* "no moves" was the old form of this claim, and it stopped being the right form once
+     `planSwaps` and `planMoves` fill a free seat before offering anybody up: this roster
+     is two men in four seats, so a pure add is correct and appears. What the claim is
+     about is the SWAP — `planMoves` will not drop a man it is starting — so it is stated
+     as that, plus the note it owes. */
   t("the older planner declines that same swap because it is starting him",
-    !old.moves.length && old.notes.some(n => /starting him/.test(n)),
-    JSON.stringify(old.notes))
+    old.moves.every(m => m.drop === null) && old.notes.some(n => /starting him/.test(n)),
+    JSON.stringify({ moves: old.moves, notes: old.notes }))
 
   // a man who would ride the bench is worth nothing, and bscore cannot see that
   const benchOnly = planSwaps({

@@ -15,6 +15,7 @@ import {
 } from "./api.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
+import { tab } from "./panels.tsx"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -198,11 +199,16 @@ const BOARD_GRID_CSS = `
 	font-size:var(--fs-3);color:var(--muted)}
 /* The player's name is never cut. */
 .board .board-row .who b{overflow:visible;text-overflow:clip;white-space:normal}
-/* the score, then the ownership it was divided by, on one column's width */
-.board .board-row .us-val{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.board .board-row .us-own,.board .board-row .us-none{
-	display:block;font-size:var(--fs-1);color:var(--faint);font-style:normal;line-height:1.3;
-}
+/*
+  .us-val, .us-own and .us-none stood here — the uscore score with the
+  ownership it was divided by underneath, or the word "unlisted". No row has
+  rendered any of the three since the four-column pass took uscore off the board;
+  checked across src/, test/ and api/, the only surviving mentions are two comments
+  in test/board.mjs explaining that the cells went and one helper built to read the
+  number out of the drill-down instead. The rules below them in this block already
+  say why a rule kept "in case" is how a deleted column comes back wearing somebody
+  else's heading, and these three were that rule.
+*/
 /* the unit rides the number, because the column holds two of them */
 .board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
 
@@ -692,7 +698,7 @@ export const Board = ({
 			:	[],
 		[pool]
 	)
-	const { rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort, injuryError } =
+	const { rows, scored, slotsRanked, edgeCoverage, period, streaming, teamNames, availability, sort, injuryError } =
 		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
@@ -890,6 +896,66 @@ export const Board = ({
 		filters.hideInjured ? "injured hidden" : ""
 	].filter(Boolean)
 
+	/**
+	 * A league that pays for one side of the ball and not the other, said on the
+	 * board rather than only on My league.
+	 *
+	 * This is not hypothetical and it is not a broken import: Yahoo prints the two
+	 * stat tables under separate headers, so a settings page copied from a league
+	 * that scores batters only — or a copy that caught one table and missed the
+	 * other — yields `scoring.pitching: {}`. Reproduced on the published build by
+	 * pasting a Batters table with no Pitchers table: the league is created, My
+	 * league says so twice ("No pitching stats scored", and "The paste carried no
+	 * pitching scoring" under Needs review), and Pickups said nothing at all. The
+	 * board fell from 1,009 rows to 481, the word "pitch" appeared nowhere on the
+	 * screen, and SP, RP and P were still offered as chips — each answering "0
+	 * players. Try a different position or a wider window", which blames the reader
+	 * for a filter that could not have matched.
+	 *
+	 * `rateAll` has always been right about it: every pitcher comes back
+	 * `rateable: false` with `unrateable` reading "this league scores nothing on the
+	 * pitching side". That reason was reaching nobody, because an unrateable player
+	 * is not drawn. This is that reason, lifted to where the ranking is read.
+	 *
+	 * Null when both sides score (the ordinary case) and when NEITHER does — the
+	 * refusal card above has already returned for that one, and saying it twice in
+	 * two different shapes is how a page ends up disagreeing with itself.
+	 */
+	const unscored: "pitching" | "batting" | null =
+		!scored ? null
+		: scored.hitting && !scored.pitching ? "pitching"
+		: scored.pitching && !scored.hitting ? "batting"
+		: null
+
+	/**
+	 * The position chips, minus any that cannot match.
+	 *
+	 * Read off `slotsRanked` — the slots the rateable pool actually holds — rather
+	 * than off a hardcoded map of slot to side, because the map would be wrong: on
+	 * the committed capture five pitching-group players carry infield or outfield
+	 * eligibility, so the sides do not partition the chips cleanly. See
+	 * `slotsRanked` in useBoard.ts.
+	 *
+	 * A chip the reader has ALREADY PICKED is kept whatever the pool says, so the
+	 * way out of a narrowed board can never be taken away from him. That is reachable:
+	 * pick SP, go to My league, paste a settings page with no pitching in it, come
+	 * back — and without this the board would sit at zero rows with no control on
+	 * screen to undo it, which is the hidden-filter defect this file already carries
+	 * two comments about.
+	 */
+	const slotChips = SLOTS.filter(s => !s || slotsRanked.has(s) || filters.slot === s)
+	/** Has the reader himself cut anything down — the test for whether an empty board
+	 *  is his doing or the league's. `narrowed` alone is not it: it names only the two
+	 *  filters the fold's summary lists, and a position chip or a search string empties
+	 *  a board just as thoroughly. */
+	const narrowing = narrowed.length > 0 || !!filters.slot || !!filters.search.trim()
+	/** The ones that went, named in the note so their absence is stated rather than
+	 *  left as a gap the reader has to notice. */
+	const hiddenSlots = SLOTS.filter(s => s && !slotsRanked.has(s))
+	const andList = (xs: string[]) =>
+		xs.length < 2 ? (xs[0] ?? "")
+		: `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`
+
 	return (
 		<>
 			{/* Moved here from App so it can see the mode: it describes bscore, and the
@@ -1038,7 +1104,10 @@ export const Board = ({
 				    "more filters" there. */}
 				{filters.mode !== "stream" && (
 				<div className="chips" role="group" aria-label="Position">
-					{SLOTS.map(s => (
+					{/* `slotChips`, not SLOTS: a league that scores one side of the ball has
+					    no rateable player at the other side's positions, and a chip that
+					    cannot match is not a filter. See `slotChips`. */}
+					{slotChips.map(s => (
 						<button
 							key={s || "any"}
 							type="button"
@@ -1165,6 +1234,19 @@ export const Board = ({
 							</select>
 						</label>
 						)}
+						{/*
+						  Gone entirely where the league scores one side only, and that is the
+						  point rather than tidiness. Its three options are "batters + pitchers",
+						  "batters" and "pitchers": with no pitching scoring the first is a label
+						  for a list that holds no pitchers, the second is the same list under a
+						  second name, and the third can only ever return nothing. One control,
+						  three settings, no question it can answer.
+
+						  Kept while the reader has one of the narrow ones selected, for the same
+						  reason `slotChips` keeps a picked chip: the way out of a narrowed board
+						  must never be the thing that disappears.
+						*/}
+						{(!unscored || filters.group !== "all") && (
 						<label className="ctl">
 							<span>Side</span>
 							<select
@@ -1177,6 +1259,7 @@ export const Board = ({
 								<option value="pitching">pitchers</option>
 							</select>
 						</label>
+						)}
 						{/*
 						  "Min confidence" was here, and it is gone.
 						  
@@ -1189,10 +1272,11 @@ export const Board = ({
 						  And it did nothing where anyone looks. Measured on the committed capture
 						  with the reference league: 463 distinct confidence values across 1,248
 						  rateable players, and the floors remove 42% (at 40%+) and 58.5% (at
-						  70%+) of that whole list — but 0 of the top 60 by "ahead by", 56 of
-						  which sit at exactly 100%. Everything it removes is deep-bench men who
-						  were never candidates, and every row a reader actually reads clears both
-						  floors. The number itself is unchanged and still in the drill-down,
+						  70%+) of that whole list — but next to nothing of the top 60 by "ahead by"
+						  (0 at the 40% floor, 2 at the 70% floor), 55 of
+						  which sit at exactly 100%. Almost everything it removes is deep-bench men
+						  who were never candidates, and all but two of the rows a reader actually
+						  reads clear both floors. The number itself is unchanged and still in the drill-down,
 						  where the reasons behind it are printed with it.
 						*/}
 						<label className="toggle">
@@ -1259,6 +1343,45 @@ export const Board = ({
 						still ranked here as if he were playing.
 					</p>
 				)}
+				{/*
+				  The league's own blind spot, on the screen where it changes the answer.
+				  
+				  See `unscored` for the reproduction. Every clause here is a fact the code
+				  performs: the side really is left out rather than ranked at zero
+				  (`rateable: false` in `rateAll`), the chips really are withheld
+				  (`slotChips`), and the place named is the card that fixes it — headed
+				  "Batting" and "Pitching" on that screen, and named through `tab()` because
+				  a tab label typed into a string is a label that goes stale the next time
+				  the three are renamed.
+				*/}
+				{unscored && (
+					<p className="sub warn-note">
+						<b>
+							This league scores nothing for{" "}
+							{unscored === "pitching" ? "pitchers" : "batters"}.
+						</b>{" "}
+						There is no points total to rank one by, so every{" "}
+						{unscored === "pitching" ? "pitcher" : "batter"} is left out of the
+						ranking rather than ranked at zero
+						{/* Streaming is a list of pitchers by construction — `startersOnly` keeps
+						    only men the schedule has starting — so a league with no pitching
+						    scoring makes this one tab empty on every visit, however the reader
+						    sets the window. Saying "what is ranked below is batters only" under
+						    an empty list would be vacuously true and read as wrong. */}
+						{unscored === "pitching" && filters.mode === "stream" ?
+							<> — and this list is pitchers, so in this league it has nothing to show.</>
+						:	<>
+								, and what is ranked is{" "}
+								{unscored === "pitching" ? "batters" : "pitchers"} only
+								{filters.mode !== "stream" && hiddenSlots.length > 0 &&
+									`, with ${andList(hiddenSlots)} not offered as positions`}
+								.
+							</>
+						}{" "}
+						Fill in <b>{unscored === "pitching" ? "Pitching" : "Batting"}</b> on{" "}
+						<b>{tab("trade")}</b> and they come back.
+					</p>
+				)}
 				{filters.sort === "marketEdge" && edgeCoverage < 0.35 && (
 					<p className="sub warn-note">
 						Yahoo listed ownership for only {Math.round(edgeCoverage * 100)}% of this
@@ -1282,7 +1405,12 @@ export const Board = ({
 				*/}
 				{preview && (
 					<p className="preview-note">
-						<b>Standard scoring, not yours.</b> Every number below is real and none of
+						{/* NOT "standard". These are league 228947's own values, copied — HR pays
+						    10.4 where Yahoo's own H2H-points default pays 4 — so a reader who opens
+						    his settings page to compare finds nothing that matches and concludes the
+						    app is broken. The app's own "values to check" drawer has said the true
+						    thing all along. */}
+						<b>One real league&rsquo;s scoring, not yours.</b> Every number below is real and none of
 						it is about your league yet — set yours up and they all move.
 					</p>
 				)}
@@ -1602,7 +1730,42 @@ export const Board = ({
 							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)}
 						/>
 					))}
-					{!rows.length && <p className="empty">No players match these filters. Try clearing the slot filter or lowering the confidence minimum.</p>}
+					{/* Named the confidence floor, which no longer exists — a dead end offered to
+					    a reader who has just emptied his own board. It now names the filters that
+					    are actually on, read off the same `narrowed` list the fold's summary uses,
+					    so it cannot drift from the controls again. */}
+					{!rows.length && (
+						<p className="empty">
+							{/*
+							  Where the league scores one side and the reader has narrowed
+							  nothing, the cause is not in the controls and neither remedy below
+							  is one: no position and no window brings back a player the scoring
+							  cannot price. That is not a corner — the Streaming tab in a league
+							  with no pitching scoring is every row a pitcher, so it is empty on
+							  every visit, and "try a wider window" sends the reader round the
+							  horizon chips after something that was never there.
+
+							  His OWN narrowing still wins the sentence when he has any, because
+							  then it really might be the thing to undo, and the note at the top
+							  of the card has said the rest either way.
+							*/}
+							{unscored && !narrowing ?
+								<>
+									Nothing left to rank. This league scores nothing for{" "}
+									{unscored === "pitching" ? "pitchers" : "batters"}, and no position
+									and no window brings one back — the note at the top of this card
+									says where to fill them in.
+								</>
+							:	<>
+									No players match{narrowed.length ? " " : " these filters"}
+									{narrowed.length ? <b>{narrowed.join(", ")}</b> : ""}.{" "}
+									{narrowed.length ?
+										"Clear one of those to widen it."
+									:	"Try a different position or a wider window."}
+								</>
+							}
+						</p>
+					)}
 				</div>
 				{/* The end of the rendered window. Scrolling to it grows the list; when
 				    everything is on screen it is an empty div and says nothing. */}

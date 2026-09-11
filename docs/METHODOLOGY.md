@@ -51,6 +51,16 @@ state its own age.
 | Baseball Savant — Statcast | `/leaderboard/statcast?min=1&csv=true` | barrel rate, hard-hit rate, average exit velocity, sweet-spot rate | joined onto the above by `player_id` |
 | Yahoo | public league player pages | "% Ros", the market's price; the eligibility Yahoo prints beside each name; and (server only) who is still available in your league | 1,110 rows read, 880 of the pool priced; 411 multi-position lines, 328 matched into the pool |
 
+Every count in that last column is re-derivable from `data/snapshot.json` itself rather
+than only from the `sources` array the capture writes beside them: the pooled 651 + 795
+by grouping `players` on `group`, 198 from `injuries`, 30 from `teamGamesPlayed`, 265
+games and the 35 carrying a published starter by walking `slate`, 654 / 851 and the
+rolling 468 / 535 by counting `underlying.hitting` / `underlying.pitching` and their
+`window` field, 880 from `ownership` and 328 from `eligibility`. The two that are **not**
+independently re-derivable are the 736 / 851 raw StatsAPI rows and the 1,110 Yahoo rows
+read with their 411 multi-position lines: those are counted before the filters that build
+the file, so `sources` is the only record of them.
+
 Everything above is **observed**. The snapshot stores no projections and no
 bscores, because those depend on a league's scoring and have to be recomputed
 whenever it changes. It also stores no schedule *counts*: games, opponents, probable
@@ -324,6 +334,16 @@ team-games estimate rather than projecting at zero — but the asymmetry between
 covered and uncovered populations is real, and it is why the has-a-start filter is
 scoped to the Streaming tab. 153 of the capture's 671 rateable pitchers end up on the
 starts basis over the fortnight, 50 of them with a turn MLB has actually named.
+
+Those last two counts read as a contradiction beside the 60 and are not: **50, not 60,
+of the announced starters reach the starts basis.** One of the 60 is not in the pool at
+all, and the other nine are refused by §3.5.1 — men MLB named for a game whose outs are
+mostly not start-outs, so the count is discarded and they fall back to team games, which
+is the same guard §8 counts from the other side as "9 of the 60 named probables". The
+other 103 of the 153 are on the basis with no announced turn: every start they are
+credited with is modelled at their own rate of starting (§3.5.0). Re-derive all four
+figures by counting `data/snapshot.json`'s own horizon out of `windowFrom` and looking
+for a `starts:` line in each pitcher's `modelled`.
 
 The same coverage arithmetic governs the other side of the probables feed, the
 *opposing* starter a hitter is booked against. A starter throws about 58% of a
@@ -934,8 +954,14 @@ pitchers clear 0.70.
 
 The median confidence of the 30 busiest closers, the 30 busiest starters and the 30
 busiest hitters is **1.0 in all three** — which is the property being asserted, and
-`test/engine.mjs` asserts it. A "minimum confidence 70%" filter is a filter on
-sample size in every role rather than a filter on relievers.
+`test/engine.mjs` asserts it. The board no longer offers a **Min confidence** floor, and
+it went for reasons that have nothing to do with this section: it filtered on a number
+the four-column board had stopped drawing, and re-measured on the committed capture it
+removes 42.0% of the rateable list at 40%+ and 58.5% at 70%+ while touching 0 and 2
+respectively of the top 60 rows by "ahead by" — everything it cut was deep-bench men who
+were never candidates. The property above is nonetheless what would have made such a
+floor mean anything at all: at 70% it is a filter on sample size in every role rather
+than a filter on relievers.
 
 What it still does, correctly, is mark a reliever who has *not* worked a full season
 as thin, because half a season of relief work is a real sample limitation rather than a
@@ -1519,7 +1545,10 @@ did this return when I moved the window, and did it move?
 ## 12. What is built on top of a bscore
 
 A bscore ranks players. Four things in the app answer a different question, and each
-is a small amount of arithmetic on top of the same number.
+is a small amount of arithmetic on top of the same number: market edge, the luck
+percentile, a trade, and autonomous mode. A fifth, **Buy low**, is described here too
+and is retired — kept because what it was and why it went is the evidence, not a
+feature list.
 
 **Market edge** (`withMarketEdge`) is a selectable ordering and is **not** the default;
 bscore is (`SORT_DEFAULT` in `src/client/useBoard.ts`, and `points` on the Streaming

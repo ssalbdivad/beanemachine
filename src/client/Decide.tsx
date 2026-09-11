@@ -51,6 +51,13 @@ import "./decide.css"
  * he next changes his lineup. Saying when makes a stale baseline visible instead of
  * silently authoritative — the same rule `src/client/lineup.ts` was written under.
  */
+/* decide.css is being rewritten by another pass as this lands, so the one rule this
+   change needs rides with the component that renders it. It belongs beside `.decide-gain`
+   in decide.css and can be moved there whenever the two are not being edited at once. */
+const ASSUMED_CSS = `
+.decide-head .decide-assumed{flex-basis:100%;font-style:italic}
+`
+
 const readAgo = (at: string): string => {
 	const hours = (Date.now() - Date.parse(at)) / 3_600_000
 	if (!Number.isFinite(hours)) return "at an unknown time"
@@ -439,7 +446,30 @@ export const Decide = ({
 
 	const today = useMemo(() => {
 		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length) return null
-		if (league.scoring_period?.lineup_lock !== "daily") return null
+		/*
+		 * AN ABSENCE IS NOT A NO.
+		 *
+		 * This read `!== "daily"`, so a league that had never been asked about its lock —
+		 * which is every league until the reader answers one chip — got no Today section at
+		 * all. The reasoning was right for `"period"`: a lineup locked for the week means
+		 * tonight is not a decision anybody can act on, and offering changes would be
+		 * offering something the platform will refuse. It was wrong for null, and null is
+		 * the common case.
+		 *
+		 * Measured by a stranger walking the published build at 390x844: the lock question
+		 * sits 50px below the fold while the button that ends setup is pinned 193px above
+		 * it, so the natural gesture — press the big button you can see — skips the
+		 * question. He landed on "For this scoring period, 2026-09-11 to 2026-09-17 —
+		 * assumed, your league states no scoring period" with no Today section, under a bar
+		 * that had promised to tell him who to start tonight. The whole product was behind
+		 * one chip he never saw.
+		 *
+		 * Withholding the answer on an absence is also the opposite of this app's own rule
+		 * everywhere else: an absence is STATED. So the section renders, and `assumedDaily`
+		 * carries the fact that nobody has said — the heading says it, and the chip that
+		 * settles it is one tap away on My league.
+		 */
+		if (league.scoring_period?.lineup_lock === "period") return null
 		const h = hydrate(snapshot)
 		const day = new Date().toISOString().slice(0, 10)
 		const w = windowFrom(h.slate ?? [], day, day)
@@ -543,6 +573,9 @@ export const Decide = ({
 		const start = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size,
+			/** Nobody has said whether this league locks daily, so these changes are
+			 *  offered on the assumption that it does — which the heading states. */
+			assumedDaily: !league.scoring_period?.lineup_lock,
 			/** Every man rated for TODAY, so the seats nobody you own can fill can be
 			 *  offered somebody who is actually on a card tonight. */
 			ratedToday: rows,
@@ -744,7 +777,10 @@ export const Decide = ({
 		 */
 		let after: number | null = null
 		if (league && plan?.swaps.moves.length && league.roster.slot_accepts && seats?.spots.length) {
-			const dropped = new Set(plan.swaps.moves.map(m => normalizeName(m.drop)))
+			// A move with no drop displaces nobody, so nobody leaves the lineup for it.
+			const dropped = new Set(
+				plan.swaps.moves.flatMap(m => (m.drop ? [normalizeName(m.drop)] : []))
+			)
 			const added = plan.swaps.moves.map(m => {
 				const r = rated.rows.find(x => normalizeName(x.player.name) === normalizeName(m.add))
 				return {
@@ -1028,6 +1064,7 @@ export const Decide = ({
 			    and a player and can be made a few times a week. */}
 			{today && (
 				<>
+					<style href="decide-assumed" precedence="default">{ASSUMED_CSS}</style>
 					<h3 className="decide-head">
 						Today
 						<span className="decide-gain">
@@ -1052,6 +1089,17 @@ export const Decide = ({
 								<> · next lock {clock(today.nextLock)}</>
 							)}
 						</span>
+						{/* The assumption, on the heading it qualifies rather than in a footnote.
+						    A league whose lineup locks for the whole period cannot act on any of
+						    this, and nobody has told us which kind this is — so the changes below
+						    are offered on the commoner of the two and the reader is told that in
+						    the same breath. Answering it is a chip on My league. */}
+						{today.assumedDaily && (
+							<span className="decide-gain decide-assumed">
+								if your league lets you change the lineup every day &mdash; most do, and{" "}
+								<b>{tab("trade")}</b> takes the answer
+							</span>
+						)}
 						{/*
 						  A live read that failed has to say so.
 						  
@@ -1216,6 +1264,26 @@ export const Decide = ({
 									</li>
 								))}
 							</ul>
+							{/*
+							  THE SEATS IT COULD NOT FILL, counted rather than left to be inferred.
+							  
+							  The heading says "4 seats score nothing tonight" and the list under it
+							  named two. The other two had nobody: either no free man is eligible
+							  there, or the ones who are are not on a card tonight, or one man was
+							  the best answer for two seats and can only take one. A reader left to
+							  work that out from a list that is shorter than its own heading reads
+							  it as the app having run out of room.
+							*/}
+							{today.unfilled.length > fillTonight.length && (
+								<p className="sub decide-fill-rest">
+									{today.unfilled.length - fillTonight.length === 1 ?
+										"The other seat has"
+									:	`The other ${today.unfilled.length - fillTonight.length} have`}{" "}
+									nobody: no free man eligible there is on a card tonight. Leaving{" "}
+									{today.unfilled.length - fillTonight.length === 1 ? "it" : "them"} empty
+									is the right answer.
+								</p>
+							)}
 						</>
 					)}
 					<details className="decide-notes">
@@ -1392,7 +1460,15 @@ export const Decide = ({
 									{m.seats?.length ?
 										<span className="decide-seat"> for your {m.seats.join(" or ")} seat</span>
 									:	null}
-									, drop <b>{m.drop}</b>
+									{/* No drop clause when nothing is dropped. The planner only pairs an
+									    add with a drop once every seat is taken — see `room` in
+									    planSwaps — and printing ", drop —" or an empty <b> here is how a
+									    card ends up telling somebody to drop Aaron Judge for nothing. */}
+									{m.drop ?
+										<>
+											, drop <b>{m.drop}</b>
+										</>
+									:	<em className="decide-why"> &mdash; you have a free seat, so nobody comes out</em>}
 								</span>
 							</li>
 						))}

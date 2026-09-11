@@ -964,5 +964,70 @@ t("ownership for fewer players than the league can hold is refused",
     [...RESERVE_SLOTS].every(s => isReserveSlot(s)), [...RESERVE_SLOTS].join(","))
 }
 
+/* ── the capture carries nothing the RECENT lines cannot be read through ─────
+ *
+ * The season-line version of this rule is asserted near the top of this file. This is
+ * the same rule applied to `recentStats`, which was the second-largest field in the
+ * capture (295,502 bytes, 19.6%) and carried 39 fields per pitcher of which the rate
+ * blend can reach at most 32.
+ *
+ * `project.ts` blends the recent rate inside a loop over the SEASON line's keys,
+ * `continue`s on its `NOT_VOLUME_SCALED` set before the recent value is touched, and
+ * reads the value as `recentStats[key] ?? 0`. So a recent field is unreachable if the
+ * season line does not carry it (MLB puts `rbi` on a pitcher's window line and not on
+ * his season line), or if it is one of the six rates, or if it is zero — an absent key
+ * and a zero are the same number at the only place these lines are read, and 41.8% of
+ * the values were zero.
+ *
+ * Asserted against the committed file rather than against `trimRecentLine`, because
+ * the function runs at capture and the file is what ships.
+ */
+{
+  const RATES = new Set(["avg", "obp", "slg", "ops", "era", "whip"])
+  const seasonKeys = new Map(
+    snap.players.map(p => [`${p.id}:${p.group}`, new Set(Object.keys(p.stats ?? {}))])
+  )
+  const unreadable = []
+  for (const [key, line] of Object.entries(snap.recentStats ?? {}))
+    for (const [k, v] of Object.entries(line))
+      if (v === 0 || RATES.has(k) || !(seasonKeys.get(key)?.has(k) ?? false))
+        unreadable.push(`${key}.${k}=${v}`)
+  t("the committed capture carries no recent-line field the rate blend cannot read",
+    unreadable.length === 0, `${unreadable.length}: ${unreadable.slice(0, 6).join(", ")}`)
+  // The direction that would break a board rather than merely waste bytes: trimmed too
+  // far and the blend stops firing, silently, with every board still rendering.
+  //
+  // Every remaining line belongs to a player the board actually rates. The capture used
+  // to carry 535 and now carries 515: the 20 it lost are the 20 whose "id:group" was not
+  // in `players` at all — a window row for someone the pool filters out, whom the blend
+  // is never asked about. That is the only kind of line the trim may remove whole.
+  const pool = new Set(snap.players.map(p => `${p.id}:${p.group}`))
+  t("every recent line still belongs to a player the board rates",
+    Object.keys(snap.recentStats ?? {}).every(k => pool.has(k)) &&
+      Object.keys(snap.recentStats ?? {}).length === 515,
+    String(Object.keys(snap.recentStats ?? {}).length))
+  const withRecent = rateAll({ league, players: hy.players, underlying: hy.underlying,
+    injuries: hy.injuries, teamGamesPlayed: hy.teamGamesPlayed, gamesByTeam: hy.gamesByTeam,
+    recentStats: snap.recentStats, teams: 12 })
+  const without = rateAll({ league, players: hy.players, underlying: hy.underlying,
+    injuries: hy.injuries, teamGamesPlayed: hy.teamGamesPlayed, gamesByTeam: hy.gamesByTeam,
+    teams: 12 })
+  const moved = withRecent.filter((r, i) => r.bscore !== without[i].bscore).length
+  t("and the recent lines still move the pitchers they are there to move",
+    moved > 100, `${moved} bscores move`)
+}
+
+/* Two fields were written into every capture and read by no browser. `recentWindow`
+ * named the two window lengths and was read NOWHERE — not even by `hydrate`; the
+ * lengths are `RECENT_WINDOW_WEIGHTS`' own keys. `sources` is provenance for whoever
+ * runs `refresh`, and now comes back beside the snapshot rather than on it, so the
+ * developer keeps the print and no browser is sent 1,342 bytes to discard. The reader's
+ * version of that table is the source table in docs/METHODOLOGY.md.
+ *
+ * This asserts the shipped file, because a field can only be removed from the type
+ * once and can be put back into the file by anyone who reruns an old capture. */
+for (const gone of ["recentWindow", "sources"])
+  t(`the capture no longer ships ${gone}`, !(gone in snap))
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

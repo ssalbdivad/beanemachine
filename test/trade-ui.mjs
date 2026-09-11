@@ -524,9 +524,42 @@ t("nobody in your lineup is filed under costing you nothing",
 t("everyone filed as starting really is in the lineup on screen",
   !!startGroup && startGroup.men.every(m => startingNames.includes(m)),
   `${JSON.stringify(startGroup?.men)} against ${JSON.stringify(startingNames)}`)
-const unrated = groups.find(g => g.key === "give-unrated")
+const unrated = groups.filter(g => g.key === "give-unrated")
 t("a player with no projection is called unknown rather than free",
-  !unrated || /unknown, not zero/.test(unrated.label), unrated?.label ?? "none on this team")
+  unrated.every(g => /unknown, not zero/.test(g.label)),
+  unrated.map(g => g.label).join(" || ") || "none on this team")
+/*
+ * There may now be SEVERAL of these, one per reason, which is why the line above
+ * went from `find` to `filter` — it used to check the first group and would have
+ * passed while a second one said anything at all.
+ *
+ * The old truth was one group labelled "N with no projection in this capture". That
+ * sentence is false on a league that scores nothing on one side of the ball: the
+ * capture holds rows for those men and a projection was made for every one of them.
+ * The new truth is that each group carries the ENGINE'S own reason — `Rated.unrateable`,
+ * src/engine/bscore.ts — and the block at the foot of this file pins the specific
+ * case that was misattributed. Here, on the shipped league, all that can be checked
+ * is that the reason on the label is the same one the chips under it carry: a group
+ * whose heading and whose tooltips disagree is two different claims about one man.
+ */
+const unratedSeen = await page.$$eval(".deal-side .give-unrated", n => n.length)
+t("an unpriced man's group heading says the same thing his chip does",
+  await page.$$eval(".deal-side .give-unrated", n =>
+    n.length > 0 && n.every(g => {
+      const label = g.querySelector(".tiny-note").textContent
+      // the reason is everything between the count and the closing "unknown, not zero"
+      const why = label.split(": ").slice(1).join(": ").split(" What giving one up")[0].trim()
+      return why.length > 0 &&
+        [...g.querySelectorAll(".chip-btn")].every(b =>
+          b.title.toLowerCase().includes(why.toLowerCase()))
+    })
+  ) || unratedSeen === 0,
+  `${unratedSeen} unpriced groups on screen — a heading and its chips gave different reasons`)
+// ...and say out loud when this team had nobody to check, rather than reporting a
+// vacuous pass as protection. The block at the foot of this file builds a team that
+// is GUARANTEED to have some.
+if (unratedSeen === 0)
+  console.log("NOTE  nobody on this team is unpriceable, so the heading/chip check had no subject")
 // and the filter really filters
 const chipCount = () => page.$$eval(".deal-side .give-group .chip-btn", n => n.length)
 const allChips = await chipCount()
@@ -1025,6 +1058,256 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 				(await page.$$('.bar button:text-is("Set up a league")')).length === 1,
 			`${(await page.$$(".dock-sheet")).length} sheets, ${(await page.$$(".dock-bar")).length} bars, ${(await page.$$('.bar button:text-is("Set up a league")')).length} buttons`)
 		t("no page errors from opening and closing the setup", oops.length === 0, oops.join(" | "))
+	}
+	await page.close()
+}
+
+/**
+ * A TEAM IS TWO STORES, AND ENDING ONE HAS TO END BOTH.
+ *
+ * Who you own lives in `beanemachine:roster`; which seat each man is in lives in
+ * `beanemachine:lineup`, separately and on purpose (see src/client/lineup.ts). Every
+ * path on this screen that ended a team touched only the first of them.
+ *
+ * Measured 2026-09-11 on the dev server with nothing corrupt: paste twenty names,
+ * press "Clear team", accept the confirm — the roster store became `{}` while the
+ * lineup store kept all 1,858 characters of its twenty spots, under the timestamp it
+ * was read at. `lineupStore.clear` existed and `grep -rn lineupStore src/` found no
+ * caller for it anywhere. Tonight had already been fixed at its own end — it will not
+ * start a man who is no longer owned — so nothing RENDERED the stale seats, which is
+ * exactly why nothing caught this: the wrong data sat in the browser waiting for the
+ * next reader of it, and a seat is only true about the roster it was read off.
+ *
+ * Both halves of the pair are asserted, in both directions: that the seats really
+ * arrived first (or the test proves nothing by finding them gone), and that a replaced
+ * roster carrying no seats of its own does not inherit the old ones.
+ */
+{
+	const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+	const bats = snap.players
+		.filter(x => x.group === "hitting")
+		.sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+		.slice(0, 6)
+	const slots = ["C", "1B", "2B", "3B", "SS", "OF"]
+	const withSeats =
+		"Pos\tPlayer\tAction\n" +
+		bats.map((x, i) => `${slots[i]}\t${x.name} ${x.team ?? ""} - ${slots[i]}\tAdd/Drop`).join("\n")
+
+	const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } })
+	const oops = []
+	page.on("pageerror", e => oops.push(String(e)))
+	page.on("dialog", d => d.accept())
+	const stores = () =>
+		page.evaluate(() => ({
+			roster: Object.values(JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}"))
+				.reduce((n, v) => n + v.length, 0),
+			seats: Object.values(JSON.parse(localStorage.getItem("beanemachine:lineup") ?? "{}"))
+				.reduce((n, v) => n + v.spots.length, 0)
+		}))
+
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+	if (await toScreen(page, SCREEN.setup)) {
+		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		await page.fill("[data-ctl=paste-roster]", withSeats)
+		await page.click(".paste-roster button")
+		await page.waitForSelector(".paste-note", { timeout: 15000 })
+		const seeded = await stores()
+		t("a roster pasted with its seats puts both of them in this browser",
+			seeded.roster === bats.length && seeded.seats === bats.length, JSON.stringify(seeded))
+
+		// the same names again with no slot column — which is what typing four names
+		// into this box gives you, and the box says to do exactly that
+		await page.fill("[data-ctl=paste-roster]", bats.map(x => x.name).join("\n"))
+		await page.click(".paste-roster button")
+		await page.waitForTimeout(600)
+		const reread = await stores()
+		t("a roster read back without seats does not keep the seats of the one it replaced",
+			reread.roster === bats.length && reread.seats === 0, JSON.stringify(reread))
+
+		// and put them back, so Clear team is tested against a team that HAS seats
+		await page.fill("[data-ctl=paste-roster]", withSeats)
+		await page.click(".paste-roster button")
+		await page.waitForTimeout(600)
+		const again = await stores()
+		t("and pasting the seats again restores them", again.seats === bats.length, JSON.stringify(again))
+
+		const clear = page.locator(".trade-search button:text-is('Clear team')")
+		t("a team with players on it offers a way to clear them", (await clear.count()) === 1)
+		if (await clear.count()) {
+			await clear.click()
+			await page.waitForTimeout(600)
+			const after = await stores()
+			t("clearing a team clears the seats it was read into as well as the names",
+				after.roster === 0 && after.seats === 0, JSON.stringify(after))
+		}
+		t("no page errors while clearing a team", oops.length === 0, oops.join(" | "))
+	}
+	await page.close()
+}
+
+/**
+ * LEAVING THIS SCREEN AND COMING BACK: THE COLLAPSE AND THE OFFER GO TOGETHER.
+ *
+ * The trade builder is a disclosure on every league now, and `dealOpen` is ordinary
+ * component state. `App` renders <Trade/> in a `view === "trade"` branch, so the whole
+ * component unmounts when you tab away and the state goes with it — and the open view
+ * is remembered in this browser, so "away and back" is a route readers really take.
+ *
+ * Measured 2026-09-11 on the dev server: open the builder, pick a man to give up, tab
+ * to Tonight, tab back — the builder is collapsed again AND the chip is unpressed.
+ * That is the state worth pinning, and it is pinned as ONE assertion on purpose. The
+ * hazard is not the collapse; it is the collapse DIVERGING from the offer. A later
+ * change that remembered `dealOpen` across a navigation while `give`/`take` still
+ * reset would show a reader his own priced deal emptied without a word, and one that
+ * kept the offer behind a collapsed card would hide a half-built trade behind a button
+ * labelled "Price a trade" — the same two-stores-out-of-step defect as the roster and
+ * its seats above.
+ *
+ * The offer being discarded at all is a COST, not a defect: the effect on `leagueKey`
+ * in src/client/Trade.tsx already abandons a half-built offer rather than re-pricing it
+ * against other slots, and a verdict is only meaningful against the roster and bars it
+ * was computed from. Nothing on screen claims the offer is kept, so no sentence is
+ * false. If it is ever worth keeping, it must be kept with the disclosure state.
+ */
+{
+	const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } })
+	const oops = []
+	page.on("pageerror", e => oops.push(String(e)))
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+	if (await toScreen(page, SCREEN.setup)) {
+		// This context starts with no team, and with no team there is nothing to put on
+		// the give side — the assertion below would pass on an empty column. So one is
+		// pasted in first, the same way a reader gets one.
+		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+		const bats = snap.players
+			.filter(x => x.group === "hitting")
+			.sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+			.slice(0, 6)
+		await page.fill("[data-ctl=paste-roster]", bats.map(x => `${x.name} ${x.team ?? ""}`).join("\n"))
+		await page.click(".paste-roster button")
+		await page.waitForSelector(".paste-note", { timeout: 15000 })
+
+		const open = page.locator(
+			".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')"
+		)
+		t("the builder is asked for rather than shown, on a league of any kind",
+			(await open.count()) === 1 && (await page.$$(".deal")).length === 0,
+			`${await open.count()} buttons, ${(await page.$$(".deal")).length} builders`)
+		await open.first().click()
+		await page.waitForSelector(".deal", { timeout: 15000 })
+		const chip = page.locator(".deal-side .give-group .chip-btn").first()
+		const picked = (await chip.count()) ? await chip.innerText() : null
+		if (picked) await chip.click()
+		t("a man can be put on the give side once the builder is open",
+			!!picked &&
+				(await page.$$eval(".deal-side .chip-btn[aria-pressed=true]", n => n.length)) === 1,
+			picked ?? "no chips on the give side at all")
+
+		await toScreen(page, SCREEN.today)
+		await page.waitForTimeout(400)
+		await toScreen(page, SCREEN.setup)
+		await page.waitForSelector(".trade-team", { timeout: 30000 })
+		const back = {
+			collapsed: (await page.$$(".deal")).length === 0,
+			asks: await page
+				.locator(".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')")
+				.count(),
+			kept: await page.$$eval(".deal-side .chip-btn[aria-pressed=true]", n => n.length)
+		}
+		t("coming back collapses the builder and empties the offer together, never one without the other",
+			back.collapsed && back.asks === 1 && back.kept === 0, JSON.stringify(back))
+		t("no page errors leaving the builder and coming back", oops.length === 0, oops.join(" | "))
+	}
+	await page.close()
+}
+
+/**
+ * A SIDE OF THE SCORING THAT PAYS NOTHING IS NOT A MISSING PROJECTION.
+ *
+ * Measured 2026-09-11 on the dev server: paste twelve bats and eight arms into the
+ * shipped league, empty `scoring.pitching` in `beanemachine:config`, reload. All eight
+ * pitchers were filed under "8 with no projection in this capture" — and the capture
+ * has rows for every one of them, and `rateAll` made a projection for every one of
+ * them. What is missing is a points total to rank them by, because the league pays
+ * nothing for what a pitcher does. The sentence sent a reader hunting for absent data
+ * instead of to the scoring he has not entered.
+ *
+ * `Rated.unrateable` (src/engine/bscore.ts) already carried the true sentence — "this
+ * league scores nothing on the pitching side, so there is no points total to rank him
+ * by — import your league's scoring, or enter it." — and this screen threw it away and
+ * substituted one of its own, the same failure Decide.tsx's bench card was fixed for.
+ *
+ * The league is edited in THIS BROWSER ONLY, through localStorage, and nothing on disk
+ * is touched: data/snapshot.json and scoring.json are evidence and are read-only here.
+ */
+{
+	const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+	const pick = g =>
+		snap.players
+			.filter(x => x.group === g)
+			.sort((a, b) => (b.stats?.plateAppearances ?? b.stats?.outs ?? 0) - (a.stats?.plateAppearances ?? a.stats?.outs ?? 0))
+	const bats = pick("hitting").slice(0, 12)
+	const arms = pick("pitching").slice(0, 8)
+	const slots = ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "UTIL", "BN", "BN", "BN"]
+	const text =
+		"Pos\tPlayer\tAction\n" +
+		bats.map((x, i) => `${slots[i]}\t${x.name} ${x.team ?? ""} - ${slots[i]}\tAdd/Drop`).join("\n") +
+		"\n" +
+		arms.map(x => `SP\t${x.name} ${x.team ?? ""} - SP\tAdd/Drop`).join("\n")
+
+	const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } })
+	const oops = []
+	page.on("pageerror", e => oops.push(String(e)))
+	page.on("dialog", d => d.accept())
+
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+	if (await toScreen(page, SCREEN.setup)) {
+		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		await page.fill("[data-ctl=paste-roster]", text)
+		await page.click(".paste-roster button")
+		await page.waitForSelector(".paste-note", { timeout: 15000 })
+
+		// this browser's copy of the league, and only this browser's
+		const emptied = await page.evaluate(() => {
+			const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+			const key = Object.keys(c.leagues)[0]
+			if (!c.leagues[key].scoring?.pitching) return false
+			c.leagues[key].scoring.pitching = {}
+			localStorage.setItem("beanemachine:config", JSON.stringify(c))
+			return true
+		})
+		t("the shipped league scores the pitching side, so emptying it is a real change",
+			emptied, "no pitching scoring to empty — this block proves nothing")
+		if (emptied) {
+			await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 })
+			await page.waitForSelector(".views button", { timeout: 30000 })
+			await toScreen(page, SCREEN.setup)
+			await page.waitForSelector(".trade-team", { timeout: 30000 })
+			const open = page.locator(
+				".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')"
+			)
+			if (await open.count()) {
+				await open.first().click()
+				await page.waitForSelector(".deal", { timeout: 15000 })
+			}
+			const labels = await page.$$eval(".deal-side .give-unrated .tiny-note", n =>
+				n.map(e => e.textContent.trim())
+			)
+			t("a side the league pays nothing for is reported as that, not as missing data",
+				labels.length > 0 && labels.every(l => /scores nothing on the pitching side/.test(l)),
+				labels.join(" || ") || "no unpriced group at all")
+			t("and it does not claim the capture is missing them, because it is not",
+				labels.every(l => !/no projection in this capture/.test(l)),
+				labels.join(" || "))
+			// the reader is told what to DO about it, which is the half a symptom lacks
+			t("and it names the way out, which is entering the scoring",
+				labels.every(l => /scoring/.test(l)), labels.join(" || "))
+			t("no page errors on a league that scores one side only", oops.length === 0, oops.join(" | "))
+		}
 	}
 	await page.close()
 }

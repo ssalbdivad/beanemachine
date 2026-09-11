@@ -487,8 +487,13 @@ t("the template picker offers exactly what scoring.json ships",
 t("and it offers no Sleeper league type, because Sleeper runs no fantasy baseball",
   !tplOptions.some(o => /sleeper/i.test(o.value + o.label)),
   tplOptions.map(o => o.label).join(" | "))
+/* "standard values" was the word and it was false. The shipped preset is league 228947's
+   own settings page, copied — R 1.9, HR 10.4 — while Yahoo's own H2H-points default pays
+   1 and 4. A reader told these are standard, who then opens his settings page to compare
+   as four separate sentences tell him to, finds not one number that matches. The claim
+   here is unchanged: the option that is SELECTED is the filled one, not the blank one. */
 t("the ready-made preset is what it lands on, not the blank one",
-  (await fp.inputValue("#tpl")) === "yahoo" && /standard values/i.test(tplOptions.find(o => o.value === "yahoo").label),
+  (await fp.inputValue("#tpl")) === "yahoo" && /borrowed values/i.test(tplOptions.find(o => o.value === "yahoo").label),
   `${await fp.inputValue("#tpl")} — ${tplOptions.map(o => o.label).join(" | ")}`)
 
 /**
@@ -766,8 +771,12 @@ t("and it carries scoring, slots and a team count — the three the engine needs
 // A board that ranks looks like a board that is right, which is the whole risk of
 // shipping a preset. The page has to keep saying whose numbers these are.
 const preset = await fp.locator(".preset-note").first().textContent()
+/* Same rewording, same claim: whatever the sentence says, it must say these values did
+   not come from the reader's own league. It now also says where they DID come from,
+   because "not yours" alone left a reader guessing whether they were Yahoo's defaults. */
 t("the board says the values were not read from your league",
-  /not read from your league/i.test(preset), preset.slice(0, 120))
+  /not read from yours|not read from your league/i.test(preset) && /one real Yahoo league/i.test(preset),
+  preset.slice(0, 160))
 t("and it names what to check, from the league's own needs_review",
   (await fp.$$eval(".preset-note .flags li", n => n.length)) >= 3,
   String(await fp.$$eval(".preset-note .flags li", n => n.length)))

@@ -19,7 +19,6 @@ import {
 	EligibilityPanel,
 	Fragment2,
 	freshness,
-	IMPORT_COMMAND,
 	isPreset,
 	leagueReady,
 	PresetNote,
@@ -472,14 +471,10 @@ export const App = () => {
 						padding: "var(--sp-4)"
 					}}
 				>
-					<span>
-						Drop a league file to load it
-						<br />
-						<span style={{ font: "400 14px/1.6 inherit", opacity: 0.75 }}>
-							the <code>scoring.json</code> that <code>{IMPORT_COMMAND.split(" <")[0]}</code>{" "}
-							writes, or one you downloaded here
-						</span>
-					</span>
+					{/* A file is a file. Naming its format and the command that writes it, to
+					    somebody holding the file over the page, is the software explaining
+					    itself at the one moment nobody needs it to. */}
+					<span>Drop it to load your league</span>
 				</div>
 			)}
 			<header>
@@ -574,7 +569,7 @@ export const App = () => {
 						file.lineups ? `${Object.keys(file.lineups).length} lineup` : null,
 						file.pools ? `${Object.keys(file.pools).length} free-agent list` : null
 					].filter(Boolean)
-					show(`Downloaded scoring.json — ${carried.join(", ")}. Drop it on this page anywhere to load it back.`)
+					show(`Saved a file with ${carried.join(", ")} in it. Drop it on this page to load it back.`)
 				}}
 				onLoadFile={loadFile}
 				onPicker={registerPicker}
@@ -602,7 +597,7 @@ export const App = () => {
 						</ul>
 						<p className="sub" style={{ margin: "var(--sp-3) 0 0" }}>
 							Nothing was overwritten and nothing was guessed at. <b>Load file</b> above
-							replaces what is in this browser with a <code>scoring.json</code> you keep.
+							replaces what is in this browser with a file you saved.
 						</p>
 					</section>
 				</div>
@@ -796,17 +791,20 @@ export const App = () => {
 							<>
 								Editing <b>{league.meta.league_name ?? key}</b>.
 							</>
-						:	/* Short enough for one line on a phone: the bar is fixed, so every line
-						     it takes is a line of ranking it covers. Two facts earn the space —
-						     that the numbers above are not about his league, and where a league
-						     goes if he gives one. The second used to be in the masthead and then
-						     inside the sheet, which means a reader who never pressed the button
-						     never saw it; "does this upload my team somewhere" is a question
-						     people decide on before they press anything. */
-							<>
-								<b>Standard scoring</b> — not your league yet. Yours stays in this
-								browser.
-							</>
+						:	/*
+						     The one conversion moment in the app, said as a benefit rather than as
+						     a disclaimer.
+						     
+						     It read "Standard scoring — not your league yet. Yours stays in this
+						     browser." Every word true, and all of it about what the app has not
+						     got. What makes a stranger press a button is what he gets for it, and
+						     what he gets is the thing the board behind the bar cannot tell him:
+						     who to start tonight. The borrowed-values caveat has not gone — it is
+						     on the board itself, attached to the numbers it is about — and the
+						     privacy line moved inside the sheet, next to the box he types his team
+						     into, which is where that question is actually asked.
+						   */
+							<>Tell it who&rsquo;s on your team and it will tell you who to start tonight.</>
 					}
 				>
 <Onboard
@@ -831,6 +829,40 @@ export const App = () => {
 						})
 					}
 					onUsePreset={() => preset && void create(preset.key)}
+					/*
+					 * Turn the preview into a real league, synchronously, and hand back its
+					 * key — because the caller needs it in the same tick to write a roster
+					 * against it. `create` is the async, toast-and-navigate version for a
+					 * reader who deliberately chose the preset; this is the quiet one for a
+					 * reader who has just typed his team and does not know there was a
+					 * question about scoring yet.
+					 */
+					/*
+					 * The one number that moves every row, set from a chip rather than a form.
+					 * Written straight to the active league because the reader has said it —
+					 * there is nothing to derive and nothing to check it against.
+					 */
+					onTeamCount={teams =>
+						void run(async () => {
+							if (!league || !key) return
+							adopt(
+								leagues.save(key, { ...league, meta: { ...league.meta, max_teams: teams } }),
+								key
+							)
+						})
+					}
+					onAdoptPreset={() => {
+						if (!config || !preset) return null
+						try {
+							const k = leagues.suggestKey(config, preset.key)
+							const next = leagues.create(k, preset.key)
+							adopt(next, k)
+							return k
+						} catch (e) {
+							show(e instanceof ApiError ? e.message : String(e), true)
+							return null
+						}
+					}}
 					onImportUrl={url =>
 						void run(async () => {
 							const { key: k, league: got } = await api.import(url)
@@ -927,10 +959,13 @@ const Colophon = () => (
 		  three things that could not be measured at all — is in METHODOLOGY.md, which is
 		  linked above and is where it can be kept true.
 		*/}
+		{/* The explanation moved to the table, under the heads, generated from the
+		    ordering actually in force — see `.board-legend` in Board.tsx. It was here,
+		    on every screen including the one with no table on it, and it named the
+		    column the streaming list is NOT sorted by. What is left is the pointer. */}
 		<p className="tiny-note">
-			A bscore is a ranking, not a forecast: 55 means &ldquo;further ahead of the next
-			man up than 40 is&rdquo;, never &ldquo;55 points in the bank&rdquo;. What was
-			measured, and the parts that could not be, are in Methodology.
+			Every number is in your league&rsquo;s own points. How the projections were
+			built and measured, and the parts that could not be, are in Methodology.
 		</p>
 	</footer>
 )
@@ -1082,13 +1117,13 @@ const Toolbar = ({
 				</button>
 				<button
 					disabled={!keys.length}
-					title="Take every league in this browser out as one scoring.json — plus your roster and the seats it was read in — and load it into any other browser"
+					title="Save everything in this browser — your leagues, your team and the seats they were in — as one file you can load on another phone or computer"
 					onClick={onDownload}
 				>
 					Download
 				</button>
 				<button
-					title="Replace the leagues in this browser with a scoring.json file — the one the local importer writes, or one downloaded here. Dropping it anywhere on the page does the same."
+					title="Load a file you saved here before. Dropping it anywhere on the page does the same."
 					onClick={() => picker.current?.click()}
 				>
 					Load file
@@ -1098,7 +1133,7 @@ const Toolbar = ({
 					type="file"
 					accept="application/json,.json"
 					hidden
-					aria-label="Load a scoring.json file"
+					aria-label="Load a league file you saved"
 					onChange={e => {
 						const chosen = e.currentTarget.files?.[0]
 						// picking the same file twice has to fire again, so clear it either way
@@ -1251,13 +1286,10 @@ const WireChip = ({
 			data-wire="none"
 			style={{ font: "inherit", fontSize: "var(--fs-3)", cursor: "pointer" }}
 			onClick={onLoadFile}
-			title={
-				`Nothing on this page can read a Yahoo league's free-agent list: Yahoo sends no ` +
-				`CORS headers, so the response never reaches a browser. Until one is carried in, ` +
-				`availability is ESTIMATED from rostered shares rather than read. Run ` +
-				`\`${IMPORT_COMMAND}\` on your own machine and load the scoring.json it writes — ` +
-				`click here, or drop it anywhere on this page.`
-			}
+			/* A tooltip is not a place to explain anything — a phone cannot open one —
+			   and this held five sentences about access-control headers and a shell
+			   command. What it needs to say is what the chip beside it already means. */
+			title="Who is free is a guess from how widely each player is rostered, not your league's own list. Click to load a file if you have one."
 		>
 			free agents <b>none carried</b> — load a file
 		</button>

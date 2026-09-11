@@ -646,7 +646,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
  * arrives anywhere. A button that sets `onboarding` but not `setupOpen` would render
  * a closed one-line bar with the setup still hidden behind a second press, and the
  * reader who pressed "Set up a league" would have been handed a bar that says
- * "Set up my league" — which is indistinguishable from a no-op.
+ * "Who's on my team" — which is indistinguishable from a no-op.
  *
  * Its own page, because opening the dock changes app-wide state and everything above
  * shares one; same reason the paste block has one.

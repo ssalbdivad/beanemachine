@@ -608,8 +608,12 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 	const slotAccepts = t.sport === "mlb" ? deriveSlotAccepts(slots) : null
 	if (slotAccepts) {
 		needsReview.push(
-			"slot_accepts is derived from the roster slot names plus the columns of " +
-				"Yahoo's position-eligibility grid; Yahoo does not state it as prose."
+			// A needs_review line is read by the reader, on My league, next to his own
+			// scoring. It has to say what he should check, in his words — not name a
+			// field in a JSON schema.
+			"Which positions can fill each seat was worked out from the seat names and " +
+				"Yahoo's eligibility grid. Yahoo never says it outright, so check it if a " +
+				"lineup looks wrong."
 		)
 	}
 

@@ -202,8 +202,8 @@ export const leagueFromPastedSettings = (
 	const slotAccepts = deriveSlotAccepts(slots)
 	if (slotAccepts)
 		needsReview.push(
-			"slot_accepts is derived from the roster slot names, not stated as prose on " +
-				"the settings page."
+			"Which positions can fill each seat was worked out from the seat names. The " +
+				"settings page never says it outright, so check it if a lineup looks wrong."
 		)
 	needsReview.push(
 		`These values were read off a settings page you pasted on ${today}. Nothing ` +

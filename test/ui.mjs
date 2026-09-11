@@ -181,7 +181,7 @@ const toSetupBar = async pg => {
  * time that button is relabelled it should be one line in this file.
  */
 // The bar's single button both opens and closes the sheet, and its label flips between
-// "Set up my league" and "Close" — so it is addressed by its place in the bar rather
+// "Who's on my team" and "Close" — so it is addressed by its place in the bar rather
 // than by text that is only ever half of what you are looking for.
 const DOCK_TOGGLE = ".dock-bar button"
 /** The other way in, and with a league the only one: pressing it is what puts the

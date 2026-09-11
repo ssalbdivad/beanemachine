@@ -81,7 +81,10 @@ export const Dock = ({
 					aria-expanded={open}
 					onClick={() => onToggle(!open)}
 				>
-					{open ? "Close" : "Set up my league"}
+					{/* Named for what it asks rather than for what it is. "Set up my league"
+					    is a chore; the button is the first thing a stranger reads and it should
+					    say the question it is about to ask. */}
+					{open ? "Close" : "Who's on my team"}
 				</button>
 			</div>
 		</aside>

@@ -2,7 +2,7 @@ import { useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { Config, League } from "../schema.ts"
 import { leagueFromPastedSettings } from "../data/paste-settings.ts"
-import { rosterFromPaste } from "../data/paste.ts"
+import { rosterFromPaste, type PastedRoster } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
 import { IMPORT_COMMAND, leagueGaps } from "./panels.tsx"
@@ -39,6 +39,12 @@ import { IMPORT_COMMAND, leagueGaps } from "./panels.tsx"
  * Every one of them ends in the same place: a league in this browser, and a board
  * ranked in its points.
  */
+
+/** Four real men, so the box shows the shape of an answer rather than describing it.
+ *  Kept as a literal and pinned by test/paste.mjs against the shipped capture: a
+ *  placeholder naming somebody who is not in the data would teach the wrong format on
+ *  the one screen that has to get the format across. */
+const PLACEHOLDER = "C Cal Raleigh\n1B Ben Rice\nOF Aaron Judge\nSP Tarik Skubal"
 
 type Where = "yahoo" | "espn" | "custom"
 
@@ -81,6 +87,8 @@ export const Onboard = ({
 	preset,
 	onCreateLeague,
 	onUsePreset,
+	onAdoptPreset,
+	onTeamCount,
 	onImportUrl,
 	onLoadFile,
 	onOpenSetup,
@@ -98,6 +106,14 @@ export const Onboard = ({
 	preset: { key: string; label: string } | null
 	onCreateLeague: (platform: Where, league: League) => void
 	onUsePreset: () => void
+	/** Turns the preview the reader is looking at into a real league in this browser,
+	 *  and returns its key. Called at the moment he first writes something of his own:
+	 *  before that there is nothing to attach it to. */
+	onAdoptPreset: () => string | null
+	/** How many teams this league has. It is the second and last question, because the
+	 *  bar every player is measured against is the (teams x seats)-th best man — so the
+	 *  count moves every row on the board. */
+	onTeamCount: (teams: number) => void
 	onImportUrl: (url: string) => void
 	onLoadFile: () => void
 	onOpenSetup: () => void
@@ -109,6 +125,9 @@ export const Onboard = ({
 	const [url, setUrl] = useState("")
 	const [team, setTeam] = useState("")
 	const [teamNote, setTeamNote] = useState<string | null>(null)
+	/** The last read of the team box, kept so the sheet can name every player back and
+	 *  quote every line that produced nobody. */
+	const [read, setRead] = useState<PastedRoster | null>(null)
 
 	const gaps = league ? leagueGaps(league) : []
 	const missing = gaps.filter(g => g.have === null)
@@ -150,18 +169,36 @@ export const Onboard = ({
 		)
 	}
 
-	/** The team, from the same gesture. Optional, and the difference between "here
-	 *  is the wire ranked" and "here is what to do with your team tonight". */
+	/**
+	 * The team, and on a first visit this is the ONLY question that has to be answered.
+	 *
+	 * It used to open `if (!leagueKey || !snapshot) return` — and on a first visit
+	 * `leagueKey` is null, because the board a stranger is looking at runs on the
+	 * shipped preset as a PREVIEW that is never stored. So the primary button at the
+	 * highest-attrition step in the whole product did nothing at all: the reader typed
+	 * his team, pressed the button, and the app said nothing and changed nothing.
+	 *
+	 * Pressing it now makes the preview real first. That is the right moment for it —
+	 * a reader who has typed his players has told us he wants this to be his, and the
+	 * scoring he is adopting is the scoring he has been looking at for the last
+	 * minute, still labelled as standard on the board behind the sheet.
+	 */
 	const readTeam = () => {
-		if (!leagueKey || !snapshot) return
-		const read = rosterFromPaste(team, snapshot)
-		if (!read.players.length) return setTeamNote(read.note)
+		if (!snapshot) return
+		const got = rosterFromPaste(team, snapshot)
+		setRead(got)
+		if (!got.players.length) return setTeamNote(got.note)
+		const key = leagueKey ?? onAdoptPreset()
+		if (!key)
+			return setTeamNote(
+				"Something went wrong saving your team. Nothing was lost — try again."
+			)
 		try {
-			roster.set(leagueKey, read.keys)
-			if (read.spots.length)
-				lineupStore.set(leagueKey, read.spots, new Date().toISOString())
+			roster.set(key, got.keys)
+			if (got.spots.length)
+				lineupStore.set(key, got.spots, new Date().toISOString())
 			setTeam("")
-			setTeamNote(read.note)
+			setTeamNote(got.note)
 		} catch (e) {
 			setTeamNote((e as Error).message)
 		}
@@ -181,303 +218,233 @@ export const Onboard = ({
 		<div className="grid">
 			<section className="card full onboard">
 				{/*
-				  The board is already on screen, so this card's job changed.
+				  ONE question, and it is about baseball.
 				  
-				  It used to be the whole first visit and had to argue that nothing could be
-				  ranked without a league. That is true and it is no longer the reader's
-				  situation: a ranked board is directly below, on the shipped preset, and
-				  what this card has to say is what changes when he replaces it. Three
-				  inputs, two minutes, and every number below moves.
+				  This card used to open with "Where do you play?" — a question asked for the
+				  app's benefit, not the reader's — followed by an instruction to select a
+				  whole web page with Ctrl+A, which no phone browser can do. On the device
+				  this app is opened on, the only advertised route in was impossible.
+				  
+				  What is possible on a phone, and has been all along without the app ever
+				  saying so, is typing names. `playersInText` matches known players in
+				  arbitrary text, so a list a reader thumbs in works exactly as well as a
+				  pasted page. So that is the front door, and everything about platforms and
+				  scoring tables moves behind "My league scores differently" — true for some
+				  readers, and never the first thing anybody is asked.
 				*/}
-				<h2>Set up your league</h2>
+				<h2>Who&rsquo;s on your team?</h2>
 				<p className="sub">
-					The board behind this is on <b>standard</b> scoring. A player is only worth what{" "}
-					<i>your</i> league pays for what he does — tell it three things and every
-					number changes: what each stat is worth, how many roster slots you fill, and
-					how many teams you are up against. Two minutes, once, and it all stays in
-					this browser.
+					First and last name, one to a line. Put the position first if you know it.
+				</p>
+				<textarea
+					data-ctl="onboard-team"
+					value={team}
+					onChange={e => setTeam(e.currentTarget.value)}
+					placeholder={PLACEHOLDER}
+					rows={5}
+					aria-label="The players on your team"
+				/>
+				{/* Said where the typing happens, not in a policy nobody opens. It is the
+				    question a stranger actually has before he gives an app a list of
+				    anything, and it is answered in one sentence because the answer is
+				    simple: there is no server to send it to. */}
+				<p className="onboard-privacy">
+					Nothing leaves this phone. There is no account &mdash; your team is saved in
+					this browser and nowhere else.
+				</p>
+				<p className="onboard-go">
+					<button
+						type="button"
+						className="primary"
+						onClick={readTeam}
+						disabled={!team.trim()}
+					>
+						That&rsquo;s my team
+					</button>
+					<span className="sub">
+						Only got a few? Start with your starters. You can add the rest later.
+					</span>
 				</p>
 
-				<ol className="onboard-steps">
-					{step(
-						1,
-						"Where do you play?",
-						!!where,
+				{/*
+				  The answer, in the same sheet, before he goes anywhere.
+				  
+				  Names ticked back as the app spells them, so he can check four of them in
+				  four seconds — a count cannot be checked. And every line that produced
+				  nobody, quoted verbatim: a silent drop is the one failure a reader never
+				  notices, and two mistyped names would otherwise be missing from every
+				  recommendation for the rest of the season with nothing on screen about it.
+				*/}
+				{read && (
+					<div className="onboard-answer">
+						{read.players.length > 0 && (
+							<p className="onboard-got">
+								<b>
+									Got them. {read.players.length}{" "}
+									{read.players.length === 1 ? "player" : "players"}:
+								</b>{" "}
+								{read.players.map(p => p.name).join(", ")}
+							</p>
+						)}
+						{read.unmatched.length > 0 && (
+							<p className="onboard-missed">
+								I couldn&rsquo;t find a player in{" "}
+								{read.unmatched.length === 1 ? "this line" : "these lines"}:{" "}
+								{read.unmatched.slice(0, 6).map(l => `\u00ab${l}\u00bb`).join(", ")}
+								{read.unmatched.length > 6 && ` and ${read.unmatched.length - 6} more`}.
+								Nothing in them is counted anywhere.
+							</p>
+						)}
+						{read.ambiguous.length > 0 && (
+							<p className="onboard-missed">
+								Two different players share {read.ambiguous.join(" and ")}, so neither was
+								added. Add a position in front of the one you own.
+							</p>
+						)}
+					</div>
+				)}
+
+				{/*
+				  The second question, and the only other one. It changes who counts as a
+				  good pickup more than anything else does: the bar every player is measured
+				  against is the (teams x seats)-th best man, so the number of teams moves
+				  every row on the board. Ten is preselected because it is Yahoo's own
+				  default for baseball and is what the shipped values came from — a guess,
+				  and said to be one.
+				*/}
+				{league && (
+					<div className="onboard-teams">
+						<h3>How many teams are in your league?</h3>
 						<div className="chips">
-							{WHERE.map(w => (
+							{[8, 10, 12, 14, 16].map(n => (
 								<button
-									key={w.id}
+									key={n}
 									type="button"
-									className={`chip-btn${where === w.id ? " on" : ""}`}
-									title={w.note}
-									onClick={() => {
-										setWhere(w.id)
-										setNote(null)
-									}}
+									className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
+									aria-pressed={league.meta.max_teams === n}
+									onClick={() => onTeamCount(n)}
 								>
-									{w.label}
+									{n}
 								</button>
 							))}
 						</div>
-					)}
-
-					{/*
-					  The route that ends in a ranked board in three taps, said out loud.
-					  
-					  It already existed and it was folded inside a disclosure called "Other
-					  ways in", 1,536px down a screen whose only visible path is one a phone
-					  cannot walk: selecting a whole settings page with Ctrl-A is a desktop
-					  gesture, and this app is opened on a phone. So the first-time visitor
-					  who could not paste had no visible way to see the thing work at all.
-					  
-					  It is offered as what it is — borrowed values, replaceable in a tap —
-					  and the notice above the board goes on saying so until somebody checks
-					  them. Only before a league exists: once one does, this is a second
-					  league nobody asked for.
-					*/}
-					{preset && !league && (
-						<p className="onboard-shortcut">
-							<button type="button" className="chip-btn" onClick={onUsePreset}>
-								Start from these values
-							</button>
-							<span className="sub">
-								Keeps the scoring the board behind this is already using — <b>{preset.label}</b>{" "}
-								— so you can add your team now and correct the values later. The page
-								goes on saying they were not read from your league until you check them.
-							</span>
+						<p className="sub">
+							It changes who counts as a good pickup more than anything else does.
 						</p>
-					)}
+					</div>
+				)}
 
-					{where &&
-						step(
-							2,
-							ready ? "Its settings are in" : "Get its settings in",
-							ready,
-							<>
-								{/* The route that cannot be revoked, first, on every platform. */}
-								<ol className="paste-how">
-									<li>Open {SETTINGS_PAGE[where]}.</li>
-									<li>
-										Select the whole page: <kbd>Ctrl</kbd>+<kbd>A</kbd> (<kbd>⌘</kbd>+
-										<kbd>A</kbd> on a Mac), then <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy.
-									</li>
-									<li>
-										Click in the box below, paste, and press <b>Read that</b>.
-									</li>
-								</ol>
+				{/*
+				  Everything about platforms, scoring tables and pasted pages lives here, off
+				  the required path. It is true for the reader who wants it and it is the
+				  wrong first question for everybody.
+				*/}
+				<details className="onboard-alts">
+					<summary>My league scores differently</summary>
+					<p className="sub">
+						The numbers you are looking at are standard point values. If your league
+						pays differently, every ranking shifts &mdash; here is how to tell it.
+					</p>
+					<div className="chips onboard-where">
+						{WHERE.map(w => (
+							<button
+								key={w.id}
+								type="button"
+								className={`chip-btn${where === w.id ? " on" : ""}`}
+								title={w.note}
+								onClick={() => {
+									setWhere(w.id)
+									setNote(null)
+								}}
+							>
+								{w.label}
+							</button>
+						))}
+					</div>
+					{where && (
+						<>
+							{/* The one sentence about Yahoo a reader needs, said once. It is a
+							    fact about Yahoo and not a thing to make his problem. */}
+							{where === "yahoo" && (
 								<p className="sub">
-									Adverts, menus and columns you don&rsquo;t care about do no harm —
-									only the scoring rows, the roster positions and the team count are
-									read. It works on a <b>private</b> league, which is the case no
-									amount of scraping has ever reached.
+									Yahoo won&rsquo;t let any website read your league &mdash; not this one,
+									not anyone. Copying your own page works, private leagues included.
 								</p>
-								<textarea
-									data-ctl="paste-settings"
-									value={pasted}
-									onChange={e => setPasted(e.currentTarget.value)}
-									placeholder={
-										"Max Teams\t10\nRoster Positions\tC, 1B, 2B, 3B, SS, OF, OF, OF, Util, …\n" +
-										"Batters Stat Category\tValue\nHome Runs (HR)\t10.4\n…"
-									}
-									rows={5}
-									aria-label="Paste your league's settings page here"
-								/>
-								<p style={{ margin: "var(--sp-2) 0 0" }}>
-									<button
-										type="button"
-										className="primary"
-										onClick={readSettings}
-										disabled={!pasted.trim()}
-									>
-										Read that
+							)}
+							<ol className="paste-how">
+								<li>
+									<b>On a computer</b>, open {SETTINGS_PAGE[where]}.
+								</li>
+								<li>
+									Hold <kbd>Ctrl</kbd> and press <kbd>A</kbd> &mdash; the whole page turns
+									blue &mdash; then <kbd>Ctrl</kbd> and <kbd>C</kbd> to copy it.
+								</li>
+								<li>Paste it below.</li>
+							</ol>
+							<textarea
+								data-ctl="paste-settings"
+								value={pasted}
+								onChange={e => setPasted(e.currentTarget.value)}
+								placeholder={"Max Teams\t10\nRoster Positions\tC, 1B, 2B, 3B, SS, OF, …"}
+								rows={4}
+								aria-label="Paste your league's settings page here"
+							/>
+							<p style={{ margin: "var(--sp-2) 0 0" }}>
+								<button
+									type="button"
+									onClick={readSettings}
+									disabled={!pasted.trim()}
+								>
+									Read that
+								</button>
+							</p>
+							{note && <p className="sub paste-note">{note}</p>}
+							{(where === "espn" || canImport) && (
+								<p className="onboard-url">
+									<input
+										type="text"
+										value={url}
+										placeholder="https://…"
+										onChange={e => setUrl(e.currentTarget.value)}
+										aria-label="Your league's web address"
+									/>
+									<button type="button" onClick={() => onImportUrl(url)} disabled={!url.trim()}>
+										Read it from that address
 									</button>
 								</p>
-								{note && <p className="sub paste-note">{note}</p>}
+							)}
+							<p style={{ margin: "var(--sp-3) 0 0" }}>
+								<button type="button" onClick={onOpenSetup}>
+									Or type the values in myself
+								</button>{" "}
+								<button type="button" onClick={onLoadFile}>
+									Load a file I saved
+								</button>
+							</p>
+						</>
+					)}
+				</details>
 
-								{/* Everything below is a fallback, and folded, because offering four
-								    equal routes to somebody who has done none of them is how a setup
-								    screen becomes a menu. */}
-								<details className="onboard-alts">
-									<summary>Other ways in</summary>
-									<dl>
-										{(where === "espn" || canImport) && (
-											<>
-												<dt>From its URL</dt>
-												<dd>
-													{where === "espn" ?
-														<>
-															ESPN lets this page read it directly, with no server
-															anywhere. Paste your league&rsquo;s URL:
-														</>
-													: canImport ?
-														<>
-															There is a server behind this page, so it can try to
-															read the league itself. Paste your league&rsquo;s URL:
-														</>
-													:	null}
-													<span className="onboard-url">
-														<input
-															type="text"
-															value={url}
-															placeholder="https://…"
-															onChange={e => setUrl(e.currentTarget.value)}
-															aria-label="Your league's URL"
-														/>
-														<button
-															type="button"
-															onClick={() => onImportUrl(url)}
-															disabled={!url.trim()}
-														>
-															Read it
-														</button>
-													</span>
-												</dd>
-											</>
-										)}
-										{where === "yahoo" && !canImport && (
-											<>
-												<dt>From its URL</dt>
-												<dd>
-													Not available for Yahoo from a browser, and saying so is the
-													point: Yahoo sends no CORS headers, so the response never
-													reaches this page however the URL is written. Pasting the page
-													is the route that works — including on a private league.
-												</dd>
-											</>
-										)}
-										{preset && (
-											<>
-												<dt>Start from a preset</dt>
-												<dd>
-													<b>{preset.label}</b> — a ready-made scoring table copied from
-													a league that was read from source. Nothing in it came from
-													your league, so the page keeps saying so until you check it.
-													<p style={{ margin: "var(--sp-2) 0 0" }}>
-														<button type="button" onClick={onUsePreset}>
-															Use the preset
-														</button>
-													</p>
-												</dd>
-											</>
-										)}
-										<dt>From a file</dt>
-										<dd>
-											Read the league once on your own machine and carry the file back.
-											It brings the free-agent list and your roster with it, which a
-											paste of the settings page alone does not:
-											<pre>{IMPORT_COMMAND}</pre>
-											Drop the <code>scoring.json</code> it writes anywhere on this page.
-											<p style={{ margin: "var(--sp-2) 0 0" }}>
-												<button type="button" onClick={onLoadFile}>
-													Load a league file…
-												</button>
-											</p>
-										</dd>
-										<dt>By hand</dt>
-										<dd>
-											Type the scoring, the slots and the team count in yourself. Nothing
-											is guessed on your behalf.
-											<p style={{ margin: "var(--sp-2) 0 0" }}>
-												<button type="button" onClick={onOpenSetup}>
-													Open Setup
-												</button>
-											</p>
-										</dd>
-									</dl>
-								</details>
-							</>
-						)}
-
-					{/* Named, not hidden: a league that is half-read is the case this whole
-					    screen exists to make visible, and the board must not open until the
-					    reader has seen what is still missing. */}
-					{league &&
-						missing.length > 0 &&
-						step(
-							3,
-							`${missing.length === 1 ? "One input" : `${missing.length} inputs`} still missing`,
-							false,
-							<>
-								<ul className="flags">
-									{missing.map(g => (
-										<li key={g.label}>
-											<b>{g.label}</b> — {g.why} {g.blocks}
-										</li>
-									))}
-								</ul>
-								<p style={{ margin: "var(--sp-3) 0 0" }}>
-									<button type="button" className="primary" onClick={onOpenSetup}>
-										Fill these in on Setup
-									</button>
-								</p>
-							</>
-						)}
-
-					{ready &&
-						step(
-							3,
-							"Add your players",
-							false,
-							<>
-								<p className="sub" style={{ margin: "0 0 var(--sp-3)" }}>
-									Optional, and it is what turns a ranked list into an answer: with your
-									team in, Today says which of <i>your</i> men to drop for
-									which free agent, and the daily lineup names the seats to change.
-								</p>
-								<ol className="paste-how">
-									<li>
-										Open your team — <b>My Team</b> on Yahoo and ESPN, <b>Roster</b>{" "}
-										elsewhere.
-									</li>
-									<li>
-										<kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd>, then
-										paste below.
-									</li>
-								</ol>
-								<textarea
-									data-ctl="paste-onboard-roster"
-									value={team}
-									onChange={e => setTeam(e.currentTarget.value)}
-									placeholder={"C\tBen Rice NYY - C,1B\n1B\tJonathan Aranda TB - 1B\n…"}
-									rows={4}
-									aria-label="Paste your roster page here"
-								/>
-								<p style={{ margin: "var(--sp-2) 0 0" }}>
-									<button
-										type="button"
-										className="chip-btn"
-										onClick={readTeam}
-										disabled={!team.trim()}
-									>
-										Read that
-									</button>
-								</p>
-								{teamNote && <p className="sub paste-note">{teamNote}</p>}
-							</>
-						)}
-				</ol>
-
-				{/* The way out, always available. A setup screen you cannot leave is a wall,
-				    and somebody who wants to look around before committing should be able
-				    to — there is simply nothing to rank until a league exists, and the
-				    button says which of those two states they are in. */}
 				<p className="onboard-done">
 					{league ?
 						<button type="button" className={ready ? "primary" : ""} onClick={onDone}>
-							{ready ?
-								`Show me the board for ${league.meta.league_name ?? leagueKey}`
-							:	"Take me to the board anyway"}
+							{read && read.players.length ? "Show me tonight" : "Show me the board"}
 						</button>
-					:	/* This said "there is nothing to show until one of these is done", which
-					     was true when the setup was the whole first visit and is false now: the
-					     board is directly below, running on the preset. What is still true, and
-					     is the reason to do any of this, is that none of it is about his team
-					     yet. */
-						<span className="sub">
-							The board behind this is already running &mdash; on standard values, with no
-							team behind it. Any of these makes it yours.
+					:	<span className="sub">
+							The board behind this is already running, on standard values, with no team
+							behind it. Answering the question above makes it yours.
 						</span>
 					}
+					{league && missing.length > 0 && (
+						<span className="sub">
+							{missing.map(g => g.label).join(" and ")} still missing &mdash; the board
+							cannot rank without{" "}
+							{missing.length === 1 ? "it" : "them"}.{" "}
+							<button type="button" className="linkish" onClick={onOpenSetup}>
+								Fill in
+							</button>
+						</span>
+					)}
 				</p>
 			</section>
 		</div>

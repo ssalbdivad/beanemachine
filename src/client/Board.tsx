@@ -130,39 +130,94 @@ const MODE_FOCUS_CSS = `.modes .mode:focus-visible{
  * cascade cannot depend on which stylesheet React inserts first.
  */
 const BOARD_GRID_CSS = `
+/*
+  FOUR columns, or five once a roster exists, and the cuts are the point.
+  
+  It carried seven: uscore, bscore, games, confidence, luck, and later Δ mine.
+  Measured on the shipped capture, three of them could not be read as columns at all.
+  uscore is bscore discounted by availability, on a list already filtered to players
+  you can add — the same number twice, or its opposite, depending on a checkbox.
+  Confidence read 100% on 41 of the first 60 rows and took four distinct values across
+  all sixty. Luck is a percentile of expected-minus-actual contact that feeds no
+  ranking on this screen, printed beside numbers that do.
+  
+  Nothing measured is lost: confidence and luck are both in the drill-down, which is
+  one tap on the row and is where the working already lives. What goes is the claim
+  that they are decision columns.
+  
+  The name gets the width. On a phone it was ellipsised while the numbers kept full
+  columns, which is a table that has decided the reader came to look at figures rather
+  than at players.
+*/
 .board .board-head,.board .board-row{
-	grid-template-columns:30px minmax(0,1fr) 84px 66px 62px 86px 46px;
+	grid-template-columns:28px minmax(0,1fr) 88px 62px;
 }
-/* With a roster entered there is one more track: Δ MINE sits beside bscore,
-   because the two are the same subtraction against two different bars and reading
-   them side by side is the point. Declared as its own rule rather than by editing
-   the template above, so a reader with no roster is not paying a column of blanks
-   for a question he has not asked. */
+/* With a roster there is one more, and it is the one an already-good manager reads:
+   what this man gains over the man he would actually displace. */
 .board[data-mine] .board-head,.board[data-mine] .board-row{
-	grid-template-columns:28px minmax(0,1fr) 74px 60px 58px 54px 80px 40px;
+	grid-template-columns:28px minmax(0,1fr) 80px 72px 58px;
 }
-.board[data-mine] .board-head>[data-col=mine],.board[data-mine] .board-row>[data-col=mine]{grid-column:5}
-.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{grid-column:6}
-.board[data-mine] .board-head>[data-col=conf],.board[data-mine] .board-row>[data-col=conf]{grid-column:7}
-.board[data-mine] .board-head>[data-col=luck],.board[data-mine] .board-row>[data-col=luck]{grid-column:8}
+.board[data-mine] .board-head>[data-col=mine],.board[data-mine] .board-row>[data-col=mine]{grid-column:4}
+.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{grid-column:5}
 /* Placed by NAME. app.css places the same cells by nth-child, which cannot
    survive a column being added to one row and not the other — that is on the
    record: auto-placement once put the confidence gauge under "GP" and the games
-   count under "confidence". Only grid-column is set here; a grid item is
-   blockified by the container, so nothing needs a display value until a media
-   query has to undo one of app.css's index-based hides. */
+   count under "confidence". */
 .board .board-head>[data-col],.board .board-row>[data-col]{grid-row:1;min-width:0}
 .board .board-head>[data-col=rank],.board .board-row>[data-col=rank]{grid-column:1}
 .board .board-head>[data-col=who],.board .board-row>[data-col=who]{grid-column:2}
-.board .board-head>[data-col=uscore],.board .board-row>[data-col=uscore]{grid-column:3}
-.board .board-head>[data-col=bscore],.board .board-row>[data-col=bscore]{grid-column:4}
-.board .board-head>[data-col=games],.board .board-row>[data-col=games]{grid-column:5}
-.board .board-head>[data-col=conf],.board .board-row>[data-col=conf]{grid-column:6}
-.board .board-head>[data-col=luck],.board .board-row>[data-col=luck]{grid-column:7}
+.board .board-head>[data-col=bscore],.board .board-row>[data-col=bscore]{grid-column:3}
+.board .board-head>[data-col=games],.board .board-row>[data-col=games]{grid-column:4}
+/* The three that left the row. Kept as rules rather than deleted markup so that a
+   view which still renders one — Streaming prints projected points where the board
+   prints uscore — cannot land it in somebody else's column. */
+.board .board-head>[data-col=uscore],.board .board-row>[data-col=uscore],
+.board .board-head>[data-col=pts],.board .board-row>[data-col=pts]{grid-column:3}
+.board .board-head>[data-col=conf],.board .board-row>[data-col=conf],
+.board .board-head>[data-col=luck],.board .board-row>[data-col=luck]{display:none}
+/* The player's name is never cut. */
+.board .board-row .who b{overflow:visible;text-overflow:clip;white-space:normal}
 /* the score, then the ownership it was divided by, on one column's width */
 .board .board-row .us-val{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .board .board-row .us-own,.board .board-row .us-none{
 	display:block;font-size:var(--fs-1);color:var(--faint);font-style:normal;line-height:1.3;
+}
+/* the unit rides the number, because the column holds two of them */
+.board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
+
+/* app.css spaces a drill-down heading after another heading and after a note list,
+   but not after a definition list — so "Statcast model" now sits flush against the
+   last row of "Measured", which reads as one table with a caption in the middle of
+   it. Belongs in app.css beside its siblings; here because app.css is not this
+   change's file. */
+.detail dl + h3{margin-top:var(--sp-3)}
+
+/* Under 900px luck goes: it is a percentile against everyone on the player's own
+   side, the softest of the seven, and the Buy low card below the board is where
+   that reading is actually acted on. The two un-hides undo app.css's nth-child
+   hides, which now land on the wrong cells. */
+/*
+  Two media blocks became one, and they are short now because the table is.
+  
+  They existed to decide which of seven columns survived at each width, and with four
+  there is one decision left: at 390px the board is 300px wide, which holds the rank,
+  the name and two numbers. The games count goes there rather than the value, because
+  the value IS the ranking and a list sorted by a column it does not show is a list
+  nobody can check.
+*/
+@media(max-width:640px){
+	.board .board-head,.board .board-row{
+		grid-template-columns:24px minmax(0,1fr) 74px;gap:var(--sp-2);
+	}
+	.board[data-mine] .board-head,.board[data-mine] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 62px 62px;gap:var(--sp-2);
+	}
+	.board .board-head>[data-col=games],.board .board-row>[data-col=games],
+	.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{display:none}
+	/* Streaming shows what he scores; the board shows what he is ahead by. One number
+	   each at this width, and it is always the one the list is ordered by. */
+	.board[data-mode=stream] .board-head>[data-col=pts],
+	.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
 }
 /* the unit rides the number, because the column holds two of them */
 .board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
@@ -1334,10 +1389,19 @@ export const Board = ({
 						    STREAM_GRID_CSS. What replaces it is the half of his question the
 						    board never answered: what this man actually scores over the
 						    window. */}
-						{filters.mode === "stream" ?
-							<SortHead col="pts" field="points" filters={filters} setFilters={setFilters} right>pts</SortHead>
-						:	<SortHead col="uscore" field="uscore" filters={filters} setFilters={setFilters} right>uscore</SortHead>}
-						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>bscore</SortHead>
+						{filters.mode === "stream" && (
+							<SortHead col="pts" field="points" filters={filters} setFilters={setFilters} right>
+								points
+							</SortHead>
+						)}
+						{/* "ahead by", not "bscore". The coined word survives on Billy's badge and
+						    in the methodology, where a reader who wants it will find it; the
+						    column that carries the decision says what the number is. */}
+						{filters.mode !== "stream" && (
+							<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>
+								ahead by
+							</SortHead>
+						)}
 						{/* Δ MINE: what he gains over the man he would actually displace on YOUR
 						    roster. bscore is measured against the (teams x seats)-th man in the
 						    league — the right unit for "who is the best available player" and not
@@ -1348,7 +1412,7 @@ export const Board = ({
 						    roster has been entered — a column of blanks teaches nothing. */}
 						{myNames && (
 							<SortHead col="mine" field="deltaMine" filters={filters} setFilters={setFilters} right>
-								Δ mine
+								for you
 							</SortHead>
 						)}
 						{/* Not "GP" any more. GP is the games a player's TEAM plays, which for a
@@ -1370,7 +1434,12 @@ export const Board = ({
 						    costs nothing — the definition is on the tooltip either way, and
 						    widening the head's own gap silently misaligns it from the rows,
 						    which share its template. */}
-						<SortHead col="conf" field="confidence" filters={filters} setFilters={setFilters}>conf</SortHead>
+						{/* Confidence and luck left the row and kept their place in the
+						    drill-down. Measured on the shipped capture, confidence read 100% on
+						    41 of the first 60 rows and took four distinct values across all
+						    sixty; luck is a contact percentile that feeds no ranking on this
+						    screen. Neither is a decision column, and printing them beside two
+						    that are lent them the same weight. */}
 						{/* The number is a percentile, and nothing said so: 88 read as a quantity of
 						    luck rather than as "unluckier than 88% of his side". The denominator
 						    belongs in the heading, read once, rather than on 1,235 rows. */}
@@ -1378,12 +1447,38 @@ export const Board = ({
 						    reading about a season, acted on in the Buy low card. Nothing
 						    about which arm to start on Saturday turns on it, so it is not on
 						    the streaming grid. */}
-						{filters.mode !== "stream" && (
-							<SortHead col="luck" field="undervaluation" filters={filters} setFilters={setFilters} right unit="/100">
-								luck
-							</SortHead>
-						)}
+
 					</div>
+					{/*
+					  One sentence under the heads, and it is generated from the ordering that
+					  is actually in force rather than asserted.
+					  
+					  The app's one explanation of its own number lived in the colophon, on
+					  every screen, and said "a bscore is a ranking, not a forecast". True on
+					  two of the three horizons: Streaming ranks on raw projected points by
+					  documented decision (SORT_DEFAULT in useBoard.ts), so the only sentence
+					  explaining the table was describing a different column from the one the
+					  table was sorted by. Reading it out of `sort` is what makes that
+					  impossible rather than merely unlikely.
+					*/}
+					<p className="board-legend">
+						{sort === "points" ?
+							<>
+								Ordered by the points he should score in this window &mdash; nothing else.
+							</>
+						: sort === "deltaMine" ?
+							<>
+								<b>For you</b> is what he adds over the man he would actually take a seat
+								from on your roster, in your league&rsquo;s points.
+							</>
+						:	<>
+								<b>Ahead by</b> is how many points more than the best man still free at
+								his spot, in your league&rsquo;s points, over the window you picked. It
+								ranks players; it does not promise points &mdash; 35 means further ahead
+								of a free pickup than 20 is, not 35 points in the bank.
+							</>
+						}
+					</p>
 					{rows.slice(0, limit).map((r, i) => (
 						<Row
 							key={r.player.id}
@@ -1571,7 +1666,9 @@ const BillysPick = ({
 			</div>
 			<span className="pick-score">
 				<b>{r.bscore}</b>
-				<span>bscore</span>
+				{/* The badge said "bscore", which is a word this app invented and nobody
+				    else uses. The column beside it already says what the number is. */}
+				<span>ahead by</span>
 			</span>
 		</section>
 	)
@@ -1837,31 +1934,22 @@ const Row = ({
 			    printed one absence twice — 500 of 1,233 rows, and 36 of the first 60.
 			    Where Yahoo priced him the cell shows both numbers; where it didn't it
 			    says so once, in a word rather than a dash. */}
-			{stream ?
+			{/* On the streaming list the useful quantity is what he actually scores in
+			    the window; on the board it is what he is ahead by, which is the next
+			    cell. uscore — that same number discounted by how widely he is already
+			    rostered — was the third column here and could not be read as one: on a
+			    list already filtered to players you can add, the discount is applied
+			    twice. It survives as an ordering ("value you can actually get") and in
+			    the drill-down. */}
+			{stream && (
 				<span
 					className="r pts"
 					data-col="pts"
-					title={`Projected for ${r.points} points over this window in your league's own scoring — the quantity. bscore beside it is the same number minus what the next arm on the wire would score.`}
+					title={`Projected for ${r.points} points over this window in your league's own scoring.`}
 				>
 					{r.points.toFixed(1)}
 				</span>
-			:	<span
-				className={`r uscore${(r.uscore ?? 0) >= 10 ? " up" : ""}`}
-				data-col="uscore"
-				title={
-					r.uscore === null ?
-						"Yahoo lists no ownership for him, so there is nothing to divide by — unknown, not unowned."
-					:	`${r.addValue} points above the next man up, and ${100 - r.rosteredPct!}% of leagues still have him free.`
-				}
-			>
-				{r.uscore === null ?
-					<em className="us-none">unlisted</em>
-				:	<>
-						<b className="us-val">{r.uscore}</b>
-						<span className="us-own">{r.rosteredPct}% owned</span>
-					</>
-				}
-			</span>}
+			)}
 			<span className="r bscore" data-col="bscore">{r.bscore}</span>
 			{mine && (
 				<span
@@ -1877,18 +1965,6 @@ const Row = ({
 				</span>
 			)}
 			<Window r={r} />
-			<Confidence value={r.confidence.value} reasons={r.confidence.reasons} />
-			{!stream && <span
-				className={`r gap${(r.undervaluation ?? 0) >= 70 ? " up" : ""}`}
-				data-col="luck"
-				title={
-					r.undervaluation === null ?
-						"No Statcast data, so no luck reading."
-					:	`Unluckier than ${r.undervaluation}% of ${r.player.group === "hitting" ? "batters" : "pitchers"} — his results trail the quality of his contact by this much.`
-				}
-			>
-				{r.undervaluation === null ? "—" : r.undervaluation}
-			</span>}
 		</button>
 		{open && <Detail r={r} />}
 	</>

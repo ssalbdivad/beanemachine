@@ -194,6 +194,20 @@ export interface PastedRoster {
 	spots: { slot: string; name: string; positions: string[]; team: string | null }[]
 	/** What actually happened, in the reader's terms, for the page to print. */
 	note: string
+	/**
+	 * The lines the reader typed that produced nobody, quoted back verbatim.
+	 *
+	 * A count cannot be checked and a silent drop is never noticed. "Found 11 players"
+	 * over a list of 13 names is a sentence a reader believes, and the two men he
+	 * mistyped are then missing from every recommendation the app makes for the rest of
+	 * the season without anything on screen ever mentioning them. Quoting the line back
+	 * is the smallest honest thing: he can see his own typo and fix it.
+	 *
+	 * Not a guess at what he meant. `playersInText` does substring matching over an
+	 * index of known names, not tokenising, so there is nothing here to compute an
+	 * edit distance against without building a second matcher.
+	 */
+	unmatched: string[]
 }
 
 export const rosterFromPaste = (
@@ -266,5 +280,29 @@ export const rosterFromPaste = (
 				` Two different players share ${found.ambiguous.join(" and ")}, so neither was added — search for the one you own below.`
 			:	"")
 
-	return { players: found.players, ambiguous: found.ambiguous, keys, spots, note }
+	/**
+	 * A line is unmatched when no player this read found appears anywhere in it.
+	 *
+	 * Compared on the same normalised form the matcher used, so a line that produced a
+	 * player under a different spelling ("RICE, BEN" for Ben Rice) is not reported as a
+	 * failure. Blank lines and lines too short to hold a name are skipped: a reader
+	 * pasting a page has plenty of both, and quoting page furniture back at him as
+	 * something the app failed to read would bury the two lines that matter.
+	 */
+	const seen = found.players.map(f => norm(f.name))
+	const unmatched = text
+		.split(/\r?\n/)
+		.map(l => l.trim())
+		.filter(l => l.length > 3 && /[a-z]/i.test(l))
+		.filter(l => {
+			const line = norm(l)
+			return !seen.some(name => line.includes(name) || name.split(" ").every(w => line.includes(w)))
+		})
+
+	return { players: found.players, ambiguous: found.ambiguous, keys, spots, note, unmatched }
 }
+
+/** The same fold the matcher uses, so "reported as unmatched" and "actually matched"
+ *  cannot disagree about punctuation. */
+const norm = (s: string): string =>
+	normalizeName(s).replace(/[.,'’\-]/g, " ").replace(/\s+/g, " ").trim()

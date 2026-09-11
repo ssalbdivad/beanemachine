@@ -72,7 +72,7 @@ await p.waitForSelector(".dock-bar", { timeout: 25000 })
 const openDock = async (page = p) => {
   await page.waitForSelector(".dock-bar", { timeout: 25000 })
   if (!(await page.$(".onboard")))
-    await page.click('.dock-bar button:text-is("Set up my league")')
+    await page.click(".dock-bar button")
   await page.waitForSelector(".onboard", { timeout: 25000 })
 }
 let pass=0, fail=0
@@ -138,12 +138,28 @@ t("but the board says whose scoring it is on, on the board itself",
 t("the setup is not in the way: the form is not even mounted until it is asked for",
   (await p.$$eval(".onboard", n => n.length)) === 0,
   `${await p.$$eval(".onboard", n => n.length)} onboarding cards on a first visit`)
-t("but the way to it is on the page, in one line that says whose scoring is on the board",
-  /standard scoring/i.test(await p.$eval(".dock-say", e => e.innerText)) &&
-    /not your league/i.test(await p.$eval(".dock-say", e => e.innerText)),
+/*
+ * The bar says what the reader GETS, and the caveat lives on the numbers it is about.
+ *
+ * Both lines used to say the same thing: the bar read "Standard scoring — not your
+ * league yet" and the board's own note read "Standard scoring, not yours." One screen,
+ * one fact, twice — and the half that was missing was the only half that makes a
+ * stranger press anything, which is what he gets for it. So the bar is the offer and
+ * the board keeps the caveat, attached to the numbers it is a caveat about.
+ *
+ * Asserted as a pair, because either alone is the failure: an offer with the caveat
+ * dropped is the demo-league mistake again, and a caveat with no offer is what was
+ * there before.
+ */
+t("but the way to it is on the page, saying what pressing it gets you",
+  /who.s on your team/i.test(await p.$eval(".dock-say", e => e.innerText)) &&
+    /start tonight/i.test(await p.$eval(".dock-say", e => e.innerText)),
   await p.$eval(".dock-say", e => e.innerText))
-t("and the button next to it says what pressing it gets you",
-  await p.locator('.dock-bar button:text-is("Set up my league")').isVisible(),
+t("and the borrowed-values caveat is on the board, attached to the numbers",
+  /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
+  await p.$eval(".preview-note", e => e.innerText))
+t("and the button asks the question it is about to ask, not for a chore",
+  await p.locator('.dock-bar button:text-is("Who\'s on my team")').isVisible(),
   await p.$eval(".dock-bar button", e => e.textContent))
 /*
  * THE POINT OF THE WHOLE CHANGE, and until this assertion nothing checked it.

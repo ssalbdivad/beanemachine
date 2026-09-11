@@ -593,12 +593,20 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							Open your team on your fantasy site — <b>My Team</b> on Yahoo and ESPN,{" "}
 							<b>Roster</b> on Sleeper, CBS and Fantrax.
 						</li>
+						{/* On a phone there is no Ctrl+A, and this was the only instruction the
+						    box carried. Typing names works exactly as well — `playersInText`
+						    matches known players in arbitrary text and does not care whether it
+						    came from a clipboard — so the gesture that works everywhere leads and
+						    the keyboard shortcut is named for the device it belongs to. */}
 						<li>
-							Select the whole page: <kbd>Ctrl</kbd>+<kbd>A</kbd> (<kbd>⌘</kbd>+
-							<kbd>A</kbd> on a Mac), then <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy.
+							Copy it, or just type the names — one to a line, first and last.
 						</li>
 						<li>
-							Click in the box below and paste, then press <b>Read that</b>.
+							Paste or type them below, then press <b>Read that</b>.{" "}
+							<span className="sub">
+								On a computer, <kbd>Ctrl</kbd>+<kbd>A</kbd> then <kbd>Ctrl</kbd>+
+								<kbd>C</kbd> copies the whole page in one go.
+							</span>
 						</li>
 					</ol>
 					<p className="sub">
@@ -1102,10 +1110,10 @@ const LineupCard = ({
 											wireRead ?
 												`Free in your league right now, read off its own free-agent list: ` +
 												`the best ${s.slot} on the wire. Nobody you own beats him here.`
-											:	`This spot is priced at replacement level for ${s.slot}: what the ` +
-												`${league.meta.max_teams}-team-deep best eligible ${s.slot} projects. ` +
-												`Nobody you own beats that here. He is not checked against your ` +
-												`league's wire, so he may already be rostered.`
+											:	`Priced at what a free ${s.slot} is worth in a ` +
+												`${league.meta.max_teams}-team league — nobody you own beats that ` +
+												`here. This one has not been checked against your league's own list, ` +
+												`so he may already be taken.`
 										}
 									>
 										{wireRead ? "free agent" : "replacement"} {s.slot}
@@ -1126,15 +1134,14 @@ const LineupCard = ({
 						<ul className="notes warn">
 							{[...new Set(lineup.holes)].map(slot => (
 								<li className="hole" key={slot}>
-									{lineup.holes.filter(h => h === slot).length}× {slot}: nobody in the pool is
-									eligible there, so the spot has no replacement level and is worth nothing
-									rather than something unknown.
+									{lineup.holes.filter(h => h === slot).length}× {slot}: nobody at all can
+									play there, so this seat is worth nothing rather than something unknown.
 								</li>
 							))}
 						</ul>
 					:	<p className="tiny-note">
-							Every startable spot has a known replacement level, so no spot on this lineup
-							is a hole — the ones you don&rsquo;t fill are priced off the wire.
+							Every seat here has somebody who could fill it, so none of them is a hole —
+							the ones you leave empty are priced at what a free man would be worth.
 						</p>
 					}
 				</div>

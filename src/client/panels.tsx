@@ -499,21 +499,21 @@ export const leagueGaps = (league: League): Gap[] => {
 			have: scored ? `${scored} stats scored` : null,
 			why: "Points per stat, as your league scores them.",
 			blocks:
-				"A bscore is denominated in your league's own points, so every projection comes out at exactly zero — the board, each draft pick and every trade verdict."
+				"Every ranking is in your league's own points, so without these every player comes out at exactly zero."
 		},
 		{
 			label: "How many teams",
 			have: league.meta.max_teams == null ? null : `${league.meta.max_teams} teams`,
 			why: "The number of teams in the league, as it drafts.",
 			blocks:
-				"Replacement level is teams × slots: a player is worth what he beats the next man up by, and how deep the wire runs decides who that is. Nothing is ranked without it."
+				"How many teams there are decides how deep the free-agent pool runs, and a player is worth what he beats the next man up by. Nothing is ranked without it."
 		},
 		{
 			label: "Roster slots",
 			have: slots.length ? `${slots.length} slots, ${starters} starting` : null,
 			why: "How many of each position you start, plus bench and IL.",
 			blocks:
-				"Positional scarcity, what the draft says you still need, and the lineup a trade is judged against."
+				"Which positions are scarce, and the lineup every recommendation is judged against."
 		}
 	]
 }
@@ -703,21 +703,21 @@ export const tradesClosed = (
 export const VIEWS: { id: View; label: string; purpose: string; season: number }[] = [
 	{
 		id: "board",
-		label: "Today",
+		label: "Tonight",
 		season: 3,
 		purpose:
 			"Who to start before first pitch, which of your seats scores nothing, and the one move worth making."
 	},
 	{
 		id: "wire",
-		label: "Wire",
+		label: "Pickups",
 		season: 4,
 		purpose:
 			"Everyone you can actually get, ranked in this league's scoring, over the window you pick."
 	},
 	{
 		id: "trade",
-		label: "Setup",
+		label: "My league",
 		season: 1,
 		purpose:
 			"Your league's scoring, slots and team count, and the men on your team. Everything the other two screens say is priced in these."
@@ -780,43 +780,35 @@ export const WaysIn = ({
 					<Fragment2 term="From its URL">
 						{canImport ?
 							<>
-								Paste your league&rsquo;s URL in the field above and beanemachine
-								reads the real values off <b>Yahoo</b> or <b>ESPN</b> — the only
-								route that ends with <i>read from source</i> against your own
-								league.
+								Put your league&rsquo;s web address in the field above and it reads the
+								real values straight off <b>Yahoo</b> or <b>ESPN</b>.
 							</>
 						:	<>
-								Paste an <b>ESPN</b> league URL in the field above and beanemachine
-								reads the real values off it, here, with no server. A <b>Yahoo</b>{" "}
-								league cannot be read by any browser: Yahoo sends no CORS headers,
-								so the response never reaches the page.
+								Put an <b>ESPN</b> league&rsquo;s web address in the field above and it
+								reads the real values straight off it. Yahoo does not let any website
+								read your league &mdash; this one included &mdash; so for a Yahoo
+								league, copy the page instead.
 							</>
 						}
 					</Fragment2>
 					<Fragment2 term="From a file">
-						Read the league once on your own machine and carry the file back — this is
-						the exact route for a Yahoo league, and the file is plain JSON you can
-						read. Clone the repo, then:
-						<pre>{IMPORT_COMMAND}</pre>
-						One command, three reads: the league&rsquo;s settings, <b>the free agents
-						in your league</b>, and your roster with the seat each man is in. The
-						middle one is the reason this route exists rather than being a backup
-						feature — &ldquo;which starter should I stream this week&rdquo; is a
-						question about the players you can <i>add</i>, and Yahoo&rsquo;s
-						free-agent page sends no CORS headers, so no browser will ever be handed
-						it. Carrying the file is the only way this page gets the real list
-						instead of estimating it from rostered shares. Both reads are stamped
-						with the time they happened, and the strip at the top of the page says
-						how old they are rather than showing them as live.
-						<p style={{ margin: "var(--sp-2) 0 0" }}>
-							It writes <code>scoring.json</code>, prints what it did and did not read,
-							and prints the path last. Drop that file anywhere on this page — or use
-							the button below — and all of it loads into this browser. A file taken
-							out with <b>Download</b> carries the same things back out.
-						</p>
+						{/* The whole of this used to be four paragraphs about what one command
+						    reads, what it writes, why the free-agent half of it cannot be done
+						    from a web page, and how old each read is. All true, and all of it
+						    software talking about itself to somebody who came here about
+						    baseball. The command survives, once, named for who it is for. */}
+						Read your league once on your own computer and carry the file back. It
+						brings your team and your league&rsquo;s own list of free agents with it,
+						which copying a page cannot.
+						<details style={{ marginTop: "var(--sp-2)" }}>
+							<summary>I&rsquo;m comfortable with a terminal</summary>
+							<pre>{IMPORT_COMMAND}</pre>
+							It prints what it did and did not read, and the path to the file last.
+							Drop that file anywhere on this page.
+						</details>
 						{onLoadFile && (
 							<p style={{ margin: "var(--sp-2) 0 0" }}>
-								<button onClick={onLoadFile}>Load a league file…</button>
+								<button onClick={onLoadFile}>Load a file I saved&hellip;</button>
 							</p>
 						)}
 					</Fragment2>

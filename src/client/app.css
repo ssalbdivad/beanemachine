@@ -1276,3 +1276,45 @@ kbd{
    "every heading sits over the cells it names" exists to catch. So the crowding is
    solved in the LABELS instead: the head is the one place a shorter word costs
    nothing, and the full definition is on its own tooltip either way. */
+
+/* ---------- the one question ----------
+   The sheet asks for a team and nothing else. Everything here is about making the
+   answer easy to give and easy to check: a box that looks like the answer, the
+   privacy line where the typing happens, and the read named back player by player.
+   ------------------------------------------------------------------------- */
+.onboard-privacy{margin:var(--sp-2) 0 0;font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
+.onboard-go{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
+.onboard-go .sub{margin:0;flex:1 1 220px;min-width:0}
+.onboard-answer{
+  margin:var(--sp-3) 0 0;padding:var(--sp-3);border-radius:var(--r-md);
+  background:var(--well);border-left:2.5px solid var(--accent);
+}
+.onboard-got{margin:0;font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--muted)}
+.onboard-got b{color:var(--ink)}
+/* Quoted lines are a warning, not an error: nothing was lost, and the reader is the
+   only one who can say what he meant. */
+.onboard-missed{
+  margin:var(--sp-2) 0 0;font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--flag);
+}
+.onboard-teams{margin:var(--sp-4) 0 0}
+.onboard-teams h3{margin:0 0 var(--sp-2);font-size:var(--fs-4);font-weight:600;letter-spacing:-.01em}
+.onboard-teams .chips{margin:0 0 var(--sp-2)}
+.onboard-teams .chip-btn{min-width:44px;justify-content:center}
+.onboard-where{margin:var(--sp-3) 0}
+.onboard-alts>summary{
+  cursor:pointer;list-style:none;color:var(--accent);
+  font-size:var(--fs-3);text-decoration:underline;text-underline-offset:3px;
+  padding:var(--sp-2) 0;
+}
+.onboard-alts>summary::-webkit-details-marker{display:none}
+.onboard-done{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-4) 0 0}
+.onboard-done .sub{margin:0;flex:1 1 240px;min-width:0}
+
+/* The one sentence explaining the table, under the heads it explains, generated from
+   the ordering actually in force. It replaces a colophon line printed on every screen
+   that described a different column from the one the streaming list is sorted by. */
+.board-legend{
+  margin:0;padding:var(--sp-2) 0 var(--sp-3);
+  font-size:var(--fs-2);line-height:var(--lh-snug);color:var(--faint);max-width:78ch;
+}
+.board-legend b{color:var(--muted)}

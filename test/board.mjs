@@ -89,11 +89,100 @@ const moreFilters = async p => {
     await p.click(".board-controls details.more > summary")
   await p.waitForSelector(".board-controls details.more[open]")
 }
+/**
+ * FLIPPING THE BOARD, which is no longer one click on one named head.
+ *
+ * Every direction test in this file clicked `.sort-head:has-text('bscore')`. There is
+ * no head with that text any more: the board's value column says "ahead by" and
+ * Streaming's says "points" — same controls, same `data-col`, new words. So the
+ * selector moves to `data-col`, which is also what the grid places by and therefore
+ * what the markup already treats as a column's identity; the visible text is asserted
+ * once, where the head census is, instead of smeared across twenty selectors.
+ *
+ * The second half is subtler and cost an hour. `filters.sort` is NULL until a reader
+ * touches a head — useBoard resolves the default per horizon, `bscore` on the board
+ * and `points` on Streaming — and `SortHead` marks itself active by comparing the raw
+ * null, not the resolved value. So on an untouched board NO head is active, and the
+ * first click on one does not reverse the order, it pins the order that was already
+ * in force. Two clicks then leave the board ASCENDING rather than back where it
+ * started, and the damage shows up hundreds of lines later somewhere else entirely:
+ * "the availability filter changes who is recommended" failed with the same name on
+ * both sides, because a board ordered worst-first opens on men projected for nothing,
+ * and men projected for nothing are unowned whether you filter for that or not.
+ *
+ * Hence a gesture rather than a selector: click the ACTIVE head if there is one, and
+ * otherwise pin first and flip second.
+ */
+const valueHeadOf = async p =>
+  (await p.$(".board-head .sort-head[data-col=pts]")) ?
+    ".board-head .sort-head[data-col=pts]"
+  : ".board-head .sort-head[data-col=bscore]"
+const flipValue = async p => {
+  const active = await p.$(".board-head .sort-head.active")
+  if (active) await active.click()
+  else {
+    const h = await valueHeadOf(p)
+    await p.click(h)
+    await p.waitForTimeout(350)
+    await p.click(h)
+  }
+  await p.waitForTimeout(350)
+}
+
 // The ordering control, reached the way a reader reaches it.
 const rankBy = async (p, value) => {
   await moreFilters(p)
   await p.selectOption("[data-ctl=sort]", value)
   await p.waitForTimeout(350)
+}
+
+/**
+ * NUMBERS OUT OF THE DRILL-DOWN, and why reading one is now a named gesture.
+ *
+ * Three columns left the row in the four-column pass: uscore, conf and luck. They are
+ * one tap down, in `.detail .pair`, and this helper is the tap. It exists rather than
+ * a click inlined at each site because "moved" and "deleted" must not look the same —
+ * a suite that answered the deletion of those cells by deleting the assertions that
+ * read them would go green on a board that had thrown the numbers away, which is the
+ * one outcome nothing else in this file would notice.
+ *
+ * Every reader below that used to do `$$eval(".board-row [data-col=uscore] .us-own")`
+ * goes through here instead. That is slower — one click and one re-render per row —
+ * so it reads the first handful rather than the first twenty, and each caller says
+ * what it needs the count for.
+ *
+ * ONE ROW IS OPEN AT A TIME: Board.tsx holds a single `open` player id, so clicking
+ * row i+1 closes row i and `.detail` is always the one belonging to the row just
+ * clicked. The rows are re-queried after each click because opening one inserts a
+ * `.detail` sibling and React re-keys the list underneath the old handles.
+ */
+const detailDownBoard = async (p, keys, n) => {
+  const out = []
+  for (let i = 0; i < n; i++) {
+    const rows = await p.$$(".board-row")
+    if (!rows[i]) break
+    await rows[i].click()
+    await p.waitForSelector(".detail")
+    out.push(
+      await p.evaluate(
+        ks =>
+          Object.fromEntries(
+            ks.map(k => [
+              k,
+              [...document.querySelectorAll(".detail .pair")]
+                .find(e => e.querySelector("dt").textContent.trim() === k)
+                ?.querySelector("dd")
+                ?.textContent.trim() ?? null
+            ])
+          ),
+        keys
+      )
+    )
+    const again = await p.$$(".board-row")
+    await again[i].click()
+    await p.waitForTimeout(60)
+  }
+  return out
 }
 await screen(page, "Pickups")
 
@@ -165,12 +254,28 @@ t("board opens sorted by bscore, descending",
  */
 const rankedAt = () => page.$eval("#horizon-panel .sub .count", e => Number(e.textContent.replace(/,/g, "")))
 const availOnBoard = ".board-controls .filters .toggle:has-text('I can add') input"
-// Ownership off `.us-own`, not off the cell's text: the cell reads "0.899% owned"
-// — uscore 0.8 then 99% — and any regex run over that string captures "0.899" as
-// the percentage. One element per number, one number per element.
-const ownPcts = () =>
-  page.$$eval(".board-row [data-col=uscore] .us-own", n =>
-    n.slice(0, 20).map(e => Number(String(e.textContent).replace(/[^0-9.]/g, ""))).filter(Number.isFinite))
+/**
+ * OWNERSHIP, out of the drill-down, because the row does not print it any more.
+ *
+ * It was read off `.us-own` — the ownership tucked under the uscore score, one
+ * element per number so that the cell's own text ("0.899% owned", which is uscore 0.8
+ * then 99%) could not be misparsed as a single percentage. The uscore column is gone
+ * from the row entirely, so that element is gone with it and this read returned an
+ * empty array: the assertion below then passed or failed on `[].every(...)`, which is
+ * true, i.e. it had quietly stopped measuring anything at all. That is the failure
+ * mode this whole helper exists to prevent.
+ *
+ * `rostered` in the drill-down is the same number — "unlisted" where Yahoo priced
+ * nobody, which parses to NaN and is dropped, because unknown is not unowned.
+ *
+ * TWELVE rows, not twenty, because each one costs a click now. The claim below is
+ * proportional (half the head of the unfiltered board is rostered nearly everywhere),
+ * so it is the same claim at either count rather than a relaxed one.
+ */
+const ownPcts = async () =>
+  (await detailDownBoard(page, ["rostered"], 12))
+    .map(d => Number(String(d.rostered).replace(/[^0-9.]/g, "")))
+    .filter(Number.isFinite)
 t("the board opens on players the reader can add, with no click at all",
   await page.$eval(availOnBoard, e => e.checked))
 const addableCount = await rankedAt()
@@ -185,7 +290,8 @@ t("the whole rateable pool is still ranked, one untick away",
 // The measurement that justified the flip, re-derived off whatever capture is
 // committed rather than quoted from the commit message that made the change.
 t("the old default really did open on men nobody could have",
-  wholeOwn.filter(p => p >= 90).length >= 10 && addableOwn.every(p => p < 60),
+  wholeOwn.length >= 8 && wholeOwn.filter(p => p >= 90).length >= wholeOwn.length / 2 &&
+    addableOwn.length >= 8 && addableOwn.every(p => p < 60),
   `unfiltered: ${wholeOwn.slice(0, 6)} | default: ${addableOwn.slice(0, 6)}`)
 await page.check(availOnBoard)
 await page.waitForTimeout(700)
@@ -204,45 +310,79 @@ t("the board pages in more rows as you reach the end",
 await page.evaluate(() => window.scrollTo(0, 0))
 
 /**
- * SEVEN columns, each answering a different question, and each cell placed by the
- * name of its column rather than by its index among its siblings.
+ * FOUR columns, and the three that left must be findable rather than merely absent.
  *
- * `proj pts` and `waiver pts` went first: bscore is one minus the other, so the
- * table was stating a single subtraction three times in the place where scanning
- * matters most. Both are in the drill-down, which is asserted further down.
+ * This said SEVEN, and every column it named is now one of three things. `proj pts`
+ * and `waiver pts` went first, because bscore is one minus the other and the table
+ * was stating a single subtraction three times where scanning matters most. `owned`
+ * went into uscore, whose denominator it is. And uscore, conf and luck have now gone
+ * the same way, into the drill-down — measured on the shipped capture, confidence
+ * read 100% on 41 of the first 60 rows and took four distinct values across all
+ * sixty, and luck is a percentile that feeds no ranking on this screen, so both were
+ * printed beside two numbers that decide something and lent the same weight.
  *
- * `owned` has now gone the same way, into uscore. uscore is `addValue x (1 -
- * owned)`, so the two were blank on precisely the same rows — 500 of the 1,233
- * rateable rows on the committed fixture, and 36 of the first 60, which is why the
- * board opened on seven straight rows of two dashes side by side. One missing
- * input must be reported once.
+ * What is left is # / Player / ahead by / games, and five with a roster. That is a
+ * claim about the WHOLE head, so it is asserted as an exact list rather than as a
+ * set of `startsWith` probes: the old form would have passed on a head that had
+ * grown an eighth column, which is the direction this table has always drifted.
+ *
+ * THE NAMES CHANGED TOO, and that is the substance rather than a cosmetic. "bscore"
+ * is a word this app coined and nobody else uses; the column that carries the whole
+ * decision now says what the number is. The coinage survives on Billy's badge, in
+ * the drill-down and in Methodology, which is asserted where each of those lives.
  */
 const headers = await page.$$eval(".board-head > *", n => n.map(e => e.textContent.trim()))
-/* "conf", not "confidence", and the abbreviation is the point rather than an
- * accident. At 10px of letter-spaced micro-caps the full word ran into its
- * neighbours — "GAMES CONFIDENCE LUCK/100" read as one word — and the obvious fix
- * (a wider gap on the head alone) MISALIGNS every heading from the cells it names,
- * because the head and the rows share one template whose name track is
- * `minmax(0,1fr)`: widening the head's gap shrinks only the head's name column.
- * That is the failure the assertion two below exists to catch, so the crowding was
- * solved in the label instead. The full definition is on the head's own tooltip. */
-t("the board shows the seven decision columns",
-  ["#", "Player", "uscore", "bscore", "games", "conf", "luck"]
-    .every(h => headers.some(x => x.startsWith(h))) && headers.length === 7,
-  headers.join(" | "))
-// The definition, not the word: the tooltip says what confidence MEANS — how much
-// real data stands behind the projection — which is what an abbreviated head owes
-// its reader, and is more than spelling the word out would have given him.
-t("and the shortened head still carries its definition on itself",
-  (await page.$eval('.board-head [data-col=conf]', e => e.getAttribute("title") ?? "")).length > 40,
-  await page.$eval('.board-head [data-col=conf]', e => (e.getAttribute("title") ?? "").slice(0, 80)))
-t("and no longer restates bscore's own arithmetic beside it",
+t("the board shows the four decision columns, named in words",
+  headers.join("|") === "#|Player|ahead by|games", headers.join(" | "))
+/*
+ * The head is where the app used to speak to itself. Nothing in this file asserted
+ * that, because for as long as the columns were abbreviations the tooltips carried
+ * the meaning and the crowding was the only visible problem — so a head reading
+ * "uscore bscore conf luck" passed every check here while being four words a reader
+ * who plays fantasy baseball has never seen. This is the assertion that keeps them
+ * off, and it is deliberately about the HEAD and not about the drill-down, which is
+ * the advanced surface and still says bscore, uscore and market edge on purpose.
+ */
+t("and none of them is a word this app invented",
+  !/bscore|uscore|conf\b|luck|Δ|delta/i.test(headers.join(" ")), headers.join(" | "))
+// The definition, not the word: the head that carries the decision still states on
+// itself what the number means and what bar it is measured against. This used to be
+// asserted on `conf`, whose abbreviation was the reason it needed a tooltip at all;
+// conf is off the row now, so the claim moves to the column that survived it, where
+// it matters more — "ahead by" is plainer than "bscore" and still not self-defining.
+t("and the head that carries the decision defines itself",
+  (await page.$eval('.board-head [data-col=bscore]', e => e.getAttribute("title") ?? "")).length > 40,
+  await page.$eval('.board-head [data-col=bscore]', e => (e.getAttribute("title") ?? "").slice(0, 80)))
+t("and no longer restates the decision column's own arithmetic beside it",
   !headers.some(h => /proj pts|waiver pts/.test(h)), headers.join(" | "))
 t("ownership is no longer a column of its own",
   !headers.some(h => /^owned/.test(h)), headers.join(" | "))
+/*
+ * A GENERATED LEGEND under the heads, because a fixed one was false on a third of
+ * the app.
+ *
+ * The single sentence explaining the app's own number lived in the colophon and said
+ * "a bscore is a ranking, not a forecast" on every screen. Streaming ranks on raw
+ * projected points by documented decision (SORT_DEFAULT in useBoard.ts), so on one
+ * of the three horizons the only explanation on the page was describing a different
+ * column from the one the table was ordered by. Rendering it from `sort` is what
+ * makes that impossible rather than merely unlikely — so what is pinned here is that
+ * it TRACKS the ordering, which is checked on both branches: the board's, and
+ * Streaming's further down this file.
+ */
+const legend = p => p.textContent(".board-legend")
+const boardLegend = await legend(page)
+t("a legend under the heads says what the decision column is, in the reader's words",
+  /ahead by/i.test(boardLegend) && /free/i.test(boardLegend) && !/bscore/.test(boardLegend),
+  boardLegend.replace(/\s+/g, " ").slice(0, 140))
+// ...and it is honest about what the number is NOT, which is the claim the colophon
+// used to carry and the one a reader most needs: a rank is not a forecast.
+t("and that it ranks rather than promises",
+  /does not promise points/.test(boardLegend), boardLegend.replace(/\s+/g, " ").slice(0, 200))
 
 /**
- * The head and the row must agree cell for cell, in name and in pixels.
+ * The head and the row must agree cell for cell, in name and in pixels — and no two
+ * columns may share a cell.
  *
  * app.css places both by `nth-child`, and that has failed before in exactly this
  * spot: auto-placement once put the confidence gauge under "GP" and the games
@@ -251,42 +391,96 @@ t("ownership is no longer a column of its own",
  * is only true as long as something checks it — including at the widths where
  * columns are dropped, because a header dropped without its body is the same bug
  * with a smaller blast radius.
+ *
+ * OVERLAP IS NEW HERE, and it is new because the four-column pass produced one. The
+ * old check compared the head's boxes against the row's, which two columns printed
+ * ON TOP OF EACH OTHER pass with flying colours: the head overlaps itself in exactly
+ * the same place the row does, so "every heading sits over the cells it names" was
+ * true of a phone board reading "35.2714GP". Named placement stops a heading landing
+ * over the wrong cell; nothing stopped two cells landing on one, which is what a
+ * `grid-column` rule surviving the deletion of the column it made room for does.
  */
-const columnsLineUp = async () =>
-  page.evaluate(() => {
+const columnsLineUp = async (p = page) =>
+  p.evaluate(() => {
     const vis = el => getComputedStyle(el).display !== "none"
-    const right = el => Math.round(el.getBoundingClientRect().right)
-    const head = [...document.querySelectorAll(".board-head > [data-col]")].filter(vis)
-    const row = [...document.querySelector(".board-row").querySelectorAll(":scope > [data-col]")].filter(vis)
+    const box = el => {
+      const b = el.getBoundingClientRect()
+      return { l: Math.round(b.left), r: Math.round(b.right) }
+    }
+    const cells = root =>
+      [...root.querySelectorAll(":scope > [data-col]")].filter(vis).sort((a, b) => box(a).l - box(b).l)
+    const head = cells(document.querySelector(".board-head"))
+    const row = cells(document.querySelector(".board-row"))
+    // A pair of columns that share pixels. Reported as names so the failure says
+    // WHICH two collided rather than only that some did.
+    const collisions = list =>
+      list.slice(1).flatMap((e, i) => (box(e).l < box(list[i]).r ? [`${list[i].dataset.col}+${e.dataset.col}`] : []))
     return {
-      head: head.map(e => `${e.dataset.col}@${right(e)}`),
-      row: row.map(e => `${e.dataset.col}@${right(e)}`),
-      names: head.map(e => e.dataset.col)
+      head: head.map(e => `${e.dataset.col}@${box(e).r}`),
+      row: row.map(e => `${e.dataset.col}@${box(e).r}`),
+      names: head.map(e => e.dataset.col),
+      rowNames: row.map(e => e.dataset.col),
+      collisions: [...new Set([...collisions(head), ...collisions(row)])]
     }
   })
 const wide = await columnsLineUp()
 t("every heading sits over the cells it names",
   wide.head.join() === wide.row.join(), `${wide.head.join(" ")} vs ${wide.row.join(" ")}`)
-t("all seven columns are on screen at 1280px",
-  wide.names.join() === "rank,who,uscore,bscore,games,conf,luck", wide.names.join())
+t("and no two columns are printed on top of each other",
+  wide.collisions.length === 0, wide.collisions.join(" "))
+t("all four columns are on screen at 1280px",
+  wide.names.join() === "rank,who,bscore,games", wide.names.join())
+
+/*
+ * SHIPPED FOLDED, asserted before anything in this file unfolds it.
+ *
+ * This claim lived two hundred lines below, where it was safe as long as every
+ * ordering was reached by clicking a column head. Only two heads sort now — Player
+ * and "ahead by" — so uscore, luck and the rest are reached through the select, and
+ * the first `rankBy()` in this file opens `details.more` and leaves it open for every
+ * assertion after it. The claim is unchanged and is not weakened; it is simply the
+ * claim about a state that only exists until a reader touches the disclosure, so it
+ * has to be made before this suite touches it. Its two siblings — that one gesture
+ * reaches the control and that it still orders the board — are unaffected and stay
+ * with the block that explains them.
+ */
+t("the ordering control is off screen until the reader asks for more filters",
+  !(await page.locator("[data-ctl=sort]").isVisible()),
+  "rank-by is back in the always-visible filter row")
 
 /**
- * uscore carries its own denominator now, so the cell holds two numbers and the
- * ranking has to be read off the score rather than off the cell's text.
+ * uscore MOVED; it did not retire — and the only way to prove that is to open a row.
+ *
+ * Three assertions lived here: the cell prints the ownership it divided by, choosing
+ * uscore orders by uscore, and that ordering only ranks players above replacement.
+ * The first is about a cell that no longer exists — uscore and the ownership under it
+ * are a `.detail` pair each now — so it is rewritten as the claim the two-number cell
+ * was built to make in the first place: ONE MISSING INPUT IS REPORTED ONCE. uscore is
+ * `addValue x (1 - owned)`, so it is blank in exactly the rows ownership is blank in
+ * (500 of 1,233 rateable rows on the committed fixture), and the pair of them must
+ * agree row by row or the drill-down is printing one absence as two different facts.
+ *
+ * The ordering is proved off the drill-down's own number, which is the assertion that
+ * matters most in this block: the board still OFFERS "value you can actually get" in
+ * Rank by, and with the column gone there is now nothing on screen to check it
+ * against. An ordering by an invisible number is one keystroke from an ordering by
+ * nothing at all, and this is the only thing that would notice.
  */
-await page.click(".board-head .sort-head:has-text('uscore')")
-await page.waitForTimeout(300)
-const usCells = await page.$$eval(".board-row [data-col=uscore]", n => n.map(e => e.textContent.trim()))
-t("the uscore cell prints the ownership it divided by",
-  usCells.length > 0 && usCells.every(c => /^[\d.]+\d% owned$/.test(c)), String(usCells.slice(0, 3)))
-const us = await page.$$eval(".board-row [data-col=uscore] .us-val", n => n.map(e => Number(e.textContent)))
-t("choosing uscore orders by uscore",
+await rankBy(page, "uscore")
+const usRows = await detailDownBoard(page, ["uscore", "rostered"], 6)
+t("a row with no ownership has no uscore either, and says so once",
+  usRows.length > 0 &&
+    usRows.every(d => (d.rostered === "unlisted") === (d.uscore === "—")),
+  JSON.stringify(usRows))
+const us = usRows.map(d => Number(d.uscore))
+t("choosing uscore still orders by uscore, which only the drill-down can now show",
   us.length > 0 && us.every(v => Number.isFinite(v)) &&
-    us.every((v, i) => i === 0 || us[i - 1] >= v), String(us.slice(0, 5)))
+    us.every((v, i) => i === 0 || us[i - 1] >= v), String(us))
 // a ratio against a tiny denominator is only meaningful for someone worth
 // rostering at all, so the same guard the other comparative sorts use applies
 const usB = await page.$$eval(".board-row .bscore", n => n.map(e => Number(e.textContent)))
 t("uscore ranks only players above replacement", usB.every(v => v > 0), String(usB.slice(0, 5)))
+await rankBy(page, "bscore")
 
 /**
  * A control that MOVED must not be a control that quietly retired.
@@ -297,16 +491,17 @@ t("uscore ranks only players above replacement", usB.every(v => v > 0), String(u
  * point of the move, and the 66px it bought back), it is REACHABLE with that one
  * gesture, and it still ORDERS the board once reached.
  *
- * Ordering is proved on `contact`, deliberately. Four of the six orderings are also
- * column heads, so a select that had stopped being wired to anything would still look
- * alive when tested on those: the board would already be sorted that way from the
- * head-click above. `contact` and `marketEdge` are the two orderings with NO column of
- * their own — the only reason the select still earns its place at all — so they are
- * what proves it is alive.
+ * Ordering is proved on `contact`, deliberately. It used to be that four of the six
+ * orderings were also column heads, so a select that had stopped being wired to
+ * anything would still have looked alive when tested on those — the board would
+ * already be sorted that way from the head-click above. Five of the six have no
+ * column now (only "ahead by" is left, plus Player), which is a much larger reason to
+ * check the select is alive and a much larger loss if it is not: `contact` is simply
+ * still the safest of them to prove it on.
+ *
+ * The first of the three claims — that the control ships folded — has moved up this
+ * file, above the first gesture that unfolds it. See the note there.
  */
-t("the ordering control is off screen until the reader asks for more filters",
-  !(await page.locator("[data-ctl=sort]").isVisible()),
-  "rank-by is back in the always-visible filter row")
 const beforeOrder = await page.$$eval(".board-row .who b", n => n.slice(0, 8).map(e => e.textContent.trim()))
 await rankBy(page, "contact")
 const afterOrder = await page.$$eval(".board-row .who b", n => n.slice(0, 8).map(e => e.textContent.trim()))
@@ -417,8 +612,8 @@ t("the positional-scarcity card is gone from the board",
 // The definition the reader can actually reach: the header's own tooltip, which is
 // where COLUMN_HELP survived the deletion of the "How this ranking was built"
 // disclosure that used to hold a second copy of it.
-const bscoreHelp = await page.$eval(".board-head .sort-head:has-text('bscore')", e => e.getAttribute("title") ?? "")
-t("bscore still states that the bar it subtracts is drawn at the same slot",
+const bscoreHelp = await page.$eval(await valueHeadOf(page), e => e.getAttribute("title") ?? "")
+t("\"ahead by\" still states that the bar it subtracts is drawn at the same slot",
   /same slot/.test(bscoreHelp) && /teams × seats/.test(bscoreHelp), bscoreHelp.slice(0, 120))
 // ...and the bar really does move with the slot. Read out of the drill-down, which
 // is where "waiver points" lives now.
@@ -457,34 +652,53 @@ await page.waitForTimeout(400)
  * intersection it presented as five names is now two controls the reader drives
  * himself, and that is the replacement being asserted.
  *
- * - "out-hitting his line" is the `luck` column, on every row, a percentile of
- *   expected-minus-actual over three weeks — and `undervaluation` ranks the whole
- *   board by it, which is the same ordering the card's picks came out of.
+ * - "out-hitting his line" WAS the `luck` column, on every row, a percentile of
+ *   expected-minus-actual over three weeks. The column is gone with the four-column
+ *   pass and `undervaluation` still ranks the whole board by it, which is the same
+ *   ordering the card's picks came out of.
  * - "cheap" is `uscore`, which multiplies what he adds by the share of leagues he is
- *   still free in, and the ownership it used is printed under it.
+ *   still free in. Its column is gone too; the score and the ownership it was
+ *   computed from are two pairs in the drill-down.
  *
  * The hard-coded thresholds are deliberately NOT carried over. 70% and .03 were the
  * card's own cut-offs; with the reader doing the intersecting there is nothing to
  * cut off, and inventing a bar here would be asserting a number no code holds.
  * What must hold is that both halves still rank.
+ *
+ * THE LUCK ASSERTION IS WEAKER THAN IT WAS, and this is where that is said out loud
+ * rather than hidden in a rewrite. It read the percentile off the row and checked it
+ * descended and that the top of the board cleared 80 — a direct proof that "most
+ * undervalued" really did order by undervaluation. That percentile is now printed
+ * NOWHERE: not on the row, not in the drill-down, not in a tooltip. So the strongest
+ * true statement left is that the ordering changes the board and that the quantity
+ * the percentile is computed from — expected minus actual wOBA — is still reachable
+ * on the player it was computed for. The monotonic check cannot be reconstructed from
+ * that, because the percentile is ranked within a side and the board mixes both. It
+ * is reported as a loss in this agent's return value.
  */
 t("the buy-low card is gone from the board",
   (await page.$(".buylow")) === null && (await page.$$(".buylow-card")).length === 0,
   "a buy-low panel is back under the board")
+const beforeLuck = await page.$$eval(".board-row .who b", n => n.slice(0, 8).map(e => e.textContent.trim()))
 await rankBy(page, "undervaluation")
-const luckRanked = await page.$$eval(".board-row [data-col=luck]", n =>
-  n.slice(0, 12).map(e => Number(String(e.textContent).replace(/[^0-9.\-]/g, ""))))
-t("the luck half of buy-low still ranks the board on its own",
-  luckRanked.length > 5 && luckRanked.every(Number.isFinite) &&
-    luckRanked.every((v, i) => i === 0 || luckRanked[i - 1] >= v) && luckRanked[0] > 80,
-  String(luckRanked.slice(0, 5)))
+const afterLuck = await page.$$eval(".board-row .who b", n => n.slice(0, 8).map(e => e.textContent.trim()))
+t("the luck half of buy-low still re-ranks the board on its own",
+  afterLuck.length > 5 && afterLuck.join() !== beforeLuck.join(),
+  `${beforeLuck.slice(0, 3)} then ${afterLuck.slice(0, 3)}`)
+// ...and the reading behind it is still on the player, one tap down: "expected −
+// actual" is the wOBA gap the percentile ranks. A board ordered by a signal whose
+// only trace is the order itself is a board nobody can check.
+const luckDetail = await detailDownBoard(page, ["expected − actual"], 4)
+t("and the gap that percentile ranks is still printed on the men it ranked",
+  luckDetail.length > 2 && luckDetail.every(d => d["expected − actual"] !== null),
+  JSON.stringify(luckDetail))
 // and the cheapness half, which is the other axis the card crossed with it
 await rankBy(page, "uscore")
-const cheapOwn = await page.$$eval(".board-row [data-col=uscore] .us-own", n =>
-  n.slice(0, 12).map(e => Number(String(e.textContent).replace(/[^0-9.]/g, ""))))
-t("the cheapness half does too, and says the ownership it priced",
-  cheapOwn.length > 5 && cheapOwn.every(Number.isFinite),
-  String(cheapOwn.slice(0, 5)))
+const cheap = await detailDownBoard(page, ["uscore", "rostered"], 6)
+t("the cheapness half does too, and still says the ownership it priced",
+  cheap.length > 4 && cheap.every(d => d.uscore !== null && d.rostered !== null) &&
+    cheap.some(d => /%/.test(String(d.rostered))),
+  JSON.stringify(cheap))
 await rankBy(page, "bscore")
 
 // The three horizons must actually be three different questions. A stash ranking
@@ -642,18 +856,74 @@ if (tierOnOpen !== "none") {
  */
 const streamHeads = await page.$$eval(".board-head > [data-col]", n =>
   n.map(e => `${e.dataset.col}:${e.textContent.trim().replace(/[\u25be\u25b4]/g, "")}`))
-t("the streaming board carries six columns, not the board's seven",
-  streamHeads.length === 6 &&
-    streamHeads.map(h => h.split(":")[0]).join() === "rank,who,pts,bscore,games,conf",
+/*
+ * FIVE, not six: `conf` left the streaming grid with the same pass that took it off
+ * the board. What must stay is the pair the argument above turns on — what he scores
+ * over the window, and what he is ahead of the next arm by — because over three days
+ * those two say very different things: on the live capture the best gettable starter
+ * projects 33.0 points and 15.9 above replacement, and the fifth-best projects 17.2
+ * and 0.14. One number alone hides that, which is why both columns exist.
+ *
+ * THIS IS CURRENTLY FAILING, and it is pinned rather than relaxed because the row
+ * still prints the number: `Row` renders `[data-col=bscore]` unconditionally and
+ * STREAM_GRID_CSS still gives it grid-column 4, but the HEAD wraps its "ahead by"
+ * SortHead in `filters.mode !== "stream"`. So on Streaming the board prints a column
+ * of values with no heading over it, at every width. Reported in srcConcerns; the
+ * assertion stays as the shape the row and the stylesheet both already expect.
+ */
+t("the streaming board carries five columns, not the board's four",
+  streamHeads.length === 5 &&
+    streamHeads.map(h => h.split(":")[0]).join() === "rank,who,pts,bscore,games",
   streamHeads.join(" | "))
-t("uscore and luck are not among them",
-  !streamHeads.some(h => /^uscore|^luck/.test(h)), streamHeads.join(" | "))
+t("uscore, luck and conf are not among them",
+  !streamHeads.some(h => /^uscore|^luck|^conf/.test(h)), streamHeads.join(" | "))
 t("and the window column is named for what a streamer counts",
   streamHeads.some(h => h === "games:starts"), streamHeads.join(" | "))
+t("and the value column is named in words here too",
+  !/bscore|uscore/.test(streamHeads.join(" ")), streamHeads.join(" | "))
 const streamAlign = await columnsLineUp()
 t("every streaming heading sits over the cells it names",
   streamAlign.head.join() === streamAlign.row.join(),
   `${streamAlign.head.join(" ")} vs ${streamAlign.row.join(" ")}`)
+t("and no two streaming columns are printed on top of each other",
+  streamAlign.collisions.length === 0, streamAlign.collisions.join(" "))
+/*
+ * The legend tracks the ORDERING, and this is the branch it was built for.
+ *
+ * Streaming ranks on raw projected points by documented decision — `SORT_DEFAULT` in
+ * useBoard.ts — so the fixed sentence the colophon used to carry, "a bscore is a
+ * ranking, not a forecast", was describing a column the table was not sorted by on
+ * one of the three horizons. A sentence that is true on two screens out of three is
+ * exactly what this is pinned against.
+ *
+ * ON ITS OWN PAGE, and the extra load is the point rather than laziness avoided.
+ * `filters.sort` is null until a reader touches a head, and useBoard resolves the
+ * default per horizon from that null — but this suite has already pinned the sort to
+ * bscore by name a dozen times by now, and an explicit sort is sticky across the
+ * horizons. So `page` on Streaming is ordered by bscore, its legend correctly says
+ * "Ahead by", and asserting the points branch there would be asserting that the
+ * legend ignores the ordering, which is the opposite of the claim. A context that has
+ * touched nothing is the only place the DEFAULT can be observed at all.
+ */
+{
+  const fresh = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+  await fresh.goto(BASE, { waitUntil: "domcontentloaded" })
+  await screen(fresh, "Pickups")
+  await fresh.waitForSelector(".board-row", { timeout: 30000 })
+  await fresh.click(".modes .mode:has-text('Streaming')")
+  await fresh.waitForSelector(".stream-strip", { timeout: 15000 })
+  await fresh.waitForTimeout(600)
+  const streamLegend = await legend(fresh)
+  t("and the legend says what THIS list is ordered by, not what the board is",
+    /Ordered by the points/i.test(streamLegend) && !/Ahead by/.test(streamLegend),
+    streamLegend.replace(/\s+/g, " ").slice(0, 140))
+  // and it is the same disclosure, not a second sentence bolted on for this tab
+  t("and it is still one tap to the caveat behind it",
+    (await fresh.$eval(".board-legend", e => e.tagName.toLowerCase())) === "details" &&
+      /which arm to start/.test(streamLegend),
+    streamLegend.replace(/\s+/g, " ").slice(0, 200))
+  await fresh.close()
+}
 t("and the projected total is a real number on every row, not a dash",
   (await page.$$eval(".board-row [data-col=pts]", n => n.map(e => e.textContent.trim())))
     .every(x => /^\d+(\.\d+)?$/.test(x)))
@@ -692,8 +962,15 @@ await page.click(".stream-strip .chip-btn:text-is('7 days')")
 await page.waitForTimeout(500)
 const sevenRange = await streamRange()
 const sevenNote = await streamNote()
+/* "2026-09-11 → 2026-09-17" reads "Sep 11 → Sep 17" now, and the change is the
+ * point rather than incidental: an ISO date is a developer's date, and this line is
+ * read on every visit by somebody who came to find out who to add. The assertion is
+ * the same one — a day count moves the window the board STATES — only matched
+ * against the words a reader sees. The ISO form survives in the coverage note below,
+ * where it is asserted separately, so a regression to ISO here still fails. */
 t("a day count is a real horizon: it moves the window the board states",
-  sevenRange !== periodRange && /2026-\d\d-\d\d → 2026-\d\d-\d\d/.test(sevenRange),
+  sevenRange !== periodRange && /[A-Z][a-z]{2} \d+ → [A-Z][a-z]{2} \d+/.test(sevenRange) &&
+    !/\d{4}-\d\d-\d\d/.test(sevenRange),
   `${periodRange.trim()} then ${sevenRange.trim()}`)
 t("and it names itself by its length rather than by the period it was cut from",
   /^7 days, 2026/.test(sevenNote), sevenNote.slice(0, 80))
@@ -1018,30 +1295,45 @@ t("the active column header announces the direction it is sorted",
   JSON.stringify(sortLabels))
 
 /**
- * Every column still carries its own definition, on the header.
+ * Every column still carries its own definition — and the definition is no longer
+ * only a tooltip.
  *
- * Nothing asserted this while there were two copies of the glossary: COLUMN_HELP was
- * written into each header's `title` AND into the `<details class="legend">` "How this
- * ranking was built" disclosure under the table, so an assertion about either one
- * would have passed on the other's strength. The disclosure is deleted — it was a
- * second copy of definitions the reader can get by resting on the word itself — which
- * leaves the header as the ONLY place the definitions live, and therefore the first
- * time this is worth pinning. A board of abbreviations nobody can expand is the
- * failure mode the legend existed to prevent, and deleting it without this assertion
- * is how that ships.
+ * This asserted that four or more headers carried a `title` and that the two columns
+ * nobody can guess, uscore and luck, were the two defined at length. Both of those
+ * columns are gone from the head, so the second assertion was asking after headers
+ * that do not exist; and only two headers sort now, Player and the value column, so
+ * "four or more" was asking after a table that no longer has four sortable heads.
+ *
+ * What the pair of them protected is one claim: A BOARD OF WORDS NOBODY CAN EXPAND IS
+ * THE FAILURE MODE. That claim is stronger now, not weaker, and it is checked in the
+ * two places it can be: every head that sorts still defines itself on hover, and the
+ * board carries a written legend under the heads that a phone — which has no hover at
+ * all, and on which this app is mostly read — can open with a tap. The tooltip was
+ * the ONLY home for a definition until that legend existed, which is the whole reason
+ * a hover-only glossary was a real problem rather than a stylistic one.
  */
 const helps = await page.$$eval(".board-head .sort-head", n =>
   n.map(e => [e.dataset.col, (e.getAttribute("title") ?? "").trim()]))
-t("the legend is gone and the definitions it held are on the headers instead",
-  (await page.$("details.legend")) === null &&
-    helps.length >= 4 && helps.every(([, h]) => h.length > 12),
+t("every head that sorts still defines itself",
+  helps.length >= 2 && helps.every(([, h]) => h.length > 12),
   JSON.stringify(helps.map(([c, h]) => `${c}:${h.length}`)))
-// named columns, not just non-empty ones: uscore and luck are the two the reader
-// cannot guess from the word, and they are the two the glossary was for
-t("and the two columns nobody can guess are the ones it defines at length",
-  helps.some(([c, h]) => c === "uscore" && /share of leagues|still free/.test(h)) &&
-    helps.some(([c, h]) => c === "luck" && /contact/.test(h)),
+// The value column is the one the whole table is an argument about, and it is the one
+// whose definition has to say what bar the number is measured against.
+t("and the value column's definition names the bar it subtracts",
+  helps.some(([c, h]) => c === "bscore" && /same slot/.test(h) && /teams × seats/.test(h)),
   JSON.stringify(helps.map(([c]) => c)))
+/*
+ * ...and the definition is reachable WITHOUT a pointing device, which no tooltip is.
+ * `details.legend` — the old "How this ranking was built" disclosure — was deleted as
+ * a second copy of the tooltips; `.board-legend` is not that. It is one sentence
+ * chosen by the ordering in force, with the caveat one tap below it, and it is the
+ * only definition on this page a phone reader can get at.
+ */
+t("and a phone, which cannot hover, can still reach it",
+  (await page.$("details.legend")) === null &&
+    (await page.$eval(".board-legend", e => e.tagName.toLowerCase())) === "details" &&
+    (await page.$eval(".board-legend > summary", e => e.textContent.trim().length)) > 20,
+  await page.$eval(".board-legend > summary", e => e.textContent.trim()))
 
 
 /**
@@ -1058,8 +1350,17 @@ await page.waitForSelector(".detail")
 const value = await page.$$eval(".detail .pair", n =>
   Object.fromEntries(n.map(e => [e.querySelector("dt").textContent.trim(), e.querySelector("dd").textContent.trim()]))
 )
+/*
+ * `confidence` is on this list now, and that is the whole reason the list is worth
+ * having. It was a gauge on every row; the four-column pass took it off, on the
+ * measurement that it read 100% on 41 of the first 60 rows and took four distinct
+ * values across all sixty. Fine as a reason to stop printing it 1,200 times — not a
+ * reason to stop printing it at all, because "how much is behind this projection" is
+ * the first question anybody asks of a number they are about to act on. If it ever
+ * leaves the drill-down too, this is what says so.
+ */
 t("the drill-down carries the arithmetic the row no longer repeats",
-  ["projected points", "waiver points", "bscore", "rostered", "uscore", "market edge"]
+  ["projected points", "waiver points", "bscore", "rostered", "uscore", "market edge", "confidence"]
     .every(k => k in value), Object.keys(value).join(", "))
 t("bscore equals projected minus replacement",
   Math.abs(rowBscore - (Number(value["projected points"]) - Number(value["waiver points"]))) < 0.05,
@@ -1189,6 +1490,19 @@ await search.fill("")
 await page.waitForTimeout(400)
 const why = await pickWhy(page)
 const pickScore = Number(await page.textContent(".pick-score b"))
+/*
+ * THE BADGE SAYS WHAT THE NUMBER IS, not what this app calls it.
+ *
+ * It read "bscore" — a word coined here and used nowhere else in fantasy baseball —
+ * under the one number on the card a reader is asked to act on. The column beside it
+ * had already stopped saying that, so the two surfaces disagreed about the name of
+ * the same quantity, which is worse than either name on its own. Nothing here noticed,
+ * because every assertion about this card read the score and none read the label.
+ */
+t("Billy's badge names the number in the same words the column does",
+  /ahead by/i.test(await page.textContent(".pick-score")) &&
+    !/bscore/i.test(await page.textContent(".pick-score")),
+  (await page.textContent(".pick-score")).trim())
 t("Billy's reasoning cites the actual bscore",
   why.includes(String(pickScore)) && /more points than the best/.test(why), why)
 // Per side, like the column: a hitter's club's games, a starter's own turns. The
@@ -1255,8 +1569,7 @@ const descScore = await pickBscore()
 t("the pick is above replacement descending", descScore > 0, `${descPick} bscore ${descScore}`)
 
 // one click on the active header reverses it — worst-first
-await page.click(".board-head .sort-head:has-text('bscore')")
-await page.waitForTimeout(350)
+await flipValue(page)
 const ascFirst = await page.$eval(".board-row .bscore", e => Number(e.textContent))
 t("clicking the active header really does flip the board to worst-first",
   (await sortDir()) === "asc" && ascFirst < descScore, `top row ${ascFirst}, ${await sortDir()}`)
@@ -1267,8 +1580,7 @@ t("Billy's pick does not follow the sort direction", ascPick === descPick,
 t("Billy never recommends a player below replacement", ascScore > 0,
   `${ascPick} bscore ${ascScore}`)
 // back to descending, and the pick still hasn't moved
-await page.click(".board-head .sort-head:has-text('bscore')")
-await page.waitForTimeout(350)
+await flipValue(page)
 t("and it comes back unchanged when the board is flipped again",
   (await pickOf(page)) === descPick, `${await pickOf(page)} vs ${descPick}`)
 
@@ -1278,11 +1590,9 @@ for (const mode of ["Streaming", "This fortnight", "Stash"]) {
   await page.click(`.modes .mode:has-text('${mode}')`)
   await page.waitForTimeout(350)
   const a = { name: await pickOf(page), score: await pickBscore() }
-  await page.click(".board-head .sort-head:has-text('bscore')")
-  await page.waitForTimeout(350)
+  await flipValue(page)
   const b = { name: await pickOf(page), score: await pickBscore() }
-  await page.click(".board-head .sort-head:has-text('bscore')")
-  await page.waitForTimeout(350)
+  await flipValue(page)
   t(`${mode}: the pick is the same player in both sort directions`, a.name === b.name,
     `${a.name} vs ${b.name}`)
   t(`${mode}: the pick clears replacement in both sort directions`,
@@ -1290,6 +1600,19 @@ for (const mode of ["Streaming", "This fortnight", "Stash"]) {
 }
 await page.click(".modes .mode:has-text('This fortnight')")
 await page.waitForTimeout(350)
+/*
+ * ...and the ordering is PUT BACK by name, not left to the arithmetic of the clicks
+ * above.
+ *
+ * `filters.sort` is one piece of state shared by the three horizons, and Streaming's
+ * value column is `points` where the board's is `bscore` — so the flips inside that
+ * loop can leave the board ordered by a field it never opened on, and did: the board
+ * came back ranked by projected points, ascending, and the next fifty assertions ran
+ * against a table headed by men projected for nothing. The cost of stating the
+ * ordering here is one line; the cost of not stating it was a failure two hundred
+ * lines away that pointed at the availability filter.
+ */
+await rankBy(page, "bscore")
 
 // Ordering must be ignored; FILTERING must not be. A catcher-only board still has
 // to name the best catcher you can get, in either direction.
@@ -1304,12 +1627,13 @@ t("filtering to catchers moves the pick to a catcher",
   cSlots.length > 0 && cSlots.every(x => x === "C") && /best C you could add/.test(cWhy),
   `${cPick}: ${cWhy.slice(0, 90)} (on ${cSlots.length} C rows)`)
 t("the filtered pick is still above replacement", (await pickBscore()) > 0, cPick)
-await page.click(".board-head .sort-head:has-text('bscore')")
-await page.waitForTimeout(350)
+await flipValue(page)
 t("and the filtered pick ignores direction too", (await pickOf(page)) === cPick,
   `${await pickOf(page)} vs ${cPick}`)
-await page.click(".board-head .sort-head:has-text('bscore')")
-await page.waitForTimeout(350)
+await flipValue(page)
+// Same reason as after the horizon loop: say what the board is ordered by rather
+// than trusting an even number of clicks to have cancelled out.
+await rankBy(page, "bscore")
 await page.click('.chip-btn:text-is("All")')
 await page.waitForTimeout(400)
 
@@ -1477,9 +1801,10 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
  * now.
  *
  * The batting table is found by its own HEADING rather than by `section:nth-of-type(1)`
- * for the same reason the tabs are. Setup stacks the team panel above the league
- * editor, so the first section on the screen is "My team"; the old positional
- * selector would have filled a roster textarea's neighbour and reported success.
+ * for the same reason the tabs are. "My league" — the tab that used to be called
+ * Setup — stacks the team panel above the league editor, so the first section on the
+ * screen is "My team"; the old positional selector would have filled a roster
+ * textarea's neighbour and reported success.
  */
 await page.click(".chip-btn:text-is(\"All\")")
 await page.selectOption("[data-ctl=group]", "all")
@@ -1490,7 +1815,7 @@ const batting = 'section.card:has(h2:text-is("Batting"))'
 await page.waitForSelector(`${batting} .rows`)
 const sb = await page.$$eval(`${batting} .code`, n => n.map(e => e.textContent))
 const sbIdx = sb.indexOf("SB")
-t("the league's own scoring is editable from Setup, where the team panel also lives",
+t("the league's own scoring is editable from My league, where the team panel also lives",
   sbIdx >= 0 && !!(await page.$(".trade-team")),
   `batting codes ${sb.join(",")}; team panel ${!!(await page.$(".trade-team"))}`)
 const sbInput = page.locator(`${batting} input.val`).nth(sbIdx)
@@ -1502,59 +1827,85 @@ t("re-scoring the league re-ranks the board",
   typeof topAfter === "string" && topAfter.length > 0, `${topBefore} → ${topAfter}`)
 
 /**
- * The phone. Below 640px only two numbers fit beside the name — measured, the
- * board is 300px wide at 390px — and which two is a decision, not an accident.
+ * The phone. Below 640px ONE number fits beside the name — measured, the board is
+ * 300px wide at 390px — and which one is a decision, not an accident.
  *
- * They used to be uscore and bscore, and uscore is the column that is blank on 36
+ * It used to be two, uscore and bscore, and uscore is the column that is blank on 36
  * of the first 60 rows: the mobile reader got a column of dashes as one of his two
- * numbers. The window count has the slot now. It is never blank (0 of 1,233 rows
- * on the fixture), it is the only number on the row that is a fact about the
- * window rather than about the player, and for a starter it is his own turns.
- * uscore comes back only when the board is RANKED by it, because a board must
- * always show the number it is sorted by.
+ * numbers. Then it was the window count and bscore. It is now bscore alone and the
+ * name gets everything else, which is the whole argument of the four-column pass —
+ * a table that ellipsises the player and keeps full columns for figures has decided
+ * the reader came to look at numbers rather than at people.
+ *
+ * THIS IS CURRENTLY FAILING, and the failure is worth more than a green tick. The
+ * grid template in the 640px block is three tracks and hides `games`; a stale
+ * `@media(max-width:899px)` block LATER in the same stylesheet un-hides it with
+ * `display:block`, and a second 640px block then sends it to `grid-column:3` — where
+ * "ahead by" already is. Both rules win on source order, so at 390px the two cells
+ * are printed on top of each other and the first row reads "35.2714GP". Pinned as the
+ * shape the CSS's own template and its own comment describe; reported in srcConcerns.
  */
 const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
-await phone.goto(BASE, { waitUntil: "networkidle" })
-// A fresh context lands on Today, so the phone has to ask for Wire too — and the
-// tab bar is the narrowest thing on this screen, which makes this click its own
-// small proof that three labels still fit on a 390px phone at all. Four did not,
-// which is part of why there are three.
+/* `networkidle`, and it timed out here on a dev server that was answering perfectly:
+   vite holds an HMR websocket open for the life of the page, so "no network for 500ms"
+   is a coin flip rather than a state this app ever reliably reaches. Every other goto
+   in this file already waits for the thing it actually needs — a rendered row — which
+   is both faster and a real signal. */
+await phone.goto(BASE, { waitUntil: "domcontentloaded" })
+// A fresh context lands on the decision card, so the phone has to ask for the board
+// too — and the tab bar is the narrowest thing on this screen, which makes this click
+// its own small proof that three labels still fit on a 390px phone at all. Four did
+// not, which is part of why there are three; "My league" is the longest of the three
+// and it is what this click is really measuring.
 await screen(phone, "Pickups")
 await phone.waitForSelector(".board-row", { timeout: 30000 })
-const cols = async () =>
-  phone.evaluate(() => {
-    const vis = el => getComputedStyle(el).display !== "none"
-    const right = el => Math.round(el.getBoundingClientRect().right)
-    const head = [...document.querySelectorAll(".board-head > [data-col]")].filter(vis)
-    const row = [...document.querySelector(".board-row").querySelectorAll(":scope > [data-col]")].filter(vis)
-    return {
-      names: head.map(e => e.dataset.col),
-      head: head.map(e => `${e.dataset.col}@${right(e)}`),
-      row: row.map(e => `${e.dataset.col}@${right(e)}`)
-    }
-  })
+const cols = () => columnsLineUp(phone)
 const small = await cols()
-t("at 390px the board keeps the name and the two numbers that are never blank",
-  small.names.join() === "rank,who,bscore,games", small.names.join())
+t("at 390px the board is the name and the one number it is ranked by",
+  small.names.join() === "rank,who,bscore" && small.collisions.length === 0,
+  `${small.names.join()}${small.collisions.length ? ` — printed on top of each other: ${small.collisions.join(" ")}` : ""}`)
 t("and the headings still sit over the cells they name at 390px",
   small.head.join() === small.row.join(), `${small.head.join(" ")} vs ${small.row.join(" ")}`)
-t("no column on the phone board is empty",
-  (await phone.$$eval(".board-row [data-col=games]", n => n.map(e => e.textContent.trim())))
+/* The number that survives the cut must never be the blank one. That was the whole
+ * case against uscore here: it is `addValue x (1 - owned)` and goes blank wherever
+ * Yahoo priced nobody, 36 of the first 60 rows on the committed fixture, so a phone
+ * reader's one number was a dash. This used to be asserted of the games column, which
+ * is no longer on the phone at all. */
+t("the one number the phone keeps is never blank",
+  (await phone.$$eval(".board-row [data-col=bscore]", n => n.map(e => e.textContent.trim())))
     .every(x => /\d/.test(x)))
+/* And the width the columns gave up went to the NAME, which is the point of giving it
+ * up. app.css used to ellipsise `.who b`; a board that cuts "Pete Crow-Armstro…" to
+ * keep a column of 100%s has its priorities backwards. */
+t("and the player's name is never cut to make room for them",
+  await phone.$eval(".board-row .who b", e => {
+    const c = getComputedStyle(e)
+    return c.textOverflow !== "ellipsis" && c.whiteSpace !== "nowrap"
+  }))
 t("the page does not scroll sideways at 390px",
   (await phone.evaluate(() => document.documentElement.scrollWidth)) <= 390,
   String(await phone.evaluate(() => document.documentElement.scrollWidth)))
+/*
+ * "Ranking by uscore brings its column back on a phone" stood here, on the rule that
+ * a board must always show the number it is sorted by — `.board[data-sort=uscore]`
+ * existed in BOARD_GRID_CSS for exactly that. There is no uscore column at any width
+ * now, so the rule cannot be satisfied and the assertion cannot be rewritten into
+ * something true: ordering by uscore, market edge, luck or contact produces a board
+ * ranked by a number that appears nowhere on it. That is a real loss and it is named
+ * in this agent's return value rather than quietly dropped here.
+ *
+ * What CAN still be asserted is the half that survives: the ordering is real, and the
+ * number behind it is one tap away on the row it ranked. A phone is where that matters
+ * most, because a phone has no hover and the drill-down is the only thing it can open.
+ */
 await rankBy(phone, "uscore")
-const sorted = await cols()
-t("ranking by uscore brings its column back on a phone",
-  sorted.names.includes("uscore") && sorted.head.join() === sorted.row.join(),
-  sorted.names.join())
+const phoneUs = await detailDownBoard(phone, ["uscore", "confidence"], 3)
+t("ordering a phone board by a number it cannot show still puts that number one tap away",
+  phoneUs.length > 2 && phoneUs.every(d => d.uscore !== null),
+  JSON.stringify(phoneUs))
 // and confidence, which the phone drops, has to survive somewhere the phone reaches
-await phone.click(".board-row")
-await phone.waitForSelector(".detail")
-const phoneDetail = await phone.$$eval(".detail .pair dt", n => n.map(e => e.textContent.trim()))
 t("what the phone drops from the row is in the drill-down it can open",
-  phoneDetail.includes("confidence"), phoneDetail.join(", "))
+  phoneUs.every(d => d.confidence !== null), JSON.stringify(phoneUs.map(d => d.confidence)))
 
 /**
  * The phone, on the STREAMING tab — which this block never reached, and which is
@@ -1566,8 +1917,6 @@ t("what the phone drops from the row is in the drill-down it can open",
  * on the page this whole change exists to fix, while the fortnight board it was
  * measured on sat at exactly 390.
  */
-await phone.click(".board-row")
-await phone.waitForTimeout(150)
 await phone.click(".modes .mode:has-text('Streaming')")
 await phone.waitForSelector(".stream-strip", { timeout: 15000 })
 await phone.waitForTimeout(600)
@@ -1575,6 +1924,12 @@ t("the streaming board does not scroll sideways at 390px either",
   (await phone.evaluate(() => document.documentElement.scrollWidth)) <= 390,
   String(await phone.evaluate(() => document.documentElement.scrollWidth)))
 const smallStream = await cols()
+/* Unchanged, and it is the same src defect as the desktop streaming census two
+ * hundred lines up: the ROW prints "ahead by" here — STREAM_GRID_CSS's 640px block
+ * puts `[data-col=bscore]` at grid-column 3 on purpose, because over three days what
+ * he is ahead of the next arm by is the number that decides the add — and the head
+ * does not, because its SortHead is wrapped in `filters.mode !== "stream"`. So the
+ * phone streaming list prints a column of numbers under no heading at all. */
 t("at 390px streaming keeps the name, what he is worth and how many turns he gets",
   smallStream.names.join() === "rank,who,bscore,games", smallStream.names.join())
 t("and those headings still sit over the cells they name",
@@ -1787,7 +2142,7 @@ await phone.close()
     /20 IP floor/.test(line), line)
 }
 
-/* ── Δ MINE: the board finally mentions your team ─────────────────────────────
+/* ── "FOR YOU": the board finally mentions your team ──────────────────────────
  *
  * Every other number on this table is measured against the (teams × seats)-th man
  * in the LEAGUE. That is the right unit for "who is the best available player" and
@@ -1808,7 +2163,7 @@ await phone.close()
   await dm.waitForSelector(".views button", { timeout: 30000 })
   await dm.click('.views button:has-text("Pickups")')
   await dm.waitForSelector(".board-row", { timeout: 30000 })
-  t("with no roster entered the board carries no Δ MINE column",
+  t("with no roster entered the board carries no \"for you\" column",
     (await dm.$$(".board-head [data-col=mine]")).length === 0)
 
   // A team, entered the way a reader enters one.
@@ -1829,15 +2184,22 @@ await phone.close()
   await dm.click('.views button:has-text("My league")')
   await dm.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
   await dm.fill('textarea[data-ctl="paste-roster"]', roster)
-  await dm.click('.paste-roster button:text-is("Read that")')
+  /* Scoped to the roster box's own card. There are two `.paste-roster` panels on
+     this screen — the roster and the free-agent list — with the same button text on
+     each, so the bare selector names two elements and Playwright refuses it. */
+  await dm.click('.paste-roster:has(textarea[data-ctl="paste-roster"]) button:text-is("Read that")')
   await dm.waitForTimeout(800)
   await dm.click('.views button:has-text("Pickups")')
   await dm.waitForSelector(".board-row", { timeout: 30000 })
   await dm.waitForTimeout(1200)
 
   const head = await dm.$$eval(".board-head > *", n => n.map(e => e.textContent.trim()))
-  t("with a roster it appears, beside bscore",
-    head.some(h => /mine/i.test(h)), head.join(" | "))
+  /* "Δ mine" reads "for you" now, and the rename is the assertion rather than a
+     detail of it: Δ is a symbol a reader has to have been taught, and "mine" is the
+     app talking about its own data model. The column is still located by `data-col`
+     everywhere else in this block, which is why only this one line had to change. */
+  t("with a roster it appears, named in words, beside the league's own bar",
+    head.join("|") === "#|Player|ahead by|for you|games", head.join(" | "))
   const pairs = await dm.$$eval(".board-row", rs =>
     rs.slice(0, 20).map(r => ({
       b: r.querySelector("[data-col=bscore]")?.textContent.trim(),

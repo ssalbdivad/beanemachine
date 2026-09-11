@@ -229,7 +229,7 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * has told the reader to go and find something, which is the same failure the
 	 * blocked card's CTA is written against further down.
 	 */
-	t("Today carries the decision and no ranked board under it",
+	t(`${TAB.board} carries the decision and no ranked board under it`,
 		!(await page.$(".board")) && !!(await page.$(".decide")),
 		text.slice(0, 60))
 	// by `TAB.board`, not by the literal: the label was "Today" and is now "Tonight",
@@ -933,16 +933,37 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * This assertion was deliberately left matching "League setup" after the four tabs
 	 * became three, so that the mismatch stayed visible rather than being papered over
 	 * by loosening the regex: the card was telling a reader to open a tab that no
-	 * longer existed. The copy is fixed now — Decide.tsx says "Open Setup" — so the
-	 * assertion moves to the new name, and the pair below is what keeps it honest in
-	 * future: the screen it names must be one the nav actually offers.
+	 * longer existed. It was then fixed to "Open Setup", and the pair was written to
+	 * keep it honest in future — the screen the card names must be one the nav offers.
+	 *
+	 * IT HAS CAUGHT THE SAME BUG A SECOND TIME, which is why the pair was worth having.
+	 * The bar now reads "Tonight | Pickups | My league" and the tab that takes a team
+	 * count is "My league"; `Decide.tsx` line 833 still reads "Open Setup". There is no
+	 * screen called Setup any more, so the one instruction this blocked card gives
+	 * cannot be followed by reading the screen — and it is the WHOLE card: without a
+	 * team count there is no honest replacement level, so nothing else is offered.
+	 * Decide.tsx:852 and :1166, Trade.tsx:450 and :468, Board.tsx:792 and
+	 * panels.tsx:818/:926 say it too; the rename pass moved the label and left every
+	 * pointer to it behind. This suite may not edit src/, so the assertion STAYS RED
+	 * and the defect is reported rather than absorbed — see the run's srcConcerns.
+	 *
+	 * Two changes to the pair, both of which make it harder to paper over next time:
+	 *
+	 *  · the expected name is DERIVED from the nav rather than written out here, so the
+	 *    test cannot be brought green by editing a literal in it. Whatever the bar is
+	 *    relabelled to, the card has to say that.
+	 *  · the two halves were split so the red one names the real defect. The old first
+	 *    assertion ANDed "it says the team count is missing" with "it says where", so a
+	 *    stale pointer read as the card failing to report the missing input at all,
+	 *    which is a different and much worse bug. It reports it fine. It points wrong.
 	 */
-	t("a league with no team count is told that, and where to set it",
-		/how many teams are in it/.test(text) && /\bSetup\b/.test(text), text.slice(0, 300))
-	t("and the screen it names is one the navigation actually offers",
-		(await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))).includes("Setup") &&
-			!/League setup|Recommendations|My team &/.test(text),
-		text.slice(0, 300))
+	const navLabels = await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))
+	t("a league with no team count is told that much",
+		/how many teams are in it/.test(text), text.slice(0, 300))
+	t("and the screen it sends him to is one the navigation actually offers",
+		navLabels.some(l => text.includes(l)) &&
+			!/League setup|Recommendations|My team &|\bSetup\b/.test(text),
+		`nav offers ${JSON.stringify(navLabels)} — the card says: ${text.replace(/\s+/g, " ").slice(0, 200)}`)
 	await page.close()
 }
 

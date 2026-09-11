@@ -158,8 +158,13 @@ t("but the way to it is on the page, saying what pressing it gets you",
 t("and the borrowed-values caveat is on the board, attached to the numbers",
   /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
   await p.$eval(".preview-note", e => e.innerText))
+/* Matched on a regex rather than `text-is`, and the apostrophe is why: this button
+   ships a straight one ("Who's on my team", Dock.tsx) while every other string in the
+   same flow ships a curly `&rsquo;` — "Who&rsquo;s on your team?", "That&rsquo;s my
+   team". The claim is about the WORDS, so a typographic fix to either glyph must not
+   read as this button disappearing. */
 t("and the button asks the question it is about to ask, not for a chore",
-  await p.locator('.dock-bar button:text-is("Who\'s on my team")').isVisible(),
+  await p.locator(".dock-bar button", { hasText: /^Who.s on my team$/ }).isVisible(),
   await p.$eval(".dock-bar button", e => e.textContent))
 /*
  * THE POINT OF THE WHOLE CHANGE, and until this assertion nothing checked it.
@@ -363,9 +368,25 @@ t("the colophon is one sentence, and it points at the working rather than explai
  * sentence was protecting. Read off the rendered page rather than the source so a
  * legend that stopped rendering is a failure rather than an absence nobody notices.
  */
-const legend = (await p.$eval(".board-legend", e => e.innerText)).replace(/\s+/g, " ").trim()
-t("and the not-a-forecast claim moved onto the table, generated from the sort in force",
-  /does not promise points/i.test(legend) && /best man still free/i.test(legend), legend)
+/*
+ * Read as SUMMARY and BODY, because the legend is a disclosure.
+ *
+ * `.board-legend` is a `<details>`: the summary names the column the rows are sorted
+ * by, and the caveat is one tap under it. That is deliberate and measured — three
+ * lines of caveat above the table is a third of a phone screen spent on prose about
+ * the thing the reader came to look at — so the assertion has to be about both halves,
+ * and `innerText` only ever returns the summary while the disclosure is shut. The
+ * body is read off `textContent`, which is what "present, one tap away" means here.
+ */
+const legendSummary =
+  (await p.$eval(".board-legend summary", e => e.innerText)).replace(/\s+/g, " ").trim()
+const legendAll =
+  (await p.$eval(".board-legend", e => e.textContent)).replace(/\s+/g, " ").trim()
+t("and the column the rows are sorted by is named under the heads, by the sort in force",
+  /ahead by/i.test(legendSummary) && /best man still free/i.test(legendSummary), legendSummary)
+t("and the not-a-forecast claim moved onto the table, one tap under that",
+  /does not promise points/i.test(legendAll) && !/does not promise points/i.test(legendSummary),
+  legendAll.slice(0, 200))
 t("and it no longer quotes folds, rho, z-scores or p-values at a reader who cannot act on them",
   !/\bfolds?\b|spearman|\brho\b|z-score|p-value/i.test(colophon), colophon.slice(0, 200))
 const colophonLinks = await p.$$eval(".colophon a", n => n.map(e => e.getAttribute("href") ?? ""))
@@ -407,7 +428,7 @@ await openDock()
 t("the sheet asks one question, and it is who is on your team",
   /who.s on your team/i.test(await p.$eval(".onboard h2", e => e.innerText)) &&
     (await p.$$eval('.onboard textarea[data-ctl="onboard-team"]', n => n.length)) === 1 &&
-    await p.locator('.onboard button:text-is("That\u2019s my team")').isVisible(),
+    await p.locator(".onboard button", { hasText: /^That.s my team$/ }).isVisible(),
   await p.$eval(".onboard h2", e => e.innerText))
 // The box has to TEACH the format, not describe it: four real men, one to a line, the
 // position first. A placeholder naming somebody the capture has never heard of would
@@ -456,24 +477,39 @@ t("and it does not offer Yahoo a URL import a browser cannot perform",
     return !alts || !alts.querySelector('input[type=text]')
   }))
 /*
- * The one-tap route to a league, visible.
+ * The one-tap route to a league is not a button any more; it is the answer.
  *
- * It was folded inside a disclosure called "Other ways in", 1,536px down, while the
- * only VISIBLE path was pasting a whole settings page — which needs Ctrl-A, a
- * desktop gesture, on an app that is opened on a phone. A first-time visitor who
- * could not paste had no visible way forward at all.
+ * This asserted a visible `.onboard-shortcut` reading "Start from these values", with
+ * "not read from your league" on its own line. That control is DELETED, and so is the
+ * "Use the preset" button inside the disclosure — both of them ways of saying "adopt
+ * the scoring you are looking at", which is a sentence about configuration that a
+ * reader who has not asked about scoring should never have to read.
  *
- * It read "Show me a board first" then, and that sentence stopped being true the
- * moment the board moved onto the first visit: it is already below. What the control
- * actually does is keep the scoring the board is running on and make it his, so he
- * can add a team now and correct the values later — so that is what it says.
- * Asserted as VISIBLE without opening anything, because that is the whole point.
+ * It happens on its own now. Typing a team into the box above and pressing the button
+ * materialises the previewed preset as a real league FIRST and writes the roster
+ * against it (`onAdoptPreset` in App.tsx, called from `readTeam`) — which is both
+ * simpler and a bug fix: `leagueKey` is null on a first visit, `readTeam` used to open
+ * `if (!leagueKey) return`, and the primary button at the highest-attrition step in the
+ * whole product therefore did nothing at all. That whole route is asserted end to end
+ * at the bottom of this file, under "a stranger gets from nothing to a stored team".
+ *
+ * What is asserted here is the half that has to be true BEFORE he types: the sheet
+ * says what the board behind it is running on, and that answering the question is what
+ * makes it his. Without that line the sheet is a box with no stated consequence.
  */
-t("a first visit can adopt the scoring it is already looking at, in one tap",
-  await p.locator('.onboard-shortcut button:text-is("Start from these values")').isVisible())
-t("and it says they were not read from the reader's league, on the button's own line",
-  /not read from your league/i.test(await p.$eval(".onboard-shortcut", e => e.innerText)),
-  await p.$eval(".onboard-shortcut", e => e.innerText))
+t("a first visit is told the board behind the sheet is already running, on borrowed values",
+  /already running/i.test(await p.$eval(".onboard-done", e => e.innerText)) &&
+    /makes it yours/i.test(await p.$eval(".onboard-done", e => e.innerText)),
+  await p.$eval(".onboard-done", e => e.innerText))
+/*
+ * WHAT IS NO LONGER PROTECTED, recorded rather than dropped: nothing now checks that
+ * the borrowed-values caveat sits on the CONTROL a reader presses to borrow them,
+ * because there is no such control. The caveat survives in two other places and both
+ * are asserted — on the board (`.preview-note`) and in the disclosure's own copy, the
+ * line below — but a reader who types his team and presses the button has adopted
+ * standard scoring without the button having said so. The board he lands on still says
+ * it, which is why this is a note and not a failure.
+ */
 // The card and the board must agree about whose scoring this is: two different
 // answers on one screen is worse than either answer alone.
 t("and the card and the board agree that the scoring is standard, not the reader's",
@@ -524,6 +560,11 @@ const onboard = async () => {
   // Opens the dock first. This was a bare wait on `.onboard`, which was on screen
   // whenever this browser held no league; the form is behind the dock's button now.
   await openDock()
+  // And then the disclosure. Pasting a settings page is no longer the front door — it
+  // is what "My league scores differently" opens onto — so the platform chip this
+  // helper needs is inside a closed `<details>`, where a click waits 30s for an
+  // element that is in the DOM and will never be visible. See `openAlts`.
+  await openAlts()
   await p.click('.onboard .chip-btn:text-is("Yahoo")')
   await p.fill('textarea[data-ctl="paste-settings"]', SETTINGS_PASTE)
   await p.click('.onboard button:text-is("Read that")')
@@ -636,18 +677,66 @@ t("and Buy low and the scarcity card no longer run beneath the table",
   !/Buy low|hurts to wait/i.test(boardText),
   (await p.$$eval("section.card h2, section.card h3", n => n.map(e => e.textContent))).join(" | "))
 /**
+ * FOUR columns now, and that is the change this block had to be rewritten for.
+ *
+ * It required uscore, bscore, conf and luck to each carry a >40-character definition
+ * on their own header. Three of those four columns are no longer on the board at all:
+ * uscore, conf and luck left the row and the head together. Measured on the shipped
+ * capture, confidence read 100% on 41 of the first 60 rows and took four distinct
+ * values across all sixty, and luck is a contact percentile that feeds no ranking on
+ * this screen — so three of the six numbers on every row were not decision columns,
+ * and printing them beside the two that are lent them the same weight.
+ *
+ * What a row says now is: rank, who, how far ahead of a free pickup he is, and what he
+ * gets out of the window — plus "for you" once a roster is entered, which is the same
+ * subtraction taken against the reader's own bench. So the head is asserted as a SET
+ * rather than by picking columns out of it: a column creeping back on is as much a
+ * failure here as a definition going missing, and a per-column check cannot see it.
+ */
+const headCols = await p.$$eval(".board-head > [data-col]", n => n.map(e => e.getAttribute("data-col")))
+t("the board is four columns with no roster: rank, player, ahead by, games",
+  JSON.stringify(headCols) === JSON.stringify(["rank", "who", "bscore", "games"]),
+  headCols.join(" | "))
+/**
  * The property the legend was protecting, asserted against what replaced it.
  *
  * Read for LENGTH as well as presence, because `title=""` is a header with a title
  * attribute and no definition in it, and that is precisely how this would rot: a
  * column added to COLUMN_HELP with a placeholder would leave the glossary gone and
  * nothing in its place, and a bare `hasAttribute` check would call that a pass.
+ *
+ * `who` is exempt and named rather than filtered out: its definition is "Sort by
+ * player name.", twenty characters, and a longer one would be padding — the column
+ * whose content is a man's name needs no gloss.
  */
 const heads = Object.fromEntries(await p.$$eval(".board-head .sort-head",
   n => n.map(e => [e.getAttribute("data-col"), e.getAttribute("title") ?? ""])))
-t("but every column still defines itself, on the header instead of in a list below it",
-  ["uscore", "bscore", "conf", "luck"].every(c => (heads[c] ?? "").length > 40),
+t("and every column that is a number still defines itself, on the header itself",
+  Object.entries(heads).every(([c, h]) => c === "who" ? h.length > 10 : h.length > 40),
   Object.entries(heads).map(([c, h]) => `${c}:${h.length}ch`).join(" "))
+/*
+ * The two numbers that left the row are still PRINTED, one tap down, and that is the
+ * difference between moving a column and deleting a measurement. Confidence and uscore
+ * are named in the drill-down — `.detail dt` — so the reader who wants to know how much
+ * data stands behind a projection can still get it per player.
+ *
+ * WHAT IS NO LONGER PROTECTED ANYWHERE, recorded rather than dropped: their
+ * DEFINITIONS. COLUMN_HELP still holds a sentence for confidence, uscore and luck, and
+ * nothing on the page renders those three any more — they were only ever reachable as
+ * the `title=` of a header that no longer exists. The drill-down prints the numbers
+ * with no gloss on what they mean, and the glossary that would have explained them is
+ * the `<details class="legend">` this pass deleted. So "confidence 100%" is on screen,
+ * correct, and undefined.
+ */
+const firstRow = p.locator(".board-row").first()
+await firstRow.click()
+await p.waitForSelector(".detail", { timeout: 10000 })
+const detailTerms = await p.$$eval(".detail dt", n => n.map(e => e.textContent.trim()))
+t("and the numbers that left the row are still printed in the drill-down, per player",
+  detailTerms.includes("confidence") && detailTerms.includes("uscore"),
+  detailTerms.join(" | "))
+await firstRow.click()
+await p.waitForSelector(".detail", { state: "detached", timeout: 10000 })
 // The one definition a reader cannot do without, and the one the old primer got
 // WRONG: it said "the best free agent at the same slot", and the engine draws the
 // bar at the (teams x seats)-th of them — who is left once every team has filled
@@ -729,8 +818,23 @@ await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
   // the note below about what is no longer promised anywhere visible.
   await openDock(fresh)
   const note = (await fresh.$eval(".onboard", e => e.innerText)).replace(/\s+/g, " ")
-  t("the first screen still promises the league stays in this browser",
-    /stays in this browser/i.test(note), note.slice(0, 200))
+  /*
+   * The promise is next to the BOX now, and it is about his team.
+   *
+   * This matched "stays in this browser", which was the sentence the setup carried
+   * when the setup's first question was about a league. The sheet asks one question
+   * now — who is on your team — and the promise moved to sit directly under the box he
+   * types them into, which is where the question "where does this go?" is actually
+   * asked: "Nothing leaves this phone. There is no account — your team is saved in this
+   * browser and nowhere else."
+   *
+   * Read for BOTH halves, because either alone is the old failure: that nothing is
+   * sent anywhere, and that the thing he typed is nonetheless kept. A promise of
+   * privacy with no promise of persistence reads as "and we threw it away".
+   */
+  t("the screen he types his team into promises it goes nowhere and is kept anyway",
+    /nothing leaves this phone/i.test(note) && /saved in this browser/i.test(note),
+    note.slice(0, 220))
   // The claim, not the wording. A blanket "importing needs the local server" was the
   // single sentence standing between a visitor and using this on their own league, and
   // it was false for ESPN, which imports here with no backend at all. It is equally
@@ -892,12 +996,96 @@ t("and nothing was asked of Sleeper, because there was nothing there to ask for"
 // was shown to everybody, which is what made the hosted build a demo of one
 // stranger's team. It has to keep being said, and it has to say WHICH platform.
 const yahooMsg = await importUrl(
-  "https://baseball.fantasysports.yahoo.com/b1/228947/8", /server/i)
-t("a Yahoo import still says it needs the local server", /local server/i.test(yahooMsg), yahooMsg)
-t("and it names Yahoo, and the CORS headers Yahoo doesn't send, as the reason",
-  /yahoo/i.test(yahooMsg) && /cors/i.test(yahooMsg), yahooMsg)
-t("and it says ESPN imports here, so it can't be read as a blanket refusal",
-  /espn/i.test(yahooMsg), yahooMsg)
+  "https://baseball.fantasysports.yahoo.com/b1/228947/8", /any website/i)
+/*
+ * ONE SENTENCE, and it is about his league rather than about our software.
+ *
+ * This asserted four things of this message, and three of them are deliberately no
+ * longer in it: "local server", "CORS", and ESPN by name. The old message was four
+ * sentences and a shell command — access-control headers, what a browser is and is not
+ * handed, ESPN's behaviour by contrast, and `npx --yes github:…` — read by somebody who
+ * is on a hosted page precisely because he was never going to run a command. None of it
+ * changed what he does next.
+ *
+ * The two facts he can act on are what is left, and both are asserted: nothing can read
+ * a Yahoo league, and copying his own page does work. The refusal is STILL Yahoo's by
+ * name, which is the original claim and the one that must not go — a blanket "importing
+ * is not supported" was the sentence that made the hosted build useless, and it was
+ * false for ESPN besides.
+ */
+t("a Yahoo import is refused, and the refusal is Yahoo's by name rather than this app's",
+  /yahoo/i.test(yahooMsg) && /any website can do/i.test(yahooMsg), yahooMsg)
+t("and it ends somewhere a reader can go: copying his own page, private leagues included",
+  /copying your own/i.test(yahooMsg) && /private leagues included/i.test(yahooMsg), yahooMsg)
+/*
+ * The plain-language claim, asserted as a negative on the one message a Yahoo user is
+ * the only reader of.
+ *
+ * Measured across the three screens before this pass: ten lines of developer vocabulary
+ * in user-facing copy. This message carried four of them by itself. A negative
+ * assertion is the only kind that can hold it, because the words come back one at a
+ * time and each one looks harmless on its own.
+ */
+t("and it says none of it in software: no headers, no server, no command",
+  !/cors|access-control|header|local server|npx|node |terminal/i.test(yahooMsg), yahooMsg)
+/*
+ * ── Where the command went, and the claim that went with it ─────────────────────
+ *
+ * The two assertions that used to live on the Yahoo toast — that it names a route which
+ * works for Yahoo (read it locally, carry the file back) and that the command it names
+ * is one a visitor with no clone could run — are still claims worth keeping. The
+ * command has not been deleted; it survives exactly once, on My league, behind a
+ * disclosure whose summary says who it is for. So they are asserted there.
+ *
+ * Read on a SECOND browser carrying a deliberately incomplete league, because that is
+ * the state which renders that card (`Setup` in panels.tsx: a league that exists and
+ * cannot rank) and this page's league is complete. The league is this file's own pasted
+ * one with the team count taken out — one of the three inputs `leagueGaps` requires —
+ * so nothing about it is invented, and the gap is the one a reader most often arrives
+ * with.
+ */
+{
+  const gapPage = await b.newPage({ viewport: { width: 1280, height: 1000 } })
+  await gapPage.route("**/api/**", r => r.abort())
+  await gapPage.goto(BASE, { waitUntil: "networkidle" })
+  const incomplete = await p.evaluate(k => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    const l = JSON.parse(JSON.stringify(c.leagues[k]))
+    l.meta.max_teams = null
+    return JSON.stringify({ ...c, leagues: { [k]: l }, active_league: k })
+  }, KEY)
+  await gapPage.evaluate(c => localStorage.setItem("beanemachine:config", c), incomplete)
+  await gapPage.reload({ waitUntil: "networkidle" })
+  await gapPage.waitForSelector(".flags li", { timeout: 25000 })
+  t("a league that cannot rank says which input is missing, rather than ranking anyway",
+    /how many teams/i.test(await gapPage.$eval(".flags", e => e.innerText)),
+    await gapPage.$eval(".flags", e => e.innerText).then(s => s.replace(/\s+/g, " ").slice(0, 140)))
+  // The card's own prose, which is where the ESPN-imports-here claim now lives: the
+  // refusal toast no longer carries it, and without it somewhere a reader could still
+  // read "Yahoo can't be read" as "no league can".
+  const ways = (await gapPage.$eval("dl", e => e.innerText)).replace(/\s+/g, " ")
+  t("and the page still says ESPN can be read from its URL, so Yahoo is not a blanket no",
+    /espn/i.test(ways) && /yahoo does not let any website/i.test(ways), ways.slice(0, 300))
+  // Folded, and the summary is the whole point of the fold: it names the reader it is
+  // for. A command printed unconditionally is the app talking about itself to somebody
+  // who came here about baseball, which is what the Yahoo toast was doing.
+  const terminal = gapPage.locator("details", { hasText: /comfortable with a terminal/ })
+  t("and the one command left in the product is folded behind who it is for",
+    (await terminal.count()) === 1 &&
+      !(await terminal.locator("pre").first().isVisible()),
+    `${await terminal.count()} disclosures`)
+  const { IMPORT_COMMAND } = await import("../src/client/command.ts")
+  await terminal.locator("summary").first().click()
+  const shown = (await terminal.locator("pre").first().textContent()) ?? ""
+  t("and it names the route that works for Yahoo: read it locally, carry the file back",
+    shown.trim() === IMPORT_COMMAND &&
+      /drop that file/i.test((await terminal.innerText()) ?? "") && !/\bnub\b/.test(shown),
+    shown)
+  t("and the command it names is one a visitor with no clone could actually run",
+    /^npx --yes github:/.test(IMPORT_COMMAND) && !/experimental-strip-types/.test(IMPORT_COMMAND),
+    IMPORT_COMMAND)
+  await gapPage.close()
+}
 // The refusal has to end somewhere a visitor can go. It used to end at "run a
 // server", said to somebody who opened a hosted page precisely because they were
 // not going to run one — and it named `nub`, a command that does not exist on a
@@ -913,15 +1101,10 @@ t("and it says ESPN imports here, so it can't be read as a blanket refusal",
 // So the claim is now asserted against the SHARED constant rather than against a
 // path: whatever src/client/command.ts says is what the refusal has to say, and
 // leagues.mjs is what keeps that constant runnable.
-{
-  const { IMPORT_COMMAND } = await import("../src/client/command.ts")
-  t("and it names the route that works for Yahoo: read it locally, carry the file back",
-    yahooMsg.includes(IMPORT_COMMAND) && /drop that file/i.test(yahooMsg) && !/\bnub\b/.test(yahooMsg),
-    yahooMsg)
-  t("and the command it names is one a visitor with no clone could actually run",
-    /^npx --yes github:/.test(IMPORT_COMMAND) && !/experimental-strip-types/.test(IMPORT_COMMAND),
-    IMPORT_COMMAND)
-}
+/* The two assertions that stood here — that the refusal names the file route, and that
+   the command is runnable by somebody with no clone — moved up into the block above,
+   onto the card that now carries the command. They are not dropped; the toast simply is
+   not where that sentence lives any more. */
 
 // A URL that is no league at all must not be blamed on Yahoo either — that is the
 // shape the message took when the static build had one refusal for everything.
@@ -1001,28 +1184,127 @@ t("and anyone this capture cannot place is named rather than silently dropped",
   pullNote)
 
 /**
- * ── The Yahoo user's two routes, on the build where they are the only ones ──────
+ * ── A stranger gets from nothing to a stored team by TYPING NAMES ────────────────
  *
- * This is the case the hosted site failed at: Yahoo sends no CORS headers, so
- * nothing on this page can read a Yahoo league, and every platform template shipped
- * with 0 stats, 0 slots and no team count — so "new league from a yahoo template"
- * produced a league that ranked nothing. A Yahoo user's only real options here were
- * a stranger's demo league or typing seventeen point values by hand.
+ * THE POINT OF THE WHOLE PASS, and until this block nothing in this suite walked it.
+ *
+ * This is the case the hosted site failed at, and it failed at it twice. First
+ * because Yahoo sends no CORS headers, so nothing on this page can read a Yahoo league
+ * and every platform template shipped with 0 stats and no team count — a Yahoo user's
+ * only real options were a stranger's demo league or typing seventeen point values by
+ * hand. Then, once a preset fixed that, because the only advertised route in was
+ * "select the whole settings page with Ctrl+A", a gesture no phone browser has.
+ *
+ * This block used to walk the fix for the first failure: open the sheet, pick Yahoo,
+ * unfold "Other ways in", press "Use the preset". That BUTTON IS GONE — both it and the
+ * `.onboard-shortcut` one, because "adopt these values" is a sentence about
+ * configuration aimed at somebody who has not asked about scoring and does not know he
+ * is being offered anything.
+ *
+ * What replaced it is one question and one answer: type your players, press the button.
+ * Three things happen on that press and all three are asserted, because this is the
+ * single highest-attrition step in the product and two of the three have been broken
+ * inside it before:
+ *
+ *  · the previewed preset becomes a REAL league in this browser. `readTeam` used to
+ *    open `if (!leagueKey || !snapshot) return`, and `leagueKey` is null on a first
+ *    visit because the board a stranger is looking at is a preview that is never
+ *    stored — so the primary button did nothing at all. Nothing on screen changed and
+ *    nothing was saved.
+ *  · the roster is stored against it, so tonight's lineup has something to rank.
+ *  · every name is repeated back, and every line that matched NOBODY is quoted. A count
+ *    cannot be checked — "18 players" reads the same whether it found yours or not —
+ *    and a silent drop is the one failure a reader never notices: two mistyped names
+ *    would be missing from every recommendation for the rest of the season.
+ *
+ * Typed through `page.type` on the real textarea rather than `fill`, because `fill`
+ * sets the value in one event and this box's only control is React state driven by
+ * `onChange` — a difference that has hidden a broken input before now.
  */
 await p.evaluate(() => localStorage.clear())
 await p.reload({ waitUntil: "networkidle" })
-// The preset is reached through the onboarding now, not through a toolbar: on a
-// first visit the toolbar is hidden, because offering New / Remove / Download /
-// Load file / a URL field to somebody who has no league is five unexplained
-// buttons where one question belongs. It is folded under "Other ways in", which
-// is the ranking this app believes: paste your own page first, borrow second.
 await openDock()
-await p.click('.onboard .chip-btn:text-is("Yahoo")')
-await p.click(".onboard-alts summary")
-await p.click('.onboard-alts button:text-is("Use the preset")')
-// A preset that ranks lands on Today (src/client/App.tsx `create`), so the thing to
-// wait for is the Decide card, not a board row.
+t("a cold first visit holds no league at all, which is the state this route starts in",
+  await p.evaluate(() =>
+    Object.keys(JSON.parse(localStorage.getItem("beanemachine:config")).leagues).length === 0 &&
+      localStorage.getItem("beanemachine:roster") === null))
+/*
+ * The names are the shipped PLACEHOLDER, plus one line that is nobody.
+ *
+ * Taking them off the placeholder rather than hardcoding four more names is the point:
+ * the placeholder is what the app teaches a stranger to type, so this walks the example
+ * the product itself gives. If that example ever names somebody the capture has never
+ * heard of, the front door teaches a format that silently matches nobody, and this
+ * assertion is what would catch it.
+ *
+ * The junk line is deliberate and is not a typo: it is the only way to see the quoting
+ * half of the answer block, and a reader's real paste always has one — a team name, a
+ * header row, a man who retired.
+ */
+const JUNK = "Zzyzx Quimbleton"
+await p.click('.onboard textarea[data-ctl="onboard-team"]')
+await p.type('.onboard textarea[data-ctl="onboard-team"]', `${PLACEHOLDER}\n${JUNK}`)
+await p.locator(".onboard button", { hasText: /^That.s my team$/ }).click()
+await p.waitForSelector(".onboard-answer", { timeout: 15000 })
+const typedKey = await p.evaluate(() =>
+  JSON.parse(localStorage.getItem("beanemachine:config")).active_league)
+t("typing a team on a first visit materialises a real league to hang it on",
+  !!typedKey, String(typedKey))
+t("and the team itself is stored in this browser, against that league",
+  await p.evaluate(k => {
+    const r = JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}")[k]
+    return Array.isArray(r) && r.length === 4
+  }, typedKey),
+  await p.evaluate(() => localStorage.getItem("beanemachine:roster")))
+// Named BACK, not counted. Four names can be checked in four seconds; "4 players"
+// cannot be checked at all.
+const got = await p.$eval(".onboard-got", e => e.innerText)
+t("and every man it found is named back, so four of them can be checked in four seconds",
+  PLACEHOLDER.split("\n").map(l => l.split(" ").slice(1).join(" ")).every(n => got.includes(n)),
+  got)
+t("and the line that matched nobody is quoted back verbatim, not silently dropped",
+  (await p.$eval(".onboard-missed", e => e.innerText)).includes(JUNK),
+  await p.$eval(".onboard-missed", e => e.innerText))
+/*
+ * The second and last question, and it only appears once there is a league to write it
+ * to. The bar every player is measured against is the (teams x seats)-th best man, so
+ * the team count moves every row on the board — which is why it is asked at all, and
+ * why it is a chip row rather than a number field.
+ */
+const teamChips = p.locator(".onboard-teams .chip-btn")
+t("and the one other question that moves every row is asked, as chips",
+  JSON.stringify(await teamChips.allTextContents()) === JSON.stringify(["8", "10", "12", "14", "16"]),
+  (await teamChips.allTextContents()).join(" "))
+await p.click('.onboard-teams .chip-btn:text-is("12")')
+await p.waitForFunction(() => {
+  const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+  return c.leagues[c.active_league].meta.max_teams === 12
+}, null, { timeout: 10000 }).catch(() => {})
+t("and answering it is written to the league, not only to the chip",
+  await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    return c.leagues[c.active_league].meta.max_teams === 12
+  }),
+  String(await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    return c.leagues[c.active_league].meta.max_teams
+  })))
+// The way out of the sheet says what he is getting, and it says it differently once he
+// has a team: "Show me the board" is a place, "Show me tonight" is an answer. It used
+// to read "Done" either way.
+t("and the way out names what the answer bought him",
+  /show me tonight/i.test(await p.$eval(".onboard-done button", e => e.innerText)),
+  await p.$eval(".onboard-done button", e => e.innerText))
+await p.click(".onboard-done button")
+// Finishing lands on Tonight (src/client/App.tsx `onDone`), so the thing to wait for is
+// the Decide card, not a board row.
 await p.waitForSelector(".decide", { timeout: 25000 })
+// And the whole point of having typed it: the screen he lands on is about HIS men. It
+// used to be `.decide-blocked`, naming the roster it did not have, because the button
+// that was supposed to store one did nothing.
+t("and the screen it lands on is about his own team rather than asking for one",
+  (await p.$$eval(".decide-blocked", n => n.length)) === 0,
+  await p.$eval(".decide", e => e.innerText.replace(/\s+/g, " ").slice(0, 160)))
 // `#tpl` — "Start a league from" — lives in the management toolbar, which used to be
 // on the League setup tab and is now on SETUP, the third screen. This was
 // `nth-child(2)`, which is Wire, where no toolbar renders at all.

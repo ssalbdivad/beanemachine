@@ -328,7 +328,7 @@ export const App = () => {
 					// key, which is an internal string nobody chose
 					show(
 						`Ranking on the ${made.meta.platform[0]!.toUpperCase()}${made.meta.platform.slice(1)} ` +
-							`preset — check its values in Setup`
+							`preset — check its values on My league`
 					)
 				} else {
 					setView("trade")
@@ -448,6 +448,12 @@ export const App = () => {
 
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
+			{/* The first stop on the page, and off screen until it is the focused one. A
+			    keyboard reader had to pass the masthead, three tabs, four status chips and
+			    a dozen filter controls to reach the ranking, on every visit. */}
+			<a className="skip" href="#main">
+				Skip to the answer
+			</a>
 			{/* Styled inline rather than in app.css: it is one element that exists only
 			    while a file is in the air, and it has to sit above everything the page
 			    has painted. `pointer-events: none` matters — the window's own drop
@@ -660,6 +666,10 @@ export const App = () => {
 				/>
 			)}
 
+			{/* `<main id="main">` is where "skip to the answer" lands, and it is also the
+			    landmark a screen reader jumps to. It wraps the view content rather than the
+			    whole page, because the masthead, the tabs and the status chips are exactly
+			    what both of those readers are trying to get past. */}
 			{/* Nothing below can say anything until a league exists — the board is
 			    empty and a trade has no prices — so on a first
 			    visit the setup above is the page rather than a card on top of four
@@ -667,6 +677,10 @@ export const App = () => {
 			    open, because those come apart: the setup stays open while a
 			    half-read league is being finished, and that league can already rank
 			    a board worth seeing underneath it. */}
+			{/* `tabIndex={-1}` so the skip link can actually put focus here — without it
+			    the browser scrolls to the landmark and leaves focus on the body, and the
+			    next Tab starts again from the top of the page. */}
+			<main id="main" tabIndex={-1}>
 			{!shown ? null
 			: view === "board" ?
 				/*
@@ -761,6 +775,7 @@ export const App = () => {
 					:	null}
 				</>
 			:	null}
+			</main>
 
 			{/*
 			  The setup hovers at the foot of the page rather than sitting above the

@@ -599,7 +599,7 @@ export const PresetNote = ({
 			    the visitor had just asked for, entirely below the fold, which is the
 			    same defect the management toolbar was moved off the board for. Folded,
 			    with the paragraph trimmed to three lines: 163px and y=1278. The same
-			    lines are listed in full, unfolded, on Setup's Needs review
+			    lines are listed in full, unfolded, on My league's Needs review
 			    card. */}
 			{league.needs_review.length > 0 && (
 				<details>
@@ -616,7 +616,7 @@ export const PresetNote = ({
 			)}
 			{onOpenSetup && (
 				<button className="primary" onClick={onOpenSetup}>
-					Check these in Setup
+					Check these on My league
 				</button>
 			)}
 			{/* The user's own statement, never an inference. Saving an edit is NOT
@@ -769,7 +769,7 @@ export const WaysIn = ({
 							<b>{preset}</b> — a ready-made scoring table, roster and team count,
 							copied from a league that was read from source. Nothing in it came
 							from your league, so the page keeps saying so until you check it,
-							and every value is editable in Setup.
+							and every value is editable on My league.
 							<p style={{ margin: "var(--sp-2) 0 0" }}>
 								<button className="primary" onClick={onUsePreset}>
 									Start from this preset
@@ -815,7 +815,7 @@ export const WaysIn = ({
 					<Fragment2 term="By hand">
 						{league && onOpenSetup ?
 							<>
-								Open <b>Setup</b> and type your league&rsquo;s scoring, slots
+								Open <b>My league</b> and type your league&rsquo;s scoring, slots
 								and team count in. Nothing is filled in for you and nothing is
 								guessed.
 							</>
@@ -923,7 +923,7 @@ export const Setup = ({
 				{league && onOpenSetup && (
 					<p style={{ margin: "var(--sp-3) 0 0" }}>
 						<button className="primary" onClick={onOpenSetup}>
-							Open Setup
+							Open My league
 						</button>
 					</p>
 				)}

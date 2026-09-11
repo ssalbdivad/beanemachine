@@ -251,7 +251,33 @@ const tab = name => page.locator(".views button").filter({ hasText: new RegExp(`
 const current = () => page.$eval(".views button[aria-selected=true]", e => e.textContent.trim())
 const rows = () => page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
 const codes = () => page.$$eval(".board-row .who .code", n => n.map(e => e.textContent.trim()))
-const confs = () => page.$$eval(".board-row .conf-num", n => n.map(e => Number(String(e.textContent).replace("%", ""))))
+/**
+ * Confidence, read off the row's ACCESSIBLE NAME rather than out of a cell.
+ *
+ * It used to be `.board-row .conf-num`, a visible column. The board is four columns
+ * now (#, Player, "ahead by", games; five with a roster) and uscore, conf and luck
+ * came out of the row and the head together — measured on the shipped capture,
+ * confidence read 100% on 41 of the first 60 rows and took four distinct values
+ * across all sixty, so it was a column that looked like a decision column and was
+ * not. Both it and luck are still in the drill-down.
+ *
+ * That left this suite with no per-row confidence at all, and the failure was the
+ * bad kind: `$$eval` over a selector that matches nothing returns `[]`, so every
+ * `.every(...)` over it went on passing VACUOUSLY and only the one assertion that
+ * demanded somebody on each side of the floor ("0 above, 0 below") noticed that the
+ * three claims beside it had stopped testing anything.
+ *
+ * `rowLabel` in Board.tsx puts `confidence NN%` in each row's `aria-label`, built
+ * from the same `pct()` as the old cell, so the value and its rounding are unchanged
+ * and the floor can still be checked per row without opening sixty drill-downs. It is
+ * also the number a screen reader is given, which makes reading it here a claim worth
+ * having: a row whose spoken confidence drifted from the one the filter applies would
+ * fail here.
+ */
+const confs = () =>
+	page.$$eval(".board-row", n =>
+		n.map(e => Number((/confidence (\d+)%/.exec(e.getAttribute("aria-label") ?? "") ?? [])[1]))
+	)
 const bscores = () => page.$$eval(".board-row .bscore", n => n.map(e => parseFloat(e.textContent)))
 /** The board renders only its top 120, so the rendered count is not the ranking's
  *  size. This is the real one, read off the element that states it — it used to be
@@ -447,7 +473,21 @@ const horizon = async label => {
  */
 const pickName = async () =>
 	(await page.$eval(".pick-name", e => e.firstChild?.textContent ?? "")).trim()
+/**
+ * The sentence under the column heads, summary and caveat both.
+ *
+ * Shut is the expected state — it is a `<details>` precisely so three lines of caveat
+ * are not a third of a phone screen above the table they describe — so the text has to
+ * be read with `textContent` rather than by opening it, and `open` is carried along so
+ * the journey can say it shipped shut.
+ */
+const legend = async () => ({
+	summary: (await page.textContent(".board-legend summary")).replace(/\s+/g, " ").trim(),
+	all: (await page.textContent(".board-legend")).replace(/\s+/g, " ").trim(),
+	open: await page.$eval(".board-legend", d => d.open)
+})
 const fortnightPick = await pickName()
+const fortnightLegend = await legend()
 const stream = await horizon("Streaming")
 /**
  * Rewritten, not weakened: `stream.length === 10` was a claim about the RENDER
@@ -462,10 +502,47 @@ const stream = await horizon("Streaming")
 t("switching to Streaming re-ranks against the league's own scoring period",
 	stream.length > 0 && stream.join() !== fortnight.join(), `${stream.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
 const streamPick = await pickName()
+const streamLegend = await legend()
 const stash = await horizon("Stash")
 t("switching to Stash re-ranks against the rest of the season",
 	stash.length === 10 && stash.join() !== stream.join(), `${stash.slice(0, 3)} vs ${stream.slice(0, 3)}`)
 const stashPick = await pickName()
+
+/**
+ * NEW, and it is the assertion the colophon's old one handed its job to.
+ *
+ * The app's one explanation of its own number used to be a fixed sentence in the
+ * footer — "a bscore is a ranking, not a forecast" — rendered under all three screens,
+ * including the one with no table on it. It was also FALSE on one horizon out of three:
+ * Streaming ranks on raw projected points by documented decision (SORT_DEFAULT in
+ * useBoard.ts), so the sentence explaining the table named a column the table was not
+ * ordered by, and a reader comparing the two would have concluded the app could not
+ * read its own numbers.
+ *
+ * `.board-legend` is generated from the ordering actually in force, and that is the
+ * property worth protecting: not that a particular sentence is present, but that the
+ * sentence CHANGES when the ranked column does. A fixed string would pass a
+ * "the legend explains the ranking" assertion on every horizon and be wrong on one,
+ * which is exactly the bug the legend was written to make impossible.
+ *
+ * Asserted here rather than in section 7 with the rest of the footer claims because
+ * this is the one place in the journey that switches horizons, and one reading cannot
+ * make the claim.
+ */
+t("the table explains its own ordering rather than a fixed sentence about one column",
+	fortnightLegend.summary !== streamLegend.summary &&
+		/ahead by/i.test(fortnightLegend.summary) && /points/i.test(streamLegend.summary),
+	`fortnight: ${fortnightLegend.summary}\n  streaming: ${streamLegend.summary}`)
+/** The caveat the footer used to carry, now beside the number it is about. It is the
+ *  one sentence a decision depends on — a bscore of 35 is "further ahead than 20 is",
+ *  not 35 points in the bank — and the footer no longer says it anywhere. */
+t("and the caveat the footer used to carry is on the ranking now, not lost",
+	/does not promise points/i.test(fortnightLegend.all), fortnightLegend.all.slice(0, 200))
+/** A disclosure that ships open is the paragraph again with a triangle on it — the
+ *  same claim this suite makes about the Decide card's fine print in section 6. */
+t("and it is a tap rather than three lines standing over the table",
+	fortnightLegend.open === false && streamLegend.open === false,
+	`fortnight ${fortnightLegend.open ? "OPEN" : "shut"}, streaming ${streamLegend.open ? "OPEN" : "shut"}`)
 
 /**
  * Billy's pick has to follow the horizon. A stale pick above a re-ranked board is
@@ -1044,8 +1121,26 @@ t("the footer is three links and one sentence, not a statistics essay",
 	onTodayFooter.links.length === 3 && onTodayFooter.note.split(/\s+/).length < 60 &&
 		!/Spearman|fold|z[- ]score|p-value/i.test(onTodayFooter.note),
 	`${onTodayFooter.links.length} links, ${onTodayFooter.note.split(/\s+/).length} words: ${onTodayFooter.note}`)
-t("the one sentence is the one a decision depends on — a bscore is not a forecast",
-	/ranking, not a forecast/i.test(onTodayFooter.note), onTodayFooter.note)
+/**
+ * Rewritten, and the rewrite is a handover rather than a relaxation.
+ *
+ * This asserted /ranking, not a forecast/ against the footer, because the footer was
+ * where the app explained its own number: "a bscore is a ranking, not a forecast",
+ * under every screen. That sentence is gone from the footer and the reason is in
+ * `.board-legend` — it was FALSE on one of the three horizons. Streaming ranks on raw
+ * projected points by documented decision (SORT_DEFAULT in useBoard.ts), so the one
+ * sentence explaining the table was describing a column the table was not sorted by,
+ * on every screen including the one with no table on it.
+ *
+ * So the footer's claim is now the two things a footer can truthfully say about three
+ * screens — what the unit is, and where the measurements live — and the caveat it used
+ * to carry is asserted where it actually renders, on the ranking, per ordering. See
+ * "the table explains its own ordering" in section 3. Dropping this line without
+ * putting that one in would have lost the only protection the phrase had.
+ */
+t("the one sentence says what the numbers are in, and points at the measurements",
+	/your league.s own points/i.test(onTodayFooter.note) && /Methodology/.test(onTodayFooter.note),
+	onTodayFooter.note)
 t("and the results it no longer prints are linked rather than dropped",
 	onTodayFooter.methodology, onTodayFooter.links.join(" | "))
 

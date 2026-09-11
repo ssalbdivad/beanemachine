@@ -604,32 +604,138 @@ t("Escape closes it too, from focus anywhere, and still leaves the way back",
 
 // Back in for the route assertions below, through the only door there now is.
 await openDock(fp)
-await fp.click('.onboard .chip-btn:text-is("Yahoo")')
-await fp.click(".onboard-alts summary")
-const routes = await fp.$$eval(".onboard-alts dt", n => n.map(e => e.textContent))
-t("the ways into your own league are named, in one place", routes.length >= 3, routes.join(" | "))
-// It must be runnable by the person READING it, which is somebody on
-// beanemachine.com with no clone. `node --experimental-strip-types src/cli.ts` was
-// neither: the flag has not been needed since node 22.18, and the path only exists
-// inside a checkout. The npx form is verified to work — `bin` in package.json points
-// at a compiled bundle, because node refuses to strip types under node_modules and
-// the .ts bin failed on its first line for everyone.
-t("and the file route prints a command a visitor could actually run",
-  /^npx --yes github:/.test(await fp.locator(".onboard-alts pre").first().textContent()),
-  await fp.locator(".onboard-alts pre").first().textContent())
-// The paste route leads, because it is the only one no platform can switch off.
-t("and pasting the settings page leads, above every route that needs permission",
+
+/**
+ * ── The sheet asks ONE question, and it is about baseball ────────────────────────
+ *
+ * WHAT THIS USED TO ASSERT, three lines down: that the sheet's first control was the
+ * platform picker (`.onboard .chip-btn:text-is("Yahoo")` was clicked to reveal the
+ * rest), that the routes in were a `<dl>` of four terms inside `.onboard-alts`, and
+ * that `textarea[data-ctl="paste-settings"]` came above `.onboard-alts` — "the paste
+ * route leads, because it is the only one no platform can switch off".
+ *
+ * WHY THAT CHANGED, and it is the whole of this pass. The sheet opened with "Where do
+ * you play?" — a question asked for the app's benefit — and the route it then led with
+ * told the reader to select an entire web page with Ctrl+A, which no phone browser can
+ * do. On the device this app is opened on, the advertised front door was impossible.
+ * What always worked on a phone, and was never offered, is typing names:
+ * `playersInText` matches known players in arbitrary prose, so a thumbed-in list reads
+ * exactly as well as a pasted page. So the sheet is now the one question it can
+ * actually answer with — "Who's on your team?", a textarea and a button — and every
+ * word about platforms, settings pages and pasted URLs is behind a <details> whose
+ * summary is a claim about the READER ("My league scores differently") rather than an
+ * interrogation of him.
+ *
+ * So the old ordering assertion is kept, pointed at the new front: the thing that
+ * leads is the question, and the platform machinery is underneath it. What has NOT
+ * changed, and is asserted below rather than dropped, is that every route in is still
+ * named in one place — they are buttons inside that <details> now instead of terms in
+ * a list, and a route that exists but is named nowhere is the failure this has always
+ * been about.
+ */
+t("the sheet asks one question, and it is who is on your team",
+  (await fp.textContent(".dock-sheet .onboard h2")) === "Who’s on your team?" &&
+    (await fp.locator('.onboard textarea[data-ctl="onboard-team"]').count()) === 1 &&
+    (await fp.locator('.onboard .onboard-go button:text-is("That’s my team")').count()) === 1,
+  `${await fp.textContent(".dock-sheet .onboard h2")} — ${await fp.locator('.onboard textarea[data-ctl="onboard-team"]').count()} team boxes`)
+// The platform question is not merely further down, it is SHUT: a reader whose league
+// scores the standard way must be able to finish without ever reading the word Yahoo.
+// Asserted on `open` rather than on visibility because a <details> that ships open is
+// the easy regression and would look like a longer form rather than a broken one.
+t("and everything about platforms is shut behind a claim about the reader, not a question",
+  (await fp.locator(".onboard-alts").evaluate(e => e.open)) === false &&
+    (await fp.textContent(".onboard-alts summary")) === "My league scores differently" &&
+    !(await fp.locator('.onboard-alts .chip-btn:text-is("Yahoo")').isVisible()),
+  `open=${await fp.locator(".onboard-alts").evaluate(e => e.open)} summary="${await fp.textContent(".onboard-alts summary")}"`)
+// The ordering claim, rehomed: the question a phone can answer is above the route that
+// needs a desktop, rather than the other way round.
+t("and the question leads, above every route that needs a computer",
   await fp.evaluate(() => {
-    const box = document.querySelector('textarea[data-ctl="paste-settings"]')
+    const box = document.querySelector('textarea[data-ctl="onboard-team"]')
     const alts = document.querySelector(".onboard-alts")
     return !!box && !!alts &&
       !!(box.compareDocumentPosition(alts) & Node.DOCUMENT_POSITION_FOLLOWING)
   }))
+
+// Opened the way a reader opens it, and the platform chosen inside it — the chips moved
+// into the <details> with everything else, so they cannot be clicked until it is open.
+await fp.click(".onboard-alts summary")
+await fp.click('.onboard-alts .chip-btn:text-is("Yahoo")')
+/**
+ * Every route in is still NAMED, in one place. Named as buttons now rather than as the
+ * terms of a definition list, so they are counted by their labels: pasting the page,
+ * typing the values, and loading a file saved by a local run. The URL field is
+ * deliberately not in the count — `canImport` is false on a page with no server behind
+ * it and the field is rightly absent there, so requiring it would fail for the reason
+ * the app is correct.
+ */
+const routes = await fp.$$eval(".onboard-alts button", n =>
+  n.map(e => e.textContent.trim()).filter(Boolean))
+t("the ways into your own league are named, in one place",
+  ["Read that", "Or type the values in myself", "Load a file I saved"].every(r => routes.includes(r)),
+  routes.join(" | "))
+// And within the platform half, the paste still leads: it is the only route no platform
+// can switch off, and the only one that works on a private league.
+t("and pasting the page leads the routes that need permission",
+  await fp.evaluate(() => {
+    const box = document.querySelector('textarea[data-ctl="paste-settings"]')
+    const byHand = [...document.querySelectorAll(".onboard-alts button")]
+      .find(b => b.textContent.trim() === "Or type the values in myself")
+    return !!box && !!byHand &&
+      !!(box.compareDocumentPosition(byHand) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }))
 // back out of the setup the way a reader does
 await fp.click(".onboard-done button")
-// `onDone` sends the reader to Today, so the toolbar has to be walked back to rather
-// than assumed: the management row lives only on Setup now.
+// `onDone` sends the reader to Tonight, so the toolbar has to be walked back to rather
+// than assumed: the management row lives only on My league now.
 await toSetupBar(fp)
+
+/**
+ * ── The one command, and where it went ──────────────────────────────────────────
+ *
+ * WHAT THIS USED TO ASSERT, inside the block above: that `.onboard-alts pre` printed
+ * `npx --yes github:…`. The reason is unchanged and is still worth an assertion of its
+ * own — a printed command must be runnable by the person READING it, who is on
+ * beanemachine.com with no clone. `node --experimental-strip-types src/cli.ts` was not:
+ * the flag has not been needed since node 22.18 and the path only exists inside a
+ * checkout. The npx form is verified to work, because `bin` in package.json points at a
+ * compiled bundle — node refuses to strip types under node_modules and the .ts bin
+ * failed on its first line for everyone.
+ *
+ * WHAT CHANGED is where it is printed. The command is not in the setup sheet any more,
+ * and it is not on any screen by default: this pass counted the developer vocabulary a
+ * novice meets and took it from ten lines to one, and a terminal command is the purest
+ * example of the class. It survives once, in `WaysIn` (src/client/panels.tsx) behind a
+ * <details> reading "I'm comfortable with a terminal" — which is the honest gate,
+ * because the route is genuinely the best one for a Yahoo league and genuinely unusable
+ * by most readers.
+ *
+ * Reached by making a league that cannot rank, because `WaysIn` renders inside `Setup`
+ * and App.tsx shows that only for a league short of an input — the blank template is
+ * exactly that. On its own context: it leaves a half-built second league behind, and
+ * the assertions further down count the leagues in the file.
+ */
+{
+  const cli = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+  await stubSlate(cli)
+  const cp = await cli.newPage()
+  cp.on("dialog", d => d.accept())
+  await cp.goto(BASE, { waitUntil: "networkidle" })
+  await toSetupBar(cp)
+  await cp.selectOption("#tpl", "custom")
+  await cp.click('.bar button:text-is("New")')
+  await cp.waitForSelector(".routes")
+  const gate = '.routes details summary:text-is("I’m comfortable with a terminal")'
+  t("the terminal route is shut until a reader says that is him",
+    (await cp.locator(".routes details").evaluate(e => e.open)) === false &&
+      (await cp.locator(gate).count()) === 1,
+    `open=${await cp.locator(".routes details").evaluate(e => e.open)}, ${await cp.locator(".routes details summary").textContent()}`)
+  await cp.click(gate)
+  const printed = (await cp.textContent(".routes pre")).trim()
+  t("and the command it prints is one a visitor could actually run",
+    /^npx --yes github:/.test(printed), printed)
+  await cli.close()
+}
 
 // Route 1: one click from the picker to a ranked board.
 await fp.click('.bar button:text-is("New")')
@@ -892,16 +998,26 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
    *
    * It read ["Recommendations", "League setup", "My team & trades"] — three tabs left
    * over from four, named after the machinery rather than after the moment they serve.
-   * It is now ["Today", "Wire", "Setup"]: one question per screen, in the order a
-   * season is actually lived — what to do before first pitch, who is out there to get,
-   * and the once-a-season league-and-team setup both of those are priced in.
+   * It then read ["Today", "Wire", "Setup"], and now reads
+   * ["Tonight", "Pickups", "My league"]: one question per screen, in the order a season
+   * is actually lived — what to do before first pitch, who is out there to get, and the
+   * once-a-season league-and-team setup both of those are priced in.
    *
-   * The half of the old assertion that has not changed at all is the one that matters
-   * most here: there are THREE, and none of them is a draft. A fourth tab reappearing
-   * is how the deleted draft board would come back.
+   * WHY THE SECOND RENAME. "Wire" and "Setup" are both words a person learns from
+   * fantasy software: the wire is jargon for the pool of unowned players, and Setup is
+   * what a program calls its own configuration screen. "Today" was plain English and
+   * still wrong, because the screen is about tonight's games specifically and a reader
+   * opening it at 9am wants to know that. The labels are now the three things a manager
+   * says out loud. The view IDS behind them are untouched — board / wire / trade — and
+   * that is not laziness: the id is the key this browser stores the open screen under,
+   * so renaming it would land every returning reader back on the default.
+   *
+   * The half of the assertion that has not changed across either rename is the one that
+   * matters most here: there are THREE, and none of them is a draft. A fourth tab
+   * reappearing is how the deleted draft board would come back.
    */
   t("the tabs are the three screens that are left, and none of them is a draft",
-    JSON.stringify(tabs) === JSON.stringify(["Today", "Wire", "Setup"]),
+    JSON.stringify(tabs) === JSON.stringify([TONIGHT, PICKUPS, MY_LEAGUE]),
     tabs.join(" | "))
   /**
    * WHERE THE APP OPENS, and what it says there.
@@ -911,24 +1027,29 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
    * tab carried pointed a mid-season reader at that page, and the claim being kept
    * alive was "the thing the banner deferred to is still there, and still works".
    *
-   * Both halves moved, in opposite directions. The default is Today, and Today no
-   * longer ranks: it renders the Decide card alone. At phone width the old shared tab
-   * was 7,477px, which put the first ranked row well past the fold and the decision a
-   * reader came for underneath nothing; Today is now 947px and 105 words with no
-   * roster loaded. The ranked board is Wire, one tap away.
+   * Both halves moved, in opposite directions. The default screen no longer ranks: it
+   * renders the Decide card alone. At phone width the old shared tab was 7,477px, which
+   * put the first ranked row well past the fold and the decision a reader came for
+   * underneath nothing; it is now 947px and 105 words with no roster loaded. The ranked
+   * board is the second tab, one tap away.
    *
    * So the assertion is split in two, because the single claim has become two and
-   * collapsing them would let either one rot unnoticed: Today is what opens and it
-   * answers with a decision, and the ranking is still reachable and still ranks. Only
-   * the second half is what the draft banner pointed at, and it is the one that would
-   * have been quietly lost by deleting this.
+   * collapsing them would let either one rot unnoticed: the default screen answers with
+   * a decision, and the ranking is still reachable and still ranks. Only the second half
+   * is what the draft banner pointed at, and it is the one that would have been quietly
+   * lost by deleting this.
+   *
+   * The label in it is now "Tonight" rather than "Today" — the rename documented at the
+   * head of this file — and it is read through `TONIGHT` rather than typed here, because
+   * this is an assertion about WHICH SCREEN opens and not about what the tab is called:
+   * the tab's name is pinned once, in the nav assertion directly above.
    */
-  t("the app opens on Today, with the decision rather than the table",
-    (await lp.$eval(".views button.on", e => e.textContent.trim())) === "Today" &&
+  t("the app opens on the decision, rather than on the table",
+    (await lp.$eval(".views button.on", e => e.textContent.trim())) === TONIGHT &&
       (await lp.waitForSelector(".decide", { timeout: 25000 }).then(() => true, () => false)) &&
       (await lp.locator(".board-row").count()) === 0,
     `${await lp.$eval(".views button.on", e => e.textContent.trim()).catch(() => "(no tab marked current)")} — ${await lp.locator(".board-row").count()} board rows`)
-  // The link is part of the claim: Today only gets to be this short because the thing
+  // The link is part of the claim: Tonight only gets to be this short because the thing
   // it dropped is one labelled tap away, and a reader who cannot find the table is no
   // better off than one who had to scroll past it.
   t("and it names the way to the ranked board, which still ranks",

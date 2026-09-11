@@ -326,8 +326,17 @@ const BOARD_GRID_CSS = `
  * explicitly at every width or a heading ends up over the wrong cell.
  */
 const STREAM_GRID_CSS = `
+/*
+  Streaming carries one more number than the board, and it is the right one.
+  
+  The board asks who is worth adding, and answers with what he is ahead of a free man
+  by. Streaming asks which arm to start on Saturday, and the quantity that answers it
+  is what he actually scores in the window — a free arm you are not starting is worth
+  nothing to you this week. So both are on the row here, and the list is ordered by
+  the first of them.
+*/
 .board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
-	grid-template-columns:30px minmax(0,1fr) 58px 66px 62px 86px;
+	grid-template-columns:28px minmax(0,1fr) 66px 74px 58px;
 }
 .board[data-mode=stream] .board-head>[data-col=pts],
 .board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3;display:block}
@@ -335,43 +344,18 @@ const STREAM_GRID_CSS = `
 .board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:4;display:block}
 .board[data-mode=stream] .board-head>[data-col=games],
 .board[data-mode=stream] .board-row>[data-col=games]{grid-column:5;display:block}
-.board[data-mode=stream] .board-head>[data-col=conf]{grid-column:6;display:flex}
-.board[data-mode=stream] .board-row>[data-col=conf]{grid-column:6;display:block}
-/* Under 900px the projected total goes and the comparison stays: bscore is the one
-   that answers "is this add worth making at all". */
-@media(max-width:899px){
-	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
-		grid-template-columns:26px minmax(0,1fr) 62px 58px 86px;gap:var(--sp-2);
-	}
-	.board[data-mode=stream] .board-head>[data-col=pts],
-	.board[data-mode=stream] .board-row>[data-col=pts]{display:none}
-	.board[data-mode=stream] .board-head>[data-col=bscore],
-	.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:3}
-	.board[data-mode=stream] .board-head>[data-col=games],
-	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4}
-	.board[data-mode=stream] .board-head>[data-col=conf]{grid-column:5;display:flex}
-	.board[data-mode=stream] .board-row>[data-col=conf]{grid-column:5;display:block}
-}
-/* Under 640px, two numbers beside the name: what he is worth over the window, and
-   how many turns he gets in it. Confidence survives in the drill-down, which
-   prints it, and the start line under his name keeps the opponents. */
+/* Under 640px the board is 300px wide: the name, what he scores, and how many turns
+   he gets. "Ahead by" goes rather than the points, because on this tab the points ARE
+   the ordering and a list must always show the number it is sorted by. */
 @media(max-width:640px){
 	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 58px 58px;gap:var(--sp-2);
+		grid-template-columns:24px minmax(0,1fr) 58px 52px;gap:var(--sp-2);
 	}
-	.board[data-mode=stream] .board-head>[data-col=conf],
-	.board[data-mode=stream] .board-row>[data-col=conf]{display:none}
 	.board[data-mode=stream] .board-head>[data-col=bscore],
-	.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:3}
+	.board[data-mode=stream] .board-row>[data-col=bscore]{display:none}
 	.board[data-mode=stream] .board-head>[data-col=games],
-	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4}
+	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4;display:block}
 }
-/* His rostered share, on the meta line beside slot and club rather than in a
-   column of its own. It is the estimate's own input and it varies row to row, so a
-   reader can audit the claim — but it is a property of the player, not a ranked
-   quantity, and giving it a column would cost the width the pts column now uses. */
-.board .board-row .who .own{color:var(--faint)}
-.board .board-row .who .own.free{color:var(--accent)}
 `
 
 /**
@@ -789,7 +773,7 @@ export const Board = ({
 				<h2>The wire</h2>
 				<p className="empty">
 					A player is worth what he beats the next man up by, and how deep the waiver
-					wire runs decides who that is. Set the team count in <b>Setup</b> and
+					wire runs decides who that is. Set the team count on <b>My league</b> and
 					the board fills in.
 				</p>
 			</section>
@@ -1404,12 +1388,17 @@ export const Board = ({
 						)}
 						{/* "ahead by", not "bscore". The coined word survives on Billy's badge and
 						    in the methodology, where a reader who wants it will find it; the
-						    column that carries the decision says what the number is. */}
-						{filters.mode !== "stream" && (
-							<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>
-								ahead by
-							</SortHead>
-						)}
+						    column that carries the decision says what the number is.
+						    
+						    Rendered on EVERY horizon, streaming included. It was made conditional
+						    when the heads were renamed, and the row's cell was not — so on the
+						    streaming tab the head had three cells over four of body and every
+						    heading sat over the wrong column. A head and a row that disagree about
+						    how many cells they have is the exact failure named at the top of
+						    BOARD_GRID_CSS. */}
+						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>
+							ahead by
+						</SortHead>
 						{/* Δ MINE: what he gains over the man he would actually displace on YOUR
 						    roster. bscore is measured against the (teams x seats)-th man in the
 						    league — the right unit for "who is the best available player" and not

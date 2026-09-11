@@ -447,7 +447,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				<p className="empty">
 					This league doesn&rsquo;t say how many teams are in it, and how deep the waiver
 					wire runs depends on that — so a vacated spot has no honest price yet. Open{" "}
-					<b>Setup</b> and set the team count.
+					<b>My league</b> and set the team count.
 				</p>
 			</section>
 		)
@@ -465,7 +465,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				</p>
 				<p className="sub">
 					Paste your league URL above to read the real values off the platform, or open{" "}
-					<b>Setup</b> and enter them. A trade is priced in your league&rsquo;s own
+					<b>My league</b> and enter them. A trade is priced in your league&rsquo;s own
 					points, so it cannot mean anything until those exist.
 				</p>
 			</section>

@@ -1406,3 +1406,47 @@ kbd{
   .pick-strip .pick-name{font-size:var(--fs-5)}
   .card.pick.pick-strip{padding:var(--sp-2) var(--sp-3);margin-top:var(--sp-2)}
 }
+
+/* ---------- focus, in every rendering mode ----------
+   Focus here is a ring plus a border change, because either alone disappears against
+   one of the two themes — and both are drawn with `box-shadow` and `border-color`,
+   which Windows high-contrast mode throws away. In forced colours the only thing that
+   survives is `outline`, and every focus rule in this file suppresses it. So it comes
+   back, at the one time it is the only signal there is.
+   ------------------------------------------------------------------------- */
+@media (forced-colors: active){
+  :focus-visible,
+  input:focus-visible,select:focus-visible,button:focus-visible,
+  textarea:focus-visible,.board-row:focus-visible,input.val:focus{
+    outline:3px solid Highlight !important;outline-offset:2px !important;
+  }
+}
+
+/* ---------- skip to the answer ----------
+   The board is a thousand rows and the controls above it are a dozen stops. A
+   keyboard reader arriving on this page had to tab through all of it to reach what he
+   came for, on every visit. Visible the moment it is focused and nowhere else.
+   ------------------------------------------------------------------------- */
+.skip{
+  position:absolute;left:var(--sp-5);top:-999px;z-index:60;
+  padding:10px var(--sp-4);border-radius:var(--r-md);
+  background:var(--accent);color:var(--accent-ink);font-size:var(--fs-3);
+  text-decoration:none;
+}
+.skip:focus{top:var(--sp-3)}
+
+/* main is focused programmatically by the skip link and never by tabbing, so it must
+   not draw a ring — the scroll and the next Tab are the feedback. */
+main#main:focus{outline:none}
+
+/* WCAG 2.5.8 asks 24x24 of any pointer target, at every width and not only on a
+   phone. Measured on the published build at 1280px: 31 controls under it. Expanded
+   through padding rather than type, because the type is right. */
+button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
+.board-row{min-height:44px}
+
+/* The two checkboxes were 16x16. Their labels are the real target and are much
+   bigger, but the box itself is what a shaking hand aims at. The inline links that
+   also measure under 24px are exempt: WCAG 2.5.8 excludes a link inside a sentence,
+   and giving them a box would break the sentence. */
+.toggle input[type=checkbox]{width:20px;height:20px}

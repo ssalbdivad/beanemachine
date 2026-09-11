@@ -15,6 +15,7 @@ import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { useSlate } from "./useSlate.ts"
+import { useStored } from "./stores.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { statusOf, lockFor, nextLock, clock, type TodayStatus } from "../data/today.ts"
 import "./decide.css"
@@ -113,6 +114,16 @@ export const Decide = ({
 	 * localStorage key into a blank page, which is a worse answer to "your store is
 	 * broken" than the one already written two tabs away.
 	 */
+	/**
+	 * Anything written to this browser re-reads the stores below.
+	 *
+	 * Without it, pasting a roster into the first-run setup wrote it correctly and this
+	 * card went on saying "Add your players and this becomes tonight's lineup" until the
+	 * page was reloaded — the payoff of the whole onboarding, invisible, to a reader who
+	 * had just done the one thing the app asked of him.
+	 */
+	const rev = useStored()
+
 	const owned = useMemo(() => {
 		if (!leagueKey) return []
 		try {
@@ -120,7 +131,7 @@ export const Decide = ({
 		} catch {
 			return []
 		}
-	}, [leagueKey])
+	}, [leagueKey, rev])
 	const carried = leagueKey ? poolStore.of(leagueKey) : null
 
 	/**

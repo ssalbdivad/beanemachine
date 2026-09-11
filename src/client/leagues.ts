@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { stored } from "./stores.ts"
 import { Config, League } from "../schema.ts"
 import { ApiError } from "./api.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
@@ -56,6 +57,8 @@ const write = (config: Config): Config => {
 	if (out instanceof type.errors)
 		throw new StoreError(`Refusing to store an invalid config:\n${out}`)
 	localStorage.setItem(STORE_KEY, JSON.stringify(out))
+	// tell the screens to look again — see src/client/stores.ts
+	stored()
 	return out
 }
 

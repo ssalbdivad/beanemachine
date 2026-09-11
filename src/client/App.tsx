@@ -13,6 +13,7 @@ import { Decide } from "./Decide.tsx"
 import { Onboard } from "./Onboard.tsx"
 import { Dock } from "./Dock.tsx"
 import { leagues } from "./leagues.ts"
+import { useStored } from "./stores.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
 	EligibilityPanel,
@@ -131,7 +132,10 @@ export const App = () => {
 	 * config change instead of one per render, and recomputed when `config` moves
 	 * because that is what a dropped file changes.
 	 */
-	const wire = useMemo(() => (key ? poolStore.of(key) : null), [key, config])
+	/** Any write to this browser — a pasted free-agent list included — makes the
+	 *  masthead and the board re-read. See src/client/stores.ts. */
+	const rev = useStored()
+	const wire = useMemo(() => (key ? poolStore.of(key) : null), [key, config, rev])
 	/**
 	 * Remounts the two views that ask for a free-agent list when the list changes
 	 * under them.
@@ -726,8 +730,19 @@ export const App = () => {
 				*/
 				<>
 					<div className="grid">
+						{/*
+						  No `key={wireKey}` here, and that is the point.
+						  
+						  The remount exists so a surface that fetched availability once re-asks
+						  when a different free-agent list arrives. Board needs it and holds
+						  nothing a reader typed. Trade IS the screen the list is pasted INTO —
+						  so remounting it on the write wiped the textarea's own confirmation
+						  ("Found 12 free agents…") in the same tick it appeared. A reader who
+						  pastes, sees it work, and watches the message vanish has been told it
+						  did not. Store writes now announce themselves (src/client/stores.ts),
+						  so the re-read happens without throwing the component away.
+						*/}
 						<Trade
-							key={wireKey}
 							snapshot={snapshot}
 							league={league ?? null}
 							leagueKey={key}

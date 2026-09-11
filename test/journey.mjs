@@ -1194,6 +1194,62 @@ const left = await page.evaluate(keys => keys.filter(k => localStorage.getItem(k
 t("the journey leaves nothing behind for the next suite", left.length === 0, left.join(", "))
 clean("over the whole journey")
 
+/* ── a write on one screen reaches another without a reload ──────────────────
+ *
+ * This suite exists for state carried ACROSS surfaces, and this is the case it was
+ * missing — the one where a screen is stale rather than wrong.
+ *
+ * Every league, roster, lineup and free-agent list lives in localStorage, and the
+ * only thing that used to make a screen notice a write was that the component doing
+ * the writing also held the value in React state. That works exactly as far as the
+ * writer and no further. Measured: pasting a roster wrote it correctly and the Today
+ * card went on saying "Add your players and this becomes tonight's lineup" until the
+ * page was reloaded — a reader who has just done the one thing the app asked of him,
+ * watching it go on asking, has been told the app did not work.
+ *
+ * src/client/stores.ts is a revision counter every store bumps on write and every
+ * reading screen subscribes to. Asserted end to end and WITHOUT a reload, because a
+ * reload is the thing that used to hide it.
+ */
+{
+  const live = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+  await live.goto(BASE, { waitUntil: "domcontentloaded" })
+  await live.waitForSelector(".views button", { timeout: 30000 })
+  await live.evaluate(() => localStorage.removeItem("beanemachine:roster"))
+  await live.reload({ waitUntil: "domcontentloaded" })
+  await live.click('.views button:has-text("Today")')
+  await live.waitForSelector(".decide", { timeout: 30000 })
+  await live.waitForTimeout(2000)
+  const before = await live.$eval(".decide", e => e.innerText)
+  t("with no team the card asks for one",
+    /add your players/i.test(before), before.slice(0, 90))
+
+  // Real men out of the shipped capture, entered the way a reader enters them.
+  const team = await live.evaluate(async () => {
+    const snap = await (await fetch("/snapshot.json")).json()
+    const bats = snap.players
+      .filter(p => p.group === "hitting")
+      .sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+    return ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "Util", "Util"]
+      .map((s, i) => `${s}\t${bats[i * 3 + 7].name}`)
+      .join("\n")
+  })
+  await live.click('.views button:has-text("Setup")')
+  await live.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
+  await live.fill('textarea[data-ctl="paste-roster"]', team)
+  await live.click('.paste-roster button:text-is("Read that")')
+  await live.waitForTimeout(1200)
+  await live.click('.views button:has-text("Today")')
+  await live.waitForTimeout(3000)
+  const after = await live.$eval(".decide", e => e.innerText)
+  t("and the moment a team is entered the card stops asking, with no reload",
+    !/add your players/i.test(after) && after !== before, after.slice(0, 140))
+  t("and it is about the team that was just entered",
+    /of your men can score|seats score nothing|nothing to change/i.test(after),
+    after.slice(0, 200))
+  await live.close()
+}
+
 await browser.close()
 if (foreign.length)
 	console.log(`\nset aside, not asserted on — ${foreign.length} console error(s) about a resource this app does not host:` +

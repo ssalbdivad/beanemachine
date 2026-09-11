@@ -4,6 +4,7 @@ import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
 import { readView, writeView } from "./view.ts"
 import { roster } from "./roster.ts"
+import { useStored } from "./stores.ts"
 import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
@@ -531,6 +532,9 @@ export const Board = ({
 	 * the bar for you. Guarded, because `roster.of` throws on a corrupt store and a
 	 * bad localStorage key must not blank the one screen that ranks anything.
 	 */
+	/** Re-read the roster whenever anything in this browser is written — otherwise a
+	 *  team entered on Setup does not reach the Δ MINE column until a reload. */
+	const rev = useStored()
 	const myNames = useMemo(() => {
 		if (!leagueKey || !snapshot) return null
 		let held: string[]
@@ -544,7 +548,7 @@ export const Board = ({
 		return new Set(
 			snapshot.players.filter(p => ids.has(p.id)).map(p => normalizeName(p.name))
 		)
-	}, [leagueKey, snapshot])
+	}, [leagueKey, snapshot, rev])
 	/**
 	 * Opens on the question this reader last asked, not on a guess about a stranger.
 	 * Only mode, window and moves are restored — see `view.ts` for why the filters

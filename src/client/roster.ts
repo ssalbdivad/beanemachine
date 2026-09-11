@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { stored } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -76,6 +77,8 @@ const write = (next: Stored): Stored => {
 		throw new RosterError(`Refusing to store an invalid roster:\n${out}`)
 	try {
 		storage().setItem(STORE_KEY, JSON.stringify(out))
+		// tell the screens to look again — see src/client/stores.ts
+		stored()
 	} catch (e) {
 		throw new RosterError(`This browser refused to store the roster: ${(e as Error).message}`)
 	}

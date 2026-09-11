@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { stored } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -64,6 +65,8 @@ const write = (next: Stored): Stored => {
 	if (out instanceof type.errors) throw new LineupError(`Refusing to store an invalid lineup:\n${out}`)
 	try {
 		storage().setItem(STORE_KEY, JSON.stringify(out))
+		// tell the screens to look again — see src/client/stores.ts
+		stored()
 	} catch (e) {
 		throw new LineupError(`This browser refused to store the lineup: ${(e as Error).message}`)
 	}

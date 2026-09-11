@@ -590,8 +590,13 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * because a "shorter" card that still carries 277 words behind a summary has not
 	 * got shorter.
 	 */
+	/* The verb changed, the AGE is the claim. "as read" was true of seats pulled off a
+	   platform and false of seats typed in, which is the commoner route and the only one a
+	   phone has — a reader who typed his team forty seconds ago was told the comparison was
+	   against seats "as read". What this assertion is for is that the age is on the card,
+	   because the age is the part he acts on. */
 	t("and it says how old the seats it compared against are",
-		new RegExp(`as read ${AGE.source}`).test(text), text.slice(-400))
+		new RegExp(`you last gave it, ${AGE.source}`).test(text), text.slice(-400))
 	t("it says it once — the sentence restating it is gone, not folded",
 		!/Change your lineup in Yahoo since then/.test(deep), text.slice(-400))
 

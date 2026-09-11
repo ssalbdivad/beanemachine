@@ -63,6 +63,10 @@ heading and two buttons are on screen. No horizontal scroll.
 
 ## Smaller, all measured
 
+Two entries that were here have been fixed and are gone: `needs_review` lines that named
+`scoring.unmapped`, `roster.slots` and "endpoint" to a reader, and "vs your seats as read"
+printed about a team that was typed.
+
 - Junk lines of three characters or fewer are dropped silently (`l.length > 3` in
   `src/data/paste.ts`): pasting "asdfgh / 12345 / ???" reports only «asdfgh» while saying
   "Nothing in THEM is counted anywhere". Deliberate for page furniture, invisible for a
@@ -73,6 +77,8 @@ heading and two buttons are on screen. No horizontal scroll.
 - Listing the same man three times dedupes correctly and says nothing about it.
 - A man on the 60-day injured list gets two different explanations on one card: "Injured
   60-Day — no source states a return date" at the top, and "could not be priced" at the foot.
-- "vs your seats as read in the last hour" is printed about a team he typed forty seconds
-  ago, and nothing was "read".
-- "next lock 7:05pm" and "locks 7:10pm" carry no timezone.
+- RETRACTED on inspection: "next lock 7:05pm" and "locks 7:10pm" were reported as carrying
+  no timezone. `clock` in src/data/today.ts calls `toLocaleTimeString(undefined, …)`, so
+  every one of those times is already in the READER's own zone, which is the zone he wants
+  and which needs no label. Left here rather than deleted so the next walk does not
+  re-report it.

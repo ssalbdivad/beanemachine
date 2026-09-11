@@ -758,10 +758,20 @@ t("the board offers no filter on a number it does not print",
 at("a filter nobody matches empties the board and says why")
 await search.fill("zzqqxxnobodyisnamedthis")
 await settle()
-t("a filter nobody matches empties the board and says why",
-	(await page.$$(".board-row")).length === 0 &&
-		/no players match these filters/i.test((await page.textContent(".board .empty")) ?? ""),
-	(await page.textContent(".board .empty")) ?? "no empty state rendered")
+/* "these filters" was the wording and it is gone for a good reason: the message now names
+   the filters that are actually narrowing the board, the position chip and the search box
+   included. A skeptic found the version in between making a CONFIDENT WRONG attribution —
+   a board emptied by the search with Side=batters set read "No players match batters only"
+   — so the list it prints is everything narrowing, and this holds it to naming the two
+   that really are. An empty board that does not say why is the failure mode either way. */
+{
+	const empty = (await page.textContent(".board .empty")) ?? ""
+	t("a filter nobody matches empties the board and says why",
+		(await page.$$(".board-row")).length === 0 && /no players match/i.test(empty),
+		empty || "no empty state rendered")
+	t("and it names what is narrowing it, rather than blaming filters in general",
+		/the C position/.test(empty) && /zzqqxxnobodyisnamedthis/.test(empty), empty)
+}
 
 // and the whole thing unwinds back to where it started
 await search.fill("")
@@ -1061,7 +1071,13 @@ t(liveReasons.length ?
  */
 const readLine = (await page.textContent(".decide-read")).replace(/\s+/g, " ").trim()
 t("the diff dates itself against the read that happened on the other screen",
-	/^vs your seats as read (in the last hour|\d+ hours? ago|\d+ days? ago)$/.test(readLine), readLine)
+	/* "as read" was the verb and it was true of only one of the two ways seats arrive. A
+	   reader who TYPED his team forty seconds ago was told the comparison was against seats
+	   "as read", which claims a platform read that never happened — and on a phone, typing is
+	   the only route there is. The AGE is what this assertion is for, because the age is the
+	   only part that changes what he should do, and it is unchanged. */
+	/^vs the seats you last gave it, (in the last hour|\d+ hours? ago|\d+ days? ago)$/.test(readLine),
+	readLine)
 t("and it no longer repeats itself about changing your lineup in Yahoo",
 	!/Change your lineup/i.test(readLine), readLine)
 
@@ -1291,7 +1307,7 @@ at("Tonight still plans the lineup that was read before the reload")
 await page.waitForSelector(".decide:not(.decide-blocked)", { timeout: 30000 })
 await page.waitForSelector(".decide-read", { timeout: 30000 })
 t("the seats read on the other screen survived the reload, and are still dated",
-	/^vs your seats as read /.test((await page.textContent(".decide-read")).replace(/\s+/g, " ").trim()),
+	/^vs the seats you last gave it, /.test((await page.textContent(".decide-read")).replace(/\s+/g, " ").trim()),
 	(await page.textContent(".decide-read")).replace(/\s+/g, " ").trim())
 /**
  * And the honest edge of it, stated rather than assumed.

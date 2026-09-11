@@ -850,20 +850,28 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 				`settings page before trusting a ranking built on them.`,
 			...(items.length ?
 				[
-					`${items.length} scoring stat(s) ESPN states only as a numeric id this map ` +
-						`does not name, or that carry a per-position points override this engine ` +
-						`cannot express, are kept verbatim under scoring.unmapped and score ` +
-						`nothing. They are not guessed at.`
+					/* `needs_review` renders on My league, so these three lines are read by
+					   somebody who has never seen this repo. They named `scoring.unmapped`,
+					   `roster.slots` and "endpoint" — a schema field, a second schema field and a
+					   word about the software. The facts are unchanged; what goes is the
+					   vocabulary, and with it the implication that the reader can go and look at
+					   something called `scoring.unmapped`. */
+					`${items.length} scoring stat(s) your league pays for are ones ESPN names only ` +
+						`by a number, or that pay differently by position, which this app cannot ` +
+						`express. They are kept exactly as they arrived and score nothing \u2014 ` +
+						`nothing about them is guessed at. Enter those by hand below if they matter.`
 				]
 			:	[]),
 			...(unnamedSlots.length ?
 				[
-					`ESPN lineup-slot id(s) ${unnamedSlots.join(", ")} are not in the derived ` +
-						`baseball slot table, so they keep their numbers in roster.slots and no ` +
-						`replacement level is computed for them.`
+					`Your league has ${unnamedSlots.length} roster seat(s) ESPN names only by a ` +
+						`number (${unnamedSlots.join(", ")}), so this app does not know which ` +
+						`positions they take. They are kept, and nobody is priced against them \u2014 ` +
+						`name them below and they start counting.`
 				]
 			:	[]),
-			"This endpoint doesn't expose position-eligibility rules; eligibility is null."
+			"ESPN does not publish what it takes to qualify at a position, so nothing here " +
+				"assumes it. Where a man plays comes from the player data instead."
 		]
 	}
 }

@@ -1328,7 +1328,13 @@ export const Decide = ({
 							   changes what the reader should do. The second sentence — "change your
 							   lineup in Yahoo since then and this list is against the old one" —
 							   restated the first for anyone who had already understood it. */
-							<>vs your seats as read {readAgo(today.readAt)}</>
+							/* "as read" was true of one of the two ways seats arrive and false of the
+							   commoner one. A reader who TYPED his team forty seconds ago was told the
+							   comparison was against seats "as read", which claims a platform read
+							   that never happened — and on a phone, typing is the only route. The
+							   age is the part that changes what he should do, so it stays; the verb
+							   is now one that is true however the seats got here. */
+							<>vs the seats you last gave it, {readAgo(today.readAt)}</>
 						:	<>
 								Nothing here knows which seats you currently have these men in, so this is
 								the lineup to <b>set</b>, not the changes to make. Read your roster off

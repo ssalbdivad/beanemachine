@@ -63,18 +63,16 @@ heading and two buttons are on screen. No horizontal scroll.
 
 ## Smaller, all measured
 
-Two entries that were here have been fixed and are gone: `needs_review` lines that named
-`scoring.unmapped`, `roster.slots` and "endpoint" to a reader, and "vs your seats as read"
-printed about a team that was typed.
+Five entries that were here have been fixed and are gone: `needs_review` lines that named
+`scoring.unmapped`, `roster.slots` and "endpoint" to a reader; "vs your seats as read"
+printed about a team that was typed; a paste note still sending readers to a tab called
+"Recommendations"; a two-way player stored as two roster entries and reported as one; and
+short lines of a TYPED list dropped from `unmatched` by a floor meant for a pasted page.
 
-- Junk lines of three characters or fewer are dropped silently (`l.length > 3` in
-  `src/data/paste.ts`): pasting "asdfgh / 12345 / ???" reports only «asdfgh» while saying
-  "Nothing in THEM is counted anywhere". Deliberate for page furniture, invisible for a
-  hand-typed list.
-- Shohei Ohtani is two rows in the capture (DH hitting, TWP pitching). Typing his name
-  silently takes one of them and raises no ambiguity note, unlike the documented
-  two-men-one-name path.
-- Listing the same man three times dedupes correctly and says nothing about it.
+- A line of pure punctuation ("???") is still dropped from `unmatched` on both routes. The
+  length floor now applies only to a paste, so "asdfgh" and "12345" are quoted back, but a
+  line with no word character in it is treated as furniture either way. Defensible; noted
+  so the decision is visible rather than accidental.
 - A man on the 60-day injured list gets two different explanations on one card: "Injured
   60-Day — no source states a return date" at the top, and "could not be priced" at the foot.
 - RETRACTED on inspection: "next lock 7:05pm" and "locks 7:10pm" were reported as carrying

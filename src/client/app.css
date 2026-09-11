@@ -27,7 +27,7 @@
      number the whole board exists to show. Both darkened to clear AA. */
   --ink:#191c1f; --muted:#5f5b53; --faint:#6e685c;
   --rule:rgba(92,82,66,.16); --rule-strong:rgba(92,82,66,.34);
-  --accent:#276848; --accent-soft:rgba(39,104,72,.13);
+  --accent:#276848; --accent-soft:rgba(39,104,72,.13); --ring-tint:rgba(39,104,72,.55);
   --acc:var(--accent);
   --neg:#b0432b; --neg-soft:rgba(176,67,43,.11);
   --flag:#8a6d1f; --flag-soft:rgba(200,163,60,.17);
@@ -50,11 +50,10 @@
   --amb-1:rgba(47,125,91,.34); --amb-2:rgba(0,45,114,.30);
   --amb-3:rgba(255,89,16,.22); --amb-4:rgba(47,125,91,.11);
 
-  /* Aliases the newer components were written against. They were referenced
-     before they existed, so `.chip-btn`, `.scar .bar`, `.modes .mode b` and
-     `.buylow-card` silently got nothing at all. Defined as aliases rather than
-     as literals so they follow every theme automatically — there is no second
-     place for them to drift out of sync. */
+  /* Aliases the newer components were written against. They were referenced before
+     they existed, so `.chip-btn`, `.scar .bar` and `.modes .mode b` silently got
+     nothing at all. Defined as aliases rather than as literals so they follow every
+     theme automatically — there is no second place for them to drift out of sync. */
   /* The one colour a primary button's label is allowed to be. `button.primary` sets
      a green ground and inherited ink on it measured 2.39:1 in dark mode — the app's
      only conversion action, failing AA. 6.5:1 light, 10.0:1 dark. */
@@ -94,7 +93,21 @@
 
   --r-sm:7px; --r-md:9px; --r-lg:13px; --r-pill:999px;
   --radius:var(--r-lg);
-  --ring:0 0 0 3px var(--accent-soft);
+  /*
+    THE RING, at a strength that is actually an indicator.
+
+    It was `--accent-soft` — 13% alpha in light, 15% in dark — and sampling the rendered
+    3px band against the page behind it gave 1.20:1 on a value field, 1.05:1 on a toolbar
+    button and 1.20:1 on a chip. WCAG 1.4.11 wants 3:1. So on every control where the ring
+    was the whole treatment it was not visible, and on the rest the real signal was the 1px
+    border turning green. Halving the surrounding colour's lightness is not available to a
+    box-shadow, so the ring gets its own alpha rather than borrowing the wash's.
+
+    Keyboard focus no longer depends on it — see the `:focus-visible` note below, where an
+    outline nothing can suppress carries that. This is for the places the ring is used on
+    its own: `input.val:focus`, which fires on a mouse click too, and the pressed states.
+  */
+  --ring:0 0 0 3px var(--ring-tint);
 
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,"Cascadia Mono",monospace;
   --sans:ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif;
@@ -113,7 +126,7 @@
     --paper:#14161a; --sunken:#22262c;
     --ink:#eceae4; --muted:#a6a096; --faint:#8b8578;
     --rule:rgba(255,255,255,.10); --rule-strong:rgba(255,255,255,.22);
-    --accent:#5cb98d; --accent-soft:rgba(92,185,141,.15);
+    --accent:#5cb98d; --accent-soft:rgba(92,185,141,.15); --ring-tint:rgba(92,185,141,.55);
     --neg:#e0785c; --neg-soft:rgba(224,120,92,.15);
     --flag:#d4b463; --flag-soft:rgba(212,180,99,.15);
     --lens:#1d3129; --glint:#dff0e7; --mets-blue:#1b4d99; --mets-orange:#ff6b2c;
@@ -135,7 +148,7 @@
   --paper:#14161a; --sunken:#22262c;
   --ink:#eceae4; --muted:#a6a096; --faint:#8b8578;
   --rule:rgba(255,255,255,.10); --rule-strong:rgba(255,255,255,.22);
-  --accent:#5cb98d; --accent-soft:rgba(92,185,141,.15);
+  --accent:#5cb98d; --accent-soft:rgba(92,185,141,.15); --ring-tint:rgba(92,185,141,.55);
   --neg:#e0785c; --neg-soft:rgba(224,120,92,.15);
   --flag:#d4b463; --flag-soft:rgba(212,180,99,.15);
   --lens:#1d3129; --glint:#dff0e7; --mets-blue:#1b4d99; --mets-orange:#ff6b2c;
@@ -195,12 +208,36 @@ input[type=number]{appearance:textfield;-moz-appearance:textfield}
 input[type=number]::-webkit-outer-spin-button,
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 
-/* One focus treatment, applied to everything focusable. Keyboard focus has to be
-   visible against glass in both themes, so it is a ring AND a border change —
-   either one alone disappears against one of the two backgrounds. */
+/*
+  ONE FOCUS TREATMENT, AND THE OUTLINE IS NEVER TURNED OFF.
+
+  It used to be: `:focus-visible` sets an outline, then a second rule at (0,1,1) for
+  inputs, selects and buttons sets `outline:none` and replaces it with a border colour
+  and a box-shadow. Every later rule in this file at (0,1,1) or higher that touches
+  either property therefore erased the whole treatment, because the outline it would
+  have fallen back to had already been suppressed:
+
+    .views button   box-shadow:none, border:1px solid transparent   — the tab bar
+    .modes .mode    box-shadow:none, border:0                       — the horizon tabs
+    button.primary  its own box-shadow, border-color:transparent    — every CTA
+    button.ghost    box-shadow:none, border-color:transparent
+    select,input[type=text]  box-shadow:inset…, border:1px solid var(--edge-line)
+
+  Measured by tabbing to each control and screenshotting it plus a 6px margin, focused
+  against unfocused: 0.00% of pixels changed on the view tabs, the horizon tabs, the
+  player search box, the primary buttons and the ghost buttons, in both themes. Five
+  classes of control with no visible focus at all — including the tab bar, which is the
+  first thing a keyboard reader lands on. Selects were fine, and only because
+  `select,input[type=text]` is (0,0,1) and loses.
+
+  So the outline stays on for everything, and the border and inner highlight are an
+  addition on top of it rather than a substitute for it. An outline cannot be cancelled
+  by a `box-shadow:none` or a `border-color`, which is precisely why it is the layer the
+  treatment rests on: this pattern has now failed once per control type.
+*/
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 input:focus-visible,select:focus-visible,button:focus-visible{
-  outline:none;border-color:var(--accent);
+  border-color:var(--accent);
   box-shadow:inset 0 1px 0 var(--edge), var(--ring);
 }
 
@@ -514,6 +551,29 @@ pre{
 .savebar .inner{max-width:940px;margin:0 auto;padding:var(--sp-3) var(--sp-5);display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
 .savebar .msg{flex:1;font-size:var(--fs-2);letter-spacing:.06em;color:var(--muted);min-width:min(220px,100%)}
 
+/*
+  ON A PHONE IT MUST NOT COVER THE FORM IT IS ASKING ABOUT.
+
+  Measured on My league at 390x844: editing one scoring value raised a 130px bar —
+  15% of the viewport — fixed to the bottom, and a hit test with it up found three
+  whole scoring rows underneath it. The point value, and the button that removes the
+  stat, both untappable, on the rows nearest the one just edited. `.wrap`'s
+  `padding-bottom` reserves space at the END of the document, which does nothing for a
+  reader in the middle of a long form.
+
+  Two changes, and the second is the one that matters. The bar goes to a single line,
+  because "Unsaved changes / Revert / Save" does not need three; `.msg` stops claiming
+  its own row at this width, which is what was wrapping it. And every field in the
+  editor gets `scroll-margin-bottom`, so when the browser scrolls a focused input into
+  view it puts it clear of the bar rather than flush against the bottom edge — which is
+  what a reader tabbing or tapping through the form actually experiences.
+*/
+@media(max-width:640px){
+  .savebar .inner{padding:var(--sp-2) var(--sp-3);flex-wrap:nowrap}
+  .savebar .msg{min-width:0;flex:1 1 auto}
+  .rows .row input,.rows .row button,.slot-row input,input.val{scroll-margin-bottom:96px}
+}
+
 /* ---------- toast ---------- */
 .toast{
   position:fixed;top:var(--sp-5);left:50%;z-index:40;
@@ -717,32 +777,21 @@ pre{
   font-variant-numeric:tabular-nums}
 
 /* ---------- the board ----------
-   Nine columns, and the header and the rows are placed into them explicitly.
-   Auto-placement had quietly put the confidence gauge under "GP" and the games
-   count under "confidence" — every number in those two columns was labelled as
-   the other one. Explicit placement is the only version of this that cannot
-   drift when a cell is added to one of the two rows and not the other. */
+   The shell only: a grid, a sticky head, and how a cell in it is typeset. WHICH
+   columns exist and which track each one sits in is in Board.tsx beside the markup
+   that emits them, because only that file knows how many there are.
+
+   This block used to carry an eight-track template and a ladder of nth-child
+   placements for nine columns. Four of the nine are gone and a fifth is conditional,
+   so every index in that ladder pointed at a different cell than it was written for:
+   at 390px `nth-child(7)` and `nth-child(8)` were hiding nothing and a 900px block
+   was un-hiding the games count that the 640px block had just dropped, landing it on
+   top of "ahead by" — the first row read "35.2714GP" on a phone. Index-based
+   placement cannot survive a column count changing, and this one's changed four
+   times. Placement is by `data-col` now, and a cell with no rule simply does not
+   render. */
 .board{display:flex;flex-direction:column;min-width:0}
-.board-head,.board-row{
-  display:grid;
-  grid-template-columns:
-    30px minmax(0,1fr) 66px 66px 56px 34px 86px 46px;
-  gap:10px;align-items:center;text-align:left;
-}
-/* every cell is on the one row; without that, placing a later child into an
-   earlier column pushes it onto a second implicit row */
-.board-head>*,.board-row>*{grid-row:1;min-width:0}
-.board-head>*:nth-child(1),.board-row>*:nth-child(1){grid-column:1}
-.board-head>*:nth-child(2),.board-row>*:nth-child(2){grid-column:2}
-.board-head>*:nth-child(3),.board-row>*:nth-child(3){grid-column:3}
-.board-head>*:nth-child(4),.board-row>*:nth-child(4){grid-column:4}
-.board-head>*:nth-child(5),.board-row>*:nth-child(5){grid-column:5}
-.board-head>*:nth-child(6){grid-column:6}
-.board-head>*:nth-child(7){grid-column:7}
-.board-head>*:nth-child(8),.board-row>*:nth-child(8){grid-column:8}
-/* the row carries them the other way round: confidence, then games */
-.board-row>*:nth-child(6){grid-column:7}
-.board-row>*:nth-child(7){grid-column:6}
+.board-head,.board-row{display:grid;gap:10px;align-items:center;text-align:left}
 .board-head{
   position:sticky;top:0;z-index:2;
   font-size:var(--fs-1);color:var(--faint);
@@ -757,7 +806,7 @@ pre{
 }
 .board-head .r,.board-row .r{text-align:right}
 /* the rank is a right-aligned column, so its heading is one too */
-.board-head>*:nth-child(1){text-align:right}
+.board-head>[data-col=rank]{text-align:right}
 .board-row{
   background:transparent;border:0;border-bottom:1px solid var(--rule);border-radius:0;
   padding:7px var(--sp-2);cursor:pointer;font:inherit;color:inherit;box-shadow:none;
@@ -769,7 +818,10 @@ pre{
 }
 .board-row:hover:not(:disabled){background:var(--glass-2);border-left-color:var(--rule-strong)}
 .board-row.open{background:var(--accent-soft);border-left-color:var(--accent)}
-.board-row:focus-visible{outline:none;background:var(--glass-2);border-left-color:var(--accent);box-shadow:var(--ring)}
+/* The outline is kept here too. A row is 44px of full-width button and the rail alone
+   was the only mark of focus on it; see the note on `:focus-visible` above for why no
+   rule in this file is allowed to switch the outline off any more. */
+.board-row:focus-visible{background:var(--glass-2);border-left-color:var(--accent);box-shadow:var(--ring)}
 .rank{font-family:var(--mono);font-size:var(--fs-2);color:var(--faint);text-align:right;
   font-variant-numeric:tabular-nums}
 .who{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -810,26 +862,6 @@ pre{
 .sort-head.active{color:var(--accent)}
 .sort-head .arrow{font-size:8px;line-height:1;flex:none;width:8px;text-align:center}
 .board .empty{padding:var(--sp-4) var(--sp-2) 0}
-
-/* Below this width nine columns of numbers is not a table, it is a wall, and a
-   player's name is what gets squeezed for them. Columns are dropped in header and
-   body together — never one without the other — so what is left still lines up,
-   and everything dropped is a tap away in the drill-down.
-
-   Under 900px: owned and GP go. Under 640px: confidence and luck go too, leaving
-   the ranking, the name, and the two numbers it is ranked on. */
-@media(max-width:899px){
-  .board-head,.board-row{grid-template-columns:26px minmax(0,1fr) 58px 62px 86px 46px;gap:var(--sp-2)}
-  .board-head>*:nth-child(5),.board-head>*:nth-child(6),
-  .board-row>*:nth-child(5),.board-row>*:nth-child(7){display:none}
-  .board-head>*:nth-child(7),.board-row>*:nth-child(6){grid-column:5}
-  .board-head>*:nth-child(8),.board-row>*:nth-child(8){grid-column:6}
-}
-@media(max-width:640px){
-  .board-head,.board-row{grid-template-columns:24px minmax(0,1fr) 54px 58px}
-  .board-head>*:nth-child(7),.board-head>*:nth-child(8),
-  .board-row>*:nth-child(6),.board-row>*:nth-child(8){display:none}
-}
 
 /* ---------- drill-down ---------- */
 .detail{
@@ -919,24 +951,6 @@ pre{
 }
 .card.pick .pick-bot .bot circle[r="3.8"]{animation-delay:1.2s}
 
-/* Buy low. Deliberately quieter than the main board: it is a shortlist to consider,
-   not a ranking to act on, and styling it like a verdict would oversell it. */
-.buylow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:var(--sp-3);margin-top:var(--sp-3)}
-.buylow-card{
-  border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--sp-3) var(--sp-4);
-  background:var(--panel);display:flex;flex-direction:column;gap:6px;min-width:0;
-}
-.buylow-card b{font-size:var(--fs-5);font-weight:600;letter-spacing:-.01em}
-.buylow-card .pos{font-family:var(--mono);font-size:var(--fs-1);color:var(--faint);
-  letter-spacing:var(--caps);text-transform:uppercase}
-.buylow-card dl{margin:var(--sp-1) 0 0;display:grid;grid-template-columns:minmax(0,1fr) auto;
-  gap:var(--sp-1) var(--sp-3);font-size:var(--fs-3)}
-.buylow-card .pair{display:contents}
-.buylow-card dt{font-family:var(--mono);font-size:var(--fs-2);color:var(--muted);text-transform:none}
-.buylow-card dd{margin:0;text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
-.buylow-card dd.good{color:var(--accent);font-weight:600}
-.buylow-card .tiny-note{margin:6px 0 0;font-size:var(--fs-2);line-height:var(--lh-snug);color:var(--muted)}
-
 /* Scarcity. A bar chart because the comparison IS the point — the numbers alone
    make you do the ranking in your head. */
 .scarcity{display:flex;flex-direction:column;gap:7px;margin-top:var(--sp-3)}
@@ -994,7 +1008,7 @@ textarea{
   padding:var(--sp-3);margin:var(--sp-2) 0 0;
 }
 textarea:hover{border-color:var(--rule-strong)}
-textarea:focus-visible{outline:none;border-color:var(--accent);box-shadow:var(--ring)}
+textarea:focus-visible{border-color:var(--accent);box-shadow:var(--ring)}
 textarea::placeholder{color:var(--faint)}
 
 .paste-roster{margin-top:var(--sp-5)}
@@ -1030,8 +1044,6 @@ kbd{
 .onboard-alts dl{margin-top:var(--sp-3)}
 .onboard-url{display:flex;gap:var(--sp-2);margin-top:var(--sp-2);flex-wrap:wrap}
 .onboard-url input{flex:1 1 220px;min-width:0}
-.onboard-done{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-5) 0 0}
-.onboard-done .sub{margin:0;flex:1 1 260px}
 @media(max-width:640px){
   .onboard-steps{gap:var(--sp-4)}
   .onboard-step{gap:var(--sp-2)}
@@ -1041,12 +1053,6 @@ kbd{
    other in the order a decision is made, and the reader who needs the second one
    has just finished the first. */
 .next-screen{grid-column:1/-1;margin:0;display:flex;justify-content:flex-end}
-
-/* The three-tap route to a working board, offered before the two-minute one. It
-   reads as an aside rather than as a step, because it is not one: it is the way to
-   see the thing work before committing a league to it. */
-.onboard-shortcut{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
-.onboard-shortcut .sub{margin:0;flex:1 1 240px;min-width:0}
 
 /* A folded card: the heading stays a heading and the summary carries the answer, so
    nothing has to be opened to check it. The marker sits with the text rather than in
@@ -1110,6 +1116,20 @@ kbd{
    ------------------------------------------------------------------------- */
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;pointer-events:none}
 .dock>*{pointer-events:auto}
+/* The page behind the sheet, dimmed but not taken away. See src/client/Dock.tsx for
+   why this is a dim and not a modal. Two things it must do and one it must not:
+     · pointer-events:none, overriding the rule above, so the board goes on scrolling
+       under a finger. A scrim that swallows touches is a modal with extra steps.
+     · z-index:-1, so it paints under the sheet and the bar. They are static boxes and
+       this is a positioned one, so without it a fixed child would cover both — inside
+       .dock's own stacking context, which is above everything in .wrap either way.
+     · it must not animate: this appears over a thousand-row table and a fading full
+       -viewport layer is a repaint of all of it. */
+.dock-scrim{position:fixed;inset:0;z-index:-1;pointer-events:none;background:rgba(40,34,24,.34)}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]) .dock-scrim{background:rgba(0,0,0,.52)}
+}
+:root[data-theme=dark] .dock-scrim{background:rgba(0,0,0,.52)}
 .dock-bar{
   display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
   max-width:940px;width:100%;margin:0 auto;
@@ -1330,6 +1350,31 @@ kbd{
 .onboard-alts>summary::-webkit-details-marker{display:none}
 .onboard-done{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-4) 0 0}
 .onboard-done .sub{margin:0;flex:1 1 240px;min-width:0}
+/* The finish, pinned to the foot of the sheet.
+   Measured on the published build at 390x844 before this: the sheet's scroll box was
+   590px tall with 713px in it and "Show me tonight" sat 646px down — 56px below its
+   own fold. At 360x640, 685px down in a 447px box, 238px under. The sheet scrolls
+   independently of the page and a phone draws no scrollbar, so there was nothing on
+   screen saying the way forward existed. Pinned, it is the last 46px of the sheet at
+   every size, and the content sliding under it is the only thing that says so.
+   Added only when there is a button to pin — see the note in src/client/Onboard.tsx.
+   The side bleed is so it reads as a bar across the sheet rather than a button
+   floating in one; it covers the card's padding, and `z-index` puts it over the card's
+   registration marks, which are absolutely positioned and would otherwise paint on
+   top of it. */
+.onboard-foot{
+  position:sticky;bottom:0;z-index:2;
+  margin:var(--sp-4) calc(-1 * var(--sp-5)) 0;
+  padding:var(--sp-3) var(--sp-5);
+  background:var(--paper);
+  border-top:1px solid var(--edge-line);
+}
+/* A hairline alone says "bar"; this says "there is more above it", which is the half
+   of the measured defect that is about not knowing the box scrolls at all. */
+.onboard-foot::before{
+  content:"";position:absolute;left:0;right:0;top:-22px;height:22px;pointer-events:none;
+  background:linear-gradient(to top,var(--paper),transparent);
+}
 
 /* The one sentence explaining the table, under the heads it explains, generated from
    the ordering actually in force. It replaces a colophon line printed on every screen
@@ -1367,17 +1412,59 @@ kbd{
 .board-row.open{background:var(--accent-wash)}
 
 /* ---------- a thumb ----------
-   Measured on the published build: 30 of 94 controls were under 44x44 on a phone, and
-   not one primary control met it. The padding is expanded rather than the type,
-   because the type is right and the target is not.
+
+   THE FLOOR FIRST, THEN THE PHONE, and the order is the whole fix.
+
+   These two blocks were the other way round: the 44px phone rules came first and a
+   32px floor headed "WCAG 2.5.8 asks 24x24" sat eighty lines below them with no media
+   query. Same specificity, later in the file, and a media query adds none — so at
+   390px the 32px rule won every one of them and the phone block was dead CSS under a
+   comment claiming it had fixed something. Proved with CDP `CSS.getMatchedStylesForNode`
+   on the published build: `.views button` matched all three rules and computed
+   min-height 32px, box 82.7x35.
+
+   Re-measured on the published build at 390x844, deduped across all three screens:
+   26 of 91 distinct visible controls under 44x44 — every navigation tab, every horizon
+   tab, all eleven position chips, both sort headers and the three footer links. The
+   comment said "30 of 94 were", describing the state this block was supposed to end.
+
+   Both are kept and both are honest: 24x24 is the standard's floor at any width, 44x44
+   is what a thumb needs, and the phone rules now come last so they win where they apply.
    ------------------------------------------------------------------------- */
+
+/* WCAG 2.5.8 asks 24x24 of any pointer target, at every width and not only on a
+   phone. Measured on the published build at 1280px: 31 controls under it. Expanded
+   through padding rather than type, because the type is right. */
+button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
+.board-row{min-height:44px}
+
+/* The two checkboxes were 16x16. Their labels are the real target and are much
+   bigger, but the box itself is what a shaking hand aims at. The inline links that
+   also measure under 24px are exempt: WCAG 2.5.8 excludes a link inside a sentence,
+   and giving them a box would break the sentence. */
+.toggle input[type=checkbox]{width:20px;height:20px}
+
 @media(max-width:640px){
   .views button,.modes .mode,.chip-btn,.board-controls .more>summary,
   .onboard-alts>summary,.period-fold>summary{
     min-height:44px;display:inline-flex;align-items:center;
   }
+  /* And WIDE enough. The position chips cleared 44 vertically and measured 35 to 43
+     across — "C" narrowest at 35 — because their width is their label's width plus
+     padding, and a one-letter label is one letter wide. A target is two dimensions. */
+  .chip-btn{min-width:44px;justify-content:center}
+  /* The three remaining under-height targets, all of them real controls rather than
+     links inside a sentence — which WCAG 2.5.8 does exempt, and these are not. The
+     footer links are a navigation row (17px tall, measured) and "why him" is a
+     disclosure on Billy's card (54x18). Padding, not type: the type is right. */
+  .colophon .links{gap:var(--sp-3)}
+  .colophon .links a{padding:14px 0;display:inline-flex;align-items:center}
+  .pick summary,.pick-strip summary{padding:13px 0;min-height:44px;display:inline-flex;align-items:center}
   .toggle{min-height:44px}
-  .toggle input{width:22px;height:22px}
+  /* `.toggle input[type=checkbox]` above is (0,2,1) and this was (0,1,1), so the
+     desktop 20x20 beat the phone 22x22 even before the blocks were reordered. Matched
+     attribute for attribute so the two can be read side by side. */
+  .toggle input[type=checkbox]{width:22px;height:22px}
   button{min-height:44px}
 }
 
@@ -1393,11 +1480,33 @@ kbd{
   header::after{display:none}
   .bot{width:34px;height:26px}
   .mark h1{font-size:var(--fs-6)}
+  /*
+    TWO THINGS STUCK TO top:0, and the taller one won.
+
+    `.views` pins at z-index 30 and `.board-head` pins at z-index 2, both at top 0. So
+    the moment the board scrolled, the column headings were painted UNDERNEATH the tab
+    strip. Measured on the published build at scrollY 1200: nav top 0 bottom 45, head top
+    0 bottom 49, and `document.elementFromPoint(239, 24)` — the middle of the "ahead by"
+    sort button — returned the "My league" tab. A real touch tap there switched screens
+    and threw away the scroll position, so the gesture that should reorder the list left
+    the list entirely.
+
+    The second cost is quieter and worse: the headings vanish as soon as anyone scrolls,
+    so every number beside a name is unlabelled for the whole rest of the list.
+
+    The nav's height is written once here and the head is offset by it, rather than the
+    two agreeing by luck about a number neither states. 54px is the measured height of
+    the bar at this width with the 44px thumb rule applied above — a magic number, and
+    the honest kind: it is stated once, and `.thumb.mjs` prints the real one beside the
+    head's offset on every run.
+  */
+  :root{--nav-h:54px}
   .views{
     position:sticky;top:0;z-index:30;margin-top:var(--sp-2);
     background:var(--paper);border-radius:0;
     padding:var(--sp-1) 0;
   }
+  .board-head{top:var(--nav-h)}
   /* The pick is a hook, not a paragraph: on a phone it is the name and the number. */
   .pick-strip .pick-bot,.pick-strip .pick-body h2{display:none}
   .pick-strip .pick-avail{
@@ -1429,7 +1538,8 @@ kbd{
    ------------------------------------------------------------------------- */
 .skip{
   position:absolute;left:var(--sp-5);top:-999px;z-index:60;
-  padding:10px var(--sp-4);border-radius:var(--r-md);
+  padding:12px var(--sp-4);border-radius:var(--r-md);min-height:44px;box-sizing:border-box;
+  display:inline-flex;align-items:center;
   background:var(--accent);color:var(--accent-ink);font-size:var(--fs-3);
   text-decoration:none;
 }
@@ -1439,14 +1549,3 @@ kbd{
    not draw a ring — the scroll and the next Tab are the feedback. */
 main#main:focus{outline:none}
 
-/* WCAG 2.5.8 asks 24x24 of any pointer target, at every width and not only on a
-   phone. Measured on the published build at 1280px: 31 controls under it. Expanded
-   through padding rather than type, because the type is right. */
-button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
-.board-row{min-height:44px}
-
-/* The two checkboxes were 16x16. Their labels are the real target and are much
-   bigger, but the box itself is what a shaking hand aims at. The inline links that
-   also measure under 24px are exempt: WCAG 2.5.8 excludes a link inside a sentence,
-   and giving them a box would break the sentence. */
-.toggle input[type=checkbox]{width:20px;height:20px}

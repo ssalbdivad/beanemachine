@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { Billy } from "./Billy.tsx"
@@ -7,8 +7,7 @@ import { roster } from "./roster.ts"
 import { useStored } from "./stores.ts"
 import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import {
-	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
-	realInnings,
+	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, SORT_DEFAULT, useBoard,
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
 import {
@@ -18,18 +17,6 @@ import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
-
-/** Confidence as a filling lens — the same motif Billy wears. */
-const Confidence = ({ value, reasons }: { value: number; reasons: string[] }) => (
-	<span
-		className="conf"
-		data-col="conf"
-		title={reasons.length ? `Confidence ${pct(value)} — ${reasons.join("; ")}` : `Confidence ${pct(value)}`}
-	>
-		<span className="conf-fill" style={{ width: pct(value) }} />
-		<span className="conf-num">{pct(value)}</span>
-	</span>
-)
 
 const MISSING_LABEL: Record<string, string> = {
 	plateAppearances: "no plate appearances on record, so there is no playing-time rate to project from",
@@ -73,9 +60,10 @@ const MODES = [
  * decision — a start on Monday scores for a matchup this week's is already settled
  * without. The day counts are the same control with a nearer far edge (see
  * `withinDays`), and they stop at seven because that is where the schedule data
- * stops paying: on the committed capture MLB has named the starter in 41 of 92
- * games three days out and still only 43 of 184 seven days out, so days five
- * through seven add games and no extra certainty about who pitches them.
+ * stops paying. Re-derived on the committed capture (2026-09-08) in club-games, the
+ * unit a starting assignment is counted in: 56 of 70 named three days out, 60 of 130
+ * at five and still 60 of 180 at seven — the numerator stops moving after three days,
+ * so days five through seven add games and no extra certainty about who pitches them.
  */
 const WINDOWS = [
 	[null, "Rest of period"],
@@ -141,9 +129,10 @@ const BOARD_GRID_CSS = `
   all sixty. Luck is a percentile of expected-minus-actual contact that feeds no
   ranking on this screen, printed beside numbers that do.
   
-  Nothing measured is lost: confidence and luck are both in the drill-down, which is
-  one tap on the row and is where the working already lives. What goes is the claim
-  that they are decision columns.
+  Nothing measured is lost. Confidence is in the drill-down, one tap on the row, where
+  the working already lives; luck is there as the wOBA gap it is derived from, and its
+  percentile comes back as a column whenever the board is ordered by it. What goes is
+  the claim that either is a decision column on every visit.
   
   The name gets the width. On a phone it was ellipsised while the numbers kept full
   columns, which is a table that has decided the reader came to look at figures rather
@@ -168,13 +157,45 @@ const BOARD_GRID_CSS = `
 .board .board-head>[data-col=who],.board .board-row>[data-col=who]{grid-column:2}
 .board .board-head>[data-col=bscore],.board .board-row>[data-col=bscore]{grid-column:3}
 .board .board-head>[data-col=games],.board .board-row>[data-col=games]{grid-column:4}
-/* The three that left the row. Kept as rules rather than deleted markup so that a
-   view which still renders one — Streaming prints projected points where the board
-   prints uscore — cannot land it in somebody else's column. */
-.board .board-head>[data-col=uscore],.board .board-row>[data-col=uscore],
+/* Streaming prints projected points where the board prints what he is ahead by, and
+   it is the same track. The rules that used to sit here for uscore, confidence and
+   luck are gone with the columns: nothing renders a uscore or a luck cell on this
+   screen any more, and conf only appears inside the drill-down, which is not a
+   child of a row. A rule kept "in case" is how a deleted column comes back wearing
+   somebody else's heading. */
 .board .board-head>[data-col=pts],.board .board-row>[data-col=pts]{grid-column:3}
-.board .board-head>[data-col=conf],.board .board-row>[data-col=conf],
-.board .board-head>[data-col=luck],.board .board-row>[data-col=luck]{display:none}
+
+/*
+  THE ORDERING'S OWN TRACK, inserted left of "ahead by" because it is the number the
+  list is in and the eye reads left to right. Present only when the sort has no column
+  here already — see SORTED_COL — so four combinations exist and all four are written
+  out. An inherited grid-column is how two cells end up on one track, which this file
+  has now shipped twice.
+*/
+.board[data-ordered] .board-head,.board[data-ordered] .board-row{
+	grid-template-columns:28px minmax(0,1fr) 76px 78px 58px;
+}
+.board[data-ordered] .board-head>[data-col=sorted],
+.board[data-ordered] .board-row>[data-col=sorted]{grid-column:3}
+.board[data-ordered] .board-head>[data-col=bscore],
+.board[data-ordered] .board-row>[data-col=bscore]{grid-column:4}
+.board[data-ordered] .board-head>[data-col=games],
+.board[data-ordered] .board-row>[data-col=games]{grid-column:5}
+.board[data-mine][data-ordered] .board-head,.board[data-mine][data-ordered] .board-row{
+	grid-template-columns:26px minmax(0,1fr) 70px 70px 62px 52px;
+}
+.board[data-mine][data-ordered] .board-head>[data-col=sorted],
+.board[data-mine][data-ordered] .board-row>[data-col=sorted]{grid-column:3}
+.board[data-mine][data-ordered] .board-head>[data-col=bscore],
+.board[data-mine][data-ordered] .board-row>[data-col=bscore]{grid-column:4}
+.board[data-mine][data-ordered] .board-head>[data-col=mine],
+.board[data-mine][data-ordered] .board-row>[data-col=mine]{grid-column:5}
+.board[data-mine][data-ordered] .board-head>[data-col=games],
+.board[data-mine][data-ordered] .board-row>[data-col=games]{grid-column:6}
+/* It is a number the reader asked for, so it is not dimmed into the furniture, but it
+   is not the headline either: "ahead by" keeps the weight. */
+.board .board-row>[data-col=sorted]{font-family:var(--mono);font-variant-numeric:tabular-nums;
+	font-size:var(--fs-3);color:var(--muted)}
 /* The player's name is never cut. */
 .board .board-row .who b{overflow:visible;text-overflow:clip;white-space:normal}
 /* the score, then the ownership it was divided by, on one column's width */
@@ -192,106 +213,58 @@ const BOARD_GRID_CSS = `
    change's file. */
 .detail dl + h3{margin-top:var(--sp-3)}
 
-/* Under 900px luck goes: it is a percentile against everyone on the player's own
-   side, the softest of the seven, and the Buy low card below the board is where
-   that reading is actually acted on. The two un-hides undo app.css's nth-child
-   hides, which now land on the wrong cells. */
 /*
-  Two media blocks became one, and they are short now because the table is.
+  ONE media block, where there were three.
   
-  They existed to decide which of seven columns survived at each width, and with four
-  there is one decision left: at 390px the board is 300px wide, which holds the rank,
-  the name and two numbers. The games count goes there rather than the value, because
+  They existed to decide which of nine columns survived at each of three widths. With
+  four there is one decision left: at 390px the board is 300px wide, which holds the
+  rank, the name and one number. The games count goes rather than the value, because
   the value IS the ranking and a list sorted by a column it does not show is a list
   nobody can check.
+  
+  The two that went were written for the nine-column board and outlived it. A 900px
+  block set a six-track template and un-hid the games count; a second 640px block
+  then sent that cell to track 3, where "ahead by" already was, and both won on
+  source order — so at 390px the first row read "35.2714GP", two numbers printed on
+  top of each other under one heading. Every rule in them named uscore, confidence or
+  luck, and no row has rendered any of the three since the four-column pass.
 */
 @media(max-width:640px){
 	.board .board-head,.board .board-row{
 		grid-template-columns:24px minmax(0,1fr) 74px;gap:var(--sp-2);
 	}
+	/* "For you" takes the near column, because it is the one about HIS team, and both
+	   cells are placed explicitly rather than left to inherit from the desktop rule —
+	   in a four-track grid that put "for you" to the right of a number it should lead. */
 	.board[data-mine] .board-head,.board[data-mine] .board-row{
 		grid-template-columns:24px minmax(0,1fr) 62px 62px;gap:var(--sp-2);
 	}
+	.board[data-mine] .board-head>[data-col=mine],
+	.board[data-mine] .board-row>[data-col=mine]{grid-column:3}
+	.board[data-mine] .board-head>[data-col=bscore],
+	.board[data-mine] .board-row>[data-col=bscore]{grid-column:4}
 	.board .board-head>[data-col=games],.board .board-row>[data-col=games],
 	.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{display:none}
+	/* Ordered by something with no column of its own, the ONE number that fits beside
+	   the name is that one — "ahead by" is not what this list is in. */
+	.board[data-ordered] .board-head,.board[data-ordered] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 74px;gap:var(--sp-2);
+	}
+	.board[data-ordered] .board-head>[data-col=sorted],
+	.board[data-ordered] .board-row>[data-col=sorted]{grid-column:3}
+	.board[data-ordered] .board-head>[data-col=bscore],
+	.board[data-ordered] .board-row>[data-col=bscore]{display:none}
+	.board[data-mine][data-ordered] .board-head,.board[data-mine][data-ordered] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 68px 60px;gap:var(--sp-2);
+	}
+	.board[data-mine][data-ordered] .board-head>[data-col=mine],
+	.board[data-mine][data-ordered] .board-row>[data-col=mine]{grid-column:4}
 	/* Streaming shows what he scores; the board shows what he is ahead by. One number
 	   each at this width, and it is always the one the list is ordered by. */
 	.board[data-mode=stream] .board-head>[data-col=pts],
 	.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
 }
-/* the unit rides the number, because the column holds two of them */
-.board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
-
-/* app.css spaces a drill-down heading after another heading and after a note list,
-   but not after a definition list — so "Statcast model" now sits flush against the
-   last row of "Measured", which reads as one table with a caption in the middle of
-   it. Belongs in app.css beside its siblings; here because app.css is not this
-   change's file. */
-.detail dl + h3{margin-top:var(--sp-3)}
-
-/* Under 900px luck goes: it is a percentile against everyone on the player's own
-   side, the softest of the seven, and the Buy low card below the board is where
-   that reading is actually acted on. The two un-hides undo app.css's nth-child
-   hides, which now land on the wrong cells. */
-@media(max-width:899px){
-	.board .board-head,.board .board-row{
-		grid-template-columns:26px minmax(0,1fr) 76px 62px 58px 86px;gap:var(--sp-2);
-	}
-	.board .board-head>[data-col=games],.board .board-row>[data-col=games]{display:block}
-	.board .board-head>.sort-head[data-col=conf]{display:flex}
-	.board .board-row>[data-col=conf]{display:block}
-	.board .board-head>.sort-head[data-col=luck],.board .board-row>[data-col=luck]{display:none}
-	/* Every template below has to be repeated for the roster case, because
-	   .board[data-mine] outranks a bare .board inside a media query — without these
-	   the desktop eight-track grid would apply on a tablet. */
-	.board[data-mine] .board-head,.board[data-mine] .board-row{
-		grid-template-columns:26px minmax(0,1fr) 76px 62px 56px 58px 86px;gap:var(--sp-2);
-	}
-}
-/* Under 640px only two numbers fit beside the name — measured at 390px the board
-   is 300px wide. They used to be uscore and bscore, and uscore is the column that
-   is blank on 36 of the first 60 rows: on a phone the reader got a column of
-   dashes as one of his two numbers. The window count takes the slot instead. It
-   is never blank (0 of 1,233 rows), it is the only number on the row that is a
-   fact about the WINDOW rather than about the player, and for a starter it is now
-   his own starts. Confidence and luck are one tap away in the drill-down, which
-   prints both. uscore comes back only when the board is RANKED by it, because a
-   board must always show the number it is sorted by. */
-@media(max-width:640px){
-	.board .board-head,.board .board-row{
-		grid-template-columns:24px minmax(0,1fr) 56px 62px;gap:var(--sp-2);
-	}
-	/* Four tracks is what 300px of board holds, and Δ MINE is the more useful of the
-	   two value columns to a reader who has entered a team: it is about HIS roster.
-	   So on a phone it takes uscore's place rather than adding a fifth. */
-	.board[data-mine] .board-head,.board[data-mine] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 56px 62px;gap:var(--sp-2);
-	}
-	.board[data-mine] .board-head>.sort-head[data-col=uscore],
-	.board[data-mine] .board-row>[data-col=uscore]{display:none}
-	.board[data-mine] .board-head>[data-col=mine],
-	.board[data-mine] .board-row>[data-col=mine]{grid-column:3;display:block}
-	.board[data-mine] .board-head>[data-col=bscore],
-	.board[data-mine] .board-row>[data-col=bscore]{grid-column:4}
-	.board[data-mine] .board-head>[data-col=games],
-	.board[data-mine] .board-row>[data-col=games]{display:none}
-	.board .board-head>.sort-head[data-col=conf],.board .board-row>[data-col=conf]{display:none}
-	.board:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore],
-	.board:not([data-sort=uscore]) .board-row>[data-col=uscore]{display:none}
-	.board:not([data-sort=uscore]) .board-head>[data-col=games],
-	.board:not([data-sort=uscore]) .board-row>[data-col=games]{grid-column:3}
-	/* On a board nobody has committed a league to, uscore is the more useful of the
-	   two: bscore asks who is best, uscore asks who is the best you can actually get,
-	   and a reader who has not entered a team is exactly the reader asking the second
-	   question. It takes the games column's place rather than adding a fifth track. */
-	.board[data-preview]:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore],
-	.board[data-preview]:not([data-sort=uscore]) .board-row>[data-col=uscore]{display:block;grid-column:3}
-	.board[data-preview]:not([data-sort=uscore]) .board-head>.sort-head[data-col=uscore]{display:flex}
-	.board[data-preview] .board-head>[data-col=games],
-	.board[data-preview] .board-row>[data-col=games]{display:none}
-	.board[data-sort=uscore] .board-head>[data-col=games],
-	.board[data-sort=uscore] .board-row>[data-col=games]{display:none}
-}`
+`
 
 /**
  * The STREAMING grid, which is deliberately not the board's grid.
@@ -308,9 +281,10 @@ const BOARD_GRID_CSS = `
  * nobody, which on the live 2026-09-04 capture is 553 of 1,435 players, including
  * the top row of the gettable list.
  *
- * `luck` is a percentile of expected-minus-actual wOBA over 21 days. It is a
- * buy-low signal about a season, and the Buy low card below the board is where it
- * is acted on. Nothing about a Saturday start turns on it.
+ * `luck` is a percentile of expected-minus-actual wOBA over 21 days. It is a buy-low
+ * signal about a season, acted on by ordering the board with "who has been unluckiest"
+ * — which now draws the percentile beside each name, because a list ranked by a number
+ * it does not print cannot be checked. Nothing about a Saturday start turns on it.
  *
  * What goes in their place is the half of the reader's question the board never
  * answered: "expected performance". `pts` is what he is projected to actually
@@ -329,11 +303,16 @@ const STREAM_GRID_CSS = `
 /*
   Streaming carries one more number than the board, and it is the right one.
   
-  The board asks who is worth adding, and answers with what he is ahead of a free man
-  by. Streaming asks which arm to start on Saturday, and the quantity that answers it
-  is what he actually scores in the window — a free arm you are not starting is worth
-  nothing to you this week. So both are on the row here, and the list is ordered by
-  the first of them.
+  The board asks who is worth adding and answers with what he is ahead of a free man
+  by. Streaming asks which arm to start on Saturday, and what answers that is what he
+  actually scores in the window — a free arm you are not starting is worth nothing to
+  you this week. So both are on the row here, and the list is ordered by the first.
+  
+  EVERY cell is placed explicitly in every combination below, and that is not
+  verbosity. There are four: two horizons times whether a roster exists. A cell left
+  to inherit its column from another combination auto-places, and an auto-placed cell
+  lands on top of its neighbour — measured on the streaming tab with a roster, "points"
+  and "for you" both rendered at x=219.
 */
 .board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
 	grid-template-columns:28px minmax(0,1fr) 66px 74px 58px;
@@ -344,9 +323,20 @@ const STREAM_GRID_CSS = `
 .board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:4;display:block}
 .board[data-mode=stream] .board-head>[data-col=games],
 .board[data-mode=stream] .board-row>[data-col=games]{grid-column:5;display:block}
-/* Under 640px the board is 300px wide: the name, what he scores, and how many turns
-   he gets. "Ahead by" goes rather than the points, because on this tab the points ARE
-   the ordering and a list must always show the number it is sorted by. */
+/* With a roster, "for you" joins them — it is the only number here about HIS team. */
+.board[data-mine][data-mode=stream] .board-head,.board[data-mine][data-mode=stream] .board-row{
+	grid-template-columns:26px minmax(0,1fr) 60px 66px 64px 52px;
+}
+.board[data-mine][data-mode=stream] .board-head>[data-col=pts],
+.board[data-mine][data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
+.board[data-mine][data-mode=stream] .board-head>[data-col=bscore],
+.board[data-mine][data-mode=stream] .board-row>[data-col=bscore]{grid-column:4}
+.board[data-mine][data-mode=stream] .board-head>[data-col=mine],
+.board[data-mine][data-mode=stream] .board-row>[data-col=mine]{grid-column:5;display:block}
+.board[data-mine][data-mode=stream] .board-head>[data-col=games],
+.board[data-mine][data-mode=stream] .board-row>[data-col=games]{grid-column:6}
+/* Under 640px the board is 300px wide: the name and two numbers. On this tab the
+   points ARE the ordering, and a list must always show the number it is sorted by. */
 @media(max-width:640px){
 	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
 		grid-template-columns:24px minmax(0,1fr) 58px 52px;gap:var(--sp-2);
@@ -355,6 +345,14 @@ const STREAM_GRID_CSS = `
 	.board[data-mode=stream] .board-row>[data-col=bscore]{display:none}
 	.board[data-mode=stream] .board-head>[data-col=games],
 	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4;display:block}
+	/* With a roster the second number is his own, not the league's. */
+	.board[data-mine][data-mode=stream] .board-head,.board[data-mine][data-mode=stream] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 58px 56px;gap:var(--sp-2);
+	}
+	.board[data-mine][data-mode=stream] .board-head>[data-col=mine],
+	.board[data-mine][data-mode=stream] .board-row>[data-col=mine]{grid-column:4;display:block}
+	.board[data-mine][data-mode=stream] .board-head>[data-col=games],
+	.board[data-mine][data-mode=stream] .board-row>[data-col=games]{display:none}
 }
 `
 
@@ -694,7 +692,7 @@ export const Board = ({
 			:	[],
 		[pool]
 	)
-	const { rated, rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort } =
+	const { rows, scored, edgeCoverage, period, streaming, teamNames, availability, sort, injuryError } =
 		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
@@ -708,6 +706,11 @@ export const Board = ({
 			innings: deriveInningsMinimum(raw).perPeriod
 		}
 	}, [league])
+
+	/** The ordering's own cell, where the ordering is not one of the columns already
+	 *  drawn — see SORTED_COL. Computed once here so the head and every row agree
+	 *  about whether the track exists, which is the failure BOARD_GRID_CSS opens with. */
+	const orderedBy = orderedCell(sort, filters.mode === "stream", !!myNames)
 
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
 	/**
@@ -757,7 +760,10 @@ export const Board = ({
 		return (
 			<section className="card full">
 				<h2>Player data</h2>
-				<p className="empty">Couldn't load the snapshot: {error}</p>
+				{/* "the player data", as Tonight and the masthead chip both call it. This said
+				    "the snapshot", which is the file's name and not a thing a reader has ever
+				    seen — three names for one thing, one of them jargon. */}
+				<p className="empty">Couldn&rsquo;t load the player data: {error}</p>
 			</section>
 		)
 	if (!league)
@@ -824,25 +830,6 @@ export const Board = ({
 		}
 	}
 
-	/**
-	 * The innings a pick is expected to throw in the window, for leagues that state
-	 * a weekly innings floor — the reason much streaming happens at all.
-	 *
-	 * MLB reports innings in baseball notation, so 85.2 is 85 and two THIRDS, not
-	 * 85.2. Read as a decimal it is short by up to 0.8 per pitcher, and this sums
-	 * over a whole week of picks. Converted through outs.
-	 *
-	 * A rate needs starts to divide by. A pitcher with none this season gets no
-	 * estimate rather than a guessed one, and the line below says how many of the
-	 * picks it could speak for.
-	 */
-	const inningsFor = (r: Ranked): number | null => {
-		const st = r.player.stats as Record<string, number> | undefined
-		const gs = st?.gamesStarted ?? 0
-		const ip = st?.inningsPitched ?? 0
-		if (!(gs > 0) || !(ip > 0) || r.scheduledStarts == null) return null
-		return (realInnings(ip) / gs) * r.scheduledStarts
-	}
 
 	/**
 	 * Billy names the best player you can GET, not the best player. The top of a
@@ -900,7 +887,6 @@ export const Board = ({
 		filters.group === "hitting" ? "batters only"
 		: filters.group === "pitching" ? "pitchers only"
 		: "",
-		filters.minConfidence > 0 ? `confidence ${pct(filters.minConfidence)}+` : "",
 		filters.hideInjured ? "injured hidden" : ""
 	].filter(Boolean)
 
@@ -1134,15 +1120,35 @@ export const Board = ({
 					</summary>
 					<div className="filters">
 						{/*
-						  Ordering lives here now, not above the table.
+						  Ordering lives here, not above the table: the column heads are already
+						  sort controls, so standing permanently above the ranking this cost 66px
+						  on a phone to offer a second way to do a thing one tap away. What it
+						  earns its place for is the orderings that are NOT columns, and every one
+						  of those now draws its number beside the name while it is in force (see
+						  SORTED_COL) — before that, four of these six reordered the board by a
+						  figure printed nowhere on it.
 						  
-						  Every column head on the board is already a sort control, and four of
-						  the six orderings this select offers ARE columns — so most of what it
-						  did was a second way to do a thing one tap away on the thing itself.
-						  Standing permanently above the ranking it cost 66px on a phone, on the
-						  one screen whose job is to show ranked rows. What it still earns its
-						  place for is the two orderings that have no column: market edge, and
-						  contact against results.
+						  `uscore` was the sixth and is gone from the list. It is bscore times the
+						  share of leagues where he is still free, on a list this screen has
+						  already filtered to men he can get — the same discount applied twice,
+						  which reorders the survivors by who is rarer rather than by who is
+						  better. It is also null wherever Yahoo prices no ownership: 553 of 1,435
+						  players on the committed capture, the top row of the gettable list among
+						  them. The number survives in the drill-down, where it is one of several
+						  readings rather than the order of the table.
+						  
+						  The words are the reader's, not the engine's. "market edge (what the
+						  field is wrong about)" asked him to hold a definition in his head to
+						  pick an ordering; the definition is under the heads once he picks it.
+						  
+						  "best contact vs results" went too, because it was the SAME ORDERING.
+						  `undervaluation` is the within-side percentile of the signed
+						  `regressionGap`; `contact` is that same signed gap raw. A percentile is
+						  monotone within a side, so the two coincide exactly whenever Side is not
+						  "batters + pitchers" — measured in the browser on the dev league: 60 of
+						  60 rows identical with Side=batters, 40 of 40 with Side=pitchers. The
+						  percentile is the one that survives, because it is the one that is
+						  comparable when both sides are on the list.
 						*/}
 						{filters.mode !== "stream" && (
 						<label className="ctl">
@@ -1152,12 +1158,10 @@ export const Board = ({
 								value={sort}
 								onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
 							>
-								<option value="bscore">bscore (value over replacement)</option>
-								<option value="uscore">uscore (value you can actually get)</option>
-								<option value="points">projected points</option>
-								<option value="marketEdge">market edge (what the field is wrong about)</option>
-								<option value="undervaluation">most undervalued (above replacement)</option>
-								<option value="contact">best contact vs results (last 21 days)</option>
+								<option value="bscore">how far ahead of a free man he is</option>
+								<option value="points">the points he should score</option>
+								<option value="marketEdge">how far he beats his own ownership</option>
+								<option value="undervaluation">who has been unluckiest</option>
 							</select>
 						</label>
 						)}
@@ -1173,18 +1177,24 @@ export const Board = ({
 								<option value="pitching">pitchers</option>
 							</select>
 						</label>
-						<label className="ctl">
-							<span>Min confidence</span>
-							<select
-								data-ctl="confidence"
-								value={String(filters.minConfidence)}
-								onChange={e => set("minConfidence", Number(e.currentTarget.value))}
-							>
-								<option value="0">any</option>
-								<option value="0.4">40%+</option>
-								<option value="0.7">70%+</option>
-							</select>
-						</label>
+						{/*
+						  "Min confidence" was here, and it is gone.
+						  
+						  Two things were wrong with it and either alone would have been enough.
+						  It filtered on a number the board stopped drawing in the four-column
+						  pass, so a reader could narrow the list and had nothing on screen to
+						  check the narrowing against — a hidden filter, which is the defect this
+						  project already has a comment about in view.ts.
+						  
+						  And it did nothing where anyone looks. Measured on the committed capture
+						  with the reference league: 463 distinct confidence values across 1,248
+						  rateable players, and the floors remove 42% (at 40%+) and 58.5% (at
+						  70%+) of that whole list — but 0 of the top 60 by "ahead by", 56 of
+						  which sit at exactly 100%. Everything it removes is deep-bench men who
+						  were never candidates, and every row a reader actually reads clears both
+						  floors. The number itself is unchanged and still in the drill-down,
+						  where the reasons behind it are printed with it.
+						*/}
 						<label className="toggle">
 							<input
 								type="checkbox"
@@ -1233,6 +1243,22 @@ export const Board = ({
 						)}
 					</p>
 				</div>
+				{/*
+				  The injured list this board is using, when it is not tonight's.
+				  
+				  The rows change either way — measured with MLB blocked, row two moved from
+				  3B 34.55 to OF 34.51 and row three from 33.18 to 33.14 — and nothing on this
+				  screen said which of the two boards a reader was looking at. Tonight has
+				  always said it. An absence is stated as an absence, on every screen that
+				  depends on it, and this is the screen a pickup is made from.
+				*/}
+				{injuryError && (
+					<p className="sub warn-note">
+						Couldn&rsquo;t reach MLB ({injuryError}), so who is hurt is from the player
+						data rather than from today. Anyone placed on the injured list since then is
+						still ranked here as if he were playing.
+					</p>
+				)}
 				{filters.sort === "marketEdge" && edgeCoverage < 0.35 && (
 					<p className="sub warn-note">
 						Yahoo listed ownership for only {Math.round(edgeCoverage * 100)}% of this
@@ -1339,11 +1365,21 @@ export const Board = ({
 				{streaming && (
 					<p className="sub stream-note">
 						{period && `${period.basis.charAt(0).toUpperCase()}${period.basis.slice(1)}. `}
+						{/*
+						  "starting assignments", not "games". `streaming.games` sums `coverage.games`
+						  over CLUBS, and every game has two of them — so on the rest-of-period
+						  window over Sep 11-13 the capture's 45 games were printed as 90. The ratio
+						  was right and the noun was not, and a reader who counts tonight's schedule
+						  finds the app wrong about something he can see. Club-games is also the
+						  unit the sentence actually wants: a starter is named per club per game,
+						  which is exactly what is being counted.
+						*/}
 						MLB has named the starter in{" "}
 						<b>
 							{streaming.published} of {streaming.games}
 						</b>{" "}
-						games in it, {streaming.fullyNamed} of {streaming.clubs} clubs completely.
+						starting assignments, {streaming.fullyNamed} of {streaming.clubs} clubs
+						completely.
 						{streaming.fullyNamed < streaming.clubs &&
 							" The rest are estimated from each pitcher's own rate of starting, and every row says which of the two it is showing."}
 						{/* Only when NOT ONE club is fully named — the point at which a longer
@@ -1366,13 +1402,20 @@ export const Board = ({
 				    here in the first place. The board ranks; the card decides. */}
 				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
 				    uscore column back on a phone when the board is ranked by it. */}
-				<div className="board" data-sort={filters.sort} data-mode={filters.mode} data-mine={myNames ? "" : undefined} data-preview={preview ? "" : undefined}>
-					{/* Seven columns, each answering a different question. `proj pts` and
-					    `waiver pts` used to sit here too, but bscore is one minus the other,
-					    so the table stated the same fact three times; the arithmetic is in
-					    the drill-down where it belongs. `owned` was an eighth until it was
-					    folded into uscore, whose denominator it is — BOARD_GRID_CSS carries
-					    the count of rows on which the two went blank together. */}
+				<div
+					className="board"
+					data-sort={sort}
+					data-mode={filters.mode}
+					data-mine={myNames ? "" : undefined}
+					data-ordered={orderedBy ? "" : undefined}
+					data-preview={preview ? "" : undefined}
+				>
+					{/* Four columns, five when a roster exists or the ordering needs one of its
+					    own. It carried nine: `proj pts` and `waiver pts` went because bscore is
+					    one minus the other, so the table stated the same fact three times;
+					    `owned` was folded into uscore and uscore into the drill-down; confidence
+					    and luck went because neither was a decision column. BOARD_GRID_CSS
+					    carries the measurements. */}
 					<div className="board-head">
 						<span data-col="rank">#</span>
 						<SortHead col="who" field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
@@ -1396,6 +1439,23 @@ export const Board = ({
 						    heading sat over the wrong column. A head and a row that disagree about
 						    how many cells they have is the exact failure named at the top of
 						    BOARD_GRID_CSS. */}
+						{/* The ordering, where it is not one of the columns already here. See
+						    SORTED_COL: a board ranked by a number it does not print is asking to
+						    be taken on trust, and four of the six orderings were doing exactly
+						    that. Its heading is the sort control for the sort already in force,
+						    so pressing it reverses the direction. */}
+						{orderedBy && (
+							<SortHead
+								col="sorted"
+								field={sort}
+								filters={filters}
+								setFilters={setFilters}
+								unit={orderedBy.unit}
+								right
+							>
+								{orderedBy.head}
+							</SortHead>
+						)}
 						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>
 							ahead by
 						</SortHead>
@@ -1426,25 +1486,6 @@ export const Board = ({
 						>
 							{filters.mode === "stream" ? "starts" : "games"}
 						</span>
-						{/* "conf", not "confidence": at 10px of letter-spaced micro-caps the full word
-						    ran into its neighbours, and the head is the one place a shorter word
-						    costs nothing — the definition is on the tooltip either way, and
-						    widening the head's own gap silently misaligns it from the rows,
-						    which share its template. */}
-						{/* Confidence and luck left the row and kept their place in the
-						    drill-down. Measured on the shipped capture, confidence read 100% on
-						    41 of the first 60 rows and took four distinct values across all
-						    sixty; luck is a contact percentile that feeds no ranking on this
-						    screen. Neither is a decision column, and printing them beside two
-						    that are lent them the same weight. */}
-						{/* The number is a percentile, and nothing said so: 88 read as a quantity of
-						    luck rather than as "unluckier than 88% of his side". The denominator
-						    belongs in the heading, read once, rather than on 1,235 rows. */}
-						{/* Luck is a 21-day expected-minus-actual percentile — a buy-low
-						    reading about a season, acted on in the Buy low card. Nothing
-						    about which arm to start on Saturday turns on it, so it is not on
-						    the streaming grid. */}
-
 					</div>
 					{/*
 					  One sentence under the heads, and it is generated from the ordering that
@@ -1460,7 +1501,17 @@ export const Board = ({
 					*/}
 					<details className="board-legend">
 						<summary>
-							{sort === "points" ?
+							{orderedBy ?
+								/* Ranked by something that is not one of the standing columns. The
+								   sentence names the column the rows are actually in, and the cell
+								   beside every name carries its value — this branch used to not
+								   exist, so ranking by luck or by edge reordered the board and left
+								   "Ahead by — points more than the best man still free at his spot"
+								   underneath it, describing a different number. */
+								<>
+									Ordered by <b>{orderedBy.head}</b>, the column beside each name.
+								</>
+							: sort === "points" ?
 								<>Ordered by the points he should score in this window.</>
 							: sort === "deltaMine" ?
 								<>
@@ -1468,8 +1519,29 @@ export const Board = ({
 									from on your team.
 								</>
 							:	<>
-									<b>Ahead by</b> &mdash; points more than the best man still free at his
-									spot, in your league&rsquo;s points.
+									{/*
+									  "the best man still free at his spot" — FALSE, and measured false.
+									  
+									  The bar is not the best free man, it is the (teams x seats)-th best
+									  eligible man: who is left once every club in the league has filled
+									  that spot. Named on the shipped league, with each man's Yahoo
+									  rostered-in percentage: Util Matt Olson 99%, SS Jeremy Peña 87%,
+									  2B Ketel Marte 95%, RP Trevor Megill 85%, P Cal Quantrill 50%. Five
+									  of the ten bars are set by a man rostered in 85-99% of leagues, and
+									  he is not "still free" by any reading. src/engine/trade.ts:97 had
+									  already written down that this sentence was wrong; the sentence was
+									  never changed.
+									  
+									  And "in your league's points" was unconditional, so on a first visit
+									  it sat under a banner saying the opposite: the board is running the
+									  shipped preset and none of it is about his league yet. Two sentences
+									  on one screen disagreeing about whose scoring this is.
+									*/}
+									<b>Ahead by</b> &mdash; points more than the man left at his spot once
+									every team has filled it
+									{preview ?
+										", in the standard scoring this board is running."
+									:	", in your league\u2019s points."}
 								</>
 							}
 						</summary>
@@ -1477,7 +1549,12 @@ export const Board = ({
 						    lines of it is a third of the screen above the thing it describes — and
 						    it is a tap rather than a tooltip because a phone has no hover, which is
 						    where every other definition in this app used to live. */}
-						{sort === "points" ?
+						{/* The definition of the number the board is in, which is the one a reader
+						    who changed the ordering is owed. It is the same sentence the cell's own
+						    tooltip carries, because a phone has no hover. */}
+						{orderedBy ?
+							<>{orderedBy.help}</>
+						: sort === "points" ?
 							<>
 								The streaming list is ordered by what a man actually scores over the window
 								you picked, not by what he is ahead of a free pickup by &mdash; because the
@@ -1486,18 +1563,27 @@ export const Board = ({
 							</>
 						: sort === "deltaMine" ?
 							<>
-								Every other number here is measured against the best man still free at that
-								spot, which is the bar for the league. This one is the bar for you: the
-								worst man you own who could hold the seat. A deep outfield makes a good
+								Every other number here is measured against the man left at that spot once
+								every team has filled it, which is the bar for the league. This one is the
+								bar for you: the worst man you own who could hold the seat. A deep outfield makes a good
 								free-agent outfielder worth nothing to you; a hole at catcher makes a
 								mediocre one worth a great deal.
 							</>
 						:	<>
-								It ranks players; it does not promise points. 35 means further ahead of a
-								free pickup than 20 is &mdash; not 35 points in the bank. The window is the
-								one you picked above, and &ldquo;free&rdquo; is your league&rsquo;s own
-								list where one has been read and a guess from how widely each man is
-								rostered where it has not.
+								It ranks players; it does not promise points. 35 means further ahead of the
+								man at his spot&rsquo;s bar than 20 is &mdash; not 35 points in the bank.
+								That bar is the{" "}
+								{league?.meta.max_teams ?
+									`${league.meta.max_teams}-team-deep`
+								:	"league-deep"}{" "}
+								man at the spot: not whoever is best among the men still free, which he
+								usually is not, but the one left over once every club has filled it. The window is the one you
+								picked above, and who counts as gettable is your league&rsquo;s own
+								free-agent list where one has been read
+								{availability.basis === "pool" ?
+									", which it has"
+								:	", and a guess from how widely each man is rostered where it has not"}
+								.
 							</>
 						}
 					</details>
@@ -1509,6 +1595,7 @@ export const Board = ({
 							stream={filters.mode === "stream"}
 							starts={startsFor(r)}
 							mine={!!myNames}
+							orderedBy={orderedBy}
 							/* the reader's budget, counted down the ranking he is actually
 							   looking at — his filters have already decided who is on it */
 							open={open === r.player.id}
@@ -1718,6 +1805,85 @@ const COLUMN_HELP: Record<NonNullable<Filters["sort"]>, string> = {
 }
 
 
+/**
+ * A BOARD MUST ALWAYS SHOW THE NUMBER IT IS SORTED BY.
+ *
+ * The rule is old and the enforcement is new. The nine-column board had a column for
+ * nearly every ordering, so the rule mostly held by accident; the four-column pass cut
+ * five of those columns and left the Rank-by select offering six orderings, four of
+ * which ranked the rows by a number printed nowhere on them. Worse, `.board-legend`
+ * branches on three values and falls through — so ranked by most undervalued, the
+ * board reordered itself and the sentence under the heads still read "Ahead by —
+ * points more than the best man still free at his spot". A table ordered by an
+ * invisible number, captioned with the name of a different one, is asking to be taken
+ * on trust, which is the one thing this app is not for.
+ *
+ * So the ordering gets a cell of its own whenever it has no column of its own: ONE
+ * generic track, headed with the metric's short name and carrying its value, placed
+ * immediately left of "ahead by" because it is the number the list is in. What used to
+ * be five conditional columns is one, and it cannot be out of step with the sort
+ * because it is read out of the sort.
+ *
+ * `read` returns a string, because these are five different kinds of quantity — league
+ * points, a percentile, a wOBA gap to three places — and rounding them all the same
+ * way is how a number starts claiming a precision its measurement does not have.
+ */
+const SORTED_COL: Partial<
+	Record<NonNullable<Filters["sort"]>, { head: string; unit?: string; read: (r: BoardRow) => string }>
+> = {
+	uscore: { head: "gettable", read: r => (r.uscore === null ? "\u2014" : String(r.uscore)) },
+	points: { head: "points", read: r => r.points.toFixed(1) },
+	marketEdge: {
+		head: "edge",
+		read: r => (r.marketEdge === null ? "\u2014" : r.marketEdge > 0 ? `+${r.marketEdge}` : String(r.marketEdge))
+	},
+	undervaluation: {
+		head: "luck",
+		unit: "/100",
+		read: r => (r.undervaluation === null ? "\u2014" : String(Math.round(r.undervaluation)))
+	},
+	contact: {
+		head: "contact",
+		read: r =>
+			r.regressionGap === null ? "\u2014"
+			: r.regressionGap > 0 ? `+${r.regressionGap.toFixed(3)}`
+			: r.regressionGap.toFixed(3)
+	},
+	confidence: { head: "conf", read: r => pct(r.confidence.value) },
+	replacement: { head: "free man", read: r => r.replacement.toFixed(1) },
+	deltaMine: {
+		head: "for you",
+		read: r => (r.deltaMine === null ? "\u2014" : r.deltaMine > 0 ? `+${r.deltaMine}` : String(r.deltaMine))
+	}
+}
+
+/**
+ * Which cell, if any, the ordering needs. Null when the board already draws it:
+ * "ahead by" is always there, "points" on the streaming tab, "for you" once a roster
+ * exists, and sorting by name orders the column the names are already in.
+ */
+export type OrderedCell = {
+	head: string
+	unit?: string
+	read: (r: BoardRow) => string
+	/** The definition, carried with the cell. COLUMN_HELP used to reach a reader only
+	 *  as the `title` of a sortable heading, and five of those headings were deleted —
+	 *  leaving numbers on screen, correct, and undefined. */
+	help: string
+}
+
+const orderedCell = (
+	sort: NonNullable<Filters["sort"]>,
+	stream: boolean,
+	mine: boolean
+): OrderedCell | null => {
+	if (sort === "bscore" || sort === "name") return null
+	if (stream && sort === "points") return null
+	if (mine && sort === "deltaMine") return null
+	const col = SORTED_COL[sort]
+	return col ? { ...col, help: COLUMN_HELP[sort] } : null
+}
+
 const SortHead = ({
 	col, field, filters, setFilters, right, unit, children
 }: {
@@ -1738,7 +1904,21 @@ const SortHead = ({
 	/** A plain string, because the sort state is announced by interpolating it. */
 	children: string
 }) => {
-	const active = filters.sort === field
+	/*
+	 * The RESOLVED sort, not the raw one.
+	 *
+	 * `filters.sort` is null until a reader clicks a heading, while `useBoard` ranks by
+	 * `filters.sort ?? SORT_DEFAULT[mode]` — so on every first visit the rows descended
+	 * 35.27, 34.55, 33.18 by "ahead by" and NO heading was marked: no arrow for a
+	 * sighted reader, and "Sort by ahead by" rather than "sorted descending" for a
+	 * screen reader. A table that will not say which column orders it is asking to be
+	 * taken on trust, which is the one thing this app is not for.
+	 *
+	 * It also made the first click on the ordering column pin it instead of reversing
+	 * it, because the click handler compared against the same raw value.
+	 */
+	const sort = filters.sort ?? SORT_DEFAULT[filters.mode]
+	const active = sort === field
 	return (
 		<button
 			type="button"
@@ -1746,8 +1926,8 @@ const SortHead = ({
 			className={`sort-head${right ? " r" : ""}${active ? " active" : ""}`}
 			onClick={() =>
 				setFilters(f =>
-					f.sort === field ?
-						{ ...f, desc: !f.desc }
+					(f.sort ?? SORT_DEFAULT[f.mode]) === field ?
+						{ ...f, sort: field, desc: !f.desc }
 					:	{ ...f, sort: field, desc: field !== "name" }
 				)
 			}
@@ -1781,7 +1961,8 @@ const rowLabel = (
 	rank: number,
 	r: BoardRow,
 	starts: Starts | null,
-	stream: boolean
+	stream: boolean,
+	mine: boolean
 ) =>
 	[
 		`${rank}. ${r.player.name}, ${r.slot}, ${r.player.team ?? "no team"}`,
@@ -1803,7 +1984,15 @@ const rowLabel = (
 		 * The streaming row and the board row carry different columns, so they
 		 * announce different things. A label naming uscore on a view that does not
 		 * show uscore is the same defect as a heading over the wrong cell, spoken
-		 * instead of drawn — and this file has shipped that defect before.
+		 * instead of drawn — and this file has shipped that defect twice.
+		 *
+		 * The second time was measured, not reasoned about: on the default fortnight
+		 * view the drawn columns are "# / PLAYER / AHEAD BY / GAMES" and row one spoke
+		 * "uscore 22.9, rostered in 35 percent of leagues, bscore 35.27, ... confidence
+		 * 100%" — a metric with no cell, and a different word for the one number there
+		 * actually was. Two clauses went with the columns they named, and the one that
+		 * stayed now uses the heading's own words. The numbers they carried are all in
+		 * the drill-down, which this row's button opens and which speaks them there.
 		 */
 		...(stream ?
 			[
@@ -1812,16 +2001,20 @@ const rowLabel = (
 				:	`rostered in ${r.rosteredPct} percent of leagues`,
 				`${r.points} projected points over this window`
 			]
-			// one clause for the merged column, because it is one fact. Spoken as two it
-			// said "ownership unlisted, so no uscore ... ownership unlisted" on the 500
-			// rows Yahoo does not price — the same absence read out twice.
-		: r.uscore === null ? ["ownership unlisted, so no uscore"]
-		: [`uscore ${r.uscore}, rostered in ${r.rosteredPct} percent of leagues`]),
-		`bscore ${r.bscore}`,
+		:	[]),
+		`ahead by ${r.bscore}`,
 		...(stream ?
 			[`against ${r.replacement} for the next arm on the wire`]
 		:	[`${r.points} projected points against ${r.replacement} for a replacement`]),
-		`confidence ${pct(r.confidence.value)}`,
+		// The one cell a sighted reader gets and this label did not give, on the only
+		// screen that draws it: what he gains over the man he would actually displace.
+		...(mine && !stream ?
+			[
+				r.deltaMine === null ?
+					"nobody of yours he could displace, so nothing for you"
+				:	`for you, ${r.deltaMine > 0 ? `plus ${r.deltaMine}` : r.deltaMine}`
+			]
+		:	[]),
 		// the same choice the games column makes, spoken: his own starts where they
 		// exist, his team's games where they don't, and never one labelled the other
 		r.scheduledStarts != null ?
@@ -1889,6 +2082,7 @@ const Row = ({
 	stream,
 	starts,
 	mine,
+	orderedBy,
 	open,
 	onToggle
 }: {
@@ -1901,6 +2095,10 @@ const Row = ({
 	/** On the Streaming tab, where the row answers a different question and
 	 *  therefore carries different columns — see STREAM_GRID_CSS. */
 	stream: boolean
+	/** The ordering's own cell, when the ordering has no column here of its own. The
+	 *  head computes it once and passes the same object to every row, so the two
+	 *  cannot disagree about whether the track exists. */
+	orderedBy: OrderedCell | null
 	/** His schedule in this window, on the streaming tab. Null everywhere else. */
 	starts: Starts | null
 	open: boolean
@@ -1913,7 +2111,7 @@ const Row = ({
 			type="button"
 			aria-expanded={open}
 			aria-controls={detailId(r)}
-			aria-label={rowLabel(rank, r, starts, stream)}
+			aria-label={rowLabel(rank, r, starts, stream, mine)}
 		>
 			<span className="rank" data-col="rank">{rank}</span>
 			<span className="who" data-col="who">
@@ -1970,6 +2168,11 @@ const Row = ({
 					title={`Projected for ${r.points} points over this window in your league's own scoring.`}
 				>
 					{r.points.toFixed(1)}
+				</span>
+			)}
+			{orderedBy && (
+				<span className="r dim" data-col="sorted" title={orderedBy.help}>
+					{orderedBy.read(r)}
 				</span>
 			)}
 			<span className="r bscore" data-col="bscore">{r.bscore}</span>

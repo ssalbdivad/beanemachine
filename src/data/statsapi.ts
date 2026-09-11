@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { KEPT_STATS } from "../engine/points.ts"
 
 /**
  * MLB StatsAPI — the observed record. Everything here is a real measurement the
@@ -53,8 +54,13 @@ export const fetchSeason = async (
 	const data = await json(url)
 	const splits = data.stats?.[0]?.splits ?? []
 	return splits.map((s: any): PlayerSeason => {
+		/* Only the fields something reads — see `KEPT_STATS` in src/engine/points.ts for
+		   the measurement. MLB returns 67 per player and this app reads 40; the other 27
+		   were 34% of the committed capture, served to every browser and discarded, and
+		   shrunk and volume-scaled on the way past. */
 		const stats: StatLine = {}
 		for (const [k, v] of Object.entries(s.stat ?? {})) {
+			if (!KEPT_STATS.has(k)) continue
 			const n = asNumber(v)
 			if (n !== null) stats[k] = n
 		}
@@ -84,8 +90,10 @@ export const fetchWindowStats = async (
 	)
 	return (data.stats?.[0]?.splits ?? [])
 		.map((s: any): PlayerSeason => {
+			// same filter as the season read above, for the same reason
 			const stats: StatLine = {}
 			for (const [k, v] of Object.entries(s.stat ?? {})) {
+				if (!KEPT_STATS.has(k)) continue
 				const n = asNumber(v)
 				if (n !== null) stats[k] = n
 			}

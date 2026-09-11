@@ -154,11 +154,15 @@ export const resolvePeriod = (
  * the period is the decision. It is not the only question anyone asks. Streaming a
  * starter is a two- or three-day decision ("who is pitching between now and
  * Sunday"), and it is also the only horizon the schedule data can answer sharply:
- * measured on the committed capture (captured 2026-09-02) as of 2026-09-04, MLB has
- * named the starter in 15 of 32 games one day out, 41 of 92 three days out, and
- * still only 43 of 184 seven days out. The published set stops growing about three
- * days past a capture, so beyond that a longer window buys no extra certainty —
- * only more games estimated from each pitcher's own rate.
+ * Re-derived on the committed capture (2026-09-08) in club-games — one starting
+ * assignment per club per game, which is the unit the coverage line counts in:
+ * 28 of 30 named one day out, 56 of 70 three days out, 60 of 130 five days out and
+ * still 60 of 180 seven days out. The published set stops growing about three days
+ * past a capture — the numerator is the same 60 at five days, seven and fourteen —
+ * so beyond that a longer window buys no extra certainty, only more games estimated
+ * from each pitcher's own rate. (The figures this replaced were "15 of 32 / 41 of 92
+ * / 43 of 184" attributed to a 2026-09-02 capture that is no longer the committed
+ * one, and they were quoted as games rather than club-games.)
  *
  * This is the SAME control as "rest of period", not a second one. Both name one
  * inclusive window to accrue over, and everything downstream — `windowFrom`,

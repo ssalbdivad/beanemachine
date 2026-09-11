@@ -8,7 +8,6 @@ import {
 } from "../import.ts"
 import type { League } from "../schema.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
-import { IMPORT_COMMAND } from "./command.ts"
 
 export class ApiError extends Error {}
 
@@ -92,8 +91,20 @@ const send = async <T,>(path: string, body?: unknown): Promise<T> => {
 		headers: body ? { "content-type": "application/json" } : undefined,
 		body: body ? JSON.stringify(body) : undefined
 	})
-	if (!res.headers.get("content-type")?.includes("application/json"))
-		throw new ApiError(`No API at ${resolve(path)}.`)
+	if (!res.headers.get("content-type")?.includes("application/json")) {
+		/**
+		 * This threw `No API at /beanemachine/api/import.` — four words of plumbing and
+		 * a path, shown to whoever is watching a read fail. It reaches the screen: in
+		 * `server` mode every read goes through `send`, so a server that stops
+		 * answering (or answers with the index page, which is what a static host does
+		 * with an unknown path) lands this message in the import toast.
+		 *
+		 * The path is still worth having, so it is logged rather than deleted — a
+		 * console line is where a developer looks and is not a sentence on the page.
+		 */
+		console.warn(`beanemachine: no JSON from ${resolve(path)}`)
+		throw new ApiError(`Nothing answered, so nothing was read and nothing was changed.`)
+	}
 	const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
 	if (!res.ok) throw new ApiError((data as { error?: string }).error ?? `HTTP ${res.status}`)
 	return data as T
@@ -180,10 +191,22 @@ const direct = async <T,>(what: string, read: () => Promise<T>): Promise<T> => {
 		return await read()
 	} catch (e) {
 		if (e instanceof ImportError) throw new ApiError(e.message)
+		/**
+		 * Measured 2026-09-11 on the published build, with every ESPN request aborted:
+		 * the toast read "Importing that league failed in your browser (Failed to
+		 * fetch). …". "Failed to fetch" is the browser talking to itself — it is the
+		 * same three words for a blocked request, a dead network and a refused
+		 * cross-origin read, so it tells the reader nothing and costs him a sentence of
+		 * vocabulary. It is logged instead, where whoever wants it can have it.
+		 *
+		 * The two causes he can act on are what is left, and they are the reason this
+		 * wrapper exists at all.
+		 */
+		console.warn(`beanemachine: ${what} failed —`, e)
 		throw new ApiError(
-			`${what} failed in your browser (${(e as Error).message}). The league may be ` +
-				`private, or something on this network — an extension, a proxy — may be ` +
-				`blocking the request.`
+			`${what} didn't work. The league may be private, or something between this ` +
+				`page and it — an ad blocker, a browser extension, a work network — may be ` +
+				`stopping the read.`
 		)
 	}
 }
@@ -223,14 +246,22 @@ export interface YahooRoster {
 }
 
 /**
- * A pool that arrived in a file, presented as what it is.
+ * A pool that arrived in a file, presented as what it is: EXACT — the league's own
+ * wire, not an inference from ownership percentages — and OLD, by a stated amount.
+ * Both halves matter. Dropping the first would waste the only unambiguous
+ * availability signal this app can get; dropping the second would let a pool read
+ * last Tuesday pass for today's.
  *
- * The note is what the board hangs on its "Free agents only" control, so it is the
- * one sentence that has to be exactly true: this list is EXACT — it is the league's
- * own wire, not an inference from ownership percentages — and it is OLD, by a
- * stated amount. Both halves matter. Dropping the first would waste the only
- * unambiguous availability signal this app can get; dropping the second would let a
- * pool read last Tuesday pass for today's.
+ * This comment said "the note is what the board hangs on its Free agents only
+ * control". It is not: checked 2026-09-11, no screen reads `AvailablePool.note` at
+ * all — the board composes that tooltip itself from `availability.basisText` in
+ * src/client/useBoard.ts — so the sentence below is written and thrown away. It is
+ * left written, and written plainly, because the claim it makes is the one a reader
+ * must not be denied the day something renders it again.
+ *
+ * So it says it in baseball: "read off your league on your own computer", not "a
+ * local read", and the age in the words `since` uses rather than the stored instant,
+ * which was a timestamp nobody can read.
  *
  * The reader's own note travels underneath, unedited, because it is the thing that
  * knows what was actually swept.
@@ -240,10 +271,10 @@ const fromCarried = (carried: StoredPool, why?: string): AvailablePool => ({
 	positionsRead: carried.positionsRead,
 	readAt: carried.at,
 	note:
-		`${why ? `${why} ` : ""}Using the exact free-agent list carried in from a local ` +
-		`read of your league, taken ${since(carried.at, Date.now()).label} ` +
-		`(${carried.at}). ${carried.players.length} players. Anyone added or dropped in ` +
-		`your league since then is not in it — read it again to refresh. ${carried.note}`
+		`${why ? `${why} ` : ""}Using the exact free-agent list read off your league on ` +
+		`your own computer, ${since(carried.at, Date.now()).label}. ` +
+		`${carried.players.length} players. Anyone added or dropped in your league since ` +
+		`then is not in it — read it again to refresh. ${carried.note}`
 })
 
 /**
@@ -321,7 +352,11 @@ export const api = {
 				const carried = poolStore.byLeagueId(leagueId)
 				// the server's own message is the better one when there is no fallback
 				if (!carried) throw e
-				return fromCarried(carried, `The local server could not read it (${(e as Error).message}).`)
+				// "The local server could not read it" named our plumbing to a reader who
+				// asked about his league. What he needs is that the live read failed and
+				// the older list is what he is looking at; the reason travels with it
+				// because it is sometimes his (a private league) and sometimes ours.
+				return fromCarried(carried, `Reading it just now didn't work (${(e as Error).message}).`)
 			}
 		const carried = poolStore.byLeagueId(leagueId)
 		return carried ? fromCarried(carried)

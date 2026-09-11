@@ -353,11 +353,21 @@ const colophon = (await p.$eval(".colophon", e => e.innerText)).replace(/\s+/g, 
  * What stays here is what a footer can honestly carry: the unit every number is in,
  * and the way to the working. Read for the POINTER rather than for the wording,
  * because a colophon that pointed nowhere is the failure this line is about.
+ *
+ * AND THE UNIT IS CONDITIONAL, which is the half this suite is in the right place to
+ * hold. "Every number is in your league's own points" was unconditional, so on THIS
+ * build — which ships no league at all — it sat a few inches under the board's own
+ * banner reading "Standard scoring, not yours. Every number below is real and none of
+ * it is about your league yet". The app contradicting itself on one screen, about the
+ * one fact that decides whether any of the numbers apply to the reader. So the no-league
+ * wording is what this file asserts, because no-league is the only state it has.
  */
 t("the colophon is one sentence, and it points at the working rather than explaining it",
-  colophon.split(" ").length < 90 && /methodology/i.test(colophon) &&
-    /your league.s own points/i.test(colophon),
+  colophon.split(" ").length < 90 && /methodology/i.test(colophon),
   `${colophon.split(" ").length} words: ${colophon.slice(0, 140)}`)
+t("and with no league it does not claim the numbers are in the reader's own points",
+  /standard scoring/i.test(colophon) && !/your league.s own points/i.test(colophon),
+  colophon.slice(0, 200))
 /*
  * The claim the footer used to carry, asserted where it now lives.
  *
@@ -382,8 +392,20 @@ const legendSummary =
   (await p.$eval(".board-legend summary", e => e.innerText)).replace(/\s+/g, " ").trim()
 const legendAll =
   (await p.$eval(".board-legend", e => e.textContent)).replace(/\s+/g, " ").trim()
+/* "best man still free" is gone, and it was FALSE — measured, not restyled. The bar is
+   not the best free man, it is the (teams x seats)-th best eligible man: who is left
+   once every club has filled that spot. Named on the shipped league with each man's
+   Yahoo rostered-in percentage, five of the ten bars are set by somebody rostered in
+   85-99% of leagues (Util Matt Olson 99%, 2B Ketel Marte 95%, SS Jeremy Peña 87%, RP
+   Trevor Megill 85%). src/engine/trade.ts had already written down that this sentence
+   was wrong; nobody had changed the sentence. What the summary must do is unchanged —
+   name the column the rows are actually in — so that is what is asserted, plus the
+   correction, so the old wording cannot come back. */
 t("and the column the rows are sorted by is named under the heads, by the sort in force",
-  /ahead by/i.test(legendSummary) && /best man still free/i.test(legendSummary), legendSummary)
+  /ahead by/i.test(legendSummary) && /once every team has filled it/i.test(legendSummary),
+  legendSummary)
+t("and it does not call that bar the best man still free, which he usually is not",
+  !/best man still free/i.test(legendAll), legendAll.slice(0, 240))
 t("and the not-a-forecast claim moved onto the table, one tap under that",
   /does not promise points/i.test(legendAll) && !/does not promise points/i.test(legendSummary),
   legendAll.slice(0, 200))
@@ -531,8 +553,8 @@ t("the tabs work on a first visit, because there is something behind each of the
 // stores the last screen under. Read off the label, because the label is what a reader
 // can see and the id is what nothing must change.
 t("and the visit lands on the screen that ranks",
-  (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim())))[0] === "Pickups",
-  (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim()))).join(","))
+  (await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim())))[0] === "Pickups",
+  (await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim()))).join(","))
 
 /**
  * The route that cannot be revoked, on the build where it is the only one.
@@ -1266,16 +1288,20 @@ t("and the line that matched nobody is quoted back verbatim, not silently droppe
   (await p.$eval(".onboard-missed", e => e.innerText)).includes(JUNK),
   await p.$eval(".onboard-missed", e => e.innerText))
 /*
- * The second and last question, and it only appears once there is a league to write it
- * to. The bar every player is measured against is the (teams x seats)-th best man, so
- * the team count moves every row on the board — which is why it is asked at all, and
- * why it is a chip row rather than a number field.
+ * The second question, and it only appears once there is a league to write it to. The
+ * bar every player is measured against is the (teams x seats)-th best man, so the team
+ * count moves every row on the board — which is why it is asked at all, and why it is a
+ * chip row rather than a number field.
+ *
+ * Scoped to its own heading rather than to `.onboard-teams`, which is now two rows: the
+ * lineup-lock question below shares the class and joined this census as
+ * "8 10 12 14 16 Yes, every day No, it locks for the week".
  */
-const teamChips = p.locator(".onboard-teams .chip-btn")
+const teamChips = p.locator(".onboard-teams", { hasText: "How many teams" }).locator(".chip-btn")
 t("and the one other question that moves every row is asked, as chips",
   JSON.stringify(await teamChips.allTextContents()) === JSON.stringify(["8", "10", "12", "14", "16"]),
   (await teamChips.allTextContents()).join(" "))
-await p.click('.onboard-teams .chip-btn:text-is("12")')
+await teamChips.filter({ hasText: /^12$/ }).click()
 await p.waitForFunction(() => {
   const c = JSON.parse(localStorage.getItem("beanemachine:config"))
   return c.leagues[c.active_league].meta.max_teams === 12
@@ -1289,6 +1315,39 @@ t("and answering it is written to the league, not only to the chip",
     const c = JSON.parse(localStorage.getItem("beanemachine:config"))
     return c.leagues[c.active_league].meta.max_teams
   })))
+/**
+ * THE THIRD QUESTION, AND THE ONE THE DOCK'S PROMISE RESTS ON.
+ *
+ * The bar reads "Tell it who's on your team and it will tell you who to start tonight"
+ * and the button below reads "Show me tonight". Neither was true on this route.
+ * `Decide`'s Today section renders only where `scoring_period.lineup_lock === "daily"`,
+ * and the shipped preset carries no `scoring_period` at all — verified `undefined` in
+ * public/scoring.json — so a first visit walked the whole sheet, landed on the card, and
+ * got a scoring-period plan with no tonight in it. The app's one conversion sentence,
+ * structurally unanswerable by the only route a stranger has.
+ *
+ * It cannot be read off a preset, because it is not a fact about a platform: Yahoo hosts
+ * both kinds. It is one tap and only the reader has it, so it is asked. What is asserted
+ * here is the whole chain, because any link alone would pass on a screen that still
+ * cannot answer: the question is on the sheet, the answer reaches the league with a
+ * source naming who said it, and the card that follows HAS a Today section.
+ */
+t("the sheet asks the one thing a preset cannot know about tonight",
+  /change your lineup every day/i.test(await p.$eval(".onboard", e => e.innerText)),
+  (await p.$$eval(".onboard-teams h3", n => n.map(e => e.textContent.trim()))).join(" | "))
+await p.click('.onboard-teams .chip-btn:text-is("Yes, every day")')
+await p.waitForTimeout(500)
+t("and the answer is stored as his, with the source saying so",
+  await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    const sp = c.leagues[c.active_league].scoring_period
+    return sp?.lineup_lock === "daily" && /you said/i.test(sp?.source ?? "")
+  }),
+  await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    return JSON.stringify(c.leagues[c.active_league].scoring_period)
+  }))
+
 // The way out of the sheet says what he is getting, and it says it differently once he
 // has a team: "Show me the board" is a place, "Show me tonight" is an answer. It used
 // to read "Done" either way.
@@ -1305,6 +1364,14 @@ await p.waitForSelector(".decide", { timeout: 25000 })
 t("and the screen it lands on is about his own team rather than asking for one",
   (await p.$$eval(".decide-blocked", n => n.length)) === 0,
   await p.$eval(".decide", e => e.innerText.replace(/\s+/g, " ").slice(0, 160)))
+/* And it answers the question the bar asked him in for, rather than a different one.
+   The claim is that a Today section EXISTS and counts his men — not what it says about
+   the schedule, because tonight's card is a live read of statsapi.mlb.com and a machine
+   with no network still has to get a correct answer here. The card itself says which of
+   the two it is working from, which is asserted in test/decide.mjs. */
+const card = await p.$eval(".decide", e => e.innerText.replace(/\s+/g, " "))
+t("and it really does tell him who to start tonight, which is what the bar promised",
+  /\bToday\b/.test(card) && /of your men can score/i.test(card), card.slice(0, 220))
 // `#tpl` — "Start a league from" — lives in the management toolbar, which used to be
 // on the League setup tab and is now on SETUP, the third screen. This was
 // `nth-child(2)`, which is Wire, where no toolbar renders at all.
@@ -1597,6 +1664,101 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   await page.close()
 }
 
+
+/**
+ * ONE THUMB, at 390x844, on the build that actually ships.
+ *
+ * Nothing in this repo checked a touch target, and the CSS that was supposed to
+ * guarantee them had been dead for as long as it had existed: `@media(max-width:640px)`
+ * set `min-height:44px` on the tabs, the chips and every button, and an unconditional
+ * `button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}` sat eighty
+ * lines LATER in the same stylesheet at the same specificity. A media query adds no
+ * specificity, so the 32px rule won at 390px and the phone block was decoration under a
+ * comment claiming it had fixed something — the comment even quoted the count it was
+ * supposed to have ended ("30 of 94 were under 44x44").
+ *
+ * Measured before the reorder: 26 of 91 distinct visible controls under 44x44 across the
+ * three screens — every navigation tab (82.7x35), every horizon tab, all eleven position
+ * chips (the "C" chip 35 wide), both sort headers, "why him" (54x18) and the three
+ * footer links (17px tall). After: 0 of 88 on Pickups, 0 of 10 on Tonight, 0 of 8 on My
+ * league.
+ *
+ * The assertion is the COUNT rather than the stylesheet, because the stylesheet was
+ * correct the whole time and the cascade was not.
+ */
+{
+  const ctx = await b.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true
+  })
+  const page = await ctx.newPage()
+  await page.goto(BASE, { waitUntil: "domcontentloaded" })
+  await page.waitForSelector(".board-row", { timeout: 30000 })
+  /* `checkVisibility` rather than a bounding box alone: an earlier pass counted the
+     contents of shut <details> as visible, which made the number meaningless in the
+     flattering direction. Deduped by tag+class+label so one list of 120 rows does not
+     drown the controls. */
+  const targets = () =>
+    page.evaluate(() => {
+      const seen = new Map()
+      for (const e of document.querySelectorAll("button,summary,a,input,select,[role=button]")) {
+        if (!e.checkVisibility?.({ contentVisibilityAuto: true })) continue
+        const r = e.getBoundingClientRect()
+        if (!r.width || !r.height) continue
+        const key = `${e.tagName}.${e.className}|${(e.textContent ?? "").trim().slice(0, 22)}`
+        if (!seen.has(key)) seen.set(key, { key, w: Math.round(r.width), h: Math.round(r.height) })
+      }
+      return [...seen.values()]
+    })
+  for (const label of ["Pickups", "Tonight", "My league"]) {
+    if (label !== "Pickups") {
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.click(`.views button:text-is("${label}")`)
+      await page.waitForTimeout(900)
+    }
+    const all = await targets()
+    const under = all.filter(c => c.w < 44 || c.h < 44)
+    t(`every control on ${label} is at least 44x44 under one thumb`,
+      all.length > 0 && under.length === 0,
+      `${under.length} of ${all.length}: ${under.map(c => `${c.w}x${c.h} ${c.key}`).slice(0, 6).join(" | ")}`)
+  }
+
+  /*
+   * And the sort headings are reachable once the list has been scrolled.
+   *
+   * `.views` pins at top 0 with z-index 30 and `.board-head` pinned at top 0 with
+   * z-index 2, so the column headings were painted UNDERNEATH the tab strip. Measured at
+   * scrollY 1200: `document.elementFromPoint` at the centre of the "ahead by" heading
+   * returned the "My league" tab, and a real tap there switched screens and threw away
+   * the scroll position — the gesture that should reorder the list left the list. The
+   * headings also simply vanished, so every number beside a name was unlabelled for the
+   * whole rest of the board.
+   */
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.click('.views button:text-is("Pickups")')
+  await page.waitForSelector(".board-row")
+  await page.evaluate(() => window.scrollTo(0, 1200))
+  await page.waitForTimeout(400)
+  const stuck = await page.evaluate(() => {
+    const head = document.querySelector(".board-head [data-col=bscore]")
+    const r = head?.getBoundingClientRect()
+    if (!r) return { hit: "no heading rendered", navBottom: null, headTop: null }
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    const nav = document.querySelector("nav.views")?.getBoundingClientRect()
+    return {
+      hit: at ? `${at.tagName}.${at.className}` : "nothing",
+      navBottom: nav ? Math.round(nav.bottom) : null,
+      headTop: Math.round(r.top)
+    }
+  })
+  t("a scrolled board still shows its headings, and a tap on one reaches the heading",
+    /sort-head/.test(stuck.hit), JSON.stringify(stuck))
+  t("and they sit below the tab strip rather than under it",
+    stuck.navBottom !== null && stuck.headTop >= stuck.navBottom - 1, JSON.stringify(stuck))
+  await page.close()
+}
 
 await b.close()
 console.log(`\npassed ${pass}, failed ${fail}`)

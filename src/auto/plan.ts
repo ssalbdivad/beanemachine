@@ -1,4 +1,4 @@
-import type { Rated } from "../engine/bscore.ts"
+import { isReserveSlot, startableSeats, type Rated } from "../engine/bscore.ts"
 import type { RosterSpot } from "./roster.ts"
 import { normalizeName } from "../data/yahoo-pool.ts"
 
@@ -43,13 +43,14 @@ export interface PlanOptions {
 	/** Never drop anyone at or above this bscore, whatever the alternative. */
 	keepFloor: number
 	/**
-	 * Hard cap on moves per run.
+	 * Hard cap on moves per run. See `DEFAULTS` below for why it is 2.
 	 *
-	 * One is both the safe default and the measured optimum. Played across 2023-2025,
-	 * bscore wins the season outright at one waiver move per week (41 of 68 weeks
-	 * against season-to-date) and loses its edge entirely at three, where naive
-	 * streak-chasing beats it. The model is worth using for one high-conviction move,
-	 * not for churn.
+	 * This docblock used to carry its own account of the measurement, twenty lines above
+	 * a different one, and it was the stale copy: it said one move was "both the safe
+	 * default and the measured optimum" while `DEFAULTS.maxMoves` shipped 2. It quoted
+	 * "41 of 68 weeks against season-to-date", and no run in data/results/ has a 68-week
+	 * corpus — the figure cannot be re-derived from anything this repo stores. The
+	 * measurement lives in one place now.
 	 */
 	maxMoves: number
 	/**
@@ -73,6 +74,22 @@ export interface PlanOptions {
  * weeks against a thoughtful human versus 60 at one move, and better against the
  * two streak-chasers and the naive manager as well. Three is worse than two
  * (58/111), so the curve does have a peak; it is just not at one.
+ *
+ * Every figure here re-derives from the stored runs, re-checked on 2026-09-11 by
+ * counting weeks where bscore's points beat the opponent's:
+ * `data/results/moves2_2021-2022-2023-2024-2025_moves2.json` (111 weeks) gives 63
+ * against the thoughtful human, 75 hot-hand, 73 hot-hand+vorp, 80 season-to-date;
+ * `anchor-off_..._moves1.json` gives 60 / 74 / 69 / 76; `moves3_..._moves3.json` gives
+ * 58. All five comparisons in this paragraph hold.
+ *
+ * AND THE STRENGTHS ARE NOT THE SAME, which a row of win counts hides. Against the two
+ * streak-chasers and the naive manager the result is decisive: 75 of 111 is p = 0.0003
+ * on a two-sided sign test, 80 of 111 is below 0.0001. Against a thoughtful human it is
+ * SUGGESTIVE AND NOT SIGNIFICANT: 63 of 111 is 56.8% of weeks, p = 0.18, and the one
+ * move it is being compared against (60 of 111, p = 0.45) is inside the same noise. So
+ * "two beats one" is a preference between two numbers neither of which is established
+ * against a good manager, and the choice of 2 rests on it being better against every
+ * opponent rather than on any one comparison being strong.
  *
  * The honest caveat: the simulator charges nothing for churn. A real league
  * spends waiver priority or FAAB on every claim, and this number does not know
@@ -121,24 +138,35 @@ export interface PlanInput {
 
 const r2 = (n: number): number => Number(n.toFixed(2))
 
-/** Yahoo writes the reserve slots as IL, IL+ and NA. Nobody in one is startable
- *  and nobody in one is dropped, so they are held out of every plan. */
-export const isReserve = (slot: string): boolean => /^(IL|NA)/i.test(slot.trim())
+/** "a third move", not "a 3 move". Only ever reached for a move cap, so the small
+ *  words cover it and anything larger falls back to the digit. */
+const ordinal = (n: number): string =>
+	["zeroth", "first", "second", "third", "fourth", "fifth", "sixth"][n] ?? `${n}th`
+
+/** BN, and only BN. A bench man is not started and CAN be dropped, which is the
+ *  distinction this file needs and `isReserveSlot` deliberately does not make. */
 export const isBench = (slot: string): boolean => /^BN$/i.test(slot.trim())
+
+/**
+ * The injured and minor-league seats: nobody in one is startable and nobody in one is
+ * dropped, so they are held out of every plan.
+ *
+ * DERIVED from the engine's `isReserveSlot` rather than restated. This was
+ * `/^(IL|NA)/i` written out by hand, which is the exact form that has twice lost
+ * Yahoo's second injured slot "IL+" — see the note on `isReserveSlot`, which lists what
+ * that cost the two components that made the same mistake.
+ */
+export const isReserve = (slot: string): boolean => isReserveSlot(slot) && !isBench(slot)
 
 /**
  * Every startable seat, one entry per seat.
  *
- * `slot_order` is used when the league gave us one, because it is the order Yahoo
- * itself lists the slots in and keeps the printed lineup recognisable; the counts
- * are the fallback and produce the same multiset.
+ * This was a second implementation with the OPPOSITE precedence to the engine's —
+ * `slot_order` first, counts as fallback — and the two disagreed by two seats after an
+ * ordinary edit in the league editor. `startableSeats` is now the only one; see its
+ * note for the measurement.
  */
-export const activeSlots = (shape: RosterShape): string[] =>
-	shape.slot_order ?
-		shape.slot_order.filter(s => !isReserve(s) && !isBench(s))
-	:	Object.entries(shape.slots).flatMap(([slot, count]) =>
-			isReserve(slot) || isBench(slot) ? [] : Array.from({ length: count }, () => slot)
-		)
+export const activeSlots = (shape: RosterShape): string[] => startableSeats(shape)
 
 /** The startable slots a set of eligibility positions can legally fill. `any` and
  *  `injured_only` are the bench and the IL, which are not startable seats. */
@@ -1070,11 +1098,27 @@ export const planSwaps = (
 				]
 				bestNext = Math.max(bestNext, planLineup({ ...input, roster: after }).pointsPlanned - base2)
 			}
-			if (Number.isFinite(bestNext))
+			/*
+			 * The sign decides which sentence this is, and it used to decide neither.
+			 *
+			 * One string was emitted whenever `bestNext` was finite, negative included, and
+			 * it read "a third move would gain -14.62 more on top of these two — 2 a week is
+			 * where the measurement put the cap, not where the gains stop". Observed verbatim
+			 * on the published build's first visit. Two defects in one sentence: "gain" for a
+			 * loss, and a claim that the gains have not stopped standing next to the number
+			 * showing that they have. The cap is a real caveat when another move WOULD help,
+			 * and a false one when it would not.
+			 */
+			if (Number.isFinite(bestNext) && bestNext > 0)
 				notes.push(
-					`a third move would gain ${r2(bestNext)} more on top of these two — ` +
-						`${options.maxMoves} a week is where the measurement put the cap, not where ` +
-						`the gains stop`
+					`a ${ordinal(options.maxMoves + 1)} move would gain ${r2(bestNext)} more on ` +
+						`top of these ${options.maxMoves} — ${options.maxMoves} a week is where the ` +
+						`measurement put the cap, not where the gains stop`
+				)
+			else if (Number.isFinite(bestNext))
+				notes.push(
+					`a ${ordinal(options.maxMoves + 1)} move would LOSE ${r2(-bestNext)} here, so ` +
+						`the cap is not what is stopping this list`
 				)
 		}
 	}
@@ -1103,7 +1147,7 @@ export const seatedInnings = (
 	starters: { slot: string; name: string }[]
 ): number => {
 	const seated = new Set(
-		starters.filter(st => !/^(BN|IL|NA)/i.test(st.slot)).map(st => normalizeName(st.name))
+		starters.filter(st => !isReserveSlot(st.slot)).map(st => normalizeName(st.name))
 	)
 	let outs = 0
 	for (const r of rated) {

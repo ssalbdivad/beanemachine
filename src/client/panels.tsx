@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
 import { deriveTradeDeadline } from "../import.ts"
-import { isReserveSlot } from "../engine/bscore.ts"
+import { isReserveSlot, rosterCounts } from "../engine/bscore.ts"
 
 type Num = (value: number) => void
 
@@ -56,6 +56,10 @@ export const ValueInput = ({
 			ref={el}
 			className={`${className} ${value > 0 ? "pos" : value < 0 ? "neg" : ""}`}
 			type="number"
+			/* `inputmode`, so a phone raises the keypad this field is for rather than the
+			   full alphabetic keyboard. A point value is signed and fractional (-0.5 for a
+			   strikeout is ordinary), a slot count is neither. */
+			inputMode={integer ? "numeric" : "decimal"}
 			step={integer ? 1 : "any"}
 			title={label}
 			aria-label={label}
@@ -128,6 +132,7 @@ export const TeamCountInput = ({
 			<input
 				ref={el}
 				type="number"
+				inputMode="numeric"
 				min="2"
 				step="1"
 				placeholder="—"
@@ -209,8 +214,15 @@ export const StatTable = ({
 						onCommit={n => onChange({ ...table, [code]: n })}
 						onReject={onReject}
 					/>
+					{/* `aria-label`, not `title`. In the accessible-name algorithm text content
+					    beats `title`, so Chromium computed the name of every one of these as
+					    "×" and threw away the "Remove R" it had also found — measured on My
+					    league, seventeen buttons on one screen all announcing "×, button",
+					    while the number field one element to its left gets it right because it
+					    uses `aria-label`. The title stays: it is the hover tooltip. */}
 					<button
 						className="ghost"
+						aria-label={`Remove ${code}`}
 						title={`Remove ${code}`}
 						onClick={() => {
 							const { [code]: _, ...rest } = table
@@ -255,24 +267,16 @@ const AddStat = ({
 			}}
 		>
 			<input className="k" name="code" placeholder="CODE" aria-label="Stat code" />
-			<input name="points" type="number" step="any" placeholder="points" aria-label="Points" />
+			<input name="points" type="number" inputMode="decimal" step="any" placeholder="points" aria-label="Points" />
 			<button type="submit">Add</button>
 		</form>
 	)
 }
 
-const IL_SLOTS = ["IL", "NA", "IL+"]
-
-export const recount = (slots: Record<string, number>): League["roster"]["counts"] => {
-	const sum = (ks: string[]) => ks.reduce((a, k) => a + (slots[k] ?? 0), 0)
-	const all = Object.keys(slots)
-	return {
-		active: sum(all.filter(k => k !== "BN" && !IL_SLOTS.includes(k))),
-		bench: slots.BN ?? 0,
-		injured_list: sum(IL_SLOTS),
-		total: sum(all)
-	}
-}
+/** The editor's counts, which are the engine's counts — this was a third hand-written
+ *  copy of `["IL", "NA", "IL+"]` and of the reserve test, rendering four hundred pixels
+ *  from `leagueGaps`'s answer, which used the canonical predicate. See `rosterCounts`. */
+export const recount = rosterCounts
 
 export const RosterPanel = ({
 	roster,
@@ -332,7 +336,7 @@ export const RosterPanel = ({
 					}}
 				>
 					<input className="k" name="slot" placeholder="SLOT" aria-label="New roster slot" />
-					<input name="count" type="number" min="1" step="1" placeholder="#" aria-label="Slot count" />
+					<input name="count" type="number" inputMode="numeric" min="1" step="1" placeholder="#" aria-label="Slot count" />
 					<button type="submit">Add slot</button>
 				</form>
 			</div>
@@ -388,8 +392,25 @@ export const EligibilityPanel = ({
 	onChange: (next: League["eligibility"]) => void
 	onReject: (message: string) => void
 }) => {
+	/**
+	 * An absence, stated as an absence and with no cause attributed to it.
+	 *
+	 * This read "This platform doesn't publish eligibility rules", which is one of
+	 * the three reasons this value is null and is false for the other two: ESPN's
+	 * endpoint genuinely does not expose them (src/import.ts, "This endpoint doesn't
+	 * expose position-eligibility rules"), but a Yahoo league whose eligibility page
+	 * could not be read lands here too ("Position-eligibility page unreadable"), and
+	 * so does a league typed in by hand, where nothing was ever read from anywhere.
+	 * Blaming "this platform" in those last two tells the reader his league's site
+	 * withholds something it publishes perfectly well.
+	 */
 	if (!eligibility)
-		return <p className="empty">This platform doesn't publish eligibility rules — nothing assumed.</p>
+		return (
+			<p className="empty">
+				Nobody has said what it takes to qualify at a position in this league, so nothing
+				is assumed.
+			</p>
+		)
 	const { batters, pitchers, tracked_positions } = eligibility
 	return (
 		<dl>
@@ -469,7 +490,10 @@ export const EligibilityPanel = ({
  * ------------------------------------------------------------------------- */
 
 export interface Gap {
-	/** Named the way League setup names it, so the fix is findable. */
+	/** What is missing, in the reader's words rather than the schema's — "How many
+	 *  teams", not `meta.max_teams`. It is not the heading the editor uses for it
+	 *  (that one is "This league"), and claiming it was sent readers hunting for a
+	 *  card with this name. */
 	label: string
 	/** What was actually read, or null while it is missing. Never a default. */
 	have: string | null
@@ -569,15 +593,24 @@ export const PresetNote = ({
 	onChecked
 }: {
 	league: League
-	/** Absent when League setup is already the open tab. */
+	/** Absent when the league's own tab is already the open one. */
 	onOpenSetup?: () => void
 	/** The way this notice ends. Without it the notice is permanent — and a warning
 	 *  that can never be satisfied is one people learn to read past, including on
 	 *  the league where it is still true. */
 	onChecked?: () => void
 }) => {
-	const stats =
-		Object.keys(league.scoring.batting).length + Object.keys(league.scoring.pitching).length
+	/**
+	 * Scored stats, counted the way `leagueGaps` counts them: a stat sitting at 0 is
+	 * scored at zero, which is the same as unscored as far as any projection is
+	 * concerned. This counted KEYS, so the moment somebody zeroed a value this
+	 * notice and the chip on the setup card gave two different counts of the same
+	 * league, and the larger of the two was the wrong one.
+	 */
+	const stats = [
+		...Object.values(league.scoring.batting),
+		...Object.values(league.scoring.pitching)
+	].filter(v => v !== 0).length
 	const seats = Object.values(league.roster.slots).reduce((a, b) => a + b, 0)
 	return (
 		<div className="preset-note">
@@ -587,11 +620,16 @@ export const PresetNote = ({
 			    whose numbers these are — with the figures read from the league so they
 			    stay true after an edit. */}
 			<p>
-				<b>These are standard defaults, not read from your league.</b> The board is
-				ranking on {stats} scored stats, {seats} roster seats and{" "}
+				{/* "The board is ranking on …" was wrong on one of the three screens this
+				    notice sits above: it renders over whichever tab is open, and the tab
+				    that holds the league's own values holds no board. "Every number you are
+				    shown" is true on all three, and it is also the larger truth — the trade
+				    and tonight answers are priced in these same three inputs. */}
+				<b>These are standard defaults, not read from your league.</b> Every number you
+				are shown is priced on {stats} scored stats, {seats} roster seats and{" "}
 				{league.meta.max_teams ?? "no stated number of"} teams, all copied from a league
-				that was read from source. A wrong point value silently reprices every player,
-				and a wrong team count moves every bscore.
+				that was read off its own settings page. A wrong point value silently reprices
+				every player, and a wrong team count moves every ranking on the board.
 			</p>
 			{/* Folded, and the paragraph above is why it can be: it already names every
 			    borrowed value. Measured at 1280x1200 with the four lines open, this
@@ -604,8 +642,16 @@ export const PresetNote = ({
 			{league.needs_review.length > 0 && (
 				<details>
 					<summary>
-						{league.needs_review.length} values to check against your league&rsquo;s
-						settings page
+						{/* Measured 2026-09-11 on the published build: with a league carrying a
+						    single unchecked value this read "1 VALUES TO CHECK AGAINST YOUR
+						    LEAGUE'S SETTINGS PAGE". The shipped preset carries four lines
+						    (scoring.json → platform_templates.yahoo.needs_review), so the
+						    plural is usually right and the bug only shows on the league that
+						    has nearly been checked — which is the reader most likely to be
+						    reading this line closely. */}
+						{league.needs_review.length}{" "}
+						{league.needs_review.length === 1 ? "value" : "values"} to check against
+						your league&rsquo;s settings page
 					</summary>
 					<ul className="flags">
 						{league.needs_review.map(n => (
@@ -616,7 +662,10 @@ export const PresetNote = ({
 			)}
 			{onOpenSetup && (
 				<button className="primary" onClick={onOpenSetup}>
-					Check these on My league
+					{/* The tab's own word, read from VIEWS. Typed out here it said "Setup"
+					    through two renames, so the one instruction this notice gives named a
+					    screen the tab bar did not have. */}
+					Check these on {tab("trade")}
 				</button>
 			)}
 			{/* The user's own statement, never an inference. Saving an edit is NOT
@@ -700,6 +749,18 @@ export const tradesClosed = (
 	return { closed: !!on && today > on, on }
 }
 
+/**
+ * The tab bar's own words, and the ONLY place they are written.
+ *
+ * Twelve user-facing sentences used to retype them — "Open Setup and set the team
+ * count", "adds and drops are on Today" — and the tabs have now been renamed three
+ * times. Every rename left a card pointing at a screen with no such name, which is
+ * worse than vague: a reader who is told to open Setup goes looking for Setup, and
+ * the one instruction the card gives cannot be carried out by looking at the screen.
+ * `tab("trade")` cannot drift from the bar, because it IS the bar.
+ */
+export const tab = (id: View): string => VIEWS.find(v => v.id === id)?.label ?? id
+
 export const VIEWS: { id: View; label: string; purpose: string; season: number }[] = [
 	{
 		id: "board",
@@ -726,14 +787,15 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
 
 
 /**
- * How a visitor gets from this page to a board ranked in THEIR league.
+ * How a visitor gets from this page to a board ranked in THEIR league. That was
+ * the shape of the whole problem: every route in existed, none of them was named.
  *
- * Its own component because it is needed in two places that render for opposite
- * reasons: inside `Setup`, which appears when the active league cannot rank, and
- * on League setup while the demo league is active — which CAN rank, so `Setup`
- * stays hidden and the first-time visitor would otherwise be shown a toolbar and
- * left to infer the rest. That was the shape of the whole problem: every route in
- * existed, none of them was named.
+ * Its own component because it was needed in two places that rendered for opposite
+ * reasons — inside `Setup`, and again beside the demo league, which COULD rank and
+ * so kept `Setup` hidden. The demo league is gone (a first visit now sets up its
+ * own), so today `Setup` is the only caller. Kept separate anyway: the routes are a
+ * list of their own, and the second caller comes back the moment anything else can
+ * rank without being set up.
  */
 export const WaysIn = ({
 	canImport,
@@ -767,9 +829,9 @@ export const WaysIn = ({
 					{preset && onUsePreset && (
 						<Fragment2 term="Fastest">
 							<b>{preset}</b> — a ready-made scoring table, roster and team count,
-							copied from a league that was read from source. Nothing in it came
-							from your league, so the page keeps saying so until you check it,
-							and every value is editable on My league.
+							copied from a league that was read off its own settings page. Nothing
+							in it came from your league, so the page keeps saying so until you
+							check it, and every value is editable on {tab("trade")}.
 							<p style={{ margin: "var(--sp-2) 0 0" }}>
 								<button className="primary" onClick={onUsePreset}>
 									Start from this preset
@@ -778,16 +840,27 @@ export const WaysIn = ({
 						</Fragment2>
 					)}
 					<Fragment2 term="From its URL">
+						{/* WHERE the field is, rather than "above".
+						    Measured 2026-09-11 on the dev server at 1280x1100, with a league
+						    one input short so this card renders: on Tonight and on Pickups the
+						    page holds no text field at all — the management row lives on My
+						    league alone — and this card sat at y=253 telling the reader to use
+						    a field that was not on the screen. `onOpenSetup` is the same
+						    discriminator the "By hand" route below already uses: App.tsx passes
+						    it only while some OTHER tab is open, so its presence means the field
+						    is one screen over and its absence means it is genuinely above. */}
 						{canImport ?
 							<>
-								Put your league&rsquo;s web address in the field above and it reads the
+								Put your league&rsquo;s web address in the box{" "}
+								{onOpenSetup ? <>on {tab("trade")}</> : "above"} and it reads the
 								real values straight off <b>Yahoo</b> or <b>ESPN</b>.
 							</>
 						:	<>
-								Put an <b>ESPN</b> league&rsquo;s web address in the field above and it
-								reads the real values straight off it. Yahoo does not let any website
-								read your league &mdash; this one included &mdash; so for a Yahoo
-								league, copy the page instead.
+								Put an <b>ESPN</b> league&rsquo;s web address in the box{" "}
+								{onOpenSetup ? <>on {tab("trade")}</> : "above"} and it reads the
+								real values straight off it. Yahoo does not let any website read
+								your league &mdash; this one included &mdash; so for a Yahoo league,
+								copy the page instead.
 							</>
 						}
 					</Fragment2>
@@ -815,9 +888,9 @@ export const WaysIn = ({
 					<Fragment2 term="By hand">
 						{league && onOpenSetup ?
 							<>
-								Open <b>My league</b> and type your league&rsquo;s scoring, slots
-								and team count in. Nothing is filled in for you and nothing is
-								guessed.
+								Open <b>{tab("trade")}</b> and type your league&rsquo;s scoring,
+								slots and team count in. Nothing is filled in for you and nothing
+								is guessed.
 							</>
 						: league ?
 							<>
@@ -863,8 +936,9 @@ export const Setup = ({
 	 *  same thing, and both are named because a drop target nobody knows about is
 	 *  not a route. */
 	onLoadFile?: () => void
-	/** Absent when League setup is already the open tab — a button to where you
-	 *  are is furniture. */
+	/** Absent when the league's own tab is already the open one — a button to where
+	 *  you are is furniture. Also the signal that the toolbar's URL field and New
+	 *  button are NOT on this screen, which is what `WaysIn` reads it for. */
 	onOpenSetup?: () => void
 }) => {
 	const gaps = league ? leagueGaps(league) : []
@@ -885,8 +959,9 @@ export const Setup = ({
 					:	<>
 							<b>{name}</b> is{" "}
 							{missing.length === 1 ? "one input" : `${missing.length} inputs`} short of
-							ranking anything. Nothing is assumed in their place: a value nobody read
-							stays missing and stays listed.
+							ranking anything. Nothing is assumed in{" "}
+							{missing.length === 1 ? "its" : "their"} place: a value nobody read stays
+							missing and stays listed.
 						</>
 					}
 				</p>
@@ -923,7 +998,7 @@ export const Setup = ({
 				{league && onOpenSetup && (
 					<p style={{ margin: "var(--sp-3) 0 0" }}>
 						<button className="primary" onClick={onOpenSetup}>
-							Open My league
+							Open {tab("trade")}
 						</button>
 					</p>
 				)}

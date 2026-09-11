@@ -19,7 +19,12 @@ import { MODEL } from "./weights.ts"
  * "IL+", which `src/import.ts` already marks `injured_only`, so a league carrying
  * one would have priced a spot nobody can start.
  */
-export const RESERVE_SLOTS = new Set(["BN", "IL", "NA", "IL+"])
+/** The injured and minor-league seats, as Yahoo writes them. A list rather than a
+ *  predicate because `src/import.ts` walks it to mark each one `injured_only`, which
+ *  needs the names and not a test. */
+export const IL_SLOTS = ["IL", "IL+", "NA"]
+
+export const RESERVE_SLOTS = new Set(["BN", ...IL_SLOTS])
 
 /**
  * The same question, asked the way callers actually ask it.
@@ -36,6 +41,83 @@ export const RESERVE_SLOTS = new Set(["BN", "IL", "NA", "IL+"])
  */
 export const isReserveSlot = (slot: string): boolean =>
 	RESERVE_SLOTS.has(slot.trim()) || /^(BN|IL|NA)/i.test(slot.trim())
+
+/**
+ * EVERY STARTABLE SEAT, ONE ENTRY PER SEAT, and one function for the whole app.
+ *
+ * There were two, with opposite precedence, and both reachable from My league:
+ * `src/engine/trade.ts` read the validated COUNTS, and `src/auto/plan.ts` read
+ * `slot_order` and fell back to the counts. Each docblock argued for the opposite rule.
+ * So the deal pricer and the lineup planner, three hundred pixels apart, were seating
+ * different teams — measured on the dev league by bumping OF from 3 to 5 and saving:
+ * the editor said 20 active seats, the Tonight card went on seating 18 and never
+ * mentioned the other two.
+ *
+ * THE COUNTS WIN, for the reason trade.ts gave: a `slot_order` parsed off a raw roster
+ * string can disagree with the validated counts, and the counts are the number the
+ * league actually stated. `slot_order` survives as PRINT ORDER only — it seeds the
+ * sequence, never the multiplicity — which keeps a Yahoo lineup recognisable without
+ * letting a stale order decide how many men start.
+ */
+/**
+ * How many men a roster shape starts. The same question `startableSeats` answers,
+ * asked by the three places that only want the number.
+ *
+ * `src/import.ts`, `src/data/paste-settings.ts` and the league editor each had their
+ * own copy of `slot !== "BN" && !IL_SLOTS.includes(slot)` — the exact hand-written form
+ * `isReserveSlot` was extracted to kill, and the form that loses a seat name nobody
+ * anticipated. Measured against the canonical predicate: on the reference Yahoo league
+ * all of them agree at 17, but a roster carrying "IL-60" or "NA(b)" — both typeable in
+ * the editor's own Add slot field — gave 11 and 10 against the predicate's 9 and 9.
+ * Latent rather than live, because no platform emits those names today; one function
+ * so it stays that way.
+ */
+export const startableCount = (slots: Record<string, number>): number =>
+	Object.entries(slots).reduce((sum, [slot, n]) => (isReserveSlot(slot) ? sum : sum + n), 0)
+
+/**
+ * The four counts a league's roster shape produces, in ONE place.
+ *
+ * `src/import.ts`, `src/data/paste-settings.ts` and the league editor each computed these
+ * — Yahoo fetched, Yahoo pasted, and typed by hand — from their own copy of
+ * `["IL", "NA", "IL+"]` and their own `slot !== "BN" && !IL_SLOTS.includes(slot)`. Three
+ * routes to the same four numbers, all written out by hand, and the editor's answer is
+ * rendered four hundred pixels from `leagueGaps`'s, which used the canonical predicate.
+ *
+ * Measured against that predicate: on the reference Yahoo league all three agree at 17
+ * active, but a roster carrying "IL-60" or "NA(b)" — both typeable in the editor's own
+ * Add slot field — gave 11 and 10 where the predicate gives 9 and 9. Latent rather than
+ * live, because no platform emits those names today, and one function so it stays that
+ * way.
+ */
+export const rosterCounts = (
+	slots: Record<string, number>
+): { active: number; bench: number; injured_list: number; total: number } => {
+	const entries = Object.entries(slots)
+	const sum = (keep: (slot: string) => boolean) =>
+		entries.reduce((a, [slot, n]) => (keep(slot) ? a + n : a), 0)
+	return {
+		active: startableCount(slots),
+		bench: sum(slot => /^BN$/i.test(slot.trim())),
+		// every reserve seat that is not the bench: IL, IL+, NA, and whatever a platform
+		// calls its second injured list next season
+		injured_list: sum(slot => isReserveSlot(slot) && !/^BN$/i.test(slot.trim())),
+		total: sum(() => true)
+	}
+}
+
+export const startableSeats = (shape: {
+	slots: Record<string, number>
+	slot_order: string[] | null
+}): string[] => {
+	const counts = shape.slots
+	const order = [...new Set([...(shape.slot_order ?? []), ...Object.keys(counts)])]
+	return order.flatMap(slot =>
+		isReserveSlot(slot) || !(slot in counts) ?
+			[]
+		:	Array.from({ length: counts[slot] ?? 0 }, () => slot)
+	)
+}
 
 /**
  * The bscore: a player's projected points over the horizon, minus what a freely
@@ -784,21 +866,25 @@ export const ownershipCut = (
 	 * Yahoo's "% Ros" is swept off player pages whose tooltip also carries a
 	 * per-game weather line, and a sweep that reads the wrong cell puts a whole
 	 * club on one identical percentage. `leakedByTeam` in data/yahoo-pool.ts
-	 * discards those at capture time, but the snapshot committed at 2026-09-02
-	 * predates it, and on that capture 225 of 848 priced players sit at exactly
-	 * 51% — 83% of the 270-deep boundary is a single tie the column cannot order.
-	 * Ranking by it there produced a "who you can get" list headed by Zack Wheeler,
-	 * Jacob deGrom and Logan Gilbert: the same unreachable aces, differently
-	 * spelled.
+	 * discards those at capture time; the capture that went in BEFORE it — stamped
+	 * 2026-09-02 and no longer the committed one — had 225 of 848 priced players at
+	 * exactly 51%, 83% of the 270-deep boundary inside a single tie the column cannot
+	 * order. Ranking by it there produced a "who you can get" list headed by Zack
+	 * Wheeler, Jacob deGrom and Logan Gilbert: the same unreachable aces, differently
+	 * spelled. That capture is kept here as the failure, not as the present state —
+	 * this comment used to call it "the snapshot committed", which it has not been
+	 * since 2026-09-08.
 	 *
 	 * So the tie at the cut must be smaller than ONE roster. Past that the estimate
 	 * cannot even say which team's worth of players the boundary falls in, and a
 	 * boundary that cannot be located to within a single roster is not a boundary.
 	 * The bar is the league's own seat count, not a constant.
 	 *
-	 * Measured, both captures, 10 teams x 27 seats, depth 270:
-	 *   2026-09-02 (committed, leaked)  cut 51%, 225 tied — 8.3x one roster, refused
-	 *   2026-09-04 (live, deleaked)     cut 35%,   4 tied — 0.15x one roster, used
+	 * Measured, 10 teams x 27 seats, depth 270. The third row is the capture that is
+	 * actually committed, re-derived 2026-09-11 — 880 priced, 270th value 35, 4 tied:
+	 *   2026-09-02 (leaked, superseded)    cut 51%, 225 tied — 8.3x one roster, refused
+	 *   2026-09-04 (live, deleaked)        cut 35%,   4 tied — 0.15x one roster, used
+	 *   2026-09-08 (committed, deleaked)   cut 35%,   4 tied — 0.15x one roster, used
 	 */
 	if (tied > seats)
 		return nothing(

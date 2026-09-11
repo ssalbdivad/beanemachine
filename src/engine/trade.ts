@@ -1,5 +1,5 @@
 import type { League } from "../schema.ts"
-import { RESERVE_SLOTS, slotsFor, type Rated } from "./bscore.ts"
+import { RESERVE_SLOTS, slotsFor, startableSeats, type Rated } from "./bscore.ts"
 
 /**
  * What a trade is actually worth.
@@ -29,19 +29,12 @@ const UNSTARTABLE = RESERVE_SLOTS
  * One entry per startable spot: three OF slots produce three entries, because the
  * question "what do I start" is asked of spots, not of slot names.
  *
- * `slots` carries the counts and `slot_order` only the ordering — a slot_order
- * parsed off a raw roster string can disagree with the validated counts, and the
- * counts are the number the league actually stated.
+ * The arithmetic moved to `startableSeats` in bscore.ts, where the reserve vocabulary
+ * already lives, because src/auto/plan.ts had a second copy of it that answered
+ * differently — see that function's note for what the disagreement cost on screen.
+ * This stays as the League-shaped way to ask.
  */
-export const activeSlots = (league: League): string[] => {
-	const counts = league.roster.slots
-	const names = [...new Set([...(league.roster.slot_order ?? []), ...Object.keys(counts)])]
-	return names.flatMap(slot =>
-		UNSTARTABLE.has(slot) || !(slot in counts)
-			? []
-			: Array.from({ length: counts[slot] ?? 0 }, () => slot)
-	)
-}
+export const activeSlots = (league: League): string[] => startableSeats(league.roster)
 
 /**
  * The replacement bar at every startable slot: the (teams × slots)-th best
@@ -52,10 +45,13 @@ export const activeSlots = (league: League): string[] => {
  * bscore but does not hand them back. They cannot be read off `Rated.replacement`
  * either, because that field reports the bar at the slot where a player was worth
  * MOST, so a slot that is nobody's best is absent from it altogether. SP is that
- * slot in the reference league: its bar (64.97) sits above P's (57.59), so every
- * starting pitcher is worth more at P and no `Rated.slot` ever reads "SP".
- * `test/trade.mjs` pins the two computations against each other and names that
- * gap, so neither the bars nor the gap can drift silently.
+ * slot in the reference league: its bar sits above P's, so every starting pitcher is
+ * worth more at P and no `Rated.slot` ever reads "SP". The two figures used to be
+ * printed here — "64.97" and "57.59" — and neither reproduces on the committed
+ * capture, which gives 73.56 and 64.16. They share no value, so the capture moved
+ * under the comment rather than the arithmetic drifting. The ORDERING is the claim,
+ * it still holds, and `test/trade.mjs` asserts it against the numbers the engine
+ * computes on the day rather than against a copy typed into prose.
  *
  * `teams` is required and never defaulted, for the reason bscore.ts gives: a
  * guessed team count moves every bar and therefore every number on this page.

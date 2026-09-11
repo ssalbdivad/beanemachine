@@ -18,6 +18,36 @@ const singles = (s: StatLine): number | null =>
 
 type Getter = (s: StatLine) => number | null | undefined
 
+/**
+ * EVERY STAT FIELD ANYTHING IN THIS APP READS, and nothing else.
+ *
+ * MLB's season endpoint returns 67 fields per player and this app reads 42 of them. The
+ * other 25 — airOuts, strikeoutWalkRatio, pitchesPerInning, winPercentage and the rest —
+ * were captured, committed, served to every browser and then thrown away. Measured on
+ * the committed capture: 716 KB of a 2.27 MB file, 32.1% of a payload that is already
+ * three and a half times the size of the JavaScript bundle, and about 84 KB over the
+ * wire per page load after gzip.
+ *
+ * They were not even inert once they arrived: `project.ts` iterates `Object.entries` of
+ * a stat line, so all 25 were shrunk, blended and volume-scaled for every player on
+ * every board before being discarded.
+ *
+ * The two maps below are the authority on what a league can SCORE, so the list is built
+ * from them and cannot drift as a league gains a stat. `ENGINE_READS` is the rest: the
+ * fields the projection and the seating rules read directly rather than through a
+ * scoring table. Adding a stat to either map needs no change here; reading a new field
+ * in the engine does, and the test that would notice is in test/engine.mjs.
+ */
+export const ENGINE_READS = [
+	// volume, and the denominators the projection divides it by
+	"plateAppearances", "battersFaced", "gamesPlayed", "gamesPitched", "gamesStarted",
+	// the innings a start is measured in — `outs`, never `inningsPitched`, because
+	// baseball's 85.2 means eighty-five and two THIRDS and is not a decimal
+	"outs",
+	// the rate components the Statcast blend leans on
+	"avg", "obp", "slg", "ops", "era", "whip", "battingAverage"
+] as const
+
 export const HITTING_MAP: Record<string, Getter> = {
 	R: s => s.runs,
 	"1B": singles,
@@ -65,6 +95,40 @@ export const PITCHING_MAP: Record<string, Getter> = {
 }
 
 /**
+ * The keys those getters actually touch, read off the getters themselves rather than
+ * retyped — a hand-kept copy of this list is exactly the kind of thing that goes stale
+ * the first time a stat is added. Each getter is called once against a Proxy that
+ * records what it asks for.
+ */
+const scoredKeys = (): Set<string> => {
+	const seen = new Set<string>()
+	const spy = new Proxy({} as StatLine, {
+		get: (_, k) => {
+			if (typeof k === "string") seen.add(k)
+			return 0
+		}
+	})
+	for (const map of [HITTING_MAP, PITCHING_MAP])
+		for (const get of Object.values(map))
+			try {
+				get(spy)
+			} catch {
+				// a getter that does arithmetic on two fields still records both before it
+				// throws on anything unexpected, and a throw here must not lose the rest
+			}
+	return seen
+}
+
+/** Every field worth carrying on a captured stat line: what a league can score, plus
+ *  what the engine reads directly. See `ENGINE_READS` above for why this exists. */
+export const KEPT_STATS = new Set<string>([...scoredKeys(), ...ENGINE_READS])
+
+/** A captured stat line with the fields nothing reads removed. Applied at CAPTURE, so
+ *  the file on disk is the small one and no browser is ever sent the rest. */
+export const keepScorable = (stats: StatLine): StatLine =>
+	Object.fromEntries(Object.entries(stats).filter(([k]) => KEPT_STATS.has(k)))
+
+/**
  * `Object.entries` of a league's scoring table, memoised on the table itself.
  *
  * `scoreStats` runs twice per player per board — once on the projection, once on
@@ -82,8 +146,11 @@ export const PITCHING_MAP: Record<string, Getter> = {
  *
  * Every stored number in the projection and every points breakdown goes through
  * that idiom, and it is the single hottest line on the board: `toFixed` formats a
- * string and `Number` parses it back, roughly **5.6x** the cost of the arithmetic
- * (3M calls: 470ms against 84ms, measured on this machine). A board pays it about
+ * string and `Number` parses it back, roughly **8-10x** the cost of the arithmetic
+ * (3M calls, re-measured 2026-09-11: 727ms against 73ms, then 865 against 109 on a
+ * second pass — so the ratio is quoted as a range rather than to one decimal, because
+ * it does not repeat to one decimal). It read "5.6x ... 470ms against 84ms, measured on
+ * this machine", which does not reproduce on this machine. A board pays it about
  * 100,000 times — ~43,000 in the projected stat lines and ~57,000 in the two
  * points breakdowns per player.
  *
@@ -95,7 +162,9 @@ export const PITCHING_MAP: Record<string, Getter> = {
  *
  * The bound: the multiply's error is at most |y| x 2^-53, which is under 1.2e-7 for
  * the magnitudes a stat line reaches, so requiring the scaled value to sit at least
- * 1e-6 from a half-integer leaves three orders of margin. Everything else — a tie,
+ * 1e-6 from a half-integer leaves a factor of eight of margin — 1e-6 / 1.2e-7. This
+ * said "three orders", which contradicted the bound stated one sentence earlier; the
+ * guard is sound, the arithmetic describing it was not. Everything else — a tie,
  * an out-of-range magnitude, NaN, Infinity — falls back to `toFixed` and is exactly
  * as it was. The division that remains is correctly rounded by IEEE-754, so it
  * lands on the same double `Number("1.234")` does.

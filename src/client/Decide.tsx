@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
-import { ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
+import { isReserveSlot, ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
 import {
 	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
-import { freshness } from "./panels.tsx"
+import { freshness, tab } from "./panels.tsx"
 import { canReadPool, api, poolIsPartial, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
@@ -58,9 +58,6 @@ const readAgo = (at: string): string => {
 	if (hours < 36) return `${Math.round(hours)} hours ago`
 	return `${Math.round(hours / 24)} days ago`
 }
-
-/** Yahoo writes its non-playing seats as BN, IL, IL+ and NA. */
-const RESERVE = /^(BN|IL|NA)/i
 
 const PERIOD_NAME: Record<string, string> = {
 	matchup: "this matchup",
@@ -124,14 +121,26 @@ export const Decide = ({
 	 */
 	const rev = useStored()
 
-	const owned = useMemo(() => {
-		if (!leagueKey) return []
+	/*
+	 * "No roster" and "the roster could not be read" are different, and this used to
+	 * return [] for both.
+	 *
+	 * `seats` then fell through to the lineup store, so with `beanemachine:roster` set to
+	 * invalid JSON this card printed a full twenty-man plan — "drop Jose Espada" — while
+	 * My league, on the same page load, said the store was unreadable and offered a button
+	 * to clear it. Acting on a store the app has declared unreadable, without saying so, is
+	 * the one thing this card must not do. My league still owns the explaining and the
+	 * repair; this card's job is to refuse.
+	 */
+	const owned = useMemo((): { ids: string[]; error: string | null } => {
+		if (!leagueKey) return { ids: [], error: null }
 		try {
-			return roster.of(leagueKey)
-		} catch {
-			return []
+			return { ids: roster.of(leagueKey), error: null }
+		} catch (e) {
+			return { ids: [], error: e instanceof Error ? e.message : String(e) }
 		}
 	}, [leagueKey, rev])
+	const ownedIds = owned.ids
 	const carried = leagueKey ? poolStore.of(leagueKey) : null
 
 	/**
@@ -153,11 +162,54 @@ export const Decide = ({
 	 * not a guess at where a man may play.
 	 */
 	const seats = useMemo(() => {
-		if (storedSeats?.spots.length) return { spots: storedSeats.spots, at: storedSeats.at, known: true }
-		if (!owned.length || !snapshot) return null
+		/*
+		 * THE ROSTER IS THE AUTHORITY ON WHO IS YOURS. The stored seats say only where
+		 * they sit.
+		 *
+		 * This read `storedSeats` whenever it had spots and consulted `owned` only as a
+		 * fallback, and nothing in the app has ever cleared the lineup store. So pressing
+		 * "Clear team" on My league — no corruption, no edge case — emptied the roster and
+		 * left the seats, and Tonight went on printing the whole plan for the team that had
+		 * just been deleted: "12 of your men can score", "Bench Jair Camargo", "Add Dominic
+		 * Canzone for your Util seat, drop Jose Espada". My league said "No players yet" on
+		 * the same page load. It survived reloads, and the only escape was reading a new
+		 * roster or finding the error boundary's clear button by crashing the page.
+		 *
+		 * Requiring a man to still be owned fixes it here, at the point the claim is made,
+		 * rather than relying on every future clear path remembering to delete a second
+		 * store. An EMPTY roster therefore means no seats at all, which is the honest
+		 * answer — and the card's own no-roster state is what renders.
+		 */
+		const mine = new Set(ownedIds.map(k => k.split(":")[0]))
+		const ownedNames = new Set<string>()
+		const knownNames = new Set<string>()
+		for (const p of snapshot?.players ?? []) {
+			const n = normalizeName(p.name)
+			knownNames.add(n)
+			if (mine.has(String(p.id))) ownedNames.add(n)
+		}
+		/*
+		 * A seat survives if the roster still owns the man, OR if the capture cannot name
+		 * him at all — the second is an absence, not a disowning, and My league already
+		 * reports those men by id with "has no row in the current capture", so dropping
+		 * them here would turn a stated gap into a silent one.
+		 *
+		 * And the filter only applies where the roster KNOWS something. A lineup with no
+		 * roster beside it is a real state — it is how the shipped seed arrives, and how a
+		 * league loaded from a file can arrive — and there the seats are all there is.
+		 */
+		const stillMine =
+			ownedIds.length && snapshot ?
+				storedSeats?.spots.filter(sp => {
+					const n = normalizeName(sp.name)
+					return ownedNames.has(n) || !knownNames.has(n)
+				})
+			:	storedSeats?.spots
+		if (stillMine?.length) return { spots: stillMine, at: storedSeats!.at, known: true }
+		if (!ownedIds.length || !snapshot) return null
 		const byId = new Map(snapshot.players.map(p => [p.id, p]))
 		const elig = snapshot.eligibility ?? {}
-		const spots = owned.flatMap(k => {
+		const spots = ownedIds.flatMap(k => {
 			const p = byId.get(Number(k.split(":")[0]))
 			if (!p) return []
 			return [{
@@ -184,7 +236,7 @@ export const Decide = ({
 			}]
 		})
 		return spots.length ? { spots, at: null as string | null, known: false } : null
-	}, [storedSeats, owned, snapshot])
+	}, [storedSeats, ownedIds, snapshot])
 
 	/**
 	 * The same wire the board reads, from the same place.
@@ -414,7 +466,7 @@ export const Decide = ({
 		for (const sp of seats.spots) {
 			const r = byName.get(normalizeName(sp.name))
 			if (!r) {
-				if (!RESERVE.test(sp.slot)) unmatched.push(sp.name)
+				if (!isReserveSlot(sp.slot)) unmatched.push(sp.name)
 				continue
 			}
 			// "has a game" is a claim about a man who can play it. Counting everyone whose
@@ -433,7 +485,7 @@ export const Decide = ({
 				:	r.player.teamId != null && w.games.has(r.player.teamId)
 			const plays = r.rateable && onField
 			if (plays) playing.add(normalizeName(sp.name))
-			else if (!RESERVE.test(sp.slot)) idle.push(sp.name)
+			else if (!isReserveSlot(sp.slot)) idle.push(sp.name)
 		}
 		const lineup = planLineup({
 			roster: seats.spots
@@ -485,7 +537,7 @@ export const Decide = ({
 		 * replacement is still a change he has to make.
 		 */
 		const seated = new Set(lineup.starters.map(st => normalizeName(st.name)))
-		const activeNow = seats.spots.filter(sp => !RESERVE.test(sp.slot))
+		const activeNow = seats.spots.filter(sp => !isReserveSlot(sp.slot))
 		const bench = activeNow.filter(sp => !seated.has(normalizeName(sp.name)))
 		const nowActive = new Set(activeNow.map(sp => normalizeName(sp.name)))
 		const start = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
@@ -738,6 +790,15 @@ export const Decide = ({
 	 * Two conditions, both hard: the man has to be gettable, and he has to be on a
 	 * card TONIGHT. A free agent who does not play tonight fills the seat with the
 	 * same zero it already has.
+	 *
+	 * THE SECOND CONDITION WAS A COMMENT AND NOT A CHECK. "Tonight" was `ratedToday`,
+	 * which is rated over the COMMITTED CAPTURE's schedule — the file this app itself
+	 * describes as right about a season and necessarily wrong about tonight — while the
+	 * reader's own men were gated on `statusOf(..., slate)`, the live read. Measured by
+	 * serving MLB's real schedule minus three games: the same card, on one load, benched
+	 * the reader's Reds and White Sox men with "no game today" and offered him free
+	 * agents from those same clubs as "projected tonight". The live read now gates both
+	 * sides, which is the only way the card can stop contradicting itself.
 	 */
 	const fillTonight = useMemo(() => {
 		if (!league || !today?.unfilled.length || !today.ratedToday.length) return []
@@ -757,13 +818,17 @@ export const Decide = ({
 			// him by — so nothing here has to re-derive eligibility and the two cannot
 			// disagree about it.
 			const best = today.ratedToday
-				.filter(
-					r =>
-						r.rateable &&
-						r.slots.includes(slot) &&
-						free.has(normalizeName(r.player.name)) &&
-						!taken.has(normalizeName(r.player.name))
-				)
+				.filter(r => {
+					if (!r.rateable || !r.slots.includes(slot)) return false
+					const n = normalizeName(r.player.name)
+					if (!free.has(n) || taken.has(n)) return false
+					// Tonight's card where there is one. No live read at all leaves the
+					// capture's schedule as the only answer there is, which is the state the
+					// whole card is already labelled for.
+					if (!slate) return true
+					const live = statusOf(r.player.id, r.player.teamId, r.player.group, slate)
+					return live.kind !== "no-game" && live.kind !== "benched"
+				})
 				.sort((a, b) => b.points - a.points)[0]
 			if (best && best.points > 0) {
 				taken.add(normalizeName(best.player.name))
@@ -776,7 +841,26 @@ export const Decide = ({
 			}
 		}
 		return out.slice(0, 4)
-	}, [today, candidates, league])
+	}, [today, candidates, league, slate])
+
+	/**
+	 * The men the plan could not price, grouped by WHY — one row per reason, never one
+	 * per man, which is the same rule the bench rows follow for the same reason: sixteen
+	 * rows of one sentence is not sixteen decisions.
+	 */
+	const skippedWhy = useMemo(() => {
+		const by = new Map<string, string[]>()
+		for (const line of plan?.lineup.skipped ?? []) {
+			const at = line.indexOf(": ")
+			const name = at === -1 ? line : line.slice(0, at)
+			const why =
+				at === -1 ?
+					"No projection could be made for him, so he is neither started nor offered up."
+				:	`${line.slice(at + 2)[0]!.toUpperCase()}${line.slice(at + 2).slice(1)}.`
+			by.set(why, [...(by.get(why) ?? []), name])
+		}
+		return [...by].map(([why, men]) => ({ why, men }))
+	}, [plan])
 
 	if (!league) return null
 
@@ -798,6 +882,28 @@ export const Decide = ({
 			<section className="card full decide decide-blocked">
 				<h2>What should I do?</h2>
 				<p className="empty">Loading player data…</p>
+			</section>
+		)
+	/*
+	 * An unreadable roster stops this card, before any of it is drawn.
+	 *
+	 * It used to plan from the lineup store instead and say nothing — a full twenty-man
+	 * plan against a team the app could not read, on the same load as My league saying so
+	 * and offering the repair. One sentence, and it points at the screen that owns the
+	 * fix rather than repeating it: this card is not that screen.
+	 */
+	if (owned.error)
+		return (
+			<section className="card full decide decide-blocked">
+				<h2>What should I do?</h2>
+				<p>
+					Your team can&rsquo;t be read out of this browser, so nothing here can be
+					planned: {owned.error}
+				</p>
+				<p className="sub">
+					Open <b>{tab("trade")}</b> &mdash; it says what went wrong and has the button
+					that clears it.
+				</p>
 			</section>
 		)
 
@@ -879,11 +985,6 @@ export const Decide = ({
 		 * league id at a stranger was worse than printing nothing.
 		 */
 		const espn = league.meta.platform === "espn"
-		const base = league.meta.league_url
-		const url =
-			base && league.meta.team_id ?
-				`${base.replace(/\/+$/, "")}/${league.meta.team_id}`
-			:	base
 		return (
 			<section className="card full decide decide-blocked">
 				{/*
@@ -1206,8 +1307,22 @@ export const Decide = ({
 							    the pairing can put a small loss beside a larger gain, which rendered
 							    as "+-0.33". */}
 							<span className="decide-delta">{s.gain > 0 ? `+${s.gain}` : s.gain}</span>
+							{/*
+							  `sit` is `string | null`, and null is a real and common case: the seat was
+							  EMPTY, so nobody has to come out for him. This rendered the clause
+							  unconditionally and printed "Start Matt McLain at 2B, sit " with an empty
+							  <b> after it — observed verbatim on the published build's first visit.
+							  A sentence that trails off where a name should be reads as a bug in the
+							  data, and the honest version is better news than the broken one: an
+							  empty seat is a free upgrade.
+							*/}
 							<span>
-								Start <b>{s.start}</b> at {s.startSlot}, sit <b>{s.sit}</b>
+								Start <b>{s.start}</b> at {s.startSlot}
+								{s.sit ?
+									<>
+										, sit <b>{s.sit}</b>
+									</>
+								:	" — the seat is empty, so nobody comes out"}
 							</span>
 						</li>
 					))}
@@ -1385,24 +1500,29 @@ export const Decide = ({
 						    started nor offered up nor mentioned, which is the whole roster
 						    quietly shrinking: the lineup above is planned as if he owned 22
 						    players when he owns 24. An absence is stated as an absence. */}
-						{!!plan?.lineup.skipped.length && (
-							<li>
+						{skippedWhy.map(g => (
+							<li key={g.why}>
 								<span className="decide-note">·</span>
 								<span>
-									{plan.lineup.skipped.length === 1 ? "One player" : `${plan.lineup.skipped.length} players`}{" "}
-									on your roster could not be priced this period, so nothing above
-									counts them:{" "}
-									<b>{plan.lineup.skipped.map(x => x.split(":")[0]).join(", ")}</b>.
-									{/* The per-man reason is `resolveRoster`'s, written for one man
-									    ("he has no number to compare") and wrong under a list of two.
-									    The shared half is the true half. */}
-									<em className="decide-why">
-										No projection could be made for them over this window, so they
-										are neither started nor offered up.
-									</em>
+									{g.men.length === 1 ? "One player" : `${g.men.length} players`} on your
+									roster could not be priced, so nothing above counts{" "}
+									{g.men.length === 1 ? "him" : "them"}: <b>{g.men.join(", ")}</b>.
+									{/*
+									  THE ENGINE'S OWN REASON, grouped — not one sentence invented here.
+									  
+									  This said "No projection could be made for them over this window"
+									  about every skipped man. Measured on a league pasted with a batters
+									  table and no pitchers table: it listed all eight pitchers under that
+									  sentence, and the window was not the reason — the league scores
+									  nothing on their side of the ball, which `rateAll` says in those
+									  words and which My league already reported twice on its own screen.
+									  `plan.lineup.skipped` has carried "Name: reason" all along and this
+									  threw the reason away at the colon.
+									*/}
+									<em className="decide-why">{g.why}</em>
 								</span>
 							</li>
-						)}
+						))}
 						{/* A DIFFERENCE of two projections needs no baseline, so this is the one
 						    thing that can honestly be said about the moves and the floor together.
 						    The old form compared each projection against the floor and could

@@ -107,20 +107,32 @@ const openTrade = async () => {
 	const ok = await page
 		.waitForSelector(".trade-team", { timeout: 30000 })
 		.then(() => true, () => false)
-	if (ok) await openClosedDeal()
+	if (ok) await openDeal()
 	return ok
 }
 
 /**
- * The shipped league's trade window shut on 2026-08-06, so the deal is retired
- * behind a disclosure — see `tradesClosed`. The evaluator itself is unchanged and
- * everything below still has to hold, so the tests open it. That the DEFAULT is
- * closed is asserted separately, once, rather than fought here four times.
+ * The deal is behind a press on EVERY league now, which is the new half of this.
+ *
+ * It used to be retired only once the league's own deadline had passed — see
+ * `tradesClosed` — and the shipped league's window shut on 2026-08-06, so this helper
+ * only ever had to press "Price one anyway". Measured 2026-09-11 at 390x844 on the
+ * published build, by the route a stranger takes into this screen (press "Or type the
+ * values in myself", which promises the scoring values): the builder was 718px of the
+ * 7,930px page standing between his lineup and those values, on a league whose window
+ * was wide open, and it can say nothing at all until two names have been picked. So it
+ * is asked for either way and the label is the only thing that differs.
+ *
+ * The evaluator itself is unchanged and everything below still has to hold, so the
+ * tests open it. That the DEFAULT is closed is asserted separately, once for each
+ * reason it can be closed, rather than fought here four times.
  */
-const openClosedDeal = async () => {
-	const button = page.locator(".trade-closed button:text-is('Price one anyway')")
+const openDeal = async () => {
+	const button = page.locator(
+		".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')"
+	)
 	if (await button.count()) {
-		await button.click()
+		await button.first().click()
 		await page.waitForSelector(".deal", { timeout: 15000 })
 	}
 }
@@ -349,6 +361,85 @@ t("no card on My league sends the reader to a screen by a dead name written in p
     !/\bRecommendations\b|\bLeague setup\b/.test(await page.$eval(".wrap", e => e.innerText)),
   (await page.$eval(".wrap", e => e.innerText)).match(/.{0,40}(Recommendations|League setup).{0,40}/)?.[0] ?? "clean")
 
+/**
+ * The screen says where its parts are, and the jump really arrives.
+ *
+ * THE DEFECT, measured 2026-09-11 on the published build at 390x844 by the route a
+ * stranger takes: he presses "Or type the values in myself" in the opening sheet — a
+ * button whose whole promise is the scoring values — and lands at scrollY 0 of a
+ * 7,930px page with "This league", the first of those cards, at y=4065 and "Batting"
+ * at 4398. Five screens down, past a roster card, a lineup and a trade builder he had
+ * asked nothing of, with no jump link and nothing scrolled.
+ *
+ * Two things answer it and both are asserted: the destinations are named at the top
+ * of the screen, and the one for the values LANDS — a jump that scrolls nowhere is
+ * worse than no jump, and this one cannot use an href because the league editor is a
+ * sibling `App` renders with no id on it, so it is found in the DOM by structure.
+ * Which is exactly the kind of thing that silently stops working, hence the click.
+ */
+const jumps = await page.$$eval(".trade-jump button", n => n.map(e => e.textContent.trim()))
+t("the screen opens by saying where its own parts are",
+  jumps.length === 3 && jumps[0] === "Your starting lineup" && jumps[1] === "The deal" &&
+    jumps[2] === "Scoring and slots", jumps.join(" | "))
+/* Every label has to be a heading that exists on the screen, or the row is a set of
+ * promises the page cannot keep — the same failure as a card naming a tab that was
+ * renamed. "Scoring and slots" is the one that names a group of cards rather than one
+ * card, so it is checked against the group's own first heading instead. */
+t("and every destination it names is really on the screen",
+  cardOrder.includes("Your starting lineup") && cardOrder.includes("The deal") &&
+    editorStarts > -1, cardOrder.join(" | "))
+{
+	await page.evaluate(() => window.scrollTo(0, 0))
+	await page.click("[data-ctl=jump-values]")
+	// smooth scrolling, so the assertion waits for it to settle rather than racing it
+	const landed = await page
+		.waitForFunction(() => {
+			const h2s = [...document.querySelectorAll("section.card h2")]
+			const first = h2s.find(h => /^this league$/i.test(h.textContent.trim()))
+			return !!first && Math.abs(first.getBoundingClientRect().top) < 140
+		}, { timeout: 10000 })
+		.then(() => true, () => false)
+	t("pressing the one for the scoring values lands on them rather than scrolling nowhere",
+	  landed,
+	  `after the press, scrollY ${await page.evaluate(() => Math.round(window.scrollY))} and ` +
+		`"This league" at ${await page.evaluate(() => {
+			const h = [...document.querySelectorAll("section.card h2")].find(x => /^this league$/i.test(x.textContent.trim()))
+			return h ? Math.round(h.getBoundingClientRect().top) : "absent"
+		})}`)
+	await page.evaluate(() => window.scrollTo(0, 0))
+}
+
+/**
+ * The lineup is FOLDED, with its own answer in the summary.
+ *
+ * It was 1,274px at 390x844 — the tallest thing between a stranger who pressed "type
+ * the values in myself" and the values — and it is the one card here that is derived
+ * rather than entered: this screen is where you tell the app who you own and how your
+ * league scores, and the lineup is what it says back. So the two numbers that ARE the
+ * answer stay on screen and the seat-by-seat working is one press away.
+ *
+ * The old truth this replaces: the seat rows were laid out unasked, and `.lineup-head`
+ * was a div rather than the summary. Every row assertion below still reads the same
+ * rows through `$$eval`, which does not care whether a fold is open — so nothing here
+ * was weakened, and the two that WOULD have been hidden (the total, and a seat nothing
+ * can fill) are asserted to be on the summary itself.
+ */
+const lineupFoldClosed = await page.$eval("details.lineup-fold", d => d.open) === false
+t("the lineup is folded until it is asked for", lineupFoldClosed)
+t("and the total it is the answer to stays on the summary",
+  await page.$eval("details.lineup-fold > summary .lineup-total", e => Number(e.textContent) > 0),
+  await page.textContent("details.lineup-fold > summary .lineup-total"))
+/* A seat nothing at all can fill is the one thing a closed fold could hide, and an
+ * absence has to be stated as an absence. Counted in the summary when there is one;
+ * the shipped two-man team may legitimately have none, so this is one-directional. */
+t("a spot nothing can fill is counted on the summary, not only inside the fold",
+  await page.$eval("details.lineup-fold", d => {
+	const holes = d.querySelectorAll(".lineup-holes .hole").length
+	const said = /nothing can fill/.test(d.querySelector("summary").textContent)
+	return holes === 0 || said
+  }), await page.textContent("details.lineup-fold > summary .lineup-unit"))
+await page.$eval("details.lineup-fold", d => { d.open = true })
+
 // The flat list of who you own is folded, because "Your starting lineup" below it
 // shows every one of the same men in the seat he holds. Folded, never dropped:
 // it is the only place a player can be removed by hand.
@@ -496,11 +587,16 @@ const landed = await page
   .waitForSelector("section.card.decide", { timeout: 30000 })
   .then(() => true, () => false)
 t("the decision card is one tab away, and the tab really arrives at it",
+  /* `aria-current="page"`, not `aria-selected` — this one read the attribute by hand
+     rather than through the selector the rest of the file uses, so it survived the
+     rename as a silent false. The bar stopped claiming `role="tablist"`, which it had
+     never implemented (no arrow keys, no roving tabindex, no aria-controls, no panel),
+     and `aria-selected` went with the role that owed it. */
   landed && (await page.$$eval(".views button", n => {
-    const on = n.find(e => e.getAttribute("aria-selected") === "true")
-    return on ? on.textContent.trim() : "(none selected)"
+    const on = n.find(e => e.getAttribute("aria-current") === "page")
+    return on ? on.textContent.trim() : "(none current)"
   })) === SCREEN.today,
-  landed ? await page.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim()).join(",")) : "no decision card after the click")
+  landed ? await page.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim()).join(",")) : "no decision card after the click")
 
 // The team lives in this browser, keyed per league — so it has to survive a reload.
 const stored = await page.evaluate(() => localStorage.getItem("beanemachine:roster"))
@@ -532,11 +628,64 @@ await page.evaluate(() => localStorage.setItem("beanemachine:roster", '{"any:lea
 await openTrade()
 await page.waitForSelector(".trade-store-error")
 const complaint = (await page.textContent(".trade-store-error")) ?? ""
-t("an unreadable roster says what is wrong with it", /isn't a valid roster/i.test(complaint), complaint)
+/* The words changed and the claim did not. It read "isn't a valid roster", which came
+   from a message that also printed the storage key and V8's own parser text — software
+   talk on a screen whose job is telling a reader what to do next. What has to be true is
+   that the complaint says the saved team is the problem and that clearing is the way
+   out; matching on the reader's words rather than the schema's is also what makes this
+   assertion able to notice the message going back. */
+t("an unreadable roster says what is wrong with it",
+  /team this browser saved/i.test(complaint) && /clear/i.test(complaint), complaint)
 await page.click(".trade-store-error button")
 await page.waitForSelector(".trade-store-error", { state: "detached", timeout: 10000 }).catch(() => {})
 t("and clearing it really is the way out",
   (await page.evaluate(() => localStorage.getItem("beanemachine:roster"))) === null)
+
+/**
+ * The deal is behind a press on a league whose window is WIDE OPEN too.
+ *
+ * The shipped league shut its window on 2026-08-06, so every assertion above exercises
+ * the closed-deadline disclosure and the open one would have gone untested on this
+ * server forever. It is the case the defect was measured in: at 390x844 on the
+ * published build, whose preset league has no deadline at all, the builder was 718px
+ * (y=3347 to 4065) between a stranger's lineup and the scoring values he had pressed a
+ * button to reach — a card that can say nothing until two names are picked, laid out
+ * in front of a reader who came to type in his league's settings.
+ *
+ * The deadline is taken out of the stored league to get there, which is also a check
+ * on `tradesClosed` itself: with no "Trade End Date" the window is open, so the card
+ * must carry neither the deadline sentence nor `.trade-closed` — and must still be a
+ * press rather than a wall.
+ */
+{
+	const raw = await page.evaluate(() => localStorage.getItem("beanemachine:config"))
+	if (raw) {
+		await page.evaluate(text => {
+			const c = JSON.parse(text)
+			for (const l of Object.values(c.leagues)) {
+				const rs = l.league_rules?.raw_settings
+				if (rs) delete rs["Trade End Date"]
+			}
+			localStorage.setItem("beanemachine:config", JSON.stringify(c))
+		}, raw)
+		await visit()
+		await toScreen(page, SCREEN.setup)
+		await page.waitForSelector(".trade-deal", { timeout: 30000 })
+		const card = await page.$eval(".trade-deal", e => e.innerText)
+		t("a league that still takes trades is offered the builder as a press, not a wall",
+			(await page.$$(".trade-closed")).length === 0 && (await page.$$(".deal")).length === 0 &&
+				!/stopped taking trades/.test(card) &&
+				(await page.$$(".trade-deal button:text-is('Price a trade')")).length === 1,
+			card.replace(/\s+/g, " ").slice(0, 200))
+		await page.click(".trade-deal button:text-is('Price a trade')")
+		const opened = await page.waitForSelector(".deal", { timeout: 15000 }).then(() => true, () => false)
+		t("and pressing it really opens the same evaluator", opened,
+			"pressing Price a trade produced no deal form")
+		// put the league back the way it was found, so nothing below inherits an open
+		// window from this block
+		await page.evaluate(text => localStorage.setItem("beanemachine:config", text), raw)
+	}
+}
 
 // An unconfigured league has a roster shape and no scoring, so every projection is
 // exactly zero. Eighteen zero rows read as a working lineup; they are a missing
@@ -624,6 +773,18 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		t("typing the names is offered before any keystroke is named",
 			stepWith(/type the names/i) > -1 && stepWith(/type the names/i) < stepWith(/Ctrl/),
 			steps.join(" / ").slice(0, 200))
+		/*
+		 * ...and offered ONCE.
+		 *
+		 * Step 2 said "Copy it, or just type the names" and step 3 said "Paste or type them
+		 * below", so a three-step list spent a third of itself repeating the alternative it
+		 * had already given, and a reader who types was told twice in consecutive lines.
+		 * Step 3 exists for the box and the button; it says "put that in" now, which covers
+		 * a paste and a typed line without naming either a second time.
+		 */
+		t("and offered once rather than repeated in the next step",
+			steps.filter(l => /\btype\b/i.test(l)).length === 1,
+			steps.join(" / ").slice(0, 240))
 		t("and Ctrl+A is scoped to a computer rather than given as the way in",
 			/Ctrl/.test(how) &&
 				(await page.$$eval(".paste-how li", n =>
@@ -662,6 +823,22 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		// user never gets a real wire at all, because Yahoo answers no browser and
 		// answers a server only when it feels like it.
 		const fa = snap.players.filter(x => x.group === "hitting").slice(20, 32)
+		/*
+		 * It is FOLDED now, so it has to be opened before it can be typed into — and what
+		 * the summary carries is asserted first, because a fold whose summary does not say
+		 * what is inside it is just a hidden card.
+		 *
+		 * Measured 2026-09-11 at 390x844: the heading, the paragraph, the four-row box and
+		 * its button were ~400px between the paste every reader needs and everything below
+		 * it, for a step whose own first word is "optional". The summary keeps the offer and
+		 * keeps the one fact that decides whether it is worth a minute.
+		 */
+		const wireSummary = (await page.textContent("details.paste-wire-fold > summary")) ?? ""
+		t("the optional free-agent paste is folded, and says so without being opened",
+			(await page.$eval("details.paste-wire-fold", d => d.open)) === false &&
+				/Paste your free agents/.test(wireSummary) && /[Oo]ptional/.test(wireSummary) &&
+				/estimated/.test(wireSummary), wireSummary)
+		await page.$eval("details.paste-wire-fold", d => { d.open = true })
 		await page.fill("[data-ctl=paste-wire]", fa.map(x => `${x.name} ${x.team ?? ""} - OF`).join("\n"))
 		await page.click("[data-ctl=paste-wire] ~ button")
 		await page.waitForTimeout(800)
@@ -682,6 +859,83 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		t("page furniture yields nobody, and says so rather than doing nothing",
 			/No players found/.test((await page.textContent(".paste-note")) ?? ""),
 			(await page.textContent(".paste-note")) ?? "")
+	}
+	await page.close()
+}
+
+/**
+ * HOW FAR DOWN the league's own scoring values are, in pixels, on a phone.
+ *
+ * This is the assertion the rest of this file could not make: every other block reads
+ * the DOM, and the defect was a layout. A stranger pressed "Or type the values in
+ * myself" in the opening sheet and landed at scrollY 0 of a 7,930px page with "This
+ * league" at y=4065 — 5.2 screens of an 844px viewport, past a roster card, a lineup
+ * and a trade builder, with no jump and nothing scrolled.
+ *
+ * Measured from the TEAM CARD rather than from the top of the document on purpose.
+ * Everything above it — the wordmark, the tab bar, the management toolbar, the preset
+ * notice — belongs to src/client/App.tsx, which this change may not touch, and on a
+ * phone it is 984px of the page on its own. Anchoring here isolates the part
+ * src/client/Trade.tsx is answerable for, so this number cannot be moved by somebody
+ * else's card and cannot be rescued by one either.
+ *
+ * Measured 2026-09-11 on this server, at 390x844, with a twelve-man roster pasted in:
+ * 2,888px before (team card 601, "This league" 3489) and 1,605px after. The budget is
+ * 2,200 — slack for a card growing a line, nowhere near enough for the lineup or the
+ * builder to be laid out unasked again.
+ */
+{
+	const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+	const bats = snap.players
+		.filter(x => x.group === "hitting")
+		.sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
+		.slice(0, 12)
+	const slots = ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "Util", "Util", "BN", "BN"]
+	const text = bats.map((x, i) => `${slots[i]}\t${x.name} ${x.team ?? ""}`).join("\n")
+
+	const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	const oops = []
+	page.on("pageerror", e => oops.push(String(e)))
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+	if (await toScreen(page, SCREEN.setup)) {
+		await page.waitForSelector("[data-ctl=paste-roster]", { timeout: 30000 })
+		await page.fill("[data-ctl=paste-roster]", text)
+		await page.click(".paste-roster button:text-is('Read that')")
+		await page.waitForSelector(".lineup-total", { timeout: 15000 })
+		await page.waitForTimeout(400)
+
+		/** The top of a card, by the heading it carries, in page coordinates. */
+		const topOf = (pg, re) =>
+			pg.evaluate(pattern => {
+				const h = [...document.querySelectorAll("section.card h2")].find(x =>
+					new RegExp(pattern, "i").test(x.textContent.trim())
+				)
+				return h ? Math.round(h.closest("section.card").getBoundingClientRect().top + window.scrollY) : null
+			}, re)
+
+		for (const [w, h] of [[390, 844], [1280, 1000]]) {
+			await page.setViewportSize({ width: w, height: h })
+			await page.evaluate(() => window.scrollTo(0, 0))
+			await page.waitForTimeout(300)
+			const team = await topOf(page, "^my team$")
+			const values = await topOf(page, "^this league$")
+			const height = await page.evaluate(() => document.documentElement.scrollHeight)
+			const span = team !== null && values !== null ? values - team : null
+			t(`at ${w}x${h}, the league's own values are within ${w === 390 ? "two screens" : "a screen and a half"} of the team`,
+				span !== null && span < (w === 390 ? 2200 : 1500),
+				`team card ${team}, "This league" ${values}, ${span}px apart, page ${height}px`)
+			// the jump row is what makes the distance a single press, and it has to be the
+			// first thing on the screen rather than one more card to scroll past
+			t(`and the row of destinations is above everything at ${w}x${h}`,
+				await page.evaluate(() => {
+					const jump = document.querySelector(".trade-jump")
+					const first = document.querySelector("section.card")
+					return !!jump && !!first &&
+						!!(jump.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING)
+				}), "no .trade-jump, or a card above it")
+		}
+		t("no page errors while measuring", oops.length === 0, oops.join(" | "))
 	}
 	await page.close()
 }
@@ -745,7 +999,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		// become a navigation and the reader has lost the team he was editing.
 		t("the setup hovers over My league rather than navigating off it",
 			(await page.$$(".trade-team")).length === 1 &&
-				(await page.$$eval(".views button[aria-selected=true]", n =>
+				(await page.$$eval(".views button[aria-current=page]", n =>
 					n.map(e => e.textContent.trim())
 				))[0] === SCREEN.setup,
 			`${(await page.$$(".trade-team")).length} team panels`)

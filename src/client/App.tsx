@@ -1,4 +1,3 @@
-import { useForm, useStore } from "@tanstack/react-form"
 import { type } from "arktype"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
@@ -255,7 +254,16 @@ export const App = () => {
 						pools?: Record<string, unknown>
 						rosters?: Record<string, unknown>
 					}
-					const names = Object.keys(parsed.leagues ?? {})
+					/* The league's own NAME, not the key it is filed under. `Object.keys` gave
+					   "yahoo:228947", so the dialog asked "Load yahoo:228947 (with your roster)
+					   from downloaded.json?" — an identifier this app made up, in the one
+					   sentence standing between a reader and replacing everything he has. */
+					const named = Object.values(parsed.leagues ?? {}).map(
+						l => (l as { meta?: { league_name?: string } })?.meta?.league_name
+					)
+					const names = Object.keys(parsed.leagues ?? {}).map(
+						(k, i) => named[i] ?? k
+					)
 					const extras = [
 						Object.keys(parsed.pools ?? {}).length ? "its free-agent list" : "",
 						Object.keys(parsed.rosters ?? {}).length ? "your roster" : ""
@@ -266,7 +274,7 @@ export const App = () => {
 						: names.length ? `${names.length} leagues`
 						: ""
 				} catch {
-					throw new ApiError(`${file.name} isn't valid JSON, so nothing was replaced.`)
+					throw new ApiError(`${file.name} could not be read, so nothing was replaced.`)
 				}
 				if (
 					existing &&
@@ -506,13 +514,31 @@ export const App = () => {
 				</div>
 			</header>
 
-			<nav className="views" role="tablist" aria-label="Sections">
+			{/*
+			  A <nav>, and no longer a tablist.
+
+			  It claimed `role="tablist"` with three `role="tab"` children and behaved like
+			  neither. Measured with focus on a tab: ArrowRight, ArrowLeft, Home and End all
+			  did nothing, all three were separate Tab stops rather than a roving one,
+			  `aria-controls` was null on every one, and there was no `role="tabpanel"` for
+			  them to control — the only one on the page belongs to the board's own horizon
+			  tablist. A screen reader announces "tab, 1 of 3", the reader reaches for the
+			  arrow keys, and nothing happens. It also carried `aria-current="page"`, which is
+			  a navigation-link property, on a role that is not a link.
+
+			  Two honest ways out: build the real tablist (roving tabindex, arrow keys,
+			  aria-controls, a labelled panel — the board's `.modes` already does all four and
+			  is the pattern), or stop claiming to be one. This takes the second, because it
+			  IS a navigation: each of the three swaps the whole page, the address of the
+			  screen is stored, and there would then be two tablists on one screen, one of
+			  them nested in the other's panel, which is the arrangement that confuses people
+			  most. `aria-current="page"` is exactly right on a nav and is what is left.
+			*/}
+			<nav className="views" aria-label="Sections">
 				{VIEWS.map(v => (
 					<button
 						key={v.id}
-						role="tab"
 						title={shown ? v.purpose : `${v.purpose} — set a league up first`}
-						aria-selected={view === v.id}
 						aria-current={view === v.id ? "page" : undefined}
 						className={view === v.id ? "on" : ""}
 						// Nothing on any of them exists yet. A tab that highlights and then
@@ -634,10 +660,16 @@ export const App = () => {
 					onChecked={() =>
 						void run(async () => {
 							if (
+								/* "YOUR league", not the league's own name. `league.meta.league_name`
+								   on a preset resolves to the preset's LABEL, so this dialog asked
+								   "Confirm that these values match Yahoo H2H points (preset)'s own
+								   settings page?" — whether the preset matches the preset, which is a
+								   question with no useful answer and which a reader cannot even tell
+								   is the wrong question. The only league that matters here is his. */
 								!confirm(
-									`Confirm that these values match ${league.meta.league_name ?? key}'s own ` +
-										`settings page? Nothing was read from your league, so this records ` +
-										`that you checked them by hand — it does not make them verified.`
+									`Confirm that these values match your own league's settings page? ` +
+										`Nothing was read from your league, so this records that you ` +
+										`checked them by hand — it does not make them verified.`
 								)
 							)
 								return
@@ -823,12 +855,10 @@ export const App = () => {
 					}
 				>
 <Onboard
-					config={config}
 					snapshot={snapshot}
 					leagueKey={key}
 					league={league ?? null}
 					canImport={getMode() !== "static"}
-					preset={preset ? { key: preset.key, label: preset.label } : null}
 					onCreateLeague={(platform, made) =>
 						void run(async () => {
 							if (!config) return
@@ -843,7 +873,6 @@ export const App = () => {
 							show(`Read ${made.meta.league_name ?? "your league"} from that page`)
 						})
 					}
-					onUsePreset={() => preset && void create(preset.key)}
 					/*
 					 * Turn the preview into a real league, synchronously, and hand back its
 					 * key — because the caller needs it in the same tick to write a roster
@@ -857,6 +886,35 @@ export const App = () => {
 					 * Written straight to the active league because the reader has said it —
 					 * there is nothing to derive and nothing to check it against.
 					 */
+					/*
+					 * The one fact about a league that no preset can carry, because one platform
+					 * hosts both kinds — and the fact the dock's whole promise rests on. See the
+					 * note beside the question in Onboard.tsx.
+					 *
+					 * Everything else in `scoring_period` stays null rather than being filled in
+					 * around it: he was asked one thing and answered one thing, and `source` says
+					 * so in his words so a later read off his settings page can overwrite it
+					 * without anyone having to guess where it came from.
+					 */
+					onLineupLock={lock =>
+						void run(async () => {
+							if (!league || !key) return
+							adopt(
+								leagues.save(key, {
+									...league,
+									scoring_period: {
+										kind: league.scoring_period?.kind ?? null,
+										days: league.scoring_period?.days ?? null,
+										starts_on: league.scoring_period?.starts_on ?? null,
+										anchor: league.scoring_period?.anchor ?? null,
+										lineup_lock: lock,
+										source: "you said so during setup"
+									}
+								}),
+								key
+							)
+						})
+					}
 					onTeamCount={teams =>
 						void run(async () => {
 							if (!league || !key) return
@@ -886,7 +944,31 @@ export const App = () => {
 						})
 					}
 					onLoadFile={() => openPicker.current?.()}
+					/*
+					 * "Let me type the values myself" has to land on a screen that lets him.
+					 *
+					 * It used to be `setView("trade")` and nothing else, and on a first visit —
+					 * which is the only visit this sheet appears on — My league holds exactly one
+					 * card: "Import or configure a league first." Measured from a fresh context on
+					 * the published build: the whole page body was that sentence, the footer and
+					 * the dock. A button promising an editor delivering a card telling him to go
+					 * and find one reads as a broken app, and a stranger leaves there.
+					 *
+					 * So it adopts the preview first, exactly as typing a team does. The values he
+					 * is about to edit start as the preset's — which is what the sheet has been
+					 * saying all along — and now there is a league for them to belong to.
+					 */
 					onOpenSetup={() => {
+						if (!league) {
+							if (!config || !preset) return
+							try {
+								const k = leagues.suggestKey(config, preset.key)
+								adopt(leagues.create(k, preset.key), k)
+							} catch (e) {
+								show(e instanceof ApiError ? e.message : String(e), true)
+								return
+							}
+						}
 						setOnboarding(false)
 						setSetupOpen(false)
 						setView("trade")
@@ -900,7 +982,7 @@ export const App = () => {
 				</Dock>
 			)}
 
-			<Colophon />
+			<Colophon own={!!league} />
 
 			{toast && <div className={`toast on${toast.bad ? " bad" : ""}`} role="status">{toast.message}</div>}
 		</div>
@@ -930,14 +1012,19 @@ export const App = () => {
  * - Probables, §3.5: "This cannot be backtested, and the weight was not set by
  *   a measurement." Nothing archives what was announced when.
  *
- * Market edge gets its own line because it is a control on the board a reader
- * can select today, and the board's own warning does not cover it: Board.tsx
- * warns only when `edgeCoverage < 0.35`, and about coverage, not about the
- * leaked values. docs/GUIDE.md documents the per-game weather percentage that
- * reached the committed capture's "% Ros" sweep, 225 players across four games
- * reading 51%.
+ * Market edge gets its own line because it is a control on the board a reader can
+ * select today, and the board's own warning does not cover it: Board.tsx warns only when
+ * `edgeCoverage < 0.35`, and about coverage, not about the values themselves.
+ *
+ * The leak it used to describe is FIXED and this comment was the last place still saying
+ * otherwise. "225 players across four games reading 51%" was true of the capture stamped
+ * 2026-09-02, which `leakedByTeam` in src/data/yahoo-pool.ts predates. Re-measured on the
+ * capture actually committed (2026-09-08): 880 players priced, exactly ONE at 51%, all
+ * 31 Yankees on different values, and the depth-270 cut at 35% with 4 tied. One club
+ * still has half its men on one value — the Angels, 15 of 29 at 0%, with the Reds next at
+ * 12 of 28 — and that residue is what is worth watching, not a board-wide leak.
  */
-const Colophon = () => (
+const Colophon = ({ own }: { own: boolean }) => (
 	<footer className="colophon">
 		<p className="links">
 			<a
@@ -977,10 +1064,20 @@ const Colophon = () => (
 		{/* The explanation moved to the table, under the heads, generated from the
 		    ordering actually in force — see `.board-legend` in Board.tsx. It was here,
 		    on every screen including the one with no table on it, and it named the
-		    column the streaming list is NOT sorted by. What is left is the pointer. */}
+		    column the streaming list is NOT sorted by. What is left is the pointer.
+		    
+		    And the pointer's first clause is conditional, because it was false on exactly
+		    the screen a stranger sees first. With no league this said "Every number is in
+		    your league's own points" three inches under a banner reading "Standard
+		    scoring, not yours. Every number below is real and none of it is about your
+		    league yet" — the app contradicting itself on one screen, about the one fact
+		    that decides whether any of the numbers apply to the reader. */}
 		<p className="tiny-note">
-			Every number is in your league&rsquo;s own points. How the projections were
-			built and measured, and the parts that could not be, are in Methodology.
+			{own ?
+				"Every number is in your league's own points. "
+			:	"Every number is in the standard scoring this board is running, not yours yet. "}
+			How the projections were built and measured, and the parts that could not be,
+			are in Methodology.
 		</p>
 	</footer>
 )
@@ -1125,8 +1222,26 @@ const Toolbar = ({
 				<button
 					className="ghost"
 					disabled={!activeKey}
+					// Same defect as the scoring rows' × buttons, milder: the contents say
+					// "Remove" with no object, in a toolbar beside New, Download and Load file,
+					// and the title that names the object is discarded by the name algorithm.
+					aria-label={
+						activeKey ?
+							`Remove ${config?.leagues[activeKey]?.meta?.league_name ?? activeKey} from this browser`
+						:	"Remove this league from this browser"
+					}
 					title="Remove this league"
-					onClick={() => activeKey && confirm(`Remove ${activeKey} from this browser?`) && onRemove(activeKey)}
+					/* By name, not by key. `activeKey` is "yahoo:228947" — something this app
+					   filed it under and the reader has never seen — in a dialog that deletes
+					   a league. The key is the fallback only where the league never named
+					   itself. */
+					onClick={() =>
+						activeKey &&
+						confirm(
+							`Remove ${config?.leagues[activeKey]?.meta?.league_name ?? activeKey} from this browser?`
+						) &&
+						onRemove(activeKey)
+					}
 				>
 					Remove
 				</button>
@@ -1690,28 +1805,36 @@ const LeagueEditor = ({
 	onError: (message: string) => void
 	run: (fn: () => Promise<void>) => void
 }) => {
-	/** The ArkType League schema validates the draft on every change — the same
-	 *  schema that guards what reaches storage. */
-	const form = useForm({
-		defaultValues: league,
-		validators: { onChange: LeagueSchema },
-		onSubmit: ({ value }) =>
-			run(async () => {
-				const config = leagues.save(leagueKey, value)
-				form.reset(value)
-				onSaved(config)
-			})
-	})
+	/*
+	 * The draft, in a dozen lines where a form library used to be.
+	 *
+	 * This was `@tanstack/react-form`, and the shipped bundle paid 62 KB of 655 for it —
+	 * 9.9%, measured by attributing minified bytes to modules through the sourcemap.
+	 * What the library was actually asked for: hold one object, validate it against the
+	 * ArkType schema on every change, say whether it differs from what was loaded, and
+	 * revert. Not one `<form.Field>` was ever mounted — which is also why TanStack's own
+	 * `isDirty` did not work here, and why the dirty check was already a JSON comparison
+	 * against the loaded league rather than the library's answer.
+	 *
+	 * `key={leagueKey}` at the call site means selecting a different league remounts
+	 * this editor, so the draft does not need to watch for one.
+	 */
+	const [draft, setDraft] = useState<League>(league)
+	const set = <K extends keyof League>(field: K, value: League[K]): void =>
+		setDraft(d => ({ ...d, [field]: value }))
 
-	// form.state is a snapshot — useStore subscribes this component to changes.
-	const draft = useStore(form.store, s => s.values)
-	// TanStack's isDirty tracks fields mounted via <form.Field>; this editor drives
-	// nested objects through setFieldValue, so compare against the loaded league.
+	/** The SAME schema that guards what reaches storage, so the Save button cannot be
+	 *  enabled on a league the store would refuse. */
+	const invalid = useMemo(() => {
+		const out = LeagueSchema(draft)
+		return out instanceof type.errors ? out : null
+	}, [draft])
 	const dirty = JSON.stringify(draft) !== JSON.stringify(league)
-	// the validator returns either ArkErrors or the parsed League, so narrow on ArkErrors
-	const invalid = useStore(form.store, s =>
-		s.errorMap.onChange instanceof type.errors ? s.errorMap.onChange : null
-	)
+	const save = (): void =>
+		run(async () => {
+			if (invalid) return
+			onSaved(leagues.save(leagueKey, draft))
+		})
 
 	const raw = (draft.league_rules as { raw_settings?: Record<string, unknown> } | undefined)?.raw_settings
 
@@ -1735,13 +1858,13 @@ const LeagueEditor = ({
 					    filling in a number. What he needs is why the number matters. */}
 					<p className="sub">
 						The more teams, the thinner the free-agent pool &mdash; and every player here
-						is measured against the best man still free at his position. Nothing is
-						ranked until this is set.
+						is measured against whoever is left at his position once every team has
+						filled it. Nothing is ranked until this is set.
 					</p>
 					<TeamCountInput
 						value={draft.meta.max_teams}
 						onReject={onError}
-						onChange={max_teams => form.setFieldValue("meta", { ...draft.meta, max_teams })}
+						onChange={max_teams => set("meta", { ...draft.meta, max_teams })}
 					/>
 					{draft.meta.max_teams == null && (
 						<p className="empty" style={{ marginTop: "var(--sp-2)" }}>
@@ -1771,7 +1894,7 @@ const LeagueEditor = ({
 							saved={league.scoring_period}
 							snapshot={snapshot}
 							onReject={onError}
-							onChange={p => form.setFieldValue("scoring_period", p)}
+							onChange={p => set("scoring_period", p)}
 						/>
 					</details>
 				</section>
@@ -1785,7 +1908,7 @@ const LeagueEditor = ({
 						table={draft.scoring.batting}
 						side="batting"
 						onReject={onError}
-						onChange={batting => form.setFieldValue("scoring", { ...draft.scoring, batting })}
+						onChange={batting => set("scoring", { ...draft.scoring, batting })}
 					/>
 				</section>
 
@@ -1796,14 +1919,14 @@ const LeagueEditor = ({
 						table={draft.scoring.pitching}
 						side="pitching"
 						onReject={onError}
-						onChange={pitching => form.setFieldValue("scoring", { ...draft.scoring, pitching })}
+						onChange={pitching => set("scoring", { ...draft.scoring, pitching })}
 					/>
 				</section>
 
 				<section className="card full">
 					<h2>Roster slots</h2>
 					<p className="sub">{draft.roster.raw ?? "Slot counts for this league."}</p>
-					<RosterPanel roster={draft.roster} onReject={onError} onChange={r => form.setFieldValue("roster", r)} />
+					<RosterPanel roster={draft.roster} onReject={onError} onChange={r => set("roster", r)} />
 				</section>
 
 				<section className="card">
@@ -1812,7 +1935,7 @@ const LeagueEditor = ({
 					<EligibilityPanel
 						eligibility={draft.eligibility}
 						onReject={onError}
-						onChange={e => form.setFieldValue("eligibility", e)}
+						onChange={e => set("eligibility", e)}
 					/>
 				</section>
 
@@ -1859,8 +1982,8 @@ const LeagueEditor = ({
 					<span className="msg">
 						{invalid ? `Invalid: ${invalid.summary}` : "Unsaved changes"}
 					</span>
-					<button onClick={() => form.reset()}>Revert</button>
-					<button className="primary" disabled={!!invalid} onClick={() => void form.handleSubmit()}>
+					<button onClick={() => setDraft(league)}>Revert</button>
+					<button className="primary" disabled={!!invalid} onClick={save}>
 						Save
 					</button>
 				</div>

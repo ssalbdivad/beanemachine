@@ -50,6 +50,48 @@ t("with no slot_order the counts produce the same seats",
 	activeSlots({ ...SHAPE, slot_order: null }).filter(s => s === "OF").length === 2 &&
 		activeSlots({ ...SHAPE, slot_order: null }).length === 5)
 
+/*
+ * THE COUNTS DECIDE HOW MANY MEN START, and `slot_order` only what order they print in.
+ *
+ * There were two implementations of this with opposite precedence — this file's, which
+ * read `slot_order` first, and the engine's, which read the counts — and both were
+ * reachable from the My league screen: the deal pricer seated one team and the lineup
+ * planner, three hundred pixels away, seated another. Measured on the dev league by
+ * bumping OF from 3 to 5 in the editor and saving: the editor's own totals went from 18
+ * active seats to 20, and the Tonight card went on seating 18 and never mentioned the
+ * other two. The league editor appends to `slot_order` once per slot added whatever the
+ * count, and seeds it from `Object.keys(slots)` when it is null, which destroys every
+ * multiplicity — so a stale order is the normal case, not an edge one.
+ *
+ * This is the shape that was wrong, and it is the one the editor actually produces.
+ */
+{
+	const bumped = { ...SHAPE, slots: { ...SHAPE.slots, OF: 4 } }
+	t("a count raised in the editor seats the men it says, against a stale print order",
+		activeSlots(bumped).filter(s => s === "OF").length === 4 &&
+			activeSlots(bumped).length === 7,
+		activeSlots(bumped).join(","))
+	// and the order is still Yahoo's, which is the only thing slot_order is for
+	t("and the seats still print in the order the league listed them",
+		activeSlots(bumped).join(",") === "C,1B,OF,OF,OF,OF,Util", activeSlots(bumped).join(","))
+	const seeded = { ...SHAPE, slot_order: Object.keys(SHAPE.slots) }
+	t("a print order that lost its multiplicity does not lose the seats with it",
+		activeSlots(seeded).length === 5 && activeSlots(seeded).filter(s => s === "OF").length === 2,
+		activeSlots(seeded).join(","))
+}
+
+/*
+ * Yahoo's second injured slot, IL+, through the predicate this file used to hand-write.
+ * `/^(IL|NA)/i` caught it by luck; `isReserveSlot` catches it by name AND by prefix, and
+ * is the same answer the engine and the two rendered components give. The bug that made
+ * it one list was a league with an IL+ seat being told it starts one more man than it
+ * does.
+ */
+t("IL+ is a reserve seat and starts nobody",
+	!activeSlots({ ...SHAPE, slots: { ...SHAPE.slots, "IL+": 1 }, slot_order: null }).includes("IL+"))
+t("and so is a numbered one, which an exact-match list would miss",
+	!activeSlots({ ...SHAPE, slots: { ...SHAPE.slots, IL60: 1 }, slot_order: null }).includes("IL60"))
+
 /* ---------------- lineup: the scarce slot ---------------- */
 
 // A points-only ranking starts the two best bats and leaves C empty, which is
@@ -676,6 +718,11 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
     t("it stops at the cap even when a third move would gain",
       r.moves.length === 2, JSON.stringify(r.moves.map(m => m.add)))
     t("and says what the third would have been worth rather than leaving it silent",
+      /* The note is now conditional on the sign, because it was emitted for a negative
+         too: "a third move would gain -14.62 more on top of these two — 2 a week is where
+         the measurement put the cap, not where the gains stop", observed on the published
+         build, which calls a loss a gain and denies the very thing the number shows. This
+         case is the positive one and the wording is unchanged for it. */
       r.notes.some(n => /third move would gain [\d.]+ more/.test(n)), JSON.stringify(r.notes))
   }
 

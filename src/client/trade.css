@@ -170,3 +170,63 @@
 	font-family:var(--mono);font-size:0.9em;padding:1px 5px;border:1px solid var(--line);
 	border-bottom-width:2px;border-radius:4px;background:var(--sunken);
 }
+
+/* ---------- where the rest of the screen is ----------
+   MEASURED on the published build at 390x844, by the route a stranger takes: pressing
+   "Or type the values in myself" landed him at scrollY 0 of a 7,930px page with the
+   first of the scoring cards at y=4065. This row is the one thing on the screen that
+   is about the screen, so it is kept to a line of destinations and no prose — chips,
+   at the same size as every other chip, because it is navigation and not an argument.
+   ------------------------------------------------------------------------- */
+.trade-jump{
+  grid-column:1/-1;display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;
+  /* the grid's own gap already separates it from the first card */
+  margin:0;min-width:0;
+}
+.trade-jump-label{
+  font-size:var(--fs-1);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--faint);margin-right:var(--sp-1);
+}
+
+/* ---------- the two folds ----------
+   Both follow `.period-fold` in app.css: the heading stays a heading, the summary
+   carries the number or the reason, and the marker sits with the text because the
+   card already has a gutter. */
+.lineup-fold,.paste-wire-fold{margin-top:0}
+.lineup-fold>summary,.paste-wire-fold>summary{
+  cursor:pointer;list-style:none;display:flex;align-items:baseline;
+  gap:var(--sp-2) var(--sp-3);flex-wrap:wrap;
+}
+.lineup-fold>summary::-webkit-details-marker,
+.paste-wire-fold>summary::-webkit-details-marker{display:none}
+.lineup-fold>summary::after,.paste-wire-fold>summary::after{
+  content:"\25B8";color:var(--faint);font-size:var(--fs-2);
+}
+.lineup-fold[open]>summary::after,.paste-wire-fold[open]>summary::after{content:"\25BE"}
+/* app.css tracks every `summary` in the same uppercase-mono rule as the section
+   heads, so a sentence inside one came out shouting. The heading and the big number
+   keep that treatment; the prose beside them reads as prose. */
+.lineup-fold>summary .lineup-unit,.paste-wire-fold>summary .sub{
+  text-transform:none;letter-spacing:0;font-family:var(--sans);
+}
+/* `.lineup-head` carried this margin as a div; as a summary it only wants it open */
+.lineup-fold>summary{margin-bottom:0}
+.lineup-fold[open]>summary{margin-bottom:var(--sp-3)}
+.paste-wire-fold>summary h3{margin:0}
+/* the card is a flex column and this fold is one of its children, so the gaps
+   inside it are its own */
+.paste-wire-fold>*+*{margin-top:var(--sp-2)}
+.paste-wire-fold[open]>summary{margin-bottom:var(--sp-2)}
+/* 44px of thumb, the way app.css gives it to every other control on a phone — its
+   list of summaries names the ones that existed when it was written. */
+@media(max-width:640px){
+  .lineup-fold>summary,.paste-wire-fold>summary{min-height:44px;align-items:center}
+}
+
+/* The folded heading keeps the face it had as a card heading.
+   app.css puts every `summary` in the uppercase-mono label rule, so moving this h3
+   into one RENAMED it in the rendered text: "Paste your free agents" came back out of
+   innerText as "PASTE YOUR FREE AGENTS", and test/decide.mjs — which reads this card's
+   own text to check that the exact free-agent list is got here and needs no terminal —
+   went red against a screen that was correct apart from its capitals. */
+.paste-wire-fold>summary h3{text-transform:none;letter-spacing:normal;font-family:var(--sans)}

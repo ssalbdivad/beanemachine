@@ -28,15 +28,30 @@ const STORE_KEY = "beanemachine:config"
 /** A stored config is as much a source as the API, so its failures surface the same way. */
 export class StoreError extends ApiError {}
 
+/*
+ * WHAT A READER IS TOLD WHEN THE STORE IS DAMAGED, and what he is not.
+ *
+ * These messages used to read: `The league config in this browser
+ * ("beanemachine:config") isn't valid JSON: Expected property name or '}' in JSON at
+ * position 1 (line 1 column 2) Load a scoring.json file to replace it.` — a storage key, a
+ * V8 parser message and a file name the reader has never typed, all on a screen whose job
+ * is to tell him what to do next. The house rule is that nothing user-facing talks about
+ * the software.
+ *
+ * What survives is the fact and the way out. The underlying cause is kept, because an
+ * error with the cause removed is an error nobody can report; what goes is the key, the
+ * word JSON and the file extension.
+ */
 const parse = (raw: string, source: string): Config => {
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(raw)
-	} catch (e) {
-		throw new StoreError(`${source} isn't valid JSON: ${(e as Error).message}`)
+	} catch {
+		throw new StoreError(`${source} is damaged and cannot be read back.`)
 	}
 	const out = Config(parsed)
-	if (out instanceof type.errors) throw new StoreError(`${source} isn't a valid config:\n${out}`)
+	if (out instanceof type.errors)
+		throw new StoreError(`${source} is not in a shape this page can read:\n${out}`)
 	return out
 }
 
@@ -66,11 +81,13 @@ const read = (): Config | null => {
 	const raw = localStorage.getItem(STORE_KEY)
 	if (raw === null) return null
 	try {
-		return parse(raw, `The league config in this browser ("${STORE_KEY}")`)
+		return parse(raw, "What this browser saved about your leagues")
 	} catch (e) {
 		// Reseeding would throw away whatever is in there, and no part of it can be
 		// repaired by guessing — so say what's wrong and how to replace it.
-		throw new StoreError(`${(e as Error).message}\nLoad a scoring.json file to replace it.`)
+		throw new StoreError(
+			`${(e as Error).message}\nLoading a league you saved earlier replaces it.`
+		)
 	}
 }
 

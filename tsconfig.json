@@ -11,10 +11,21 @@
     "erasableSyntaxOnly": true,
     "noEmit": true,
     "strict": true,
+    // A local that nothing reads is a decision somebody made and then abandoned, and
+    // this repo has now paid for four of them at once: a 28-line `useMemo` that ran the
+    // lineup planner every render and discarded the result (pulling plan.ts into the
+    // browser bundle for nobody), a `<Confidence>` component and a `step()` helper whose
+    // CSS was still shipping, and a `teamNote` written in four places and read in none —
+    // which made a storage failure on the highest-attrition step in the product
+    // completely silent. `tsc` could see every one of them and was not asked.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "vite.config.ts"]
+  // `api/` was outside this list, so `api/index.ts` — the serverless entry — was never
+  // type-checked by `npm run check` at all.
+  "include": ["src", "api", "vite.config.ts"]
 }

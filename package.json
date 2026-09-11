@@ -32,8 +32,7 @@
 		"test:journey": "node test/journey.mjs",
 		"test:ownership": "node test/ownership.mjs",
 		"test:period": "node test/period.mjs",
-		"test:lineups": "node test/lineups.mjs",
-		"test:node": "node test/api.mjs && node test/paste.mjs && node test/settings.mjs && node test/today.mjs && node test/injuries.mjs && node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/auto.mjs && node test/period.mjs && node test/ownership.mjs && node test/lineups.mjs && node test/compete.mjs",
+		"test:node": "node test/api.mjs && node test/paste.mjs && node test/settings.mjs && node test/today.mjs && node test/injuries.mjs && node test/engine.mjs && node test/leagues.mjs && node test/trade.mjs && node test/auto.mjs && node test/period.mjs && node test/ownership.mjs && node test/compete.mjs",
 		"build:cli": "vite build -c vite.cli.config.ts",
 		"prepare": "vite build -c vite.cli.config.ts",
 		"deploy:api": "vercel --prod",
@@ -46,7 +45,6 @@
 	"dependencies": {
 		"@hono/arktype-validator": "^2.0.1",
 		"@hono/node-server": "^2.1.1",
-		"@tanstack/react-form": "^1.33.5",
 		"arktype": "^2.2.3",
 		"hono": "^4.13.5",
 		"react": "^19.2.8",

@@ -8,6 +8,7 @@ import {
 import type { League } from "../schema.ts"
 import { resolvePeriod, windowFrom, withinDays } from "../engine/period.ts"
 import { useInjuries } from "./useInjuries.ts"
+import { normalizeName } from "../data/names.ts"
 
 export type { Ranked }
 
@@ -102,7 +103,6 @@ export interface Filters {
 	 * unanswerable on the site it is hosted at.
 	 */
 	availableOnly: boolean | null
-	minConfidence: number
 	/**
 	 * Which question the board is answering. The three differ only in horizon, but
 	 * that changes the answer completely: a two-start pitcher wins a week and a
@@ -153,7 +153,6 @@ export const DEFAULT_FILTERS: Filters = {
 	hideInjured: false,
 	// unset, so each tab opens on the answer its own question wants — see the field
 	availableOnly: null,
-	minConfidence: 0,
 	mode: "board",
 	// the league's own period, not a day count: the reset is what a head-to-head
 	// matchup is settled on, so it is the horizon that is right unless asked otherwise
@@ -245,11 +244,11 @@ export const SORT_DEFAULT: Record<Filters["mode"], NonNullable<Filters["sort"]>>
 	stash: "bscore"
 }
 
-/** Names vary by accent, punctuation and suffix between Yahoo and MLB. */
-export const normalizeName = (n: string): string =>
-	n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-		.replace(/[.'\u2019]/g, "").replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "")
-		.replace(/\s+/g, " ").trim()
+/** The join key, lifted to src/data/names.ts because this file and
+ *  src/data/yahoo-pool.ts each carried a verbatim copy of it — and `Decide.tsx` crosses
+ *  both inside one render. Re-exported here so every importer of this module is
+ *  unchanged. */
+export { normalizeName }
 
 /**
  * Whose eligibility rules the board seats a player by.
@@ -316,7 +315,23 @@ export const useBoard = (
 	 * The request is shared with the Today screen — see `useInjuries`.
 	 */
 	const captured = useMemo(() => (snapshot ? hydrate(snapshot).injuries : null), [snapshot])
-	const { merged: liveInjuries } = useInjuries(captured, snapshot?.capturedAt)
+	/*
+	 * `error` is taken as well as `merged`, and that is the whole of this change.
+	 *
+	 * This destructured only `merged`, so the board used the live injured list when the
+	 * request succeeded and the capture's when it did not, and said nothing either way.
+	 * Measured by aborting every statsapi.mlb.com request and re-walking the screen: row
+	 * two went from "Sam Antonacci 3B 34.55" to "Sam Antonacci OF 34.51" and row three
+	 * from 33.18 to 33.14, with no sentence anywhere distinguishing the two boards. On
+	 * the live feed at the time of that walk, 12 players' availability turned on whether
+	 * this request answered — six newly injured who are active in the capture, six
+	 * activated since who are injured in it.
+	 *
+	 * Tonight has said this correctly all along ("couldn't reach MLB … tonight's lineups
+	 * and injured list are from the capture, 2d ago"). An absence is stated as an
+	 * absence, on every screen that depends on it.
+	 */
+	const { merged: liveInjuries, error: injuryError } = useInjuries(captured, snapshot?.capturedAt)
 	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
 	// The reader's today, not the capture's. A snapshot is a set of games; which of
 	// them are still ahead of you is a question only the clock can answer.
@@ -524,6 +539,21 @@ export const useBoard = (
 				probableStarts,
 				probableCoverage,
 				opposingStarters,
+				/*
+				 * DERIVED ELEVEN LINES ABOVE AND THEN NOT PASSED — for every horizon on this
+				 * screen, since this is the client's only `rateAll`. `rateAll` accepts it and
+				 * hands it to `pitcherMatchupIndex`, which with `undefined` falls back to the
+				 * club's season average, so the board priced a start against Colorado exactly
+				 * like a start against Los Angeles. Board.tsx's own comment claimed the
+				 * opposite. Decide.tsx passes it, so Tonight was never affected.
+				 *
+				 * Measured on data/snapshot.json against the dev league: of 795 pitchers, 357
+				 * bscores move, the largest by 0.59 (Sean Manaea -28.84 → -29.43), and the
+				 * ranking first differs at row 37. Small because only 60 pitchers in this
+				 * capture have an announced opponent — and it grows with every probable MLB
+				 * publishes, which is exactly the window the streaming tab is about.
+				 */
+				startOpponents,
 				// over the rest of a season an injured man is a legitimate hold; over the
 				// next week he is simply unavailable
 				injuryPolicy: filters.mode === "stash" ? "keep" : "exclude",
@@ -691,13 +721,24 @@ export const useBoard = (
 	 * announced starter faces, and how much of this window MLB has actually named.
 	 *
 	 * The coverage is MEASURED off the window on screen rather than quoted from a
-	 * table, because it is a property of the capture as much as of the horizon.
-	 * Probables reach roughly three days past a capture and then stop: on the
-	 * committed snapshot (captured 2026-09-02), read on 2026-09-04, MLB has named the
-	 * starter in 15 of 32 games one day out, 41 of 92 three days out, and still 43 of
-	 * 184 seven days out. A number baked into a string would have been right on the
-	 * day it was written and wrong every day after, which is the failure mode this
-	 * whole board exists to avoid.
+	 * table, because it is a property of the capture as much as of the horizon — and
+	 * this comment is the proof of that, having gone stale twice while the code it
+	 * describes stayed right.
+	 *
+	 * Probables reach about three days past a capture and then stop. Re-derived on the
+	 * committed snapshot (captured 2026-09-08, horizon 2026-09-08 → 2026-09-22), in the
+	 * CLUB-GAME units this code counts in — one starting assignment per club per game:
+	 *
+	 *    1 day   28 of  30 named   28 of 30 clubs complete
+	 *    3 days  56 of  70 named   20 of 30 clubs complete
+	 *    5 days  60 of 130 named    0 of 30 clubs complete
+	 *    7 days  60 of 180 named    0 of 30 clubs complete
+	 *   14 days  60 of 354 named    0 of 30 clubs complete
+	 *
+	 * The absolute count stops moving after three days: every probable this capture will
+	 * ever have is already in it, and a longer window only adds unnamed games. That is
+	 * the shape the horizon cap is for, and it is why a number baked into a string would
+	 * have been right on the day it was written and wrong every day after.
 	 *
 	 * Null off the Streaming tab, so nothing can print a streaming fact under a
 	 * horizon that did not produce one.
@@ -811,7 +852,6 @@ export const useBoard = (
 			 * where the filter is correctly inert on every row.
 			 */
 			if (availableOnly && r.free === false) return false
-			if (r.confidence.value < filters.minConfidence) return false
 			return true
 		})
 		const key = (r: (typeof out)[number]) => {
@@ -847,22 +887,15 @@ export const useBoard = (
 	// actually ranked by rather than an empty box when the reader has not chosen.
 	return {
 		rated: board, rows, rankable, scored, edgeCoverage, period, streaming, teamNames,
-		availability, sort
+		availability, sort, injuryError
 	}
 }
 
-/**
- * Baseball's innings notation as a real number.
- *
- * MLB reports 85.2 for eighty-five and two THIRDS, so the digit after the point is
- * a count of outs, not a fraction. Read as a decimal, 85.2 is short by 0.467 and
- * 85.1 by 0.233 — under an inning each, but these are summed over a week of picks
- * and compared against a league's innings floor, where being a couple short is the
- * whole question. Only .0, .1 and .2 are legal; anything else is a value that did
- * not come from this notation and is passed through as itself.
+/*
+ * `realInnings` stood here: baseball's 85.2 means eighty-five and two THIRDS, so read as
+ * a decimal it is short by up to 0.8 per pitcher. Correct, non-obvious, and dead — its
+ * only caller was `inningsFor` on the board, which was itself unreachable, and the one
+ * place that still adds innings up (`seatedInnings` in src/auto/plan.ts) sums `outs` and
+ * divides by three, so the notation never reaches it. The trap it guarded cannot be hit
+ * from anywhere the code now goes; if a raw `inningsPitched` ever comes back, git has it.
  */
-export const realInnings = (ip: number): number => {
-	const whole = Math.floor(ip)
-	const outs = Math.round((ip - whole) * 10)
-	return outs > 2 ? ip : whole + outs / 3
-}

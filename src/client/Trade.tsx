@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import {
 	evaluateTrade, replacementBySlot, replacementPlayerBySlot,
@@ -8,12 +8,11 @@ import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
-import { lineupStore, type StoredLineup } from "./lineup.ts"
+import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
 import { slotsFor } from "../engine/bscore.ts"
-import { plan, railViolations, DEFAULTS, type Plan } from "../auto/plan.ts"
 import "./trade.css"
-import { tradesClosed } from "./panels.tsx"
+import { tab, tradesClosed } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 
 /**
@@ -72,6 +71,67 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 *  baseball to ADD to your team; this one only ever looks at players you hold. */
 	const [giveQuery, setGiveQuery] = useState("")
 
+	/**
+	 * Where the rest of this screen is, from the top of it.
+	 *
+	 * MEASURED on the published build, 390x844, by the route a stranger actually
+	 * takes — press "Or type the values in myself" in the opening sheet, which is a
+	 * button whose whole promise is the scoring values: he landed at scrollY 0 of a
+	 * 7,930px page with "This league" — the first of the values cards — at y=4065,
+	 * and "Batting" at 4398. Five screens below the fold, past a roster card, a
+	 * lineup and a trade builder he had not asked for, with no jump and no scroll.
+	 * (scratchpad fix1/mlh-before.txt holds the run; fix1/mlh-measure.mjs repeats it.)
+	 *
+	 * So the screen says where its parts are before it makes anyone scroll to find
+	 * out. Two of the three live in this component; the values are the league editor,
+	 * which `App` renders as a SIBLING of this one — see the `view === "trade"` branch
+	 * — so nothing in these props can tell us whether it is on the page. It is looked
+	 * for in the DOM instead, and the control is not offered when it is not found: a
+	 * jump that goes nowhere is worse than no jump.
+	 */
+	const jumpRef = useRef<HTMLElement>(null)
+	const [valuesBelow, setValuesBelow] = useState(false)
+	/** The league editor's first `.grid`, which directly follows the one this
+	 *  component's cards sit in. Checked for the class rather than taken on trust, so
+	 *  a future sibling that is not the editor cannot capture the jump. */
+	const valuesTarget = () => {
+		const next = jumpRef.current?.closest(".grid")?.nextElementSibling ?? null
+		return next?.classList.contains("grid") ? next : null
+	}
+	// Deliberately no dependency list. Whether the editor is mounted turns on `App`'s
+	// own state, and this component is re-rendered by every one of the transitions
+	// that could change it (a league arriving, a snapshot arriving, a league being
+	// switched) — a deps array here would be a list of other people's conditions, and
+	// the one it got wrong would leave a dead control or a missing one on screen. The
+	// check is two DOM hops, and `setValuesBelow` with an unchanged value re-renders
+	// nothing.
+	useEffect(() => {
+		const found = !!valuesTarget()
+		setValuesBelow(was => (was === found ? was : found))
+	})
+
+	/**
+	 * Take the reader to a part of this screen.
+	 *
+	 * Focus moves with the scroll, which is the half that is easy to leave out: a
+	 * keyboard or screen-reader user who presses one of these otherwise stays where
+	 * he was, so the next Tab carries on from the jump row and the section he asked
+	 * for is never announced. `tabindex="-1"` makes a card focusable without putting
+	 * it in the tab order, and `preventScroll` keeps the focus call from undoing the
+	 * smooth scroll it was paired with.
+	 */
+	const jumpTo = (el: Element | null) => {
+		if (!(el instanceof HTMLElement)) return
+		el.scrollIntoView({
+			// a reader who has asked his system for less motion is not given a 4,000px
+			// animated slide
+			behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+			block: "start"
+		})
+		el.setAttribute("tabindex", "-1")
+		el.focus({ preventScroll: true })
+	}
+
 	// A team belongs to one league, so changing leagues loads that league's team and
 	// abandons a half-built offer rather than re-pricing it against other slots.
 	useEffect(() => {
@@ -113,8 +173,18 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 * forever on a platform no browser can read — and null is the signal that puts
 	 * the two functions below back on their estimate.
 	 */
-	/** Whether this league still takes trades — see `tradesClosed`. */
-	const [showClosedDeal, setShowClosedDeal] = useState(false)
+	/**
+	 * Whether the trade builder has been asked for.
+	 *
+	 * It was only ever a disclosure for a league past its deadline — see
+	 * `tradesClosed`. It is one for EVERY league now, because of what this screen is
+	 * for: a reader opens it to tell the app about his team and his league, and the
+	 * evaluator prices an offer he has not made yet. Measured at 390x844 on the
+	 * published build it was 718px of wall (y=3347 to 4065) between the lineup and
+	 * the league's own scoring values, and it can only say anything at all once two
+	 * names have been picked.
+	 */
+	const [dealOpen, setDealOpen] = useState(false)
 	const tradeWindow = useMemo(
 		() => tradesClosed(league, new Date().toISOString().slice(0, 10)),
 		[league]
@@ -183,7 +253,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 * NAMED rather than silently dropped: a roster that quietly lost two players
 	 * would misprice every lineup below it.
 	 */
-	const [seats, setSeats] = useState<StoredLineup | null>(null)
+	/* The seats WERE held in state here, and read by exactly one thing: the discarded
+	 * "what Billy would do" memo above. With that gone the state was written three times
+	 * and read nowhere — including an effect that re-read the store into it on every
+	 * league change for nobody. The writes that matter are the STORE writes, which is
+	 * what Tonight reads, and those are unchanged; see `lineupStore` in ./lineup.ts. */
 	const [pulling, setPulling] = useState(false)
 	const [pullNote, setPullNote] = useState<string | null>(null)
 	const leagueId = league?.meta.league_id ?? null
@@ -242,14 +316,12 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			// the seats as they were read, which is what the planner needs and what
 			// the id list cannot carry
 			const at = new Date().toISOString()
-			setSeats(
-				lineupStore.set(
-					leagueKey,
-					res.players
-						.filter(y => y.slot)
-						.map(y => ({ slot: y.slot!, name: y.name, positions: y.positions, team: y.team })),
-					at
-				)
+			lineupStore.set(
+				leagueKey,
+				res.players
+					.filter(y => y.slot)
+					.map(y => ({ slot: y.slot!, name: y.name, positions: y.positions, team: y.team })),
+				at
 			)
 			// the reader's own note, because it is the one that knows what happened:
 			// which platform, how many rows, and whether the seats came with them
@@ -324,7 +396,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		})
 		setWireNote(
 			`Found ${found.players.length} free agent${found.players.length === 1 ? "" : "s"}. ` +
-				`Today will use this exact list instead of estimating who is taken.`
+				`${tab("board")} will use this exact list instead of estimating who is taken.`
 		)
 		setWirePasted("")
 	}
@@ -340,15 +412,10 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		}
 		persist(() => store.set(leagueKey, read.keys))
 		if (read.spots.length)
-			setSeats(lineupStore.set(leagueKey, read.spots, new Date().toISOString()))
+			lineupStore.set(leagueKey, read.spots, new Date().toISOString())
 		setPasteNote(read.note)
 		setPasted("")
 	}
-
-	useEffect(() => {
-		if (!leagueKey) return
-		setSeats(lineupStore.of(leagueKey))
-	}, [leagueKey])
 
 	useEffect(() => {
 		const id = league?.meta.league_id
@@ -366,53 +433,15 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 		}
 	}, [league?.meta.league_id, league?.meta.platform, league?.meta.season])
 
-	/**
-	 * What to add and what to drop, from the same analysis the board runs on.
+	/*
+	 * "What Billy would do" — a 28-line memo that called `plan()` and `railViolations()`
+	 * and threw the result away. Nothing rendered it: the card it fed was deleted, its
+	 * `.advice-*` CSS went with the card, and the discarded `useMemo` was left behind.
 	 *
-	 * `src/auto/plan.ts` has decided this since the autonomous runner shipped: it is
-	 * pure, it is covered by 75 assertions, and until now nothing in the browser
-	 * could reach it. It needs three things this page did not have — your seats as
-	 * the platform renders them, the free agents you can actually add, and the
-	 * league's real roster shape — and now has all three.
-	 *
-	 * Fed the FORTNIGHT board deliberately. `DEFAULTS` (keepFloor 25, minGain 5) are
-	 * absolute point quantities and were measured against that horizon; handing them
-	 * the current scoring period, which tops out around a fifth of the scale, makes
-	 * the planner mute by construction rather than cautious.
-	 *
-	 * `railViolations` re-checks the finished plan against its own rules, exactly as
-	 * `src/auto/run.ts` does, and anything it returns is a bug rather than a warning
-	 * — so the card withholds the plan and says so instead of showing a move that
-	 * broke a rail.
+	 * It was also the only thing in this file importing `plan` and `railViolations`, so
+	 * the planner reached the browser bundle to be run once per render for nobody. The
+	 * plan a reader actually sees is Tonight's, which builds its own.
 	 */
-	const advice = useMemo((): { plan: Plan; rails: string[] } | null => {
-		if (!league || !seats?.spots.length || !pool?.size || league.meta.max_teams === null) return null
-		const input = {
-			roster: seats.spots.map(sp => ({
-				slot: sp.slot,
-				name: sp.name,
-				positions: sp.positions,
-				team: sp.team ?? null,
-				status: ""
-			})),
-			rated,
-			availableNames: pool,
-			shape: {
-				slots: league.roster.slots,
-				slot_order: league.roster.slot_order,
-				slot_accepts: league.roster.slot_accepts
-			},
-			options: DEFAULTS
-		}
-		try {
-			const out = plan(input)
-			return { plan: out, rails: railViolations(out, input) }
-		} catch {
-			// a planner that throws is a bug, and a card that renders half a plan is
-			// worse than one that renders none
-			return null
-		}
-	}, [league, seats, pool, rated])
 
 	const persist = (next: () => string[]) => {
 		try {
@@ -539,6 +568,51 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 
 	return (
 		<>
+			{/*
+			  * What is on this screen, before anybody has to scroll to find out.
+			  *
+			  * See `jumpTo` above for the measurement this exists for. It is a row of
+			  * destinations rather than a sentence about the page: a reader who pressed a
+			  * button promising the scoring values gets to them in one press, and the two
+			  * derived cards between here and there stop being things he has to scroll
+			  * past to discover they were not what he came for.
+			  *
+			  * Each label IS the heading it lands on, so nothing here can promise a
+			  * section by a name the section does not have — the same failure as a card
+			  * naming a tab. "Scoring and slots" is the exception and is named for what
+			  * the editor holds rather than for its first card, because it is six cards
+			  * and "This league" names only the first of them.
+			  */}
+			<nav className="trade-jump" ref={jumpRef} aria-label="Straight to part of this screen">
+				<span className="trade-jump-label">Straight to</span>
+				<button
+					type="button"
+					className="chip-btn"
+					data-ctl="jump-lineup"
+					onClick={() => jumpTo(document.querySelector(".trade-lineup"))}
+				>
+					Your starting lineup
+				</button>
+				<button
+					type="button"
+					className="chip-btn"
+					data-ctl="jump-deal"
+					onClick={() => jumpTo(document.querySelector(".trade-deal"))}
+				>
+					The deal
+				</button>
+				{valuesBelow && (
+					<button
+						type="button"
+						className="chip-btn"
+						data-ctl="jump-values"
+						onClick={() => jumpTo(valuesTarget())}
+					>
+						Scoring and slots
+					</button>
+				)}
+			</nav>
+
 			<section className="card full trade-team">
 				<h2>My team</h2>
 				<p className="sub">
@@ -589,9 +663,16 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 					    reader knows to select-all, which is the step people miss — and the page
 					    to open has a different name on every platform, so all four are said. */}
 					<ol className="paste-how">
+						{/* Sleeper is not named here any more, and it is not a shortening: this
+						    repo establishes at length that Sleeper does not run fantasy baseball —
+						    `SLEEPER_REFUSAL` in src/import.ts refuses every Sleeper URL because
+						    `/v1/state/mlb` names no season, src/data/rosters.ts deleted the Sleeper
+						    reader, and App.tsx's own comment records that offering it at all was the
+						    bug. Sending a reader to open his baseball roster there is sending him
+						    somewhere that does not exist. */}
 						<li>
 							Open your team on your fantasy site — <b>My Team</b> on Yahoo and ESPN,{" "}
-							<b>Roster</b> on Sleeper, CBS and Fantrax.
+							<b>Roster</b> on CBS and Fantrax.
 						</li>
 						{/* On a phone there is no Ctrl+A, and this was the only instruction the
 						    box carried. Typing names works exactly as well — `playersInText`
@@ -601,8 +682,13 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						<li>
 							Copy it, or just type the names — one to a line, first and last.
 						</li>
+						{/* "Paste or type them below" was what this said, and step 2 above has
+						    already offered typing — so a reader who types was told twice and a
+						    three-step list spent a third of itself saying the same thing. What
+						    this step is actually for is the box and the button, and "put that in"
+						    covers a paste and a typed line without naming either again. */}
 						<li>
-							Paste or type them below, then press <b>Read that</b>.{" "}
+							Put that in the box below, then press <b>Read that</b>.{" "}
 							<span className="sub">
 								On a computer, <kbd>Ctrl</kbd>+<kbd>A</kbd> then <kbd>Ctrl</kbd>+
 								<kbd>C</kbd> copies the whole page in one go.
@@ -612,7 +698,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 					<p className="sub">
 						Extra columns, adverts and menus do no harm — only the names are read. It
 						works on a private league, and it brings the seat each man is in with it,
-						which is what lets Today show the changes to make.
+						which is what lets {tab("board")} show the changes to make.
 					</p>
 					<textarea
 						data-ctl="paste-roster"
@@ -631,31 +717,47 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				    "who is available" is inferred from how widely a man is rostered across all
 				    of Yahoo; with it, it is his league's own list. */}
 				<div className="paste-roster">
-					<h3>Paste your free agents</h3>
-					<p className="sub">
-						Optional, and worth a minute: without it, who is available is{" "}
-						<b>estimated</b> from how widely each player is rostered. Open your
-						league&rsquo;s <b>Players</b> or <b>Free Agents</b> page, set the filter to
-						available players, select all and paste. Do it once a week — anyone added or
-						dropped since is not in it.
-					</p>
-					<textarea
-						data-ctl="paste-wire"
-						value={wirePasted}
-						onChange={e => setWirePasted(e.currentTarget.value)}
-						placeholder={"Shea Langeliers ATH - C\nTyler Stephenson CIN - C\n…"}
-						rows={4}
-						aria-label="Paste your league's free-agent page here"
-					/>
-					<button
-						type="button"
-						className="chip-btn"
-						onClick={readWirePaste}
-						disabled={!wirePasted.trim()}
-					>
-						Read that
-					</button>
-					{wireNote && <p className="sub paste-note">{wireNote}</p>}
+					{/*
+					  * FOLDED, because it is the optional half and it said so itself.
+					  *
+					  * Measured at 390x844 on the published build: the heading, the paragraph,
+					  * a four-row box and its button were ~400px sitting between the paste that
+					  * every reader needs and everything below, for a step whose own first word
+					  * is "optional". The summary keeps the offer and the one thing that decides
+					  * whether it is worth a minute — that without it, who is free is estimated
+					  * — so nothing has to be opened to find out what is inside.
+					  */}
+					<details className="paste-wire-fold">
+						<summary>
+							<h3>Paste your free agents</h3>
+							<span className="sub">
+								Optional. Without it, who is available is estimated.
+							</span>
+						</summary>
+						<p className="sub">
+							Worth a minute: without it, who is available is <b>estimated</b> from how
+							widely each player is rostered. Open your league&rsquo;s <b>Players</b> or{" "}
+							<b>Free Agents</b> page, set the filter to available players, select all and
+							paste. Do it once a week — anyone added or dropped since is not in it.
+						</p>
+						<textarea
+							data-ctl="paste-wire"
+							value={wirePasted}
+							onChange={e => setWirePasted(e.currentTarget.value)}
+							placeholder={"Shea Langeliers ATH - C\nTyler Stephenson CIN - C\n…"}
+							rows={4}
+							aria-label="Paste your league's free-agent page here"
+						/>
+						<button
+							type="button"
+							className="chip-btn"
+							onClick={readWirePaste}
+							disabled={!wirePasted.trim()}
+						>
+							Read that
+						</button>
+						{wireNote && <p className="sub paste-note">{wireNote}</p>}
+					</details>
 				</div>
 				{leagueId && (
 					<div className="pull-roster">
@@ -835,19 +937,40 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			{/* Retired rather than removed once the league's own deadline has passed. The
 			    evaluator still works and the code is still here; what is gone is the
 			    invitation to use it on a league that will not accept the deal. */}
-			{tradeWindow.closed && !showClosedDeal ?
-				<section className="card full trade-deal trade-closed">
+			{/*
+			  * And ASKED FOR rather than laid out, on every league.
+			  *
+			  * The closed-deadline case has been a disclosure for a while. The open case
+			  * is one now for a reason that is about this screen rather than about this
+			  * league: a reader is here to tell the app who is on his team and how his
+			  * league scores, and the builder cannot answer anything until he has picked
+			  * two names. Measured on the published build at 390x844 it was 718px between
+			  * his lineup and his league's own scoring values — the widest thing on the
+			  * screen that nobody had asked a question of.
+			  *
+			  * Both branches set the same state, so there is one way in and one card.
+			  */}
+			{!dealOpen ?
+				<section className={`card full trade-deal${tradeWindow.closed ? " trade-closed" : ""}`}>
 					<h2>The deal</h2>
-					<p className="sub">
-						Your league stopped taking trades on <b>{tradeWindow.on}</b>, so a deal priced
-						here could not be made. Your roster and lineup above are still live, and adds
-						and drops are on <b>Today</b>.
-					</p>
-					{/* A disclosure, not a wall. The default is clean because the deadline has
-					    passed; the evaluator still works and a reader with a reason to run it
-					    — a keeper league, a dynasty, a what-if — is one click from it. */}
-					<button type="button" className="chip-btn" onClick={() => setShowClosedDeal(true)}>
-						Price one anyway
+					{tradeWindow.closed ?
+						<p className="sub">
+							Your league stopped taking trades on <b>{tradeWindow.on}</b>, so a deal priced
+							here could not be made. Your roster and lineup above are still live, and adds
+							and drops are on <b>{tab("board")}</b>.
+						</p>
+					:	<p className="sub">
+							Pick who leaves and who arrives and this prices the offer — what your
+							starting lineup would project afterwards, against what it projects now.
+						</p>
+					}
+					{/* A disclosure, not a wall. The evaluator still works, and a reader with a
+					    reason to run it — a deal on the table, a keeper league, a what-if — is
+					    one press from it. The wording splits because the two presses mean
+					    different things: one is an ordinary trade, the other is knowingly
+					    pricing a deal this league will not accept. */}
+					<button type="button" className="chip-btn" onClick={() => setDealOpen(true)}>
+						{tradeWindow.closed ? "Price one anyway" : "Price a trade"}
 					</button>
 				</section>
 			:	<section className="card full trade-deal">
@@ -1006,7 +1129,11 @@ const Line = ({
 			<>
 				<span
 					className={`r bs${r.bscore < 0 ? " neg" : ""}`}
-					title="bscore — points above the best man still on waivers at this slot"
+					/* Not "the best man still on waivers": the bar is the (teams x seats)-th best
+					   eligible man, and on the shipped league five of the ten bars are set by
+					   somebody rostered in 85-99% of leagues. src/engine/trade.ts had named this
+					   sentence as wrong; it was still on screen in two places. */
+					title="Points above whoever is left at this slot once every team has filled it"
 				>
 					{r.bscore}
 				</span>
@@ -1075,15 +1202,35 @@ const LineupCard = ({
 				and this fills in.
 			</p>
 		:	<>
-				<div className="lineup-head">
+				{/*
+				  * FOLDED, with the answer in the summary.
+				  *
+				  * Measured at 390x844 on the published build, from the route a stranger
+				  * takes into this screen: the seat rows, the holes note and the bench were
+				  * 1,274px — the tallest thing between him and his league's own scoring
+				  * values, which is what the button he pressed had promised. It is also the
+				  * one card here that is derived rather than entered: what he is on this
+				  * screen to do is tell the app who he owns and how his league scores, and
+				  * the lineup is what the app says back.
+				  *
+				  * So the two numbers that ARE the answer — the total and how much of it is
+				  * his own players rather than the wire — stay on screen, and the seat-by-seat
+				  * working is one press away. Holes are counted in the summary too: a spot
+				  * nothing can fill is the one thing here a closed fold could hide, and an
+				  * absence has to be stated as an absence.
+				  */}
+				<details className="lineup-fold">
+				<summary className="lineup-head">
 					<span className="lineup-total" title="The sum of every startable spot below">
 						{total(lineup.points)}
 					</span>
 					<span className="lineup-unit">
 						projected points · {lineup.starters.filter(s => s.source === "roster").length} of{" "}
 						{lineup.starters.length} spots filled by your own players
+						{lineup.holes.length > 0 &&
+							` · ${lineup.holes.length} nothing can fill`}
 					</span>
-				</div>
+				</summary>
 				{/* Seat number WITHIN its slot, so the second Util spot names the second
 				    man on the wire. The card used to read one name per slot and print
 				    it in every seat of that slot, which put the same player in both
@@ -1181,6 +1328,7 @@ const LineupCard = ({
 						</div>
 					</div>
 				)}
+				</details>
 			</>
 		}
 	</section>

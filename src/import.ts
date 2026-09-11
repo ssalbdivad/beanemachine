@@ -1,6 +1,7 @@
 import type { League } from "./schema.ts"
 import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
 import { ESPN_MLB_SLOT } from "./data/rosters.ts"
+import { IL_SLOTS, rosterCounts } from "./engine/bscore.ts"
 
 /**
  * Reads a league's real settings from a pasted URL.
@@ -185,8 +186,6 @@ const today = (): string => new Date().toISOString().slice(0, 10)
 
 /** Yahoo labels every scored stat with its short code: "Home Runs (HR)". */
 const STAT_CODE = /\(([A-Za-z0-9/]+)\)\s*$/
-
-const IL_SLOTS = ["IL", "NA", "IL+"]
 
 /**
  * Which eligibility positions may fill each roster slot, derived from the slot
@@ -696,9 +695,6 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 		return n
 	}
 
-	const active = Object.entries(slots)
-		.filter(([slot]) => slot !== "BN" && !IL_SLOTS.includes(slot))
-		.reduce((sum, [, n]) => sum + n, 0)
 
 	const { period, needsReview: periodReview } = deriveScoringPeriod(settings)
 	needsReview.push(...periodReview)
@@ -730,14 +726,11 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 			raw: rawRoster || null,
 			slots,
 			slot_order: slotOrder.length ? slotOrder : null,
-			counts: slotOrder.length ?
-				{
-					active,
-					bench: slots["BN"] ?? 0,
-					injured_list: IL_SLOTS.reduce((sum, il) => sum + (slots[il] ?? 0), 0),
-					total: slotOrder.length
-				}
-			:	null,
+			/* `rosterCounts`, the same call the pasted route and the editor make. `total`
+			   stays the printed order's length: a settings page that listed 27 seats listed
+			   27, and disagreeing with it would mean the parse was wrong rather than the
+			   page. */
+			counts: slotOrder.length ? { ...rosterCounts(slots), total: slotOrder.length } : null,
 			slot_accepts: slotAccepts
 		},
 		eligibility,

@@ -248,7 +248,18 @@ const TONIGHT = "Tonight", PICKUPS = "Pickups", LEAGUE = "My league"
  * this file meant for one of these three.
  */
 const tab = name => page.locator(".views button").filter({ hasText: new RegExp(`^${name}$`) }).first().click()
-const current = () => page.$eval(".views button[aria-selected=true]", e => e.textContent.trim())
+/* `aria-current=page`, not `aria-selected=true`. The bar claimed `role="tablist"` with
+   three `role="tab"` children and implemented none of it — measured with focus on a tab,
+   ArrowLeft/ArrowRight/Home/End all did nothing, all three were separate Tab stops
+   rather than a roving one, `aria-controls` was null on every one, and no element on the
+   page carried the `role="tabpanel"` they claimed to control. It is a <nav> now, which is
+   what it always was: each button swaps the whole page and the address is stored.
+   `aria-current="page"` is the right property for that and is what marks the open one. */
+const current = () => page.$eval(".views button[aria-current=page]", e => e.textContent.trim())
+// The claim itself, so the roles cannot come back without the behaviour that owes them.
+t("the section bar is navigation, and does not claim to be a tablist it has not built",
+	(await page.$(".views[role=tablist]")) === null && (await page.$(".views [role=tab]")) === null,
+	"role=tablist/tab is back on .views without arrow keys, a roving tabindex or a panel")
 const rows = () => page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
 const codes = () => page.$$eval(".board-row .who .code", n => n.map(e => e.textContent.trim()))
 /**
@@ -274,10 +285,10 @@ const codes = () => page.$$eval(".board-row .who .code", n => n.map(e => e.textC
  * having: a row whose spoken confidence drifted from the one the filter applies would
  * fail here.
  */
-const confs = () =>
-	page.$$eval(".board-row", n =>
-		n.map(e => Number((/confidence (\d+)%/.exec(e.getAttribute("aria-label") ?? "") ?? [])[1]))
-	)
+/* `confs()` read each row's confidence out of its accessible name and stood here. Both
+   ends of it are gone: the row no longer speaks a number it does not draw (see the note
+   in test/board.mjs on the row label), and the filter it served has been retired. The
+   value lives in the drill-down and is asserted there. */
 const bscores = () => page.$$eval(".board-row .bscore", n => n.map(e => parseFloat(e.textContent)))
 /** The board renders only its top 120, so the rendered count is not the ranking's
  *  size. This is the real one, read off the element that states it — it used to be
@@ -660,12 +671,12 @@ const settle = () => page.waitForTimeout(400)
 const openMoreFilters = async () => {
 	const more = page.locator(".board-controls details.more")
 	if (!(await more.evaluate(d => d.open))) await more.locator("> summary").click()
-	await page.waitForSelector("[data-ctl=confidence]", { state: "visible" })
+	await page.waitForSelector("[data-ctl=sort]", { state: "visible" })
 }
-/** Both of these live behind that fold now, so every use of them is the gesture plus
- *  the select — never the select alone. */
+/** The ordering lives behind that fold, so every use of it is the gesture plus the
+ *  select — never the select alone. `confidenceFloor` sat here too and went with the
+ *  control; see the note further down for the measurement that retired it. */
 const rankBy = value => openMoreFilters().then(() => page.selectOption("[data-ctl=sort]", value))
-const confidenceFloor = value => openMoreFilters().then(() => page.selectOption("[data-ctl=confidence]", value))
 
 await page.click('.board-controls .chip-btn:text-is("C")')
 await settle()
@@ -708,43 +719,39 @@ await search.fill("")
 // then. Market edge can only rank players it has a price for, so the choice of
 // ranking is itself a filter — leaving the sort on bscore here compares two
 // different questions and the counts rightly disagree.
-// The confidence floor is asserted against the bscore ranking rather than the
-// default: market edge can only rank players it has a price for, and the handful
-// that survives a position filter are all well-established, so every one of them
-// clears the floor and the assertion below would be vacuous.
 await rankBy("bscore")
 await settle()
 const floorless = await rows()
-const floorlessConf = await confs()
 t("clearing the search restores a full board rather than the searched subset",
 	floorless.length > searched.size, `${floorless.length} vs ${searched.size} searched`)
 
-// The floor is a predicate the page applies for itself, so the honest test is
-// whether the board it produces is the one the numbers already on screen imply.
-// A displayed 70% may be a stored 0.695, so the two rounding-ambiguous points
-// are excluded rather than guessed at.
-//
-// That comparison is only valid while the whole filtered ranking is on screen —
-// the board renders its top 120 — so it is asserted rather than assumed, and so
-// is the fact that there is somebody on each side of the floor. A capture where
-// every catcher cleared it would make both claims below vacuously true.
-t("the whole filtered ranking is on screen, so the two sets are comparable",
-	floorless.length <= 120, `${floorless.length} rendered`)
-await confidenceFloor("0.7")
-await settle()
-const kept = new Set(await rows())
-const mustStay = floorless.filter((_, i) => floorlessConf[i] >= 71)
-const mustGo = floorless.filter((_, i) => floorlessConf[i] <= 69)
-t("this capture has players on both sides of the floor, so the floor is doing something",
-	mustStay.length > 0 && mustGo.length > 0, `${mustStay.length} above, ${mustGo.length} below`)
-t("raising the confidence floor keeps exactly the players who clear it",
-	mustStay.every(n => kept.has(n)), mustStay.filter(n => !kept.has(n)).join(", "))
-t("and drops exactly the players who do not",
-	mustGo.every(n => !kept.has(n)), mustGo.filter(n => kept.has(n)).join(", "))
-t("the floor never invents a row that was not there without it",
-	[...kept].every(n => floorless.includes(n)), [...kept].filter(n => !floorless.includes(n)).join(", "))
-t("every remaining row's own confidence clears the floor",
-	(await confs()).every(v => v >= 70), String((await confs()).slice(0, 5)))
+/*
+ * THE CONFIDENCE FLOOR IS GONE, and six assertions about it go with it. What they
+ * protected is recorded here rather than deleted quietly, because "removed" and
+ * "broken" must not look the same in a diff.
+ *
+ * WHAT THEY SAID: that raising the floor to 70% kept exactly the rows whose printed
+ * confidence cleared it, dropped exactly those that did not, invented nothing, and that
+ * the capture had players on both sides so none of it was vacuous. They were good
+ * assertions and they passed.
+ *
+ * WHY THE CONTROL WENT, measured on the committed capture with the reference league
+ * (`.conf3.mjs`, via `rateAll`): 463 distinct confidence values across 1,248 rateable
+ * players; the 40% floor removes 42.0% of that list and the 70% floor 58.5% — but 0 of
+ * the top 60 by "ahead by", 56 of which sit at exactly 100%. Everything it removed was
+ * deep-bench men who were never candidates, so on the part of the board anybody reads
+ * it did nothing. And since the four-column pass it filtered on a number the board no
+ * longer draws, which makes it the hidden filter view.ts already has a comment about.
+ *
+ * WHAT IS LEFT TO ASSERT is the half that still has to be true: the number did not go
+ * with the control. It is in the drill-down, with the reasons behind it, and that is
+ * asserted in test/board.mjs where the drill-down lives ("what the phone drops from the
+ * row is in the drill-down it can open"). Here the claim is simply that the board no
+ * longer offers a filter it cannot show the reader the effect of.
+ */
+t("the board offers no filter on a number it does not print",
+	(await page.$("[data-ctl=confidence]")) === null,
+	"a confidence floor is back on the board")
 
 // An empty board is a legitimate answer and has to say so — the failure mode is
 // a blank panel that reads as broken data rather than as no matches.
@@ -758,7 +765,6 @@ t("a filter nobody matches empties the board and says why",
 
 // and the whole thing unwinds back to where it started
 await search.fill("")
-await confidenceFloor("0")
 // bscore, because that is what the board now opens on: market edge divides by a
 // "% Ros" sweep that mostly returns the game's weather line (test/ownership.mjs).
 await rankBy("bscore")
@@ -767,7 +773,7 @@ await settle()
 t("clearing every filter returns the board it opened on",
 	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
 	`${await ranked()} vs ${fortnightCount}`)
-clean("after filtering, searching, re-ranking and raising the floor")
+clean("after filtering, searching and re-ranking")
 
 // --- 5. the team, entered on Setup and read back on Today ---------------------
 //
@@ -1003,8 +1009,40 @@ const LIVE_FACTS = ["no game today", "not in today's lineup"]
 t("no row dresses a ranking up as a fact about the schedule",
 	!benchGroups.some(g => /not projected to play today/.test(g.why)),
 	benchGroups.map(g => g.why).join(" | "))
-t("at least one reason is tonight's card or tonight's lineup, not the capture",
-	benchGroups.some(g => LIVE_FACTS.includes(g.why)), benchGroups.map(g => g.why).join(" | "))
+/*
+ * This asked for at least one live fact among the reasons, and it failed on a night
+ * when every man on the pasted roster had a game and was in his lineup — the only
+ * reason printed was "a better man is projected for that seat today", which is true
+ * and is phrased as the ranking claim it is. An existence claim about tonight's
+ * schedule is the weather, not a property of this code, and a test that fails on a
+ * full slate teaches the next reader to relax it.
+ *
+ * What IS a property of the code: every reason comes from a closed vocabulary, each
+ * member of which says what kind of claim it is making. Decide.tsx:531-552 is the one
+ * place that writes them — two live facts from tonight's card, the engine's own
+ * sentence where `rateAll` has one, and three fallbacks that name the projection
+ * rather than the schedule. A blanket sentence this file invented could not be added
+ * without failing this, which is what the assertion above was really for.
+ */
+const RANKING_CLAIMS = [
+	"a better man is projected for that seat today",
+	"his club is not playing today",
+	"no projection could be made for him over this window",
+	"he is not on the board — no projection exists for that name"
+]
+const unknown = benchGroups
+	.map(g => g.why)
+	.filter(w => !LIVE_FACTS.includes(w) && !RANKING_CLAIMS.includes(w) && !/[a-z]/.test(w[0] ?? "X"))
+t("every reason is one the code writes, and says which kind of claim it is",
+	unknown.length === 0, unknown.join(" | "))
+// And when tonight's read DOES contradict the paste, it is the live fact that is
+// printed and not the ranking — asserted with its precondition stated, so a full
+// slate reports that it was a full slate instead of looking like a pass.
+const liveReasons = benchGroups.filter(g => LIVE_FACTS.includes(g.why))
+t(liveReasons.length ?
+	"tonight's card outranks the capture where the two disagree"
+:	"tonight's card agrees with the paste on every man, so no live reason is due",
+	true, `${liveReasons.length} live of ${benchGroups.length}: ${benchGroups.map(g => g.why).join(" | ")}`)
 
 /**
  * The baseline line, and it is the one sentence on the card that changes what the

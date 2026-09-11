@@ -2,10 +2,11 @@
 
 > How can you not be robotic about baseball?
 
-Tells you what to do with your fantasy baseball team today. Point it at a Yahoo or
-ESPN league and it reads that league's own scoring, roster slots, team count and
-scoring period off the platform, and then answers the two questions you actually
-face: **who do I start today**, and **which add is worth one of this week's moves**.
+Tells you what to do with your fantasy baseball team today. Give it a Yahoo or ESPN
+league — one paste of its settings page is enough, and on ESPN the URL alone is — and it
+reads that league's own scoring, roster slots, team count and scoring period, then
+answers the two questions you actually face: **who do I start tonight**, and **which add
+is worth one of this week's moves**.
 
 Every recommendation names both sides and can be carried out without reading
 anything else — "bench Nolan McLean, he is not projected to play today", "add TJ
@@ -44,9 +45,15 @@ or set `VITE_API_BASE` as a repository variable so
 (`ALLOWED_ORIGINS` in `src/api.ts`) must name the site, and already names
 `beanemachine.com`.
 
-It is rate-limited to 30 requests a minute per address, because an endpoint that
-scrapes somebody else's site on request is an invitation to be used as one, and that
-cost lands on Yahoo and then on this app's own access.
+It is rate-limited, because an endpoint that scrapes somebody else's site on request is
+an invitation to be used as one, and that cost lands on Yahoo and then on this app's own
+access. The budget counts **only the requests that actually reach Yahoo** — 20 a minute
+per address, and 400 for the shared "no usable address" bucket. The first version counted
+every request, health probes and cache hits included, and a user got 429s for navigating
+the site normally; `test/journey.mjs` failing intermittently is what caught it, which is
+the shape a rate limit that is too tight always takes. The unknown-address bucket is
+deliberately far larger because behind no proxy everyone shares it, and a per-user limit
+applied globally is an outage.
 
 Which platform you are on decides how you get in, and the honest answer differs — see
 **[Getting your league in](#getting-your-league-in)** before anything else.
@@ -130,10 +137,9 @@ Exploration rounds that got here live in `logo/round*.mjs` with contact sheets i
 - **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — how a bscore is computed, worked
   through with real numbers, plus the backtest design, what is built on top of a
   bscore, and the negative-results ledger. The app's footer (`Colophon` in
-  `src/client/App.tsx`) links here and states the four measured caveats a reader
-  needs before trusting a number: the fold counts the ranking won on, the human
-  comparison's `p 0.064`, the probables step that cannot be backtested at all, and
-  the leaked "% Ros" values that make market edge unreliable.
+  `src/client/App.tsx`) links here, and carries the one caveat a reader's decision
+  actually turns on — a bscore is not a promise of points — rather than the four
+  paragraphs of fold counts it used to render under every tab.
 
 ## The app
 
@@ -142,9 +148,12 @@ what a freely available replacement at the same roster slot would produce, in *y
 league's* scoring. Points above replacement is the honest unit: a bscore of 40 means
 forty more points than the next man up, in your league's own currency.
 
-Three screens, one job each.
+Three screens, one job each. Their names are written in exactly one place —
+`VIEWS` in `src/client/panels.tsx` — and nothing else is allowed to retype them,
+because they have been renamed three times and every rename left a card pointing at a
+screen with no such name.
 
-**Today** is the one you open before first pitch. It is the daily lineup as a *diff*
+**Tonight** is the one you open before first pitch. It is the daily lineup as a *diff*
 — start these, bench these, and why — plus the seats that will score nothing tonight
 and the best gettable man who is actually on a card for each of them, plus at most a
 couple of add/drops with both sides named and the point gain. Nothing on it is a
@@ -152,7 +161,7 @@ leaderboard. Where the schedule is knowable it is read live from MLB rather than
 the shipped capture, so "no game today", "not in today's lineup" and "lineup not
 posted yet" are three different sentences instead of one guess (`src/data/today.ts`).
 
-**Wire** is everyone you can actually get, ranked. It opens on three horizons, which
+**Pickups** is everyone you can actually get, ranked. It opens on three horizons, which
 are three questions rather than three filters: **Streaming** ranks over whatever is
 left of *your league's own* scoring period, against that period's real slate — the
 rest of this matchup in a weekly league, today in a daily one, the next period where
@@ -161,12 +170,13 @@ league scores no periods at all or has not said which it runs (`src/engine/perio
 The board prints which of those it used and where the window's edges came from,
 because there is no neutral default to fall back on silently. **This fortnight** is
 the standing 14-day board and the default, and **Stash** ranks over every game left in
-the regular season. All three open filtered to players you can add: measured on the
-committed capture, 42 of the first 50 rows of the old unfiltered default were rostered
-in 90% of leagues or more, which is a leaderboard wearing a recommendation engine's
-name.
+the regular season. Streaming and the fortnight open filtered to players you can add —
+on the committed capture 38 of the first 50 rows of an unfiltered board are rostered in
+90% of leagues or more and three are under 50%, which is a leaderboard wearing a
+recommendation engine's name. Stash opens unfiltered, because it is about players you
+already hold.
 
-**Setup** is your team and your league, in that order, and it is a screen you visit
+**My league** is your team and your league, in that order, and it is a screen you visit
 once a season. Everything the other two say is priced in the values on it.
 
 There used to be a fourth tab, **Draft**, and a trade evaluator beside the roster.
@@ -190,8 +200,9 @@ have filled, and who you can actually add.
 
 | | scoring, slots, period | your roster | your league's free agents |
 | --- | --- | --- | --- |
-| **ESPN** | in the browser | in the browser | **in the browser** |
-| **Yahoo** | preset, or carry a file | carry a file, or run locally | carry a file, or run locally |
+| **ESPN** | in the browser, or paste | in the browser, or paste | **in the browser, or paste** |
+| **Yahoo** | **paste**, preset, or carry a file | paste, or carry a file | paste, or carry a file |
+| **anywhere else** | paste | paste | paste |
 | **Sleeper** | not supported — Sleeper runs no fantasy baseball | — | — |
 
 So an **ESPN** league is entirely self-service on beanemachine.com: paste the league
@@ -277,7 +288,7 @@ From there the league is a file:
 
 - `npx vite` seeds a browser that has nothing stored from `scoring.json`, so a local
   run opens straight on your league.
-- **Setup → Download** in the app writes the leagues in your browser to a JSON
+- **My league → Download** in the app writes the leagues in your browser to a JSON
   file; **Load file** on any other machine or browser reads it back, and so does
   dropping it anywhere on the page (`leagues.download` / `leagues.replace` in
   `src/client/leagues.ts`). That is how a Yahoo league gets onto the hosted site: read
@@ -293,28 +304,35 @@ their own pages and hands the result straight back; it stores nothing.
 ### Running it
 
 ```sh
-node src/server.ts      # Hono API on :8000 — /api/* only, no UI
-npx vite                # Vite client on :5173, proxying /api — this is the one to open
-node src/refresh.ts     # capture a fresh snapshot of MLB + Savant into data/snapshot.json
-npm run check           # tsc --noEmit
-npm run build           # static bundle into dist/
-npm test                # every suite: engine, leagues, trade, draft, auto, period, ui, board, trade-ui, journey
-npm run test:node       # just the pure-Node six — no browser, no server. This is what CI runs.
+node src/server.ts                      # Hono API on :8000 — /api/* only, no UI
+npx vite --port 5299 --strictPort       # the client, proxying /api — this is the one to open
+node src/refresh.ts                     # capture a fresh snapshot of MLB + Savant into data/snapshot.json
+npm run check                           # tsc --noEmit
+npm run build                           # static bundle into dist/
+npm test                                # every suite
+npm run test:node                       # just the pure-Node ones — no browser, no server. This is what CI runs.
 ```
+
+**The port is 5299, and `vite.config.ts` still says 5173, so pass it.** :5173 is Vite's
+default and on the author's machine it belongs to a different application; every browser
+suite here defaults to `http://127.0.0.1:5299` for that reason (`test/ui.mjs`,
+`board.mjs`, `trade-ui.mjs`, `decide.mjs`, `journey.mjs`), and `test/static.mjs` runs
+against `npm run preview` on `:4173`.
 
 Two notes a new reader will otherwise hit. The `dev`, `start` and `import` entries
 in `package.json` shell out to `nub`, a TypeScript runner this repo does not
 install, so they fail; the lines above are what they were meant to do, and
 `node --experimental-strip-types src/cli.ts <league-url>` is the `import` one. (On
 Node 23.6 and later the flag is a no-op — type stripping is on by default — but it is
-required on 22.x and harmless everywhere, so it is what gets printed.) And of the ten suites `npm test`
-runs, six are pure Node (`engine`, `leagues`, `trade`, `draft`, `auto`, `period` — the
-`test:node` script, which is also the CI gate) while four (`ui`, `board`, `trade-ui`,
-`journey`) drive a real page at `http://127.0.0.1:5173`, so **the Vite server has to be
+required on 22.x and harmless everywhere, so it is what gets printed.) And `npm test`
+runs seventeen suites in two groups: twelve are pure Node (`api`, `paste`, `settings`,
+`today`, `injuries`, `engine`, `leagues`, `trade`, `auto`, `period`, `ownership`,
+`compete` — the `test:node` script, which is also the CI gate) while five (`ui`, `board`,
+`trade-ui`, `decide`, `journey`) drive a real page, so **the dev server has to be
 running** or they fail on a connection rather than on a defect. A live server on that
 port that is not this app is the same trap without the connection error, so each of the
-four reads the `<h1>` wordmark before its first assertion and stops there if `BASE` is
-serving somebody else. Two of those four — `ui` and `board` — reach
+five reads the `<h1>` wordmark before its first assertion and stops there if `BASE` is
+serving somebody else. Two of them — `ui` and `board` — reach
 `/api` as well, so **`node src/server.ts` has to be up beside it** or Vite proxies
 into nothing and the page logs a 502 that reads like a client bug. Both lines
 above, both running, is the state every suite expects. `BASE=` points them
@@ -332,18 +350,17 @@ comes back empty, `projectedVolume` is 0, `rateable` is false for every player, 
 the row filter drops all of them. Restart Vite after a refresh, or copy the file
 across by hand.
 
-Three more suites sit outside `npm test`, each because it needs something the chain
-cannot assume. `npm run test:compete` replays 2021-2025 from a warm backtest cache and
-passes — the cache is `data/backtest-cache/`, which is gitignored, so a fresh clone has
-nothing to replay until `node src/backtest/compete.ts` has run once. `npm run
-test:lineups` asserts batting-order capture against the live MLB StatsAPI rather than a
-fixture, deliberately, since the read is the thing under test — so it needs a network
-and an outage would abort the browser suites behind it rather than report a FAIL.
+`npm run test:static` sits outside `npm test`, because it needs a build rather than a
+dev server: `npm run build`, then `npm run preview` in one shell and `npm run test:static`
+in another. It is the only suite that asserts what a *stranger* sees — the preset board
+with the dock at its foot, and no league — which is the one thing the dev server
+deliberately cannot show, because it shadows the published asset with the `scoring.json`
+at the repo root.
 
-`npm run test:static` checks the Pages build. `npm run preview` in one shell and
-`npm run test:static` in another passes 15 of 15 — including the two assertions that
-only hold on a real static build, the disabled free-agents toggle and the
-`.static-note` banner (`getMode() === "static"` in `src/client/App.tsx`).
+`npm run test:compete` replays 2021-2025 from the backtest cache in
+`data/backtest-cache/`, which is gitignored, so a fresh clone has nothing to replay
+until `node src/backtest/compete.ts` has run once. It is in `test:node` and will fail
+loudly on a cold cache rather than quietly pass.
 
 The build's base is **`./`**, not `/beanemachine/`. A repo-name base bakes the
 deployment path into every asset URL, so the same artifact 404s anywhere else — which
@@ -414,30 +431,33 @@ They are not interchangeable:
   serves what is in `dist/`. Your leagues are not kept here: they live in the
   browser's storage, so the hosted static build behaves identically for everything
   except those two calls.
-- **`:5173` — the Vite client**, with HMR, proxying `/api` through to `:8000`.
-  **This is the one to open.**
+- **`:5299` — the Vite client**, with HMR, proxying `/api` through to `:8000`.
+  **This is the one to open**, and the port has to be passed on the command line —
+  `npx vite --port 5299 --strictPort` — because `vite.config.ts` still carries Vite's
+  5173 default and that port belongs to another application here.
 
 ### Where the numbers come from
 
 All unauthenticated, all captured server-side into `data/snapshot.json`. Row counts
-are from the shipped capture (2026-09-02T09:56Z):
+are from the shipped capture (**2026-09-08T19:17Z**, horizon 2026-09-08 → 2026-09-22):
 
 | Source | What it gives | Rows |
 |---|---|---|
-| MLB StatsAPI `/stats?stats=season&playerPool=All` | the whole pool and its season lines | 726 hitters, 841 pitchers |
+| MLB StatsAPI `/stats?stats=season&playerPool=All` | the whole pool and its season lines | 736 hitting rows, 851 pitching rows → 651 + 795 after the position filters |
 | MLB StatsAPI `/stats?stats=byDateRange` | the same stats inside a window — recent form | 3/7/21d batters, 5/21d pitchers |
-| MLB StatsAPI `/schedule?hydrate=probablePitcher` | one read: every regular-season game from the capture to the end of the season, one row per game, carrying both clubs and each side's probable starter. No counts are stored — every window's games, opponents and probables are counted from these rows at read time, because which window matters is a property of the reader's league | 30 teams, 46 pitchers with a published start |
+| MLB StatsAPI `/schedule?hydrate=probablePitcher` | one read: every regular-season game from the capture to the end of the season, one row per game, carrying both clubs and each side's probable starter. No counts are stored — every window's games, opponents and probables are counted from these rows at read time, because which window matters is a property of the reader's league | 265 games over 30 teams; 35 carry a published starter, and 60 pitchers have one inside the 14-day horizon |
 | MLB StatsAPI `/standings` | team games played to date — the per-game denominator | 30 teams |
-| MLB StatsAPI `/teams/{id}/roster` | IL status, filtered to the D-prefixed IL codes | 203 players |
-| Baseball Savant `statcast_search` (pitch level, a day at a time) | rolling 21-day wOBA and xwOBA | 449 batters, 509 pitchers |
-| Baseball Savant `expected_statistics?min=1` | season-long xBA, xSLG | 641 batters, 834 pitchers |
+| MLB StatsAPI `/teams/{id}/roster` | IL status, filtered to the D-prefixed IL codes | 198 players |
+| Baseball Savant `statcast_search` (pitch level, a day at a time) | rolling 21-day wOBA and xwOBA | 468 batters, 535 pitchers |
+| Baseball Savant `expected_statistics?min=1` | season-long xBA, xSLG | 654 batters, 851 pitchers |
 | Baseball Savant `statcast?min=1` | barrel %, exit velocity, hard-hit %, sweet-spot % | joined by `player_id` |
-| Yahoo public player pages | "% Ros" — the market's price, and the eligibility Yahoo prints beside each name | 300 rows read, 228 of the pool priced; 433 multi-position lines, 322 matched into the pool |
+| Yahoo public player pages | "% Ros" — the market's price, and the eligibility Yahoo prints beside each name | 1,110 rows read, 880 of the pool priced; 411 multi-position lines, 328 matched into the pool |
 
 Three coverage decisions matter. `playerPool=All` instead of the default, because
 the qualified leaderboard is roughly a third of the real pool and hides exactly the
 waiver-wire players this exists to surface. Savant `min=1` instead of `q`, which
-lifts batter coverage to 641 — 1,418 of the 1,432 pooled players have an xwOBA. And
+lifts batter coverage to 654 — on this capture **all 1,446** pooled players have an
+xwOBA, and 983 of them have one from the rolling window rather than the season. And
 the expected-stat pair is read from the **pitch-level** endpoint over a rolling
 window rather than off the season leaderboard, for the reason the Savant section
 below spends a while on.
@@ -510,10 +530,13 @@ Five findings, three of them negative:
    tracks it, while a starter works every fifth day, so three days of his data is
    usually zero appearances and a week is one or two starts of noise.
 2. **The recency weight is set by seasons, not by correlation.** A 14-day ranking
-   preferred 0.75; playing 2023-2025 out week by week prefers **0.5**, worth ~1,500
-   points and a weekly win rate that goes from 41/68 to 48/68 — and the five-season
-   run in `data/results/` has since put the same comparison at 38W-73L against 0.5,
-   z −3.32. The correlation cost of 0.5 is about 0.003 ρ, inside the noise band. Heavy
+   preferred 0.75; five played seasons prefer **0.5**, and the run that settles it is
+   `churn-5s_…_moves1.json`: 0.75 loses **38W-73L, z 3.32 in 0.5's favour**, by 22.6
+   points a week and 2,504 points over five seasons. An earlier, narrower measurement
+   pointed the same way — ~1,500 points across 2023-2025, a weekly win rate going from
+   41/68 to 48/68 — and is superseded rather than quoted as reproducible: no 2023-2025
+   and no 68-week run survives in `data/results/`. The correlation cost of 0.5 is about
+   0.003 ρ, inside the noise band. Heavy
    recency catches role changes, which a correlation rewards — and chases week-to-week
    noise, which a season punishes. The season is closer to how the tool is used.
 3. **The Statcast blend does not earn its place** — though *this* study is not why.
@@ -586,11 +609,11 @@ season-to-date — **and** takes a clear majority of individual weeks against bo
 number is the one that matters, because this league is head-to-head and you win by
 winning weeks.
 
-Three harder opponents were played in an earlier full-strategy run, before the
-results ledger existed, so their rows are not re-poolable and are quoted as they
-were measured: **thoughtful-human** 77,706 (50.1%, bscore wins 60/111),
-**hot-hand + scarcity** 75,261 (48.5%, 69/111), **draft-and-hold** 63,949 (41.2%,
-98/111). Re-run `compete` with no sweep flag to regenerate them into the ledger.
+Three harder opponents come out of the full-strategy run
+`anchor-off_2021-2022-2023-2024-2025_moves1.json`: **thoughtful-human** 77,706 (50.1%,
+bscore wins 60/111, z 0.95), **hot-hand + scarcity** 75,261 (48.5%, 69/111, z 2.56),
+**draft-and-hold** 63,949 (41.2%, 98/111, z 8.74). All three reproduce from that file's
+own weekly series.
 
 **The human row is the weakest claim in this file, and it is quoted with its
 strength from here on.** Every other comparison above carries a z; that one never
@@ -621,8 +644,8 @@ when the catcher scores fewer points, and only the replacement adjustment sees i
 
 The same run pairs the recency weight directly too, and it is the only knob in the
 ledger whose result is significant on its own: **0.75 loses to the shipped 0.5 by
-38W-73L, z −3.32, −22.6 points a week, −2,504 over five seasons.** The ranking
-correlation preferred 0.75 by 0.003 ρ. The season did not.
+38W-73L — z 3.32 in 0.5's favour — 22.6 points a week, 2,504 over five seasons.** The
+ranking correlation preferred 0.75 by 0.003 ρ. The season did not.
 
 **How much churn is right — and a retraction.** An earlier version of this file said
 the edge was in selectivity, that one move a week was optimal, and that autonomous mode
@@ -694,23 +717,36 @@ player's bscore against the median bscore of players *priced the same way he is
 priced*, using Yahoo's "% Ros" as the price. An edge of +18 means eighteen points more
 than the typical player rostered in about as many leagues.
 
-The reasoning survived; the price did not. Most of what the "% Ros" sweep returns is
-the per-game weather line out of Yahoo's forecast tooltip rather than anybody's roster
-share: on the committed capture twenty of thirty clubs have 93–100% of their players
-on one identical percentage, paired exactly by that day's matchups. Since edge is
-bscore minus the median at the same ownership decile, that reordered the entire board
-by the precipitation forecast. Captures now discard any percentage most of a club
-shares to the point (`leakedByTeam`), `test/ownership.mjs` pins the shape, and the
-default is the honest column until a clean capture exists. Edge stays selectable and
-says plainly that it is unreliable. A player Yahoo does not list has **no** market
-edge and shows a dash: unknown is not the same as unowned.
+The reasoning survived; the price did not, and then the price was fixed. What the
+"% Ros" sweep used to return was largely the per-game weather line out of Yahoo's
+forecast tooltip rather than anybody's roster share — on the capture of 2026-09-02,
+twenty of thirty clubs had 93–100% of their players on one identical percentage, paired
+exactly by that day's matchups. Since edge is bscore minus the median at the same
+ownership decile, that reordered the entire board by the precipitation forecast.
+
+The sweep now identifies ownership **positively** instead of ruling weather out: a stat
+cell wraps its value in a div (`<td …><div>98%</div>`) and every cell of the nested
+forecast table is a bare `<td>76%</td>`, which is a structural difference where the
+wording was not one — a blocklist of forecast phrasings missed "There is a 51% chance of
+precipitation", whose number comes *before* its label. `leakedByTeam` additionally
+discards at capture time any percentage most of a club shares to the point, and
+`test/ownership.mjs` pins the shape.
+
+The shipped capture is clean on its own terms: 880 players priced, 96 distinct values,
+the modal value 0%, and no club with more than 52% of its players on one figure. So the
+reason bscore is the default is no longer corruption, it is **coverage** — edge can price
+776 of the 1,248 rateable rows, 62%, and the board says so below 35% rather than quietly
+handing back a narrower ranking under an edge label. The complaint edge was the default
+to answer is now answered by **Only players I can add** being on by default. A player
+Yahoo does not list has **no** market edge and shows a dash: unknown is not the same as
+unowned.
 
 ### Tuning it — `model.json`
 
 Every weight lives in [`model.json`](model.json), not in code:
 
 ```jsonc
-"recentForm": { "volumeWeight": 0.75, "blend": { "hitting": 0.5, "pitching": 0.5 },
+"recentForm": { "blend": { "hitting": 0.5, "pitching": 0.5 },
                 "rate": { "hitting": 0, "pitching": 0.15 },
                 "windows": { "hitting": { "3": 2, "7": 1, "21": 1 }, "pitching": { "5": 2, "21": 1 } } }
 "statcast":   { "weight": 0, "windowDays": 21, "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 }, ... }
@@ -721,7 +757,12 @@ Every weight lives in [`model.json`](model.json), not in code:
 
 It is validated by ArkType at import (`src/engine/weights.ts`), so a typo fails loudly
 instead of silently producing a plausible recommendation built on a number nobody
-chose. Every block carries a `why` array recording the evidence that set it — a weight
+chose. Note what this block no longer carries: a `recentForm.volumeWeight: 0.75`, which
+sat here annotated as the weight that captured the largest edge in the model and steered
+nothing — every caller that supplies a recent volume supplies its weight too, so 0.75 was
+reachable only as a default no code path could take, and 0.75 is the value `blend`'s own
+note retracts. A weights file whose premise is that editing a number here changes the
+recommendation cannot carry a number that does not. Every block carries a `why` array recording the evidence that set it — a weight
 without provenance is a guess, and this project does not ship guesses.
 
 Change a number, then re-measure:
@@ -891,7 +932,8 @@ xBA and xSLG have no point-in-time equivalent, so they stay season-long and are
 labelled as such on every card rather than passed off as recent.
 
 **Buy low** used to combine the two signals on a card of its own — a player hitting
-the ball better than his line says *and* still rostered in under 70% of leagues,
+the ball better than his line says *and* still rostered in under 70% of leagues, a flat
+threshold since replaced everywhere else by a cut calibrated to the league's own size,
 scored as a product so a candidate had to clear both bars. The card is retired. It was
 a real analysis and nothing ever measured that acting on it wins anything; the only
 assertions it ever had pinned its own thresholds. What it cost was a full-width card
@@ -960,13 +1002,16 @@ is set because it replaces an average with an observation, not because a fold co
 said so.
 
 Read the coverage honestly before trusting it. Probables reach only a few days out,
-so in the shipped capture **46 pitchers** carry a published start over the next
-fortnight and every one of them carries exactly **one** — which means the fortnight
-board projects those 46 from a single announced start while every other starter is
-still projected from a fortnight of team games. That is what a starts-based number
-means today: starts *announced*, not starts he will make. The board's two-start
-badge and its "Two-start SP only" filter are driven by the same counts, so in this
-capture neither has anything to show; they light up as the week's probables fill in.
+so in the shipped capture **60 pitchers** carry a published start inside the next
+fortnight and every one of them carries exactly **one**. A partial count read as a
+complete one is how a confirmed two-start man gets projected like everybody else — and
+how, before the per-team coverage guard, a top-five starter fell about 350 places — so
+the count is **split** rather than gated: what MLB has published is used as an
+observation, and the games it has not yet named are credited at the pitcher's own rate
+of starting. On this capture 153 of 671 rateable pitchers end up on the starts basis over
+the fortnight, 50 of them with a turn MLB has actually named. That is what a
+starts-based number means: starts announced plus starts modelled, never starts he will
+make. **Only players with a start** on the Streaming tab is driven by the same count.
 
 ### A reliever's recent rate — measured, rejected
 

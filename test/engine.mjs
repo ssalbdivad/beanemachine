@@ -24,6 +24,47 @@ t("no position players in the pitching pool", p.every(x => x.position === "P" ||
 t("no duplicate player+side rows",
   new Set(snap.players.map(x => `${x.id}:${x.group}`)).size === snap.players.length)
 
+/*
+ * THE CAPTURE CARRIES NOTHING NOBODY READS.
+ *
+ * MLB's season endpoint returns 67 stat fields per player and this app reads 40. The
+ * other 27 — airOuts, strikeoutWalkRatio, pitchesPerInning, winPercentage and the rest —
+ * were captured, committed, served to every browser and discarded: 766 KB of a 2.27 MB
+ * file, 34% of a payload already three and a half times the size of the JavaScript
+ * bundle, and about 91 KB over the wire per page load after gzip (284 KB → 193 KB).
+ * They were not inert once they arrived either: `project.ts` iterates `Object.entries`
+ * of a stat line, so every one of them was shrunk, blended and volume-scaled for every
+ * player on every board before being thrown away.
+ *
+ * `KEPT_STATS` derives the list from `HITTING_MAP` and `PITCHING_MAP` themselves — each
+ * getter is run once against a recording Proxy — plus `ENGINE_READS`, the fields the
+ * projection reads directly. So adding a scored stat needs no change anywhere; reading
+ * a NEW field in the engine does, and this is what says so.
+ *
+ * Asserted against the committed file rather than against the filter, because the filter
+ * runs at capture and the file is what ships.
+ */
+{
+  const { KEPT_STATS } = await import("../src/engine/points.ts")
+  const onFile = new Set()
+  for (const p of snap.players) for (const k of Object.keys(p.stats ?? {})) onFile.add(k)
+  const extra = [...onFile].filter(k => !KEPT_STATS.has(k))
+  t("the committed capture carries no stat field this app never reads",
+    extra.length === 0, `${extra.length} unread: ${extra.slice(0, 10).join(", ")}`)
+  // And the other direction, which is the one that would break a board rather than
+  // merely waste bytes: every field a league can score is still there to score.
+  const { HITTING_MAP, PITCHING_MAP } = await import("../src/engine/points.ts")
+  const scorable = new Set()
+  for (const map of [HITTING_MAP, PITCHING_MAP])
+    for (const get of Object.values(map)) {
+      const spy = new Proxy({}, { get: (_, k) => (typeof k === "string" && scorable.add(k), 0) })
+      try { get(spy) } catch {}
+    }
+  const missing = [...scorable].filter(k => !onFile.has(k))
+  t("and every stat a league could score is still on it",
+    missing.length === 0, `${missing.length} missing: ${missing.join(", ")}`)
+}
+
 // 3. injuries must be injuries
 const inj = Object.values(snap.injuries)
 t("injury flags are only injuries", inj.length > 0 && inj.every(v => /injur/i.test(v)),

@@ -54,18 +54,19 @@ const read = (): Stored => {
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(raw)
-	} catch (e) {
-		throw new RosterError(
-			`The roster in this browser ("${STORE_KEY}") isn't valid JSON: ${(e as Error).message}`
-		)
+	} catch {
+		// The storage key, the word JSON and V8's parser message were all in here, on a
+		// screen whose job is to tell a reader what to do next. See the note on `parse`
+		// in leagues.ts: the fact and the way out survive, the software talk does not.
+		throw new RosterError("The team this browser saved is damaged and cannot be read back.")
 	}
 	const out = Stored(parsed)
 	// Repairing it would mean guessing which ids were meant, and a roster guessed
 	// wrong prices every trade on this page. Say what's wrong and how to clear it.
 	if (out instanceof type.errors)
 		throw new RosterError(
-			`The roster in this browser ("${STORE_KEY}") isn't a valid roster:\n${out}\n` +
-				`Clear it to start again.`
+			`The team this browser saved is not in a shape this page can read:\n${out}\n` +
+				`Clear it and type your team again.`
 		)
 	return out
 }

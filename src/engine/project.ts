@@ -140,15 +140,40 @@ export interface ProjectOptions {
 	 * Hitters only. Pitchers already reach their volume through `projectedStarts`,
 	 * which had this corrected separately and for the same reason.
 	 *
-	 * MEASURED, AND IT LOSES. Default stays "blend". Over 111 weeks and five seasons
-	 * of actual weekly roster decisions:
+	 * MEASURED, AND IT DOES NOT WIN — which is weaker than what this said, and the
+	 * weaker statement is the one the runs support. Default stays "blend". Over 111
+	 * weeks and five seasons of actual weekly roster decisions:
 	 *
 	 *     blend  77,464 pts   vs season-to-date 72/111   vs a thoughtful human 45/111
 	 *     state  77,375 pts   vs season-to-date 65/111   vs a thoughtful human 48/111
 	 *
 	 * and narrowing it to fire in one direction only — the version below, which is
-	 * strictly more targeted and leaves 81 more hitters untouched — measured WORSE
-	 * again at 77,131 and 65/111. Two variants, both behind.
+	 * strictly more targeted and leaves 81 more hitters untouched — measured 77,131 and
+	 * 65/111.
+	 *
+	 * THREE CAVEATS, all found by re-reading the stored runs on 2026-09-11, and none of
+	 * which the old "AND IT LOSES" admitted:
+	 *
+	 *  · The two arms were paired directly for the first time here: 54W-50L-7T, z 0.39,
+	 *    on an 89-point total gap — 0.8 points a week. That is a coin flip, not a loss.
+	 *    The sweep was run without `--control=`, so the pairing compete.ts calls "the
+	 *    question actually being asked" was never printed at the time.
+	 *  · `VOLUME_SWEEP` builds both arms with `makeBscoreStrategy` rather than
+	 *    `vorpVariant`, so both were ranked on raw projected points and NOT on value
+	 *    over replacement — which model.json's own blend note calls the dominant
+	 *    component, worth 45 to 61 points a week. Proof rather than inference:
+	 *    `moves2_*.json byWeek["projected-points"]` is element-for-element identical to
+	 *    this run's `byWeek["bscore_blend"]` across all 111 weeks, while the shipped
+	 *    bscore scores 81,585.5 in the same settings. So the ranking measured here is
+	 *    not the ranking that ships.
+	 *  · Two stored runs with identical argv disagree: `bscore_blend` is bit-identical
+	 *    across them and `bscore_state` differs by 244.5 points, 2.2 a week — more than
+	 *    the effect being decided. Nothing in either file records a variant definition,
+	 *    so the narrower variant above cannot be distinguished from a rerun.
+	 *
+	 * The default stays "blend" because nothing has shown "state" to be better, which is
+	 * a reason to leave a default alone and not a finding about the model. Re-deciding it
+	 * needs a `--control=` sweep over `vorpVariant` arms.
 	 *
 	 * The argument for it was good and the case that motivated it was vivid: on the
 	 * committed capture the board rated Juan Soto, .944 OPS and freshly back, below a
@@ -331,7 +356,9 @@ export const project = (
 	const seasonPerTeamGame =
 		volume !== undefined && teamGamesPlayed ? volume / teamGamesPlayed : null
 	// Blend season-long and recent playing time. Backtested: this is the single
-	// largest improvement available, worth ~20% relative Spearman over naive.
+	// largest improvement available: 17.7% relative Spearman on hitters and 13.9% on
+	// pitchers over a season-only estimate, re-measured 2026-09-11. Quoted as "~20%"
+	// here and in three docs, which rounds the first up and overstates the second by 44%.
 	/**
 	 * ROLE x AVAILABILITY, for hitters, when the state model is asked for.
 	 *
@@ -394,10 +421,6 @@ export const project = (
 	 * says why rather than a number being invented.
 	 */
 	const startShare = s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 0
-	/** The same ratio the rate blend reads, which defaults to 1 rather than 0 where
-	 *  appearances are not reported — a hitter, or a pitcher with no games logged,
-	 *  must not fall into the mostly-relieving branch. */
-	const startShareOrOne = s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 1
 	const startsBased =
 		!isHitter &&
 		projectedStarts !== null &&
@@ -534,7 +557,13 @@ export const project = (
 					value / volume
 				:	(value + k * leagueRate) / (volume + k)
 			// optionally pull the rate toward what the player has done lately
-			// a mostly-relieving pitcher can be given a different weight than a starter
+			/* A mostly-relieving pitcher can be given a different weight than a starter.
+			   Deliberately NOT the `startShare` in the enclosing scope: that one defaults
+			   to 0 where appearances are not reported, because there it decides whether to
+			   trust a starts-based volume estimate and an unknown must not pass that bar.
+			   Here it decides which rate weight to use, and an unknown must not fall into
+			   the relieving branch — so it defaults to 1. A copy of this line with the
+			   other default used to sit beside the first one, unread. */
 			const startShare =
 				!isHitter && s.gamesPitched ? (s.gamesStarted ?? 0) / s.gamesPitched : 1
 			const rateWeight =

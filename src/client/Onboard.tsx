@@ -1,11 +1,11 @@
 import { useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
-import type { Config, League } from "../schema.ts"
+import type { League } from "../schema.ts"
 import { leagueFromPastedSettings } from "../data/paste-settings.ts"
 import { rosterFromPaste, type PastedRoster } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
-import { IMPORT_COMMAND, leagueGaps } from "./panels.tsx"
+import { leagueGaps } from "./panels.tsx"
 
 /**
  * The first thing a stranger sees.
@@ -33,7 +33,9 @@ import { IMPORT_COMMAND, leagueGaps } from "./panels.tsx"
  *    and which nothing else here has ever reached.
  *  · URL second, and only where it is true. ESPN reflects our origin, so the page
  *    reads it directly; with a server behind us Yahoo can be scraped, sometimes.
- *  · The preset third, because it is borrowed values wearing a warning label.
+ *  · The preset is not offered as a button at all any more. It is what the board
+ *    behind this sheet is already running, labelled, and typing a team adopts it —
+ *    so a reader never chooses it, he only ever reads that he has it.
  *  · By hand last, because it works everywhere and costs the most.
  *
  * Every one of them ends in the same place: a league in this browser, and a board
@@ -79,22 +81,19 @@ const SETTINGS_PAGE: Record<Where, React.ReactNode> = {
 }
 
 export const Onboard = ({
-	config,
 	snapshot,
 	leagueKey,
 	league,
 	canImport,
-	preset,
 	onCreateLeague,
-	onUsePreset,
 	onAdoptPreset,
 	onTeamCount,
+	onLineupLock,
 	onImportUrl,
 	onLoadFile,
 	onOpenSetup,
 	onDone
 }: {
-	config: Config | null
 	snapshot: Snapshot | null
 	/** The league this browser holds once one exists, so the last step can put a
 	 *  team in it and the finish button can say what it is finishing. */
@@ -103,13 +102,14 @@ export const Onboard = ({
 	/** Whether a league can be read from wherever this page is running: true with a
 	 *  server behind it, and on the static build true for ESPN alone. */
 	canImport: boolean
-	preset: { key: string; label: string } | null
 	onCreateLeague: (platform: Where, league: League) => void
-	onUsePreset: () => void
 	/** Turns the preview the reader is looking at into a real league in this browser,
 	 *  and returns its key. Called at the moment he first writes something of his own:
 	 *  before that there is nothing to attach it to. */
 	onAdoptPreset: () => string | null
+	/** Whether this league's lineup can be changed daily. Only the reader knows — no
+	 *  platform preset can say, because one platform hosts both kinds. */
+	onLineupLock: (lock: "daily" | "period") => void
 	/** How many teams this league has. It is the second and last question, because the
 	 *  bar every player is measured against is the (teams x seats)-th best man — so the
 	 *  count moves every row on the board. */
@@ -198,22 +198,20 @@ export const Onboard = ({
 			if (got.spots.length)
 				lineupStore.set(key, got.spots, new Date().toISOString())
 			setTeam("")
-			setTeamNote(got.note)
+			// Cleared on success: the answer block below names every player back, which is
+			// the confirmation, and `note` here would repeat it in smaller type.
+			setTeamNote(null)
 		} catch (e) {
-			setTeamNote((e as Error).message)
+			setTeamNote(
+				`Your team could not be saved in this browser: ${(e as Error).message} ` +
+					`A private window usually does this, and so does a full phone.`
+			)
 		}
 	}
 
-	const step = (n: number, title: string, done: boolean, body: React.ReactNode) => (
-		<li className={`onboard-step${done ? " done" : ""}`}>
-			<b className="onboard-n">{done ? "✓" : n}</b>
-			<div className="onboard-body">
-				<h3>{title}</h3>
-				{body}
-			</div>
-		</li>
-	)
-
+	/* `step()` drew a numbered `<li class="onboard-step">` for a three-step sheet and
+	 * nothing has called it since the sheet became one question. Its CSS went with the
+	 * layout; this was the last of it. */
 	return (
 		<div className="grid">
 			<section className="card full onboard">
@@ -301,8 +299,24 @@ export const Onboard = ({
 								added. Add a position in front of the one you own.
 							</p>
 						)}
+						{/*
+						  THE THING THAT WENT WRONG, on the step with the highest attrition in the
+						  product.
+						  
+						  `teamNote` was written in four places — the parser's own note, "Something
+						  went wrong saving your team", and twice the message off a `roster.set`
+						  throw, which is what a full storage quota or a private window produces —
+						  and read in none. A storage failure here was completely silent: the reader
+						  pressed the button, saw his players named back, and had nothing saved.
+						*/}
+						{teamNote && !read.players.length && (
+							<p className="onboard-missed">{teamNote}</p>
+						)}
 					</div>
 				)}
+				{/* And the same note when there is no `read` to hang it on — a throw before the
+				    parser returned anything. */}
+				{teamNote && !read && <p className="onboard-missed">{teamNote}</p>}
 
 				{/*
 				  The second question, and the only other one. It changes who counts as a
@@ -330,6 +344,51 @@ export const Onboard = ({
 						</div>
 						<p className="sub">
 							It changes who counts as a good pickup more than anything else does.
+						</p>
+					</div>
+				)}
+
+				{/*
+				  THE THIRD QUESTION, AND IT IS THE ONE THE BAR OUTSIDE PROMISES.
+
+				  The dock says "Tell it who's on your team and it will tell you who to start
+				  tonight", and the button below says "Show me tonight" — and on the route a
+				  first visit actually takes, neither was true. `Decide`'s Today section
+				  renders only where `scoring_period.lineup_lock === "daily"`, and the shipped
+				  preset carries no `scoring_period` at all (verified: undefined), so the card
+				  came up with a scoring-period plan and no tonight in it. Repro on the
+				  published build with a fresh profile: paste 18 men, press through, and the
+				  Today section is simply absent.
+
+				  There is no honest way to read this off a preset, because it is not a fact
+				  about a platform — Yahoo hosts both kinds. It is a fact only the reader has,
+				  it takes one tap, and it is the difference between an app that answers
+				  "who do I start tonight" and one that cannot. So it is asked, in the words
+				  somebody who has never read a rules page would use, and what he answers is
+				  stored with `source` saying he is the one who said it.
+				*/}
+				{league && (
+					<div className="onboard-teams">
+						<h3>Can you change your lineup every day?</h3>
+						<div className="chips">
+							{([
+								["daily", "Yes, every day"],
+								["period", "No, it locks for the week"]
+							] as const).map(([lock, label]) => (
+								<button
+									key={lock}
+									type="button"
+									className={`chip-btn${league.scoring_period?.lineup_lock === lock ? " on" : ""}`}
+									aria-pressed={league.scoring_period?.lineup_lock === lock}
+									onClick={() => onLineupLock(lock)}
+								>
+									{label}
+								</button>
+							))}
+						</div>
+						<p className="sub">
+							Most Yahoo and ESPN points leagues let you change it every day. If yours
+							does, tonight&rsquo;s lineup is a decision you get to make.
 						</p>
 					</div>
 				)}
@@ -413,19 +472,54 @@ export const Onboard = ({
 									</button>
 								</p>
 							)}
-							<p style={{ margin: "var(--sp-3) 0 0" }}>
-								<button type="button" onClick={onOpenSetup}>
-									Or type the values in myself
-								</button>{" "}
-								<button type="button" onClick={onLoadFile}>
-									Load a file I saved
-								</button>
-							</p>
 						</>
 					)}
+					{/*
+					  The two routes that do not care where you play, outside the platform gate.
+					  
+					  These used to sit inside `{where && …}`, so both were unreachable until the
+					  reader had named a platform — and neither of them asks. Typing the values in
+					  is the same form whoever you play with, and a saved league already HAS its
+					  platform in it. That gate mattered most for the file, because it is the only
+					  load door a browser with no league has: `WireChip` in App.tsx returns null
+					  unless the active league is a Yahoo one, and the management toolbar is gated
+					  on the dock being absent, so with nothing stored this sheet and an invisible
+					  drag-and-drop were the whole of it — and the reader it is for had to claim
+					  his league scores differently, then pick a platform, to find it.
+					  
+					  It stays behind this <details>, which is shut on a first visit: measured on
+					  the published build at 390x844 and 360x640, "Load a file I saved" is not in
+					  the document at all until the reader opens this drawer. A stranger with no
+					  file is never shown it, which is the thing that would be worth removing.
+					*/}
+					<p style={{ margin: "var(--sp-3) 0 0" }}>
+						<button type="button" onClick={onOpenSetup}>
+							Or type the values in myself
+						</button>{" "}
+						<button type="button" onClick={onLoadFile}>
+							Load a file I saved
+						</button>
+					</p>
 				</details>
 
-				<p className="onboard-done">
+				{/*
+				  The finish, pinned to the foot of the sheet rather than printed under it.
+				  
+				  Measured on the published build before this, a stranger's walk at 390x844:
+				  the sheet's own scroll box was 590px tall with 713px of content in it, and
+				  "Show me tonight" — the button that ends setup — sat 646px down, 56px below
+				  a fold the reader had no way to know was there, because the page behind the
+				  sheet goes on scrolling normally and the sheet's scrollbar is a phone's, which
+				  is to say invisible. At 360x640 it was 685px down in a 447px box, 238px under.
+				  The one question had been answered and the way forward was off screen.
+				  
+				  `onboard-foot` is only added when there IS a button: with no league this
+				  paragraph is a sentence saying what the board behind the sheet is running, and
+				  pinning an explanation would spend the scarcest 75px in the product on
+				  something nobody has to act on — and would push "That’s my team" under it on a
+				  360px phone, which is the same bug one step earlier.
+				*/}
+				<p className={`onboard-done${league ? " onboard-foot" : ""}`}>
 					{league ?
 						<button type="button" className={ready ? "primary" : ""} onClick={onDone}>
 							{read && read.players.length ? "Show me tonight" : "Show me the board"}

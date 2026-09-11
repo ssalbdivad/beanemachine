@@ -40,9 +40,27 @@ const evaluate = (roster, out, incoming) =>
 	evaluateTrade({ league, roster, out, in: incoming, pool, teams })
 
 // --- the shape of the thing being filled ---
+/* The reserve list is spelled out here rather than imported, deliberately — a test that
+   calls the same predicate as the code cannot catch the predicate being wrong. It used to
+   read `["BN", "IL", "NA"]`, which is the exact hand-written form whose omission of
+   Yahoo's second injured slot cost this project two wrong seat counts (see
+   `isReserveSlot`), so the list this file checks against is the full one plus the
+   prefixed variants a reader can type into the editor's Add slot field. */
+const NOT_STARTABLE = ["BN", "IL", "IL+", "NA", "IL-60", "IL60", "NA(b)"]
 t("active slots expand to one entry per startable spot",
-	spots.length === league.roster.counts.active && !spots.some(s => ["BN", "IL", "NA"].includes(s)),
+	spots.length === league.roster.counts.active &&
+		!spots.some(s => NOT_STARTABLE.includes(s)),
 	`${spots.length} vs ${league.roster.counts.active} active`)
+t("and a seat name nobody anticipated is still read as a reserve seat",
+	activeSlots({
+		...league,
+		roster: {
+			...league.roster,
+			slots: { ...league.roster.slots, "IL-60": 2, "NA(b)": 1 },
+			slot_order: null
+		}
+	}).length === spots.length,
+	"three reserve seats with unfamiliar names added; startable count must not move")
 
 // The bars are recomputed here because rateAll keeps them to itself. If the two
 // ever disagree the analyzer is pricing vacated spots off a different waiver wire

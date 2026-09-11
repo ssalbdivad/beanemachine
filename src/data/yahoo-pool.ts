@@ -1,4 +1,5 @@
 import { cellText, documentText } from "../html.ts"
+import { normalizeName } from "./names.ts"
 
 /**
  * Who is actually available in YOUR league.
@@ -261,30 +262,9 @@ export const leakedByTeam = (
 	return leaked
 }
 
-/**
- * Normalised for joining to MLB names: accents, punctuation and suffixes vary.
- *
- * The punctuation class held two straight apostrophes for a while — they read as
- * one straight and one curly — so U+2019 survived normalisation here while the
- * browser's copy stripped it. Every read keyed on this function fails open when
- * that happens: snapshot.ts joins eligibility and ownership by name, and
- * auto/plan.ts decides who is addable by name, and a key that never matches drops
- * the player with no error. MLB spells him Ke'Bryan Hayes with U+0027; if a Yahoo
- * page ever spells him with U+2019 the two must still collapse to the same key.
- * The escape is written out so the difference is visible in a diff.
- *
- * src/client/useBoard.ts carries a second copy for the browser bundle. It always
- * had the U+2019 escape; this one is now the same function.
- */
-export const normalizeName = (n: string): string =>
-	n
-		.normalize("NFD")
-		.replace(/[̀-ͯ]/g, "")
-		.toLowerCase()
-		.replace(/[.'\u2019]/g, "")
-		.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, "")
-		.replace(/\s+/g, " ")
-		.trim()
+/** Re-exported so every existing importer of this module keeps working; the function
+ *  itself is in src/data/names.ts, which explains why it had to move. */
+export { normalizeName }
 
 /**
  * How many leagues each player is rostered in — the market's price.

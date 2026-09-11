@@ -40,6 +40,10 @@ export const Dock = ({
 	children: React.ReactNode
 }) => {
 	const sheet = useRef<HTMLDivElement>(null)
+	const bar = useRef<HTMLButtonElement>(null)
+	/** Whether the sheet has ever been open in this session, so the first render does
+	 *  not steal focus onto the bar from wherever the reader actually is. */
+	const wasOpen = useRef(false)
 
 	// Escape closes it. Bound on the document rather than on the sheet so it works
 	// wherever focus happens to be — a reader who has clicked into the board behind
@@ -53,17 +57,48 @@ export const Dock = ({
 		return () => document.removeEventListener("keydown", onKey)
 	}, [open, onToggle])
 
-	// Opening it puts focus inside, so a keyboard reader is where the content is and
-	// not still on the bar behind it.
+	/*
+	 * Opening it puts focus inside, so a keyboard reader is where the content is and not
+	 * still on the bar behind it — and CLOSING it puts focus back on the button that did
+	 * the closing, which is the half that was missing.
+	 *
+	 * Measured on the published build: with the sheet open, focus was on `.dock-sheet`;
+	 * after Escape, `open` went false and focus was on `<body>`. A screen reader's
+	 * position resets to the top of the document from there, and nothing announces that
+	 * the sheet has gone. The next Tab happened to reach the bar button, but only because
+	 * the sheet was the last thing before it in DOM — luck rather than design.
+	 */
 	useEffect(() => {
-		if (open) sheet.current?.focus()
+		if (open) {
+			wasOpen.current = true
+			sheet.current?.focus()
+		} else if (wasOpen.current) bar.current?.focus()
 	}, [open])
 
 	return (
 		<aside className={`dock${open ? " on" : ""}`} aria-label="Set up your league">
+			{/*
+			  Which layer the reader is on, said in the only way a phone has room to say it.
+			  
+			  Measured complaint from a stranger's walk: with the sheet up, the board behind
+			  it was at full contrast and the tabs above it were live, so nothing on screen
+			  distinguished "I am still answering this" from "I am done, close it". The walk
+			  itself is six gestures and under three seconds, so the flow is not the problem
+			  — knowing where you are in it is.
+			  
+			  The answer is NOT to make this a modal. The board has to stay readable and
+			  scrollable while the reader decides, for the reason in the note at the top of
+			  this file, and `aria-modal` stays false because the page behind really is still
+			  his to use. So the page is DIMMED rather than taken away, and the dim takes no
+			  pointer events at all — which is what keeps "let me look at that again" working
+			  with a finger, and is why this is not also a tap-to-dismiss target. Escape and
+			  the Close button are the ways out, both of them already here.
+			*/}
+			{open && <div className="dock-scrim" aria-hidden="true" />}
 			{open && (
 				<div
 					className="dock-sheet"
+					id="dock-sheet"
 					ref={sheet}
 					tabIndex={-1}
 					role="dialog"
@@ -77,14 +112,23 @@ export const Dock = ({
 				<p className="dock-say">{summary}</p>
 				<button
 					type="button"
+					ref={bar}
 					className={open ? "" : "primary"}
 					aria-expanded={open}
+					/* `aria-expanded` with nothing to point at is half a claim: the button said
+					   a region was expanded and never said which, and reading forward from it
+					   went to the page footer because the sheet is rendered BEFORE the bar in
+					   DOM — measured tab order from inside the open sheet was textarea →
+					   summary → Close → footer link, so the sheet is unreachable from its own
+					   trigger. The id makes the relationship explicit, which is what lets a
+					   screen reader jump to it regardless of where it sits. */
+					aria-controls="dock-sheet"
 					onClick={() => onToggle(!open)}
 				>
 					{/* Named for what it asks rather than for what it is. "Set up my league"
 					    is a chore; the button is the first thing a stranger reads and it should
 					    say the question it is about to ask. */}
-					{open ? "Close" : "Who's on my team"}
+					{open ? "Close" : "Who\u2019s on my team"}
 				</button>
 			</div>
 		</aside>

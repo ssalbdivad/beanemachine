@@ -180,8 +180,8 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
  */
 import type { League } from "../schema.ts"
 import { deriveScoringPeriod, deriveSlotAccepts } from "../import.ts"
+import { rosterCounts } from "../engine/bscore.ts"
 
-const IL_SLOTS = ["IL", "NA", "IL+"]
 
 export const leagueFromPastedSettings = (
 	text: string,
@@ -224,10 +224,6 @@ export const leagueFromPastedSettings = (
 	const leagueId =
 		read.settings["League ID#"] ?? read.settings["League ID"] ?? read.settings["League Id"] ?? null
 
-	const active = Object.entries(slots)
-		.filter(([slot]) => slot !== "BN" && !IL_SLOTS.includes(slot))
-		.reduce((sum, [, n]) => sum + n, 0)
-
 	return {
 		league: {
 			meta: {
@@ -247,14 +243,13 @@ export const leagueFromPastedSettings = (
 				raw: read.settings["Roster Positions"] ?? null,
 				slots,
 				slot_order: slotOrder.length ? slotOrder : null,
+				/* `rosterCounts`, not a fourth hand-written copy of the reserve test. `total`
+				   stays `slotOrder.length` rather than the sum of the counts, because here
+				   the printed order IS the evidence: a settings page that listed 27 seats
+				   listed 27, and disagreeing with it would mean the parse was wrong. */
 				counts:
 					slotOrder.length ?
-						{
-							active,
-							bench: slots["BN"] ?? 0,
-							injured_list: IL_SLOTS.reduce((sum, il) => sum + (slots[il] ?? 0), 0),
-							total: slotOrder.length
-						}
+						{ ...rosterCounts(slots), total: slotOrder.length }
 					:	null,
 				slot_accepts: slotAccepts
 			},

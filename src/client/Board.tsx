@@ -948,10 +948,21 @@ export const Board = ({
 	 *  is his doing or the league's. `narrowed` alone is not it: it names only the two
 	 *  filters the fold's summary lists, and a position chip or a search string empties
 	 *  a board just as thoroughly. */
-	const narrowing = narrowed.length > 0 || !!filters.slot || !!filters.search.trim()
+	/** Everything narrowing the board right now, in the reader's words, so the empty-state
+	 *  message can name the actual cause rather than only the two in `narrowed`. */
+	const narrowingNames = [
+		...narrowed,
+		filters.slot ? `the ${filters.slot} position` : "",
+		filters.search.trim() ? `the search for "${filters.search.trim()}"` : ""
+	].filter(Boolean)
 	/** The ones that went, named in the note so their absence is stated rather than
 	 *  left as a gap the reader has to notice. */
-	const hiddenSlots = SLOTS.filter(s => s && !slotsRanked.has(s))
+	/* The slots actually WITHHELD from the chip row — which is not the same as the slots
+	   the rateable pool lacks. `slotChips` keeps whichever chip the reader already picked,
+	   so that it cannot become impossible to widen a board narrowed before the league
+	   changed under him; the note has to agree with the chips it is describing, or it says
+	   "SP is not offered" with SP on screen and pressed. */
+	const hiddenSlots = SLOTS.filter(s => s && !slotsRanked.has(s) && filters.slot !== s)
 	const andList = (xs: string[]) =>
 		xs.length < 2 ? (xs[0] ?? "")
 		: `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`
@@ -1749,20 +1760,39 @@ export const Board = ({
 							  then it really might be the thing to undo, and the note at the top
 							  of the card has said the rest either way.
 							*/}
-							{unscored && !narrowing ?
+							{/*
+							  THREE CASES, and the middle one was wrong in both directions.
+							  
+							  `narrowing` counts a position chip and a search string as well as the
+							  two in `narrowed`, so a reader in a one-sided league who had a
+							  pitching chip picked before the league changed fell past the first
+							  branch and got "try a different position or a wider window" — the dead
+							  end this block exists to remove, in the one state where the scoring
+							  really is the cause.
+							  
+							  And the second branch named `narrowed` alone, so a board emptied by the
+							  SEARCH BOX with Side=batters set read "No players match batters only",
+							  which is a confident wrong attribution where the old vague sentence was
+							  at least honest. It names everything that is narrowing now, and the
+							  position chip and the search are in that list.
+							*/}
+							{unscored && !narrowed.length ?
 								<>
 									Nothing left to rank. This league scores nothing for{" "}
-									{unscored === "pitching" ? "pitchers" : "batters"}, and no position
-									and no window brings one back — the note at the top of this card
-									says where to fill them in.
+									{unscored === "pitching" ? "pitchers" : "batters"}
+									{filters.slot ?
+										<>
+											, and the <b>{filters.slot}</b> chip can never match one
+										</>
+									:	", and no position and no window brings one back"}{" "}
+									&mdash; the note at the top of this card says where to fill them in.
 								</>
-							:	<>
-									No players match{narrowed.length ? " " : " these filters"}
-									{narrowed.length ? <b>{narrowed.join(", ")}</b> : ""}.{" "}
-									{narrowed.length ?
-										"Clear one of those to widen it."
-									:	"Try a different position or a wider window."}
+							: narrowingNames.length ?
+								<>
+									No players match <b>{andList(narrowingNames)}</b>. Clear one of those to
+									widen it.
 								</>
+							:	<>No players match these filters. Try a wider window.</>
 							}
 						</p>
 					)}

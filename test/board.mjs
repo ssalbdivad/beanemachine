@@ -2390,8 +2390,13 @@ await phone.close()
     await route.fulfill({ json: j })
   })
   await sp.goto(BASE, { waitUntil: "domcontentloaded" })
-  await sp.waitForSelector(".dock button", { timeout: 30000 })
-  await sp.click(".dock button")
+  /* `.dock-bar button`, not `.dock button`. The sheet is mounted and `hidden` while closed
+     now — it had to be, or closing it discarded everything the reader had typed — so
+     `.dock button` matches seven buttons and the first of them is the DISABLED "That's my
+     team" inside the sheet, which this waited thirty seconds to become clickable. The bar
+     is the thing that opens the sheet and is what this line always meant. */
+  await sp.waitForSelector(".dock-bar button", { timeout: 30000 })
+  await sp.click(".dock-bar button")
   await sp.waitForSelector("summary:has-text('My league scores differently')", { timeout: 15000 })
   await sp.click("summary:has-text('My league scores differently')")
   await sp.click(".onboard-where button:has-text('Yahoo')")

@@ -157,6 +157,11 @@ export const playersInText = (
  * belongs to somebody else's row and is not used: a wrong seat is worse than no seat,
  * because the card diffs against it.
  */
+/** "A and B", "A, B and C" — the same shape `andList` gives on the board, kept here
+ *  because src/data/paste.ts must not import from src/client. */
+const andNames = (xs: string[]): string =>
+	xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`
+
 const slotBefore = (hay: string, at: number): string | null => {
 	// `at` is the index of the SPACE before the name, so the window has to reach one
 	// character past it or the nearest token loses its trailing space and cannot
@@ -531,6 +536,18 @@ export const rosterFromPaste = (
 		)
 	]
 
+	/*
+	 * And it is SAID, because otherwise the count is wrong in the reader's favour without
+	 * telling him. Typing "Shohei Ohtani" stores two roster entries — 660271:hitting and
+	 * 660271:pitching, which is correct and is what the note above is about — while
+	 * `found.players` dedupes by id, so the confirmation read "Found 1 player" and the
+	 * sheet echoed one name. A reader checking eighteen typed names against what the board
+	 * then holds finds the two numbers disagree and has nothing on screen explaining it.
+	 */
+	const twoWay = found.players
+		.filter(f => snapshot.players.filter(p => p.id === f.id).length > 1)
+		.map(f => f.name)
+
 	/**
 	 * The league's own eligibility where the sweep reached him, and his primary
 	 * position where it did not.
@@ -592,8 +609,15 @@ export const rosterFromPaste = (
 				"in baseball has it you will be offered him below; a nickname matches nobody."
 		:	`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
 			(spots.length ?
-				`, ${spots.length} with the seat they were in — the daily lineup on Recommendations can diff against that.`
-			:	". No seats were in that text, so Recommendations will show the lineup to set rather than the changes to make.") +
+				`, ${spots.length} with the seat they were in — tonight's lineup can be given to you as the CHANGES to make, rather than as a lineup to set from scratch.`
+			:	". No seats were in that text, so tonight's lineup comes back as the lineup to SET rather than as the changes to make.") +
+			(twoWay.length ?
+				` ${andNames(twoWay)} ${twoWay.length === 1 ? "is a two-way player" : "are two-way players"}` +
+					`, counted as both a hitter and a pitcher — which is how your league lists ` +
+					`${twoWay.length === 1 ? "him" : "them"}, so that is ` +
+					`${keys.length} roster ${keys.length === 1 ? "entry" : "entries"} for ` +
+					`${found.players.length} ${found.players.length === 1 ? "name" : "names"}.`
+			:	"") +
 			(found.ambiguous.length ?
 				` Two different players share ${found.ambiguous.join(" and ")}, so neither was added — search for the one you own below.`
 			:	"")

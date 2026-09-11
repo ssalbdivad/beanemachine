@@ -349,7 +349,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 * leagues, which is most leagues and which nothing here has ever reached.
 	 *
 	 * The seats come with it where the paste carried them, which is what makes the
-	 * daily diff on Recommendations work: a roster page prints the slot to the left
+	 * daily diff on Tonight work: a roster page prints the slot to the left
 	 * of each name, and `playersInText` keeps it.
 	 */
 	/**

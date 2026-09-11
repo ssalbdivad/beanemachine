@@ -142,12 +142,35 @@ export const activeSlots = (shape: RosterShape): string[] =>
 
 /** The startable slots a set of eligibility positions can legally fill. `any` and
  *  `injured_only` are the bench and the IL, which are not startable seats. */
+/**
+ * The seats a man may legally fill.
+ *
+ * Two ways a token earns a seat, and the second one is not redundant.
+ *
+ * The first is the platform's own rule: the seat's `accepts` list names eligibility
+ * POSITIONS, and a man carrying one of them may sit there. That is how a catcher
+ * reaches the C seat and how an outfielder reaches Util, whose list is every batter
+ * position this league rosters.
+ *
+ * The second is the seat's own NAME. A designated hitter has no fielding position to
+ * be accepted by — `slotsFor` gives him "Util" and nothing else, because Util is
+ * genuinely the only seat he can hold — and Util's accepts list is a list of
+ * positions, which "Util" is not one of. So the one man the seat exists for matched
+ * nothing and could be seated nowhere at all. Measured on the committed capture with
+ * a pasted roster: Josh Bell, stored as [Util], unseatable.
+ *
+ * Naming a seat is the strongest possible claim that you can sit in it, so it wins
+ * wherever it is made. It also costs nothing: no eligibility line anywhere writes a
+ * seat name unless it means one.
+ */
 export const legalSlotsFor = (
 	positions: string[],
 	accepts: Record<string, SlotAccepts>
 ): string[] =>
 	Object.entries(accepts).flatMap(([slot, accept]) =>
-		Array.isArray(accept) && accept.some(p => positions.includes(p)) ? [slot] : []
+		positions.includes(slot) || (Array.isArray(accept) && accept.some(p => positions.includes(p))) ?
+			[slot]
+		:	[]
 	)
 
 export interface Resolved {

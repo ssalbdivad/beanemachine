@@ -180,12 +180,22 @@ export const Onboard = ({
 	return (
 		<div className="grid">
 			<section className="card full onboard">
+				{/*
+				  The board is already on screen, so this card's job changed.
+				  
+				  It used to be the whole first visit and had to argue that nothing could be
+				  ranked without a league. That is true and it is no longer the reader's
+				  situation: a ranked board is directly below, on the shipped preset, and
+				  what this card has to say is what changes when he replaces it. Three
+				  inputs, two minutes, and every number below moves.
+				*/}
 				<h2>Set up your league</h2>
 				<p className="sub">
-					A player is only worth what <i>your</i> league pays for what he does. Nothing
-					here can rank anybody until it knows three things: what each stat is worth,
-					how many roster slots you fill, and how many teams you are up against. This
-					takes a couple of minutes, once — and it all stays in this browser.
+					The board below is on <b>standard</b> scoring. A player is only worth what{" "}
+					<i>your</i> league pays for what he does — tell it three things and every
+					number changes: what each stat is worth, how many roster slots you fill, and
+					how many teams you are up against. Two minutes, once, and it all stays in
+					this browser.
 				</p>
 
 				<ol className="onboard-steps">
@@ -228,12 +238,12 @@ export const Onboard = ({
 					{preset && !league && (
 						<p className="onboard-shortcut">
 							<button type="button" className="chip-btn" onClick={onUsePreset}>
-								Show me a board first
+								Start from these values
 							</button>
 							<span className="sub">
-								Starts from <b>{preset.label}</b> — standard values, nothing read from
-								your league, and the page keeps saying so until you check them. Setting
-								your own up replaces it.
+								Keeps the scoring the board below is already using — <b>{preset.label}</b>{" "}
+								— so you can add your team now and correct the values later. The page
+								goes on saying they were not read from your league until you check them.
 							</span>
 						</p>
 					)}
@@ -458,10 +468,14 @@ export const Onboard = ({
 								`Show me the board for ${league.meta.league_name ?? leagueKey}`
 							:	"Take me to the board anyway"}
 						</button>
-					:	<span className="sub">
-							There is nothing to show until one of these is done — every number on
-							the board is denominated in a league&rsquo;s own points, so there is no
-							board without a league.
+					:	/* This said "there is nothing to show until one of these is done", which
+					     was true when the setup was the whole first visit and is false now: the
+					     board is directly below, running on the preset. What is still true, and
+					     is the reason to do any of this, is that none of it is about his team
+					     yet. */
+						<span className="sub">
+							The board below is already running &mdash; on standard values, with no
+							team behind it. Any of these makes it yours.
 						</span>
 					}
 				</p>

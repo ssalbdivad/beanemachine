@@ -226,23 +226,29 @@ t("and it does not offer Yahoo a URL import a browser cannot perform",
     return !alts || !alts.querySelector('input[type=text]')
   }))
 /*
- * The three-tap route, visible.
+ * The one-tap route to a league, visible.
  *
- * It existed before this and it was folded inside a disclosure called "Other ways
- * in", 1,536px down — while the only VISIBLE path on the screen was pasting a whole
- * settings page, which needs Ctrl-A, which is a desktop gesture on an app that is
- * opened on a phone. A first-time visitor who could not paste had no visible way to
- * see the thing work at all, and a tool nobody has seen work is a tool nobody sets
- * a league up in.
+ * It was folded inside a disclosure called "Other ways in", 1,536px down, while the
+ * only VISIBLE path was pasting a whole settings page — which needs Ctrl-A, a
+ * desktop gesture, on an app that is opened on a phone. A first-time visitor who
+ * could not paste had no visible way forward at all.
  *
- * Asserted as VISIBLE without opening anything, because that is the whole change.
+ * It read "Show me a board first" then, and that sentence stopped being true the
+ * moment the board moved onto the first visit: it is already below. What the control
+ * actually does is keep the scoring the board is running on and make it his, so he
+ * can add a team now and correct the values later — so that is what it says.
+ * Asserted as VISIBLE without opening anything, because that is the whole point.
  */
-t("a first visit can see a board in three taps, without opening a disclosure",
-  await p.locator('.onboard-shortcut button:text-is("Show me a board first")').isVisible())
-t("and it says the values are borrowed, on the button's own line",
-  /standard values|nothing read from your league/i.test(
-    await p.$eval(".onboard-shortcut", e => e.innerText)),
+t("a first visit can adopt the scoring it is already looking at, in one tap",
+  await p.locator('.onboard-shortcut button:text-is("Start from these values")').isVisible())
+t("and it says they were not read from the reader's league, on the button's own line",
+  /not read from your league/i.test(await p.$eval(".onboard-shortcut", e => e.innerText)),
   await p.$eval(".onboard-shortcut", e => e.innerText))
+// The card and the board must agree about whose scoring this is: two different
+// answers on one screen is worse than either answer alone.
+t("and the card and the board agree that the scoring is standard, not the reader's",
+  /standard/i.test(await p.$eval(".onboard", e => e.innerText)) &&
+    /standard scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)))
 /*
  * The tabs work on a first visit now, and that is the same change as the one above.
  *

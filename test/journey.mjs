@@ -734,7 +734,23 @@ const seatVocabulary = await page.evaluate(() => {
 	const cfg = JSON.parse(localStorage.getItem("beanemachine:config") ?? "{}")
 	const league = Object.values(cfg.leagues ?? {})[0]
 	const accepts = league?.roster?.slot_accepts ?? {}
-	return [...new Set(Object.values(accepts).flatMap(a => (Array.isArray(a) ? a : [])))]
+	/*
+	 * Two ways a token earns a seat, and the second one is not redundant.
+	 *
+	 * A seat's accepts list names eligibility POSITIONS — Util's is every batter
+	 * position this league rosters — and the seat's own NAME is the other claim:
+	 * a designated hitter has no fielding position to be accepted by, so `slotsFor`
+	 * gives him "Util" and nothing else, and Util is not in Util's own accepts list.
+	 * This assertion's first version read only the accepts lists and therefore called
+	 * Josh Bell unseatable while the app seated him perfectly — the test's model of
+	 * the rule had drifted from `legalSlotsFor`, which is where the rule lives.
+	 */
+	return [
+		...new Set([
+			...Object.values(accepts).flatMap(a => (Array.isArray(a) ? a : [])),
+			...Object.keys(accepts)
+		])
+	]
 })
 /**
  * AT LEAST ONE accepted token per man, not every token accepted, and the difference
@@ -748,9 +764,10 @@ const seatVocabulary = await page.evaluate(() => {
  * accepts SP/RP), so a first draft of this assertion demanding every token be accepted
  * failed on "Util,P" while the seating was working perfectly.
  *
- * What the bug did was leave a man with NO accepted token at all: "CF" alone, or "P"
- * alone. That is the claim, made per man so one well-formed spot cannot cover for
- * thirteen broken ones.
+ * What the bug did was leave a man with NO accepted token at all: "CF" alone. That is
+ * the claim, made per man so one well-formed spot cannot cover for thirteen broken
+ * ones. "P" alone is fine — P is a seat, and naming a seat is the strongest claim
+ * there is that you can sit in it.
  */
 const unseatableMen = (stored.lineup[leagueKey]?.spots ?? [])
 	.filter(sp => !(sp.positions ?? []).some(p => seatVocabulary.includes(p)))

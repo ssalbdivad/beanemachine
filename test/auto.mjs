@@ -4,7 +4,7 @@
 // asserting the planner does not do it, and once by handing railViolations a plan
 // that does it and asserting the audit catches it.
 import {
-	activeSlots, DEFAULTS, plan, planLineup, planMoves, planSwaps, railViolations,
+	activeSlots, DEFAULTS, legalSlotsFor, plan, planLineup, planMoves, planSwaps, railViolations,
 	resolveRoster, seatedInnings
 } from "../src/auto/plan.ts"
 import { normalizeName } from "../src/data/yahoo-pool.ts"
@@ -737,6 +737,42 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
       [{ ...arms[0], rateable: false }],
       [{ slot: "SP", name: "Ace" }]
     ) === 0)
+}
+
+/* ── the seat a designated hitter can hold ───────────────────────────────────
+ *
+ * A seat's `accepts` list names eligibility POSITIONS. Util's list is every batter
+ * position the league rosters — C, 1B, 2B, 3B, SS, OF — and a designated hitter has
+ * none of them, because he has no fielding position at all. `slotsFor` gives him
+ * "Util" and nothing else, correctly: Util is genuinely the only seat he can hold.
+ * And "Util" is not in Util's own accepts list, so the one man the seat exists for
+ * matched nothing and could be seated nowhere. Measured on the committed capture
+ * with a pasted roster: Josh Bell, stored as [Util], unseatable.
+ *
+ * Naming a seat is the strongest claim there is that you can sit in it, so it wins
+ * wherever it is made — and it costs nothing, because no eligibility line writes a
+ * seat's name unless it means that seat.
+ */
+{
+  const accepts = {
+    C: ["C"], "1B": ["1B"], OF: ["OF"],
+    Util: ["C", "1B", "2B", "3B", "SS", "OF"],
+    SP: ["SP"], RP: ["RP"], P: ["SP", "RP"],
+    BN: "any", IL: "injured_only"
+  }
+  const legal = (...pos) => legalSlotsFor(pos, accepts).sort().join(",")
+  t("a designated hitter reaches the Util seat, which is the only one he can hold",
+    legal("Util") === "Util", legal("Util"))
+  t("an outfielder still reaches OF and Util through the accepts list",
+    legal("OF", "Util") === "OF,Util", legal("OF", "Util"))
+  t("a starter reaches SP and P",
+    legal("SP", "P") === "P,SP", legal("SP", "P"))
+  // The seat name is an addition, not a replacement: a token that is nobody's seat
+  // and nobody's position still earns nothing.
+  t("a token that is neither a position nor a seat earns no seat",
+    legal("CF") === "", legal("CF"))
+  t("and a man with no tokens at all is seated nowhere, rather than everywhere",
+    legal() === "", legal())
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

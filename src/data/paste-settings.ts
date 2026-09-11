@@ -104,19 +104,33 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 			}
 		}
 
-		// A two-cell row carrying no stat code is where the stat table ended. Without
-		// this, `side` stayed set for the rest of the document and any later row that
-		// happened to carry a short parenthesised code would have been scored as a
-		// pitching stat. A one-cell line does NOT reset it, because that is exactly
-		// what a flattened stat row looks like.
-		if (side && parts.length >= 2) side = null
+		/*
+		 * A two-cell row carrying NO STAT CODE AT ALL is where the stat table ended.
+		 *
+		 * The `!code` is the whole of it, and leaving it out cost the entire pitching
+		 * side. Yahoo prints "Innings Pitched (IP)" inside the pitchers' table — a row
+		 * that carries a code and is not a scoring line, which is what `NOT_A_STAT` is
+		 * for. Without this test that row fell through to the reset, `side` went null on
+		 * the FIRST line of the table, and every pitching value after it was read as a
+		 * league setting. Measured on a faithful settings page: 9 of 9 batting stats and
+		 * 0 of 8 pitching, reported as "no pitching scoring" — which downstream means a
+		 * daily card that cannot price anybody on the mound.
+		 *
+		 * A one-cell line does not reset it either, because that is exactly what a
+		 * flattened stat row looks like.
+		 */
+		if (side && parts.length >= 2 && !code) side = null
 
 		// A settings row: "Max Teams   10". Same map src/import.ts harvests, and the
 		// same two signals it uses to find one — a two-column table whose header row
 		// reads "Setting". EXACTLY two cells, because everything else on the page with
 		// a tab in it is navigation ("Scores  Standings  Players  Draft") and would
 		// otherwise land in the league's rules as a setting nobody set.
-		if (parts.length === 2 && label.toLowerCase() !== "setting") {
+		// `!side`: a row INSIDE a stat table is a stat or it is skipped, never a league
+		// setting. Without this, "Innings Pitched (IP)" — a real row of the pitchers'
+		// table that carries a code and scores nothing — was filed under the league's
+		// own rules as though the commissioner had set it.
+		if (!side && parts.length === 2 && label.toLowerCase() !== "setting") {
 			const key = label.replace(/:$/, "")
 			if (key && !(key in settings)) settings[key] = parts[1]!
 		}

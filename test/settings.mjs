@@ -42,6 +42,11 @@ const asPasted = (league) => {
   for (const [c, v] of Object.entries(league.scoring.batting))
     rows.push(`${LABEL[c] ?? c} (${c})\t${v}`)
   rows.push("Pitchers Stat Category\tValue")
+  // Yahoo prints this row INSIDE the pitchers' table, first: a row that carries a
+  // stat code and is not a scoring line. It is in the fixture because leaving it out
+  // is how the bug below survived — see the assertion headed "a row that carries a
+  // code but scores nothing".
+  rows.push("Innings Pitched (IP)\t0")
   for (const [c, v] of Object.entries(league.scoring.pitching))
     rows.push(`${LABEL[c] ?? c} (${c})\t${v}`)
   rows.push("Terms\tPrivacy\tHelp\tFeedback")
@@ -150,6 +155,37 @@ const text = asPasted(real)
   t("and it is kept as a setting instead",
     league.league_rules.raw_settings["Waiver Time (WT)"] === "2",
     JSON.stringify(league.league_rules.raw_settings["Waiver Time (WT)"]))
+}
+
+// ── a row that carries a code but scores nothing ─────────────────────────────
+//
+// This is the one that cost the whole pitching side, and it cost it silently.
+//
+// The parser ends a stat table when it meets a two-cell row with no stat code — that
+// is how it stops reading the settings rows below the table as scoring. Yahoo prints
+// "Innings Pitched (IP)" INSIDE the pitchers' table, and IP is a row that carries a
+// code and is not a scoring line: `NOT_A_STAT` exists for exactly that. Without
+// testing for the code, that row fell through to the end-of-table branch, the table
+// ended on its first line, and every pitching value after it was read as a league
+// setting instead.
+//
+// Measured on a faithful settings page before the fix: 9 of 9 batting stats and 0 of
+// 8 pitching, reported as "no pitching scoring". Downstream that is a daily card that
+// cannot price anybody on the mound and blames the roster for it.
+{
+  const withIp = asPasted(real)
+  const { read } = leagueFromPastedSettings(withIp, "yahoo", "2026-09-09")
+  t("an innings row inside the pitchers' table does not end the pitchers' table",
+    Object.keys(read.pitching).length === Object.keys(real.scoring.pitching).length,
+    `${Object.keys(read.pitching).length} of ${Object.keys(real.scoring.pitching).length}: ${Object.keys(read.pitching).join(",")}`)
+  t("and it is not itself scored, because it is not a scoring line",
+    !("IP" in read.pitching), JSON.stringify(read.pitching))
+  // The other half of the same rule: a row with no code at all still ends the table,
+  // or every setting printed below it would be read as a pitching value.
+  const trailing = leagueFromSettingsText(withIp + "\nMax Moves\t120")
+  t("a row with no code at all still ends the table",
+    !("MOVES" in trailing.pitching) && trailing.settings["Max Moves"] === "120",
+    JSON.stringify(Object.keys(trailing.pitching)))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

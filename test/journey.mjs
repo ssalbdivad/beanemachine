@@ -217,14 +217,37 @@ await onToday()
  *
  * Several suites in this directory reach a screen with `.views button:nth-child(N)`.
  * That selector survived the first restructure by luck and broke on the second one
- * silently: index 2 was "League setup" and is now "Wire", so a suite asking for the
+ * silently: index 2 was "League setup" and is now the ranking, so a suite asking for the
  * league editor got the ranking, and its next assertion failed on a screen it had
  * never meant to be standing on. A name that no longer exists fails LOUDLY — the
  * locator matches nothing and the stage that wanted it is reported — and a rename is
  * then a one-line change here instead of a hunt through every index in the file.
  */
-const TODAY = "Today", WIRE = "Wire", SETUP = "Setup"
-const tab = name => page.locator(".views button", { hasText: name }).first().click()
+/*
+ * THE LABELS MOVED AGAIN, and the ids under them deliberately did not.
+ *
+ * "Today | Wire | Setup" now reads "Tonight | Pickups | My league" — three tab names
+ * written for somebody who has never read a box score, where the old three were a
+ * developer's shorthand ("the wire" is jargon; "setup" is a thing software has, not a
+ * thing a league has). The VIEW IDS are untouched — still board / wire / trade —
+ * because the id is also the key this browser remembers the last screen under, and
+ * renaming it drops every returning reader back on the default screen.
+ *
+ * So the constants below are the only place the visible text appears, and they carry
+ * the NEW text while every comment and claim in this file goes on talking about the
+ * screens by their job. The old values are recorded here rather than in thirteen call
+ * sites: TODAY was "Today", WIRE was "Wire", SETUP was "Setup".
+ */
+const TONIGHT = "Tonight", PICKUPS = "Pickups", LEAGUE = "My league"
+/*
+ * `hasText` is a SUBSTRING match, and one of the three new labels is a substring risk
+ * the old three were not: a locator for "My league" matches only that tab today, but
+ * `hasText: "Tonight"` would also match a tab called "Tonight's lineup" if one were
+ * ever added, and `.first()` would then pick whichever came first in the DOM. Matching
+ * the whole label exactly means a future fourth tab cannot silently capture a click
+ * this file meant for one of these three.
+ */
+const tab = name => page.locator(".views button").filter({ hasText: new RegExp(`^${name}$`) }).first().click()
 const current = () => page.$eval(".views button[aria-selected=true]", e => e.textContent.trim())
 const rows = () => page.$$eval(".board-row .who b", n => n.map(e => e.textContent.trim()))
 const codes = () => page.$$eval(".board-row .who .code", n => n.map(e => e.textContent.trim()))
@@ -254,9 +277,9 @@ const ranked = () =>
  */
 const tabs = await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))
 t("the nav names the three screens this app has — one question each",
-	tabs.join("|") === `${TODAY}|${WIRE}|${SETUP}`, tabs.join(" | "))
+	tabs.join("|") === `${TONIGHT}|${PICKUPS}|${LEAGUE}`, tabs.join(" | "))
 t("and the journey starts on the one a reader opens fifty times a season",
-	(await current()) === TODAY, await current())
+	(await current()) === TONIGHT, await current())
 
 /**
  * NEW, and it is the restructure's whole thesis, so it is asserted on the landing
@@ -275,7 +298,7 @@ t("and the journey starts on the one a reader opens fifty times a season",
  * notice. So Today must carry the decision and NOT the ranking, not the mode strip,
  * and not the board's toolbar.
  */
-t("Today carries the decision", (await page.$$(".decide")).length === 1)
+t("Tonight carries the decision", (await page.$$(".decide")).length === 1)
 t("and not the ranking — no rows, no mode strip, no board toolbar on this screen",
 	(await page.$$(".board-row")).length === 0 &&
 		(await page.$$(".modes")).length === 0 &&
@@ -290,7 +313,7 @@ t("and it says where the ranking went, in one link",
 	await toWire.count() === 1 && /Everyone you can get/.test(await toWire.textContent()),
 	await toWire.count() ? await toWire.textContent() : "no link to the ranking at all")
 
-at("the card on Today says what to do about having no team")
+at("the card on Tonight says what to do about having no team")
 const blocked = await page.waitForSelector(".decide.decide-blocked", { timeout: 30000 })
 const blockedText = (await blocked.textContent()).replace(/\s+/g, " ").trim()
 /**
@@ -332,7 +355,7 @@ await onSetup()
  * on the screen that owns the job — named by the same constant the nav is checked
  * against, so a rename cannot make this pass against the wrong screen.
  */
-t("the card's button opens Setup itself", (await current()) === SETUP, await current())
+t("the card's button opens My league itself", (await current()) === LEAGUE, await current())
 t("and the roster reader is on it",
 	(await page.$$("[data-ctl=paste-roster]")).length === 1)
 
@@ -381,23 +404,23 @@ clean("on the screen that is two old tabs")
 // reader was just offered and an offer nobody tests is an offer that can rot. The
 // tab is used everywhere else below.
 
-at("the link on Today opens the ranking")
-await tab(TODAY)
+at("the link on Tonight opens the ranking")
+await tab(TONIGHT)
 await onToday()
 await page.click(".next-screen button")
 await onWire()
-t("the link at the foot of Today opens Wire", (await current()) === WIRE, await current())
+t("the link at the foot of Tonight opens Pickups", (await current()) === PICKUPS, await current())
 /** The mirror of the Today claim: Wire carries the ranking and not the decision.
  *  One screen, one question, in both directions — a Decide card that came back here
  *  would put the answer back on top of the lookup. */
-t("and Wire is the ranking alone — the decision card is not on it too",
+t("and Pickups is the ranking alone — the decision card is not on it too",
 	(await page.$$(".decide")).length === 0 && (await page.$$(".board-controls")).length === 1,
 	`${(await page.$$(".decide")).length} decide cards`)
 // the negative half of section 2's toolbar claim
-t("and the league-management chrome stayed behind on Setup",
+t("and the league-management chrome stayed behind on My league",
 	await manageChrome() === 0, String(await manageChrome()))
 
-t("the ranking Wire opens on is a real one", (await rows()).length > 50)
+t("the ranking Pickups opens on is a real one", (await rows()).length > 50)
 const fortnight = (await rows()).slice(0, 10)
 const fortnightCount = await ranked()
 
@@ -701,7 +724,7 @@ const mine = await page.$$eval(".board-row", r => r.slice(0, 14).map(row => ({
  * the SEATS it carries do on another screen.
  */
 at("a pasted roster page is read into this browser")
-await tab(SETUP)
+await tab(LEAGUE)
 await page.waitForSelector("[data-ctl=paste-roster]", { timeout: 30000 })
 await page.fill("[data-ctl=paste-roster]",
 	`Fantasy Baseball My Team\nPos\tPlayer\tAction\n` +
@@ -840,8 +863,8 @@ t("and those seats are really filled — including one no raw MLB position can r
 
 // --- 6. the payoff: the seats entered on Setup are tonight's instructions ------
 
-at("the card on Today stops being blocked once it has a team")
-await tab(TODAY)
+at("the card on Tonight stops being blocked once it has a team")
+await tab(TONIGHT)
 await onToday()
 await page.waitForSelector(".decide:not(.decide-blocked)", { timeout: 30000 })
 await page.waitForSelector(".decide-read", { timeout: 30000 })
@@ -1026,8 +1049,8 @@ t("the one sentence is the one a decision depends on — a bscore is not a forec
 t("and the results it no longer prints are linked rather than dropped",
 	onTodayFooter.methodology, onTodayFooter.links.join(" | "))
 
-at("the ranking comes back unmoved after the detour through Setup and Today")
-await tab(WIRE)
+at("the ranking comes back unmoved after the detour through My league and Tonight")
+await tab(PICKUPS)
 await onWire()
 const onWireFooter = await colophon()
 /**
@@ -1041,14 +1064,14 @@ const onWireFooter = await colophon()
 t("the ranking is the ranking it was before the team was entered",
 	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
 	`${await ranked()} vs ${fortnightCount}`)
-t("and the same footer is under Wire, rather than a second wording of it",
+t("and the same footer is under Pickups, rather than a second wording of it",
 	onWireFooter.note === onTodayFooter.note, `${onWireFooter.note}\n  vs\n  ${onTodayFooter.note}`)
 
-at("Setup shows the same footer too")
-await tab(SETUP)
+at("My league shows the same footer too")
+await tab(LEAGUE)
 await onSetup()
 const onSetupFooter = await colophon()
-t("and under Setup, which is where two tabs' worth of footers could have disagreed",
+t("and under My league, which is where two tabs' worth of footers could have disagreed",
 	onSetupFooter.note === onTodayFooter.note, `${onSetupFooter.note}\n  vs\n  ${onTodayFooter.note}`)
 clean("across all three screens")
 
@@ -1118,7 +1141,7 @@ const teamBefore = await page.$$eval(".trade-own .who b", n => n.map(e => e.text
 at("a reload lands back on the screen a visit starts on")
 await page.reload({ waitUntil: "domcontentloaded" })
 await onToday()
-t("a reload lands back on Today", (await current()) === TODAY, await current())
+t("a reload lands back on Tonight", (await current()) === TONIGHT, await current())
 
 /**
  * Rewritten from "the draft board survived the reload, and now counts the man added
@@ -1131,7 +1154,7 @@ t("a reload lands back on Today", (await current()) === TODAY, await current())
  * seats it diffs against were written by a paste on Setup before the reload, and
  * the ids were written twice (paste, then one add by hand).
  */
-at("Today still plans the lineup that was read before the reload")
+at("Tonight still plans the lineup that was read before the reload")
 await page.waitForSelector(".decide:not(.decide-blocked)", { timeout: 30000 })
 await page.waitForSelector(".decide-read", { timeout: 30000 })
 t("the seats read on the other screen survived the reload, and are still dated",
@@ -1165,8 +1188,8 @@ t("the card accounts for every seat the paste carried, and invents none",
 t("the man added by hand has no seat, so the card does not pretend to know one",
 	!seated.includes(byHand), `${byHand} appears in the lineup plan`)
 
-at("Wire still opens after the reload")
-await tab(WIRE)
+at("Pickups still opens after the reload")
+await tab(PICKUPS)
 await onWire()
 /** The horizon is the one thing about a screen that IS persisted (`beanemachine:view`),
  *  which is why the last mode this journey selected, back in section 4, had to be the
@@ -1175,8 +1198,8 @@ await onWire()
 t("and on the ranking it opened on", (await ranked()) === fortnightCount, `${await ranked()} vs ${fortnightCount}`)
 t("with a working board under it", (await rows()).length > 50)
 
-at("Setup still opens after the reload")
-await tab(SETUP)
+at("My league still opens after the reload")
+await tab(LEAGUE)
 await onSetup()
 t("the team survived the reload",
 	(await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()).sort())).join() === teamBefore.join(),
@@ -1217,7 +1240,7 @@ clean("over the whole journey")
   await live.waitForSelector(".views button", { timeout: 30000 })
   await live.evaluate(() => localStorage.removeItem("beanemachine:roster"))
   await live.reload({ waitUntil: "domcontentloaded" })
-  await live.click('.views button:has-text("Today")')
+  await live.click('.views button:has-text("Tonight")')
   await live.waitForSelector(".decide", { timeout: 30000 })
   await live.waitForTimeout(2000)
   const before = await live.$eval(".decide", e => e.innerText)
@@ -1234,12 +1257,12 @@ clean("over the whole journey")
       .map((s, i) => `${s}\t${bats[i * 3 + 7].name}`)
       .join("\n")
   })
-  await live.click('.views button:has-text("Setup")')
+  await live.click('.views button:has-text("My league")')
   await live.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
   await live.fill('textarea[data-ctl="paste-roster"]', team)
   await live.click('.paste-roster button:text-is("Read that")')
   await live.waitForTimeout(1200)
-  await live.click('.views button:has-text("Today")')
+  await live.click('.views button:has-text("Tonight")')
   await live.waitForTimeout(3000)
   const after = await live.$eval(".decide", e => e.innerText)
   t("and the moment a team is entered the card stops asking, with no reload",

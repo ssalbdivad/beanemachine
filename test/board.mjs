@@ -35,21 +35,31 @@ t("the page under test is beanemachine", wordmark === "beanemachine",
 if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
 
 /**
- * The board is on WIRE now, and Wire is a tab you have to ask for.
+ * The board is on PICKUPS now, and Pickups is a tab you have to ask for.
  *
  * Four tabs became three screens, and the split was down the middle of what used to
- * be one: "Today" is the decision card on its own, "Wire" is this ranked board on
- * its own, "Setup" is the team and the league's values. Landing on the site puts you
- * on Today, where there is no `.board-row` at all — so every assertion in this file
- * was waiting thirty seconds for a table that is one screen over.
+ * be one: the decision card is on its own tab, this ranked board is on its own, and
+ * the team and the league's values are on a third. Landing on the site puts you on
+ * the decision card, where there is no `.board-row` at all — so every assertion in
+ * this file was waiting thirty seconds for a table that is one screen over.
  *
- * BY VISIBLE TEXT, never by index. Several suites in this directory reached their
- * screen with `.views button:nth-child(N)`, and this restructure moved every one of
- * those indices — the old second tab was League setup and is now the board itself,
- * so an unchanged `nth-child(2)` kept finding A tab and silently tested the wrong
- * screen, which is the worst way for a navigation selector to fail. A tab's label is
- * the thing a reader actually clicks and the thing that shows up in a diff, so the
- * next rename is a one-line change here instead of an archaeology problem.
+ * THE LABELS ARE NOT THE IDS, and the three labels changed under this suite without
+ * the ids moving. "Today | Wire | Setup" now reads "Tonight | Pickups | My league" —
+ * developer shorthand for a reader who has never seen a waiver wire called a wire —
+ * while `View` is still `board | wire | trade`, because that string is also the key
+ * stored in this browser and renaming it drops every returning reader on the default
+ * screen (panels.tsx says so where VIEWS is declared). So the ids in this file's
+ * selectors (`data-col`, `#horizon-panel`, `.board-row`) are untouched and only the
+ * three strings a reader actually reads moved. Every one of them failed the same
+ * way: a thirty-second wait on `.views button:has-text("Wire")`, which reads like a
+ * dead navigation rather than a renamed one.
+ *
+ * BY VISIBLE TEXT, never by index — still, and the rename is the argument for it
+ * rather than against it. Several suites in this directory reached their screen with
+ * `.views button:nth-child(N)`: an index finds A tab whatever the labels say, so it
+ * would have survived this rename by silently testing the wrong screen, which is the
+ * worst way for a navigation selector to fail. A label fails loudly and is one line
+ * to fix, which is exactly what just happened here.
  */
 const screen = async (p, label) => {
   await p.click(`.views button:has-text("${label}")`)
@@ -85,7 +95,7 @@ const rankBy = async (p, value) => {
   await p.selectOption("[data-ctl=sort]", value)
   await p.waitForTimeout(350)
 }
-await screen(page, "Wire")
+await screen(page, "Pickups")
 
 await page.waitForSelector(".board-row", { timeout: 30000 })
 
@@ -1475,7 +1485,7 @@ await page.click(".chip-btn:text-is(\"All\")")
 await page.selectOption("[data-ctl=group]", "all")
 await page.waitForTimeout(300)
 const topBefore = await page.$eval(".board-row .who b", e => e.textContent)
-await screen(page, "Setup")
+await screen(page, "My league")
 const batting = 'section.card:has(h2:text-is("Batting"))'
 await page.waitForSelector(`${batting} .rows`)
 const sb = await page.$$eval(`${batting} .code`, n => n.map(e => e.textContent))
@@ -1485,7 +1495,7 @@ t("the league's own scoring is editable from Setup, where the team panel also li
   `batting codes ${sb.join(",")}; team panel ${!!(await page.$(".trade-team"))}`)
 const sbInput = page.locator(`${batting} input.val`).nth(sbIdx)
 await sbInput.fill("60"); await sbInput.blur(); await page.waitForTimeout(300)
-await screen(page, "Wire")
+await screen(page, "Pickups")
 await page.waitForSelector(".board-row")
 const topAfter = await page.$eval(".board-row .who b", e => e.textContent)
 t("re-scoring the league re-ranks the board",
@@ -1509,7 +1519,7 @@ await phone.goto(BASE, { waitUntil: "networkidle" })
 // tab bar is the narrowest thing on this screen, which makes this click its own
 // small proof that three labels still fit on a 390px phone at all. Four did not,
 // which is part of why there are three.
-await screen(phone, "Wire")
+await screen(phone, "Pickups")
 await phone.waitForSelector(".board-row", { timeout: 30000 })
 const cols = async () =>
   phone.evaluate(() => {
@@ -1602,7 +1612,7 @@ await phone.close()
   // return value rather than asserted away here: the argument in view.ts for
   // remembering the window ("the default is a guess about a stranger, this is a fact
   // about him") applies word for word to which of the three screens he was on.
-  await screen(back, "Wire")
+  await screen(back, "Pickups")
   await back.waitForSelector(".board-row", { timeout: 30000 })
   await back.waitForTimeout(1400)
   t("coming back opens on the question you last asked",
@@ -1705,7 +1715,7 @@ await phone.close()
   const top = (p, s) => p.$eval(s, e => Math.round(e.getBoundingClientRect().top + scrollY))
 
   // TODAY: the decision, on the screen that is now only the decision.
-  await screen(page, "Today")
+  await screen(page, "Tonight")
   await page.waitForSelector(".decide", { timeout: 30000 })
   await page.waitForTimeout(400)
   /*
@@ -1730,7 +1740,7 @@ await phone.close()
   await page.click(".next-screen button")
   await page.waitForSelector(".board-row", { timeout: 30000 })
   t("the link at the foot of Today reaches the ranked board",
-    (await page.$eval(".views button.on", e => e.textContent.trim())) === "Wire")
+    (await page.$eval(".views button.on", e => e.textContent.trim())) === "Pickups")
 
   // WIRE: the ranking, with nothing above it but its own controls.
   await page.click(".modes .mode:has-text('Streaming')")
@@ -1746,7 +1756,7 @@ await phone.close()
   const phoneDecide = await top(phone, ".decide")
   t("the answer is within one screen on a phone", phoneDecide < 650,
     `decision card at y=${phoneDecide}`)
-  await screen(phone, "Wire")
+  await screen(phone, "Pickups")
   await phone.waitForSelector(".board-row", { timeout: 30000 })
   await phone.click(".modes .mode:has-text('Streaming')")
   await phone.waitForTimeout(1200)
@@ -1796,7 +1806,7 @@ await phone.close()
   const dm = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
   await dm.goto(BASE, { waitUntil: "domcontentloaded" })
   await dm.waitForSelector(".views button", { timeout: 30000 })
-  await dm.click('.views button:has-text("Wire")')
+  await dm.click('.views button:has-text("Pickups")')
   await dm.waitForSelector(".board-row", { timeout: 30000 })
   t("with no roster entered the board carries no Δ MINE column",
     (await dm.$$(".board-head [data-col=mine]")).length === 0)
@@ -1816,12 +1826,12 @@ await phone.close()
     ;["SP", "SP", "RP", "RP", "P", "P"].forEach((s, i) => rows.push(`${s}\t${arms[70 + i].name}`))
     return rows.join("\n")
   })
-  await dm.click('.views button:has-text("Setup")')
+  await dm.click('.views button:has-text("My league")')
   await dm.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
   await dm.fill('textarea[data-ctl="paste-roster"]', roster)
   await dm.click('.paste-roster button:text-is("Read that")')
   await dm.waitForTimeout(800)
-  await dm.click('.views button:has-text("Wire")')
+  await dm.click('.views button:has-text("Pickups")')
   await dm.waitForSelector(".board-row", { timeout: 30000 })
   await dm.waitForTimeout(1200)
 

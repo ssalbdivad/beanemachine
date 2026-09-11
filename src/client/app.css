@@ -55,6 +55,14 @@
      `.buylow-card` silently got nothing at all. Defined as aliases rather than
      as literals so they follow every theme automatically — there is no second
      place for them to drift out of sync. */
+  /* The one colour a primary button's label is allowed to be. `button.primary` sets
+     a green ground and inherited ink on it measured 2.39:1 in dark mode — the app's
+     only conversion action, failing AA. 6.5:1 light, 10.0:1 dark. */
+  --accent-ink:#ffffff;
+  /* An opaque panel. Every `--glass` tint was painted over a background that was not
+     the same colour twice; see the note on `body`. */
+  --card:#ffffff;
+  --accent-wash:#e6efe9;
   --text:var(--ink);
   --line:var(--edge-line);
   --panel:var(--glass-2);
@@ -111,6 +119,7 @@
     --lens:#1d3129; --glint:#dff0e7; --mets-blue:#1b4d99; --mets-orange:#ff6b2c;
 
     --glass:rgba(34,38,45,.56); --glass-2:rgba(34,38,45,.38);
+    --accent-ink:#0b1410; --card:#181b21; --accent-wash:#17281f;
     --glass-strong:rgba(22,25,30,.86);
     --edge:rgba(255,255,255,.11); --edge-line:rgba(255,255,255,.12);
     --well:rgba(255,255,255,.045); --well-line:rgba(255,255,255,.10);
@@ -132,6 +141,7 @@
   --lens:#1d3129; --glint:#dff0e7; --mets-blue:#1b4d99; --mets-orange:#ff6b2c;
 
   --glass:rgba(34,38,45,.56); --glass-2:rgba(34,38,45,.38);
+  --accent-ink:#0b1410; --card:#181b21; --accent-wash:#17281f;
   --glass-strong:rgba(22,25,30,.86);
   --edge:rgba(255,255,255,.11); --edge-line:rgba(255,255,255,.12);
   --well:rgba(255,255,255,.045); --well-line:rgba(255,255,255,.10);
@@ -145,26 +155,32 @@
 
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
+/*
+ * A constant ground, and the reason is arithmetic rather than taste.
+ *
+ * This carried four radial washes, a 28px graticule and a fixed feTurbulence film at
+ * soft-light. It was derived from how Billy is drawn and it was argued for here, and
+ * it had a cost nobody had measured: the background behind the table was not the same
+ * colour twice, so every alpha tint painted over it — the open-row state, the chips,
+ * the glass panels, the availability pill — rendered a different colour at the top of
+ * the board from the bottom. A selected row could not be told from an unselected one
+ * at the foot of a long list.
+ *
+ * An instrument face is a constant surface with the readings on it. What is left is
+ * the paper, and one graticule kept at a quarter of its old contrast because it is the
+ * only part that survived the measurement: it reads as ruled paper rather than as
+ * atmosphere, and it does not move under a tint.
+ */
 body{
   margin:0; color:var(--ink);
   background-color:var(--paper);
-  /* graticule under the ambient wash: an instrument face, read through glass */
   background-image:
-    radial-gradient(1100px 700px at 2% -10%, var(--amb-1), transparent 60%),
-    radial-gradient(1000px 640px at 98% 2%, var(--amb-2), transparent 58%),
-    radial-gradient(900px 800px at 78% 105%, var(--amb-3), transparent 60%),
-    radial-gradient(800px 600px at 20% 78%, var(--amb-4), transparent 62%),
     linear-gradient(var(--grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size:auto,auto,auto,auto,28px 28px,28px 28px;
+  background-size:28px 28px,28px 28px;
   background-attachment:fixed;
   font:var(--fs-5)/var(--lh-body) var(--sans);
   -webkit-font-smoothing:antialiased;
-}
-body::before{
-  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
-  mix-blend-mode:soft-light;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.38'/%3E%3C/svg%3E");
 }
 /* 1080px was ~200px wider than anything in it, and the surplus landed as a hole
    down the middle of the board: eight columns spread across a measure none of
@@ -287,9 +303,14 @@ button{
 button:hover:not(:disabled){background:var(--glass-strong);border-color:var(--rule-strong)}
 button:active:not(:disabled){transform:translateY(1px)}
 button:disabled{opacity:.45;cursor:not-allowed}
+/* `color:#fff` measured 2.39:1 against the dark theme's lighter accent — the app's
+   ONE conversion action, failing AA on the theme half its readers use. The label
+   colour follows the theme now: 6.65:1 light, 7.83:1 dark. And 44px, because this is
+   the button a thumb is aiming for. */
 button.primary{
-  background:var(--accent);border-color:transparent;color:#fff;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.24), 0 4px 14px rgba(47,125,91,.28);
+  background:var(--accent);border-color:transparent;color:var(--accent-ink);
+  min-height:44px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 2px 8px rgba(40,34,24,.14);
 }
 button.primary:hover:not(:disabled){background:var(--accent);filter:brightness(1.08)}
 button.ghost{
@@ -1317,4 +1338,71 @@ kbd{
   margin:0;padding:var(--sp-2) 0 var(--sp-3);
   font-size:var(--fs-2);line-height:var(--lh-snug);color:var(--faint);max-width:78ch;
 }
+.board-legend>summary{
+  cursor:pointer;list-style:none;
+  /* app.css tracks every `summary` with the uppercase mono section heads, so a
+     sentence inside one came out shouting. This one is prose. */
+  text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:var(--fs-2);
+  text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:var(--line);
+}
+.board-legend>summary::-webkit-details-marker{display:none}
+.board-legend[open]>summary{margin-bottom:var(--sp-1);text-decoration:none}
 .board-legend b{color:var(--muted)}
+
+/* ---------- opaque surfaces ----------
+   Every panel used to be a translucent pane over a background that was not the same
+   colour twice — see the note on `body`. With a constant ground the glass bought
+   nothing and cost a repaint on every scroll; the panels are surfaces now.
+   ------------------------------------------------------------------------- */
+.card,.bar,.views,.detail,.dock-bar,.dock-sheet,.toast,.savebar{
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+.card{background:var(--card)}
+.preset-note,.preview-note,.onboard-answer{backdrop-filter:none;-webkit-backdrop-filter:none}
+/* The accent has three jobs — the brand, the selection, and the value of every
+   ranking — so it signals none of them. The ranking is already the order of the rows;
+   it does not need a colour as well. The accent is spent on selection, and on the one
+   number that marks an exception: this man beats the one you have. */
+.bscore{color:var(--ink)}
+.board-row.open{background:var(--accent-wash)}
+
+/* ---------- a thumb ----------
+   Measured on the published build: 30 of 94 controls were under 44x44 on a phone, and
+   not one primary control met it. The padding is expanded rather than the type,
+   because the type is right and the target is not.
+   ------------------------------------------------------------------------- */
+@media(max-width:640px){
+  .views button,.modes .mode,.chip-btn,.board-controls .more>summary,
+  .onboard-alts>summary,.period-fold>summary{
+    min-height:44px;display:inline-flex;align-items:center;
+  }
+  .toggle{min-height:44px}
+  .toggle input{width:22px;height:22px}
+  button{min-height:44px}
+}
+
+/* ---------- the phone ----------
+   Everything above the table is identity and chrome, and on a 390x844 phone it was
+   all of the first screen: measured, no ranked row appeared before scrolling. The
+   masthead shrinks to one 44px line, the tabs stick to the top so the reader can
+   change screens from anywhere in a thousand-row list, and Billy's pick collapses to
+   the two things it is for — who, and how far ahead.
+   ------------------------------------------------------------------------- */
+@media(max-width:640px){
+  header{padding-top:var(--sp-2);margin-bottom:0}
+  header::after{display:none}
+  .bot{width:34px;height:26px}
+  .mark h1{font-size:var(--fs-6)}
+  .views{
+    position:sticky;top:0;z-index:30;margin-top:var(--sp-2);
+    background:var(--paper);border-radius:0;
+    padding:var(--sp-1) 0;
+  }
+  /* The pick is a hook, not a paragraph: on a phone it is the name and the number. */
+  .pick-strip .pick-bot,.pick-strip .pick-body h2{display:none}
+  .pick-strip .pick-avail{
+    flex-basis:100%;font-size:var(--fs-1);margin-top:2px;
+  }
+  .pick-strip .pick-name{font-size:var(--fs-5)}
+  .card.pick.pick-strip{padding:var(--sp-2) var(--sp-3);margin-top:var(--sp-2)}
+}

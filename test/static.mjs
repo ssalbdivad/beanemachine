@@ -250,7 +250,19 @@ t("and this browser holds no league until the visitor puts one in it",
  * League setup tab, after the source stopped having one is exactly the failure this
  * file exists for, and nothing else here would notice it.
  */
-const TAB_LABELS = ["Today", "Wire", "Setup"]
+/*
+ * Renamed again, and this is the second rename these three have had — so what the
+ * list is for is worth restating. "Today | Wire | Setup" named the app's own parts:
+ * a wire is jargon, and "setup" is a thing software has rather than a thing a
+ * manager wants. They are now named for the question each one answers, in the words
+ * a reader would use for it — Tonight, Pickups, My league.
+ *
+ * The view IDS are deliberately unchanged (board / wire / trade). They are the key
+ * this browser stores the last-used screen under, so renaming them would drop every
+ * returning reader onto the default screen — which is why this list is the only place
+ * the new names appear, and why `go` navigates by visible text.
+ */
+const TAB_LABELS = ["Tonight", "Pickups", "My league"]
 const tabLabels = await p.$$eval(".views button", n => n.map(e => e.textContent))
 t("the published build offers three screens, named and in the order a season uses them",
   JSON.stringify(tabLabels) === JSON.stringify(TAB_LABELS), tabLabels.join(" | "))
@@ -280,7 +292,7 @@ t("the published build offers three screens, named and in the order a season use
   itself worth pinning, because the toolbar moving off this screen is the change that
   would strand the Download, Load file and import-by-URL assertions below.
 */
-const MARKER = { Today: ".decide", Wire: ".board-row", Setup: '.bar [data-ctl="onboard"]' }
+const MARKER = { Tonight: ".decide", Pickups: ".board-row", "My league": '.bar [data-ctl="onboard"]' }
 const go = async label => {
   await p.click(`.views button:text-is("${label}")`)
   await p.waitForSelector(MARKER[label], { timeout: 25000 })
@@ -300,9 +312,13 @@ t("and the Draft tab is gone from the shipped bundle, not only from the source t
  * What those 277 words were protecting was never their own length. It was two
  * claims, and both are asserted here in the form they take now:
  *
- * - that this app does not present a bscore as a forecast. The surviving sentence
- *   is the one place that is still said, so it is read for the claim and not for
- *   the wording.
+ * - that this app does not present a bscore as a forecast. That claim has MOVED,
+ *   and it is asserted below against where it went rather than dropped: the
+ *   colophon's surviving sentence no longer explains the number at all, because a
+ *   footer rendered under every screen was explaining a column that only two of the
+ *   three horizons are sorted by. It is now generated under the column heads from
+ *   the sort actually in force (`.board-legend`, Board.tsx), so it is asserted
+ *   there, on the screen that has the table on it.
  * - that the measured results AND the admitted failures are reachable from the
  *   page, not only from the repo. So METHODOLOGY must be linked, and linked by
  *   ABSOLUTE URL — which is measured, not assumed: fetching `docs/METHODOLOGY.md`
@@ -318,9 +334,38 @@ t("and the Draft tab is gone from the shipped bundle, not only from the source t
  * the code are worse than no numbers, so their absence is part of the claim.
  */
 const colophon = (await p.$eval(".colophon", e => e.innerText)).replace(/\s+/g, " ").trim()
-t("the colophon is one sentence, not the 277-word statistics footer",
-  colophon.split(" ").length < 90 && /ranking, not a forecast/i.test(colophon),
+/*
+ * The colophon POINTS now; it no longer explains.
+ *
+ * This asserted the footer still said "a ranking, not a forecast". It does not, and
+ * the sentence did not merely get cut: it was the app's one explanation of its own
+ * number, printed under every screen including the two with no table on them, and it
+ * described the bscore column while the Streaming horizon ranks on raw projected
+ * points by documented decision. One fixed sentence could not be true of all three
+ * horizons, so the explanation moved to the table and is generated from the ordering
+ * in force — asserted as `.board-legend` immediately below.
+ *
+ * What stays here is what a footer can honestly carry: the unit every number is in,
+ * and the way to the working. Read for the POINTER rather than for the wording,
+ * because a colophon that pointed nowhere is the failure this line is about.
+ */
+t("the colophon is one sentence, and it points at the working rather than explaining it",
+  colophon.split(" ").length < 90 && /methodology/i.test(colophon) &&
+    /your league.s own points/i.test(colophon),
   `${colophon.split(" ").length} words: ${colophon.slice(0, 140)}`)
+/*
+ * The claim the footer used to carry, asserted where it now lives.
+ *
+ * Generated from `sort`, so there is one legend per ordering and each one describes
+ * the column the rows are actually in. On this screen — a first visit, the fortnight
+ * board, sorted on bscore — it has to name the man the number is measured against AND
+ * refuse to be read as a points forecast, which is the whole of what the deleted
+ * sentence was protecting. Read off the rendered page rather than the source so a
+ * legend that stopped rendering is a failure rather than an absence nobody notices.
+ */
+const legend = (await p.$eval(".board-legend", e => e.innerText)).replace(/\s+/g, " ").trim()
+t("and the not-a-forecast claim moved onto the table, generated from the sort in force",
+  /does not promise points/i.test(legend) && /best man still free/i.test(legend), legend)
 t("and it no longer quotes folds, rho, z-scores or p-values at a reader who cannot act on them",
   !/\bfolds?\b|spearman|\brho\b|z-score|p-value/i.test(colophon), colophon.slice(0, 200))
 const colophonLinks = await p.$$eval(".colophon a", n => n.map(e => e.getAttribute("href") ?? ""))
@@ -343,7 +388,60 @@ t("but the measured results are still one click off the page, by absolute URL th
 // The setup is a fold now, so this block asks for it — see `openDock`. It used to be
 // on screen already, which is why none of these lines opened anything.
 await openDock()
-t("and the first question is which platform, with Yahoo among the answers",
+/*
+ * ONE question, and it is about baseball.
+ *
+ * This asserted that "the first question is which platform, with Yahoo among the
+ * answers", and the platform question is no longer asked at all on the required path.
+ * It was asked for the app's benefit rather than the reader's, and the route it led to
+ * was "select the whole page with Ctrl+A" — which no phone browser can do, on the
+ * device this app is opened on. The only advertised way in was impossible for most of
+ * the people being shown it.
+ *
+ * What replaced it is the question the app actually needs answered and the reader
+ * actually has an answer to. Asserted as all three halves of "one question", because
+ * any one alone would pass on a sheet that had quietly grown a second: the head asks
+ * it, there is somewhere to answer it, and the button is about the answer rather than
+ * about configuring software.
+ */
+t("the sheet asks one question, and it is who is on your team",
+  /who.s on your team/i.test(await p.$eval(".onboard h2", e => e.innerText)) &&
+    (await p.$$eval('.onboard textarea[data-ctl="onboard-team"]', n => n.length)) === 1 &&
+    await p.locator('.onboard button:text-is("That\u2019s my team")').isVisible(),
+  await p.$eval(".onboard h2", e => e.innerText))
+// The box has to TEACH the format, not describe it: four real men, one to a line, the
+// position first. A placeholder naming somebody the capture has never heard of would
+// teach a format that silently matches nobody — test/paste.mjs pins those four names
+// against the shipped snapshot, and this pins that they reach the shipped page.
+const PLACEHOLDER =
+  await p.getAttribute('.onboard textarea[data-ctl="onboard-team"]', "placeholder")
+t("and the box shows what an answer looks like rather than describing one",
+  (PLACEHOLDER ?? "").split("\n").length >= 4 && /^[A-Z0-9]{1,3} \w+ \w+/.test(PLACEHOLDER ?? ""),
+  JSON.stringify(PLACEHOLDER))
+/*
+ * Everything about platforms is behind a disclosure now, so reaching it is a gesture.
+ *
+ * Written as a named helper for the same reason `openDock` is: four blocks below this
+ * need a platform chip, the chips are inside `<details class="onboard-alts">`, and a
+ * closed `<details>` keeps its contents in the DOM while Playwright refuses to click
+ * them — which is exactly how this file died, on a `.chip-btn:text-is("Yahoo")` that
+ * resolved to an element and then timed out for 30s on "element is not visible".
+ *
+ * Idempotent, because a `<details>` toggles: clicking the summary of an open one shuts
+ * it again, and these blocks run in sequence on the same sheet.
+ */
+const openAlts = async (page = p) => {
+  if (!(await page.$(".onboard-alts[open]"))) await page.click(".onboard-alts summary")
+  await page.waitForSelector(".onboard-alts[open]", { timeout: 10000 })
+}
+// The summary is the reader's own reason for opening it — "my league scores
+// differently" is a thing a manager knows about his league. It used to be headed
+// "Other ways in", which is a fact about the app's plumbing.
+t("and the platform question is behind a fold named for the reader's reason to open it",
+  /scores differently/i.test(await p.$eval(".onboard-alts summary", e => e.innerText)),
+  await p.$eval(".onboard-alts summary", e => e.innerText))
+await openAlts()
+t("with Yahoo among the answers once it is opened",
   (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).includes("Yahoo"),
   (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).join(" | "))
 await p.click('.onboard .chip-btn:text-is("Yahoo")')
@@ -392,8 +490,12 @@ t("and the card and the board agree that the scoring is standard, not the reader
 t("the tabs work on a first visit, because there is something behind each of them",
   await p.$$eval(".views button", n => n.every(e => !e.disabled)),
   await p.$$eval(".views button", n => n.map(e => `${e.textContent}:${e.disabled}`).join(" ")))
+// "Pickups", not "Wire" — the tab was renamed in the plain-language pass and the
+// view id behind it ("wire") was deliberately not, because it is the key this browser
+// stores the last screen under. Read off the label, because the label is what a reader
+// can see and the id is what nothing must change.
 t("and the visit lands on the screen that ranks",
-  (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim())))[0] === "Wire",
+  (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim())))[0] === "Pickups",
   (await p.$$eval(".views button[aria-selected=true]", n => n.map(e => e.textContent.trim()))).join(","))
 
 /**
@@ -468,7 +570,7 @@ t("but it is not marked read-from-source, because nothing here fetched that page
  * the claim this whole file is about and it is worth knowing that the screen that
  * owns it came up at all.
  */
-await go("Wire")
+await go("Pickups")
 // A ranked board at all, which is what "with no server" is about. It is NOT about
 // the default filter: the list is capped at 60 rows, so the filtered default and
 // the unfiltered ranking both read 60 here and this number cannot tell them apart.
@@ -480,7 +582,7 @@ t("the board renders with no server", (await p.$$eval(".board-row", n=>n.length)
 // passing — the board would still render, just one screen too early — so the
 // separation is pinned where it can be seen, on the screen that was measured at
 // 947px with no roster loaded where it used to be 7,477px.
-await go("Today")
+await go("Tonight")
 t("and Today is the decision alone: the table is not hiding under the Decide card",
   (await p.$$eval(".decide", n => n.length)) === 1 &&
     (await p.$$eval(".board-row", n => n.length)) === 0,
@@ -490,7 +592,7 @@ t("and Today is the decision alone: the table is not hiding under the Decide car
 t("with one link across to the ranking, named as what it leads to",
   /Everyone you can get/.test(await p.$eval(".next-screen", e => e.innerText)),
   await p.$eval(".next-screen", e => e.innerText))
-await go("Wire")
+await go("Pickups")
 /**
  * The availability toggle WORKS with no server now, which is the point of the whole
  * ownership estimate. It used to be asserted disabled, because "who can I add" read
@@ -588,7 +690,7 @@ await p.waitForTimeout(600)
 // now switch to the config editor for the remaining assertions. It was its own tab,
 // "League setup", reached as `nth-child(2)`; it is the bottom half of SETUP now,
 // under the team panel, and `nth-child(2)` is the ranked board.
-await go("Setup")
+await go("My league")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
 /**
  * ── Where the storage reassurance went ──────────────────────────────────────────
@@ -668,7 +770,7 @@ t("the save landed in browser storage", await p.evaluate(k =>
   JSON.parse(localStorage.getItem("beanemachine:config")).leagues[k].scoring.batting.HR === 9.9, KEY))
 await p.reload({ waitUntil:"networkidle" })
 // Setup, not `nth-child(2)`: the scoring editor is the bottom half of Setup now.
-await go("Setup")
+await go("My league")
 await p.waitForSelector(".grid section.card .rows", { timeout: 15000 })
 const kept = await p.$$eval(".grid section:nth-of-type(1) input.val", n=>n.map(e=>e.value))
 t("the edit survives a reload with no server", kept[codes.indexOf("HR")]==="9.9", kept.join(","))
@@ -858,7 +960,7 @@ await p.waitForSelector(".decide", { timeout: 25000 })
 // This searched the tab labels for /my team/ — "My team & trades" — and that tab is
 // gone: the team panel is the TOP half of Setup, above the league editor. Named
 // rather than matched, because `go` already holds the one place a label lives.
-await go("Setup")
+await go("My league")
 await p.waitForSelector(".pull-roster", { timeout: 15000 })
 // Located by what it says rather than by `.primary`, which it no longer is. That
 // class was removed deliberately: this route works when the platform allows it and
@@ -924,14 +1026,14 @@ await p.waitForSelector(".decide", { timeout: 25000 })
 // `#tpl` — "Start a league from" — lives in the management toolbar, which used to be
 // on the League setup tab and is now on SETUP, the third screen. This was
 // `nth-child(2)`, which is Wire, where no toolbar renders at all.
-await go("Setup")
+await go("My league")
 await p.waitForSelector("#tpl", { timeout: 15000 })
 t("the picker offers no Sleeper league type on the hosted build either",
   !(await p.$$eval("#tpl option", n => n.map(e => `${e.value}${e.textContent}`).join(" "))).match(/sleeper/i),
   await p.$$eval("#tpl option", n => n.map(e => e.textContent).join(" | ")))
 // and the board, which is what a preset is FOR, is on Wire — `nth-child(1)` was the
 // tab that used to carry it and is now the Decide card alone.
-await go("Wire")
+await go("Pickups")
 t("a Yahoo preset ranks a full board with no server and no import",
   (await p.$$eval(".board-row", n => n.length)) > 50,
   String(await p.$$eval(".board-row", n => n.length)))
@@ -1008,7 +1110,7 @@ const streamHead = async (n = 6) => {
   // on Wire now, and this helper is called from four places that arrive on Today —
   // straight out of `onboard()`, or after a reload, or after a dropped file. `go` is
   // idempotent: clicking the tab you are already on is a no-op plus a marker wait.
-  await go("Wire")
+  await go("Pickups")
   await p.click('.modes .mode:has-text("Streaming")')
   await p.waitForTimeout(400)
   return p.$$eval(".board-row .who b", els => els.map(e => e.textContent.trim()))
@@ -1119,7 +1221,7 @@ await p.waitForTimeout(600)
 // read below it is the board's, and the board is Wire. A drop lands you wherever you
 // were — the first-run setup, on Today — so this has to ask for the screen. It used
 // not to, because the board was the first tab and the first tab was where you were.
-await go("Wire")
+await go("Pickups")
 const staleChip = await p.locator('[data-wire="carried"]')
 t("a week-old free-agent list is shown as a week old, and flagged",
   /read 7d ago/.test((await staleChip.textContent()).replace(/\s+/g, " ")) &&
@@ -1147,7 +1249,7 @@ t("and it is still USED, because a stale exact list beats an estimate that is no
  * Run last, on the league this file has already built, because opening the setup sets
  * `onboarding` — which hides the very toolbar the import assertions above fill in.
  */
-await go("Setup")
+await go("My league")
 await p.click('.bar [data-ctl="onboard"]')
 await p.waitForSelector(".onboard", { timeout: 15000 })
 t("a reader who has a league can ask for the setup back, and gets it already open",

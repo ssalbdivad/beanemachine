@@ -73,13 +73,21 @@ const visit = async (timeout = 60000) => {
  * retired by a rename and reported as a clean run. The same hazard as the Draft
  * deletion, arriving from the other direction.
  *
+ * It has now happened a THIRD time and this one line absorbed all of it: "Today |
+ * Wire | Setup" became **"Tonight | Pickups | My league"**, because the old three
+ * named a time, a piece of jargon and a verb nobody reading this app uses about their
+ * own team. The view IDS are deliberately unchanged — board / wire / trade are also
+ * the key this browser stores the open screen under, and renaming those would drop
+ * every returning reader back on the default screen — so nothing in this file may
+ * navigate by id. Navigate by the visible text, which is what a reader has.
+ *
  * Matching the visible label is what makes the next rename a one-line change here
  * rather than a silent skip somewhere else: `SCREEN` is the only thing in this file
  * that knows what the tabs are called and `toScreen` is the only thing that clicks
  * one. The match is anchored rather than loose, so a fourth tab whose name merely
  * CONTAINS one of these cannot quietly capture the clicks.
  */
-const SCREEN = { today: "Today", wire: "Wire", setup: "Setup" }
+const SCREEN = { today: "Tonight", wire: "Pickups", setup: "My league" }
 const toScreen = async (pg, label) => {
 	const tab = pg.locator(".views button", { hasText: new RegExp(`^${label}$`) }).first()
 	if (!(await tab.count())) return false
@@ -262,13 +270,17 @@ const at = re => cardOrder.findIndex(h => re.test(h))
  * screen which does is the first tab — a reader who has just entered a team lands on
  * it next without being told to.
  */
-t("Setup no longer answers the add/drop question at all",
+t("My league no longer answers the add/drop question at all",
   at(/add and drop/i) === -1, cardOrder.join(" | "))
 t("and the lineup still comes before the deal — you price a trade against a lineup",
   at(/starting lineup/i) > -1 && at(/starting lineup/i) < at(/the deal/i),
   cardOrder.join(" | "))
+/* `SCREEN.today` rather than the literal it used to hold: this assertion was written
+ * with "Today" typed into it, and the tab is called **Tonight** now, so the one
+ * assertion about where a reader goes next went red on a rename while the behaviour it
+ * describes never moved. Nothing in this file may name a tab except `SCREEN`. */
 t("the screen that does answer it is the first tab, so nothing has to point at it",
-  (await page.$$eval(".views button", n => n.map(e => e.textContent.trim())))[0] === "Today",
+  (await page.$$eval(".views button", n => n.map(e => e.textContent.trim())))[0] === SCREEN.today,
   (await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))).join(" | "))
 
 /**
@@ -322,8 +334,17 @@ t("and the scoring tables are below the team, not above it",
  * protecting: no surface on this screen may tell a reader to go somewhere by NAME,
  * because a screen name written into prose is a name that drifts out of the nav. The
  * nav is the only place a screen should be named.
+ *
+ * The drift has happened again and the dead name is a different one now: the tabs are
+ * "Tonight | Pickups | My league", and this screen's prose still says "what lets Today
+ * show the changes to make" and "adds and drops are on Today" — no tab has been called
+ * Today since the rename. What is checked hard here is the names that are dead AND
+ * absent (Recommendations, League setup); the two live "Today" sentences are in
+ * src/client/Trade.tsx, which this file may not edit, so they are reported as a src
+ * defect rather than asserted away — the same call the version before this one made
+ * about the same sentence under its previous name.
  */
-t("no card on Setup sends the reader to a screen by a name written in prose",
+t("no card on My league sends the reader to a screen by a dead name written in prose",
   !(await page.$("section.advice")) &&
     !/\bRecommendations\b|\bLeague setup\b/.test(await page.$eval(".wrap", e => e.innerText)),
   (await page.$eval(".wrap", e => e.innerText)).match(/.{0,40}(Recommendations|League setup).{0,40}/)?.[0] ?? "clean")
@@ -575,10 +596,46 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	// which matters here because this block shadows the outer `page`
 	if (await toScreen(page, SCREEN.setup)) {
 		await page.waitForSelector(".paste-roster", { timeout: 30000 })
-		const how = (await page.textContent(".paste-how")) ?? ""
-		t("the paste route says which page to open and which keys to press",
-			/My Team/.test(how) && /Ctrl/.test(how) && /A/.test(how) && /Read that/.test(how),
-			how.replace(/\s+/g, " ").slice(0, 160))
+		/*
+		 * The steps, and the ORDER of them, because the order is the fix.
+		 *
+		 * This asserted only that the words "My Team", "Ctrl", "A" and "Read that" were all
+		 * somewhere in the list, in any arrangement — so it passed on the broken version
+		 * and passes on the fixed one, which makes it no protection at all for the thing
+		 * that actually changed. The broken version gave Ctrl+A as THE way to get a roster
+		 * in, and no phone has a Ctrl key: on the device this app is mostly opened on, the
+		 * instruction could not be carried out, and nothing told the reader that typing four
+		 * names works exactly as well (`playersInText` matches known players in arbitrary
+		 * text and has never cared whether a clipboard was involved).
+		 *
+		 * The new truth is positional: the gesture that works on every device leads, and the
+		 * keyboard shortcut survives scoped to the device that has the keys. Both halves are
+		 * pinned separately — that typing is offered before any keystroke is named, and that
+		 * every mention of Ctrl sits inside a clause saying "on a computer" — because either
+		 * one alone still passes on the version this replaced.
+		 */
+		const steps = await page.$$eval(".paste-how li", n =>
+			n.map(e => e.innerText.replace(/\s+/g, " ").trim())
+		)
+		const how = steps.join(" ")
+		const stepWith = re => steps.findIndex(l => re.test(l))
+		t("the paste route says which page to open and what to press at the end",
+			/My Team/.test(how) && /Read that/.test(how), how.slice(0, 160))
+		t("typing the names is offered before any keystroke is named",
+			stepWith(/type the names/i) > -1 && stepWith(/type the names/i) < stepWith(/Ctrl/),
+			steps.join(" / ").slice(0, 200))
+		t("and Ctrl+A is scoped to a computer rather than given as the way in",
+			/Ctrl/.test(how) &&
+				(await page.$$eval(".paste-how li", n =>
+					n.every(
+						li =>
+							!/Ctrl/.test(li.innerText) ||
+							[...li.querySelectorAll(".sub")].some(
+								sub => /on a computer/i.test(sub.innerText) && /Ctrl/.test(sub.innerText)
+							)
+					)
+				)),
+			how.slice(0, 200))
 		t("the paste route is offered above the platform read, not below it",
 			await page.evaluate(() => {
 				const paste = document.querySelector(".paste-roster")
@@ -686,7 +743,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		// It hovers OVER this screen, it does not replace it: the roster and the league
 		// editor underneath have to still be there, or "set up my league" has quietly
 		// become a navigation and the reader has lost the team he was editing.
-		t("the setup hovers over Setup rather than navigating off it",
+		t("the setup hovers over My league rather than navigating off it",
 			(await page.$$(".trade-team")).length === 1 &&
 				(await page.$$eval(".views button[aria-selected=true]", n =>
 					n.map(e => e.textContent.trim())

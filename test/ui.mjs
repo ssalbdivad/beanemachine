@@ -109,9 +109,26 @@ if (wordmark !== "beanemachine") { await browser.close(); process.exit(1) }
  * An index encodes a fact nobody promised: the order of the nav. A name encodes the
  * thing the assertion actually depends on — which screen owns the job. So navigation
  * goes through `screen()`, which matches the visible label exactly (`:text-is`, not
- * `:has-text`, so "Setup" cannot also match a future "Setup help"), and the next
- * rename is one line here instead of a dozen index bumps scattered through the file.
+ * `:has-text`, so "Tonight" cannot also match a future "Tonight's slate"), and the
+ * next rename is one line here instead of a dozen index bumps through the file.
+ *
+ * AND THE RENAME CAME. "Today | Wire | Setup" is now "Tonight | Pickups | My league"
+ * (`VIEWS` in src/client/panels.tsx): named for the moment rather than for the
+ * machinery, because "Wire" and "Setup" are both words a person learns from fantasy
+ * software rather than from baseball. The view IDS did NOT change — board / wire /
+ * trade — and deliberately so: the id is the key this browser stores, and renaming it
+ * would drop every returning reader back on the default screen.
+ *
+ * That is exactly the split this helper was written for. Every navigating line below
+ * moved with the labels and nothing else did, so the three constants here are the
+ * whole of the change: a suite that navigated by id or by index would have had to be
+ * rewritten, and one that navigated by index would have gone on passing while
+ * visiting the wrong screens.
  */
+/** The visible labels, once, because they are the only thing the rename touched. */
+const TONIGHT = "Tonight"
+const PICKUPS = "Pickups"
+const MY_LEAGUE = "My league"
 const screen = async (pg, label) => {
   await pg.waitForSelector(".views button")
   await pg.click(`.views button:text-is("${label}")`)
@@ -137,12 +154,12 @@ const screen = async (pg, label) => {
 const BATTING = 'section.card:has(h2:text-is("Batting"))'
 const PITCHING = 'section.card:has(h2:text-is("Pitching"))'
 
-// Setup is the third tab and the editor is the lower half of it; the wait is on a
-// stat table rather than on the tab being marked current, because the team panel
+// "My league" is the third tab and the editor is the lower half of it; the wait is on
+// a stat table rather than on the tab being marked current, because the team panel
 // above it paints first and a click that landed on the wrong screen has to fail here
 // rather than forty assertions later.
 const toLeagueSetup = async pg => {
-  await screen(pg, "Setup")
+  await screen(pg, MY_LEAGUE)
   await pg.waitForSelector(`${BATTING} .rows`)
 }
 
@@ -160,7 +177,7 @@ const toLeagueSetup = async pg => {
  * on the wrong half is a timeout that blames the wrong component.
  */
 const toSetupBar = async pg => {
-  await screen(pg, "Setup")
+  await screen(pg, MY_LEAGUE)
   await pg.waitForSelector("#tpl")
   await pg.waitForSelector('.bar button:text-is("Download")')
 }
@@ -621,7 +638,7 @@ await fp.click('.bar button:text-is("New")')
 // board that ranks) and the click it now takes to SEE that is part of the claim: if
 // Wire came up empty for a freshly created preset league, the preset would be useless
 // no matter how complete its stored values were.
-await screen(fp, "Wire")
+await screen(fp, PICKUPS)
 await fp.waitForSelector(".board-row", { timeout: 25000 })
 t("choosing the preset lands on a board that actually ranks",
   (await fp.$$eval(".board-row", n => n.length)) > 50,
@@ -937,7 +954,7 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
     drafty.length === 0, drafty.join(" "))
   // What "how far in" became. Read on Today, the screen a person actually opens, and
   // it is in the masthead so it is on all three.
-  await screen(lp, "Today")
+  await screen(lp, TONIGHT)
   await lp.waitForSelector(".decide", { timeout: 25000 })
   const ageChip = await lp.locator(".chip", { hasText: /player data/ }).first()
   const ageText = (await ageChip.textContent()).replace(/\s+/g, " ").trim()

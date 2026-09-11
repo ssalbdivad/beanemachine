@@ -444,6 +444,14 @@ const onTabKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
 	tabs[to]?.focus()
 }
 
+/** "Sep 8", not "2026-09-08". An ISO date is a machine's format and this line is read
+ *  on every visit; the year is the current season on every row it could appear in. */
+const day = (iso: string): string => {
+	const [y, m, d] = iso.split("-").map(Number)
+	if (!y || !m || !d) return iso
+	return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
 /**
  * The window the SELECTED horizon is actually ranked over.
  *
@@ -470,7 +478,7 @@ const horizonSpan = (
 	if (mode === "stream" && period) {
 		const days = datesBetween(period.start, period.end)
 		return {
-			range: `${period.start} → ${period.end}`,
+			range: `${day(period.start)} → ${day(period.end)}`,
 			phrase:
 				// A window the reader chose by length is named by that length, not by the
 				// period it was cut out of: "the rest of this scoring period" under a
@@ -484,11 +492,11 @@ const horizonSpan = (
 	}
 	if (mode === "stash")
 		return {
-			range: `${start} → the end of the regular season`,
+			range: `${day(start)} → the end of the season`,
 			phrase: "the rest of the regular season"
 		}
 	const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000)
-	return { range: `${start} → ${end}`, phrase: `the next ${days} days` }
+	return { range: `${day(start)} → ${day(end)}`, phrase: `the next ${days} days` }
 }
 
 /**
@@ -1461,24 +1469,49 @@ export const Board = ({
 					  table was sorted by. Reading it out of `sort` is what makes that
 					  impossible rather than merely unlikely.
 					*/}
-					<p className="board-legend">
+					<details className="board-legend">
+						<summary>
+							{sort === "points" ?
+								<>Ordered by the points he should score in this window.</>
+							: sort === "deltaMine" ?
+								<>
+									<b>For you</b> &mdash; what he adds over the man he would take a seat
+									from on your team.
+								</>
+							:	<>
+									<b>Ahead by</b> &mdash; points more than the best man still free at his
+									spot, in your league&rsquo;s points.
+								</>
+							}
+						</summary>
+						{/* The caveat is one tap rather than three lines, because on a phone three
+						    lines of it is a third of the screen above the thing it describes — and
+						    it is a tap rather than a tooltip because a phone has no hover, which is
+						    where every other definition in this app used to live. */}
 						{sort === "points" ?
 							<>
-								Ordered by the points he should score in this window &mdash; nothing else.
+								The streaming list is ordered by what a man actually scores over the window
+								you picked, not by what he is ahead of a free pickup by &mdash; because the
+								question there is which arm to start, and a free arm you are not starting
+								is worth nothing to you this week.
 							</>
 						: sort === "deltaMine" ?
 							<>
-								<b>For you</b> is what he adds over the man he would actually take a seat
-								from on your roster, in your league&rsquo;s points.
+								Every other number here is measured against the best man still free at that
+								spot, which is the bar for the league. This one is the bar for you: the
+								worst man you own who could hold the seat. A deep outfield makes a good
+								free-agent outfielder worth nothing to you; a hole at catcher makes a
+								mediocre one worth a great deal.
 							</>
 						:	<>
-								<b>Ahead by</b> is how many points more than the best man still free at
-								his spot, in your league&rsquo;s points, over the window you picked. It
-								ranks players; it does not promise points &mdash; 35 means further ahead
-								of a free pickup than 20 is, not 35 points in the bank.
+								It ranks players; it does not promise points. 35 means further ahead of a
+								free pickup than 20 is &mdash; not 35 points in the bank. The window is the
+								one you picked above, and &ldquo;free&rdquo; is your league&rsquo;s own
+								list where one has been read and a guess from how widely each man is
+								rostered where it has not.
 							</>
 						}
-					</p>
+					</details>
 					{rows.slice(0, limit).map((r, i) => (
 						<Row
 							key={r.player.id}

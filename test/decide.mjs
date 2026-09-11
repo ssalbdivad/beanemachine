@@ -144,8 +144,19 @@ const reserve = slot => /^(BN|IL|NA)/i.test(slot)
  * silent rename away from asserting against the wrong screen — it does not fail, it
  * tests something else — whereas a label-based one fails loudly and is a one-line fix
  * when a tab is renamed. The labels are the contract with the reader anyway: he finds
- * "Setup" by reading it, not by counting.
+ * the screen by reading it, not by counting.
+ *
+ * THE LABELS HAVE SINCE BEEN REWRITTEN, and it vindicated the paragraph above: the
+ * bar read "Today | Wire | Setup" and now reads "Tonight | Pickups | My league",
+ * which are three renames and not one restructure, and every label-based click in
+ * this file failed loudly and was fixed on one line. The VIEW IDS did not move —
+ * board / wire / trade — because the id is also the key this browser stores, and
+ * renaming it drops every returning reader on the default screen. So the ids below
+ * stay as they were and only the visible text changed. `TAB` exists so the next
+ * rename is one edit rather than seven: the comments around each assertion still
+ * name the screen by its id, which is the thing that is actually stable.
  */
+const TAB = { board: "Tonight", wire: "Pickups", trade: "My league" }
 const tab = async (page, label) => {
 	await page.click(`.views button:text-is("${label}")`)
 	await page.waitForTimeout(400)
@@ -221,8 +232,11 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("Today carries the decision and no ranked board under it",
 		!(await page.$(".board")) && !!(await page.$(".decide")),
 		text.slice(0, 60))
-	t("and the card is the tab labelled Today, which is the one that opens",
-		await page.$eval(".views button.on", e => e.textContent.trim()) === "Today",
+	// by `TAB.board`, not by the literal: the label was "Today" and is now "Tonight",
+	// and what the assertion is for is that the card is the tab a first load OPENS on,
+	// which is a fact about the stored view id and survives the rename
+	t(`and the card is the tab labelled ${TAB.board}, which is the one that opens`,
+		await page.$eval(".views button.on", e => e.textContent.trim()) === TAB.board,
 		await page.$eval(".views", e => e.innerText.replace(/\s+/g, " ")))
 	{
 		const link = await page.$(".next-screen button")
@@ -234,13 +248,13 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			const onWire = await page
 				.waitForSelector(".board .board-row", { timeout: 20000 })
 				.then(() => true, () => false)
-			t("and it really lands on Wire, where the ranked board now lives",
-				onWire && await page.$eval(".views button.on", e => e.textContent.trim()) === "Wire",
+			t(`and it really lands on ${TAB.wire}, where the ranked board now lives`,
+				onWire && await page.$eval(".views button.on", e => e.textContent.trim()) === TAB.wire,
 				onWire ? "the board arrived but the tab did not follow" : "no ranked row ever appeared")
-			// back to Today by LABEL, because everything below this point is about the
-			// card and the tab it sits behind has moved once already
-			await tab(page, "Today")
-			t("and Today is still the card when you come back to it",
+			// back to the card's own tab by LABEL, because everything below this point is
+			// about the card and the bar it sits in has now been renamed twice
+			await tab(page, TAB.board)
+			t("and the card is still there when you come back to it",
 				!!(await page.$(".decide")) && !(await page.$(".board")), "")
 		}
 	}
@@ -786,8 +800,8 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		.then(() => true, () => false)
 	t("and the control on it really lands on the screen that takes a roster",
 		landed, "pressing Add your players did not reach the roster paste")
-	t("which is the tab labelled Setup, wherever in the bar that sits",
-		await page.$eval(".views button.on", e => e.textContent.trim()) === "Setup",
+	t(`which is the tab labelled ${TAB.trade}, wherever in the bar that sits`,
+		await page.$eval(".views button.on", e => e.textContent.trim()) === TAB.trade,
 		await page.$eval(".views", e => e.innerText.replace(/\s+/g, " ")))
 	if (landed) {
 		const team = await page.$eval(".trade-team", e => e.innerText)

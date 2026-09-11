@@ -1715,10 +1715,13 @@ const LeagueEditor = ({
 			<div className="grid">
 				<section className="card full">
 					<h2>This league</h2>
+					{/* Said in baseball. The old version named the arithmetic ("replacement
+					    level is teams × slots") and a screen that no longer exists, to somebody
+					    filling in a number. What he needs is why the number matters. */}
 					<p className="sub">
-						Replacement level is teams × slots — what a player is worth is what he beats
-						the next man up by, and the team count is what decides who that is. The board,
-						the draft and every trade verdict wait on it.
+						The more teams, the thinner the free-agent pool &mdash; and every player here
+						is measured against the best man still free at his position. Nothing is
+						ranked until this is set.
 					</p>
 					<TeamCountInput
 						value={draft.meta.max_teams}

@@ -16,7 +16,7 @@
 // points Yahoo actually paid out for that day in league 228947's scoring.
 //
 // One live request is made at the end, to one public endpoint, once per run.
-import { readActuals, fetchActuals, ACTUALS_URL } from "../src/data/actuals.ts"
+import { readActuals, fetchActuals, ACTUALS_URL, dayIsFinal } from "../src/data/actuals.ts"
 import { recap, gradeRecord, bestNights } from "../src/auto/recap.ts"
 import { readFileSync } from "node:fs"
 
@@ -63,6 +63,25 @@ t("a start is carried as outs", lines.get("671737:pitching").stats.outs === 18)
 t("a response with no stats is an empty day, not a throw", readActuals("hitting", {}).length === 0)
 t("a split with no player id is skipped", readActuals("hitting", { stats: [{ splits: [{ stat: { hits: 1 } }] }] }).length === 0)
 t("the url asks for one day", ACTUALS_URL(2026, "hitting", "2026-09-11").includes("startDate=2026-09-11&endDate=2026-09-11"))
+
+// --- is that day's baseball over -------------------------------------------------
+
+// The line is 34 hours after midnight UTC of the day itself, which is 10:00 UTC the next
+// morning. Measured, not guessed: across the 91 games MLB scheduled 2026-09-05 to
+// 2026-09-11 the latest first pitch was 26.2 hours after its own date's midnight UTC, so
+// this leaves 7.8 hours for a game that starts at 02:10 UTC to finish in.
+const at = (iso) => new Date(iso)
+t("a day is not over while its late games are being played",
+  dayIsFinal("2026-09-11", at("2026-09-12T04:30:00Z")) === false)
+t("nor at twenty past midnight in New York, which is when a reader asks",
+  dayIsFinal("2026-09-11", at("2026-09-12T04:20:00Z")) === false)
+t("it is over at ten hundred UTC the next day",
+  dayIsFinal("2026-09-11", at("2026-09-12T10:00:00Z")) === true)
+t("and stays over", dayIsFinal("2026-09-11", at("2026-09-20T00:00:00Z")) === true)
+// A latest-possible first pitch plus a five-hour marathon still lands inside the line.
+t("the latest first pitch in the measured week leaves seven hours fifty to finish in",
+  dayIsFinal("2026-09-11", at("2026-09-12T07:10:00Z")) === false &&
+    Date.parse("2026-09-12T10:00:00Z") - Date.parse("2026-09-12T02:10:00Z") === (7 * 60 + 50) * 60_000)
 
 // --- the league the recap is scored in ------------------------------------------
 
@@ -343,6 +362,7 @@ t("the net is allowed to be negative", near(g2.net, -23.9), String(g2.net))
 const both = gradeRecord({
   entries: [won, { ...lost, date: "2026-09-10" }],
   byDate: new Map([["2026-09-11", lines], ["2026-09-10", lines]]),
+  readable: "2026-09-11",
   league: LEAGUE
 })
 t("the net sums the days it graded", near(both.net, 10.2), String(both.net))
@@ -385,7 +405,35 @@ const ungradeable = gradeRecord({
 t("a day with no seats on record is not a tie", ungradeable.days.find(d => d.date === "2026-09-11").worth === null, JSON.stringify(ungradeable.days))
 t("but what was asked for is still scored", near(ungradeable.days.find(d => d.date === "2026-09-11").asked, 34.1))
 t("and says why it stops there", ungradeable.skipped.some(s => s.date === "2026-09-11" && /which of your men were in your lineup/.test(s.why)), JSON.stringify(ungradeable.skipped))
-t("a day whose results are not in yet is skipped", ungradeable.skipped.some(s => s.date === "2026-09-08" && /results aren't in yet/.test(s.why)), JSON.stringify(ungradeable.skipped))
+/* THE REASON CHANGED, and it changed because the old one was false about this day. This
+   assertion used to expect "last night's results aren't in yet" for 2026-09-08 while the
+   caller was reading 2026-09-11 — a day three weeks old is not waiting on results, it is
+   waiting on nobody having opened the page the morning after, and this card reads one day
+   at a time on purpose. The three states are asserted separately below. */
+t("a day nobody was here for says that, rather than blaming the results",
+  ungradeable.skipped.some(s => s.date === "2026-09-08" && /wasn't open the morning after/.test(s.why)), JSON.stringify(ungradeable.skipped))
+
+// THE THREE STATES OF A DAY WITH NO LINES. Not in the map at all and it IS the day the
+// caller could read — the games are still being played, which is what a reader at twenty
+// past midnight is actually looking at. Mapped to null — asked and half answered or not
+// answered. Mapped to an empty map — answered, and there was no baseball.
+const threeStates = gradeRecord({
+  entries: [
+    { date: "2026-09-11", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.adell, 3)] },
+    { date: "2026-09-10", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.adell, 3)] },
+    { date: "2026-09-09", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.adell, 3)] }
+  ],
+  byDate: new Map([["2026-09-10", null], ["2026-09-09", new Map()]]),
+  readable: "2026-09-11",
+  league: LEAGUE
+})
+t("the day still being played is waiting on its results",
+  threeStates.skipped.some(s => s.date === "2026-09-11" && /aren't in yet/.test(s.why)), JSON.stringify(threeStates.skipped))
+t("a read that failed says it failed, rather than scoring the day level",
+  threeStates.skipped.some(s => s.date === "2026-09-10" && /could not be read/.test(s.why)), JSON.stringify(threeStates.skipped))
+t("and a day with no baseball in it is not a day anybody lost",
+  threeStates.skipped.some(s => s.date === "2026-09-09" && /no results came back/.test(s.why)), JSON.stringify(threeStates.skipped))
+t("none of the three is graded", threeStates.days.length === 0 && threeStates.changed === 0, JSON.stringify(threeStates.days))
 t("a day with no recommendation is not graded", !ungradeable.days.some(d => d.date === "2026-09-10"), JSON.stringify(ungradeable.days.map(d => d.date)))
 t("no ungradeable day reaches the record", ungradeable.changed === 0 && ungradeable.net === 0)
 

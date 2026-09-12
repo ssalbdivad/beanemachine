@@ -447,9 +447,21 @@ export const gradeRecord = (input: {
 		 *  graded once and kept rather than re-graded from a fresh request. */
 		graded?: { asked: number; had: number | null; worth: number | null; unchanged: boolean }
 	}[]
-	/** Actual lines per date. A date with no entry here has no results yet and is
-	 *  skipped rather than scored as a scoreless day. */
-	byDate: Map<string, Map<string, ActualLine>>
+	/**
+	 * Actual lines per date, and the three states are three different values.
+	 *
+	 * A date NOT IN THE MAP was never asked about — this card reads one day, so every
+	 * recorded day but yesterday is in that state until the morning it was yesterday.
+	 * A date mapped to NULL was asked about and could not be answered, or could only be
+	 * half answered. A date mapped to an empty map was answered and had no baseball in it.
+	 * All three are skipped, and each gets its own reason, because a reader told "the
+	 * results aren't in yet" about a day three weeks old would rightly stop believing the
+	 * sentence.
+	 */
+	byDate: Map<string, Map<string, ActualLine> | null>
+	/** The one date the caller could actually read, so a day that was never asked about
+	 *  can be told from the day that was. Null when it could read nothing at all. */
+	readable?: string | null
 	league: League
 }): Record_ => {
 	const days: GradedDay[] = []
@@ -468,7 +480,20 @@ export const gradeRecord = (input: {
 		}
 		const lines = input.byDate.get(e.date)
 		if (!lines) {
-			skipped.push({ date: e.date, why: "last night's results aren't in yet" })
+			/* THE REASON HAS TO BE TRUE OF THE DAY IT IS ABOUT. One sentence used to cover
+			   every ungradeable day, and for anything but yesterday it was false: a day from
+			   three weeks ago is not waiting on results, it is waiting on nobody having been
+			   here the morning after. This page reads ONE day — sixty days graded live would
+			   be 120 requests and about 2.3 MB on every render — so a recommendation recorded
+			   on a morning the reader did not come back the next day can never be graded, and
+			   saying so is the only honest option available. */
+			skipped.push({
+				date: e.date,
+				why:
+					input.byDate.has(e.date) ? "last night's results could not be read"
+					: e.date === input.readable ? "last night's results aren't in yet"
+					: "this page wasn't open the morning after, and it reads one day at a time"
+			})
 			continue
 		}
 		/* AN EMPTY MAP IS NOT AN EMPTY DAY. A read that failed and a date with no baseball

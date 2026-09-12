@@ -5,6 +5,7 @@ import { slotsFor } from "../engine/bscore.ts"
 import { scoreStats, tableFor } from "../engine/points.ts"
 import { resolvePeriod } from "../engine/period.ts"
 import { bestNights, gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
+import { dayIsFinal } from "../data/actuals.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
 import { roster, rosterKey } from "./roster.ts"
@@ -161,6 +162,10 @@ export const Recap = ({
 	  be denominated in something, and the preset says on the card that they are borrowed.
 	*/
 	const { actuals, error, missing, loading } = useActuals(season, date, !!league)
+	/* Whether that day's baseball is actually over — see `dayIsFinal`. A reader at twenty
+	   past midnight is asking about games with outs left in them, and the card may show
+	   what MLB has so far as long as it says so. What it may not do is write a verdict. */
+	const final = dayIsFinal(date)
 
 	/** What the best nights in baseball were worth, for a reader with no team yet. */
 	const best = useMemo(
@@ -317,10 +322,25 @@ export const Recap = ({
 		if (!entries.length) return null
 		return gradeRecord({
 			entries,
-			byDate: new Map([[date, actuals.lines]]),
+			/*
+			  THREE STATES, AND ONLY ONE OF THEM IS A DAY THIS RECORD MAY SPEAK ABOUT.
+			  
+			  A half-answered read maps to null: grading a day whose hitters are missing would
+			  score both lineups over the pitchers alone. A day whose late games are still in
+			  play is left OUT of the map, because "the results aren't in yet" is exactly what
+			  is true of it — the read succeeded and the games have not finished. Only a
+			  complete, finished day is handed over, and `settle` below is gated on the same
+			  two conditions, because a verdict is written once and never asked again.
+			*/
+			byDate: new Map(
+				missing.length ? [[date, null]]
+				: !final ? []
+				: [[date, actuals.lines]]
+			),
+			readable: date,
 			league
 		})
-	}, [leagueKey, league, actuals, date, rev])
+	}, [leagueKey, league, actuals, date, rev, missing, final])
 
 	/* Yesterday's verdict is written down the first morning it can be, so tomorrow's record
 	   needs no request for it. `settle` refuses to overwrite, which is what keeps this from
@@ -329,6 +349,10 @@ export const Recap = ({
 	const settled = useRef<string | null>(null)
 	useEffect(() => {
 		if (!leagueKey || !record) return
+		/* Belt and braces: `record` cannot contain an unfinished or half-read day after the
+		   memo above, and this is the write that cannot be taken back, so it says the
+		   condition out loud rather than relying on the day not being in the list. */
+		if (!final || missing.length) return
 		const today = record.days.find(d => d.date === date)
 		if (!today || settled.current === date) return
 		settled.current = date
@@ -343,7 +367,7 @@ export const Recap = ({
 		} catch {
 			// nothing above depends on the write succeeding
 		}
-	}, [leagueKey, record, date])
+	}, [leagueKey, record, date, final, missing])
 
 	const day = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
 		weekday: "long",
@@ -477,6 +501,19 @@ export const Recap = ({
 					: "from your lineup"}
 				</span>
 			</p>
+
+			{/* STILL BEING PLAYED, said under the number rather than at the foot of the card.
+			    34 hours after midnight UTC on the day in question is 10:00 UTC the next
+			    morning — 6am in New York — and the latest first pitch MLB scheduled in the
+			    week measured in src/data/actuals.ts was 02:10 UTC. So a reader looking at this
+			    before breakfast on the East Coast is looking at a figure that can still go up,
+			    and the one thing the app must not do is imply it cannot. */}
+			{!final && (
+				<p className="sub">
+					Some of those games may not be over yet &mdash; that is what MLB had recorded
+					when this page asked, and the late ones on the west coast finish after it.
+				</p>
+			)}
 
 			{/* The stamp, where it lands after the games. Said once, under the figure it
 			    qualifies, because a reader who has just pasted a roster is the reader most

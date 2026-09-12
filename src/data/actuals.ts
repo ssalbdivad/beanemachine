@@ -123,6 +123,30 @@ export const readActuals = (
 const TIMEOUT_MS = 12_000
 
 /**
+ * IS THAT DAY'S BASEBALL ACTUALLY OVER?
+ *
+ * `byDateRange` answers about a game in progress as happily as about a finished one, and a
+ * reader at twenty past midnight asking what happened "last night" is asking about games
+ * that are still being played — a 7:10pm Pacific first pitch is 02:10 UTC the next morning,
+ * and it has six outs left to go when a reader on the East Coast is already calling it
+ * yesterday. The card can live with a partial figure as long as it says so; what must not
+ * happen is `src/client/ledger.ts` FREEZING a verdict about Billy off a fifth-inning
+ * score, because `settle` writes once and never asks again.
+ *
+ * THE LINE IS MEASURED, not guessed. Across the 91 games MLB scheduled between
+ * 2026-09-05 and 2026-09-11, the earliest first pitch was 16.2 hours and the latest 26.2
+ * hours after midnight UTC of the game's own date (`schedule?sportId=1`, read 2026-09-12).
+ * Thirty-four hours — 10:00 UTC the following day — leaves 7 hours 50 minutes after the
+ * latest first pitch in that week (02:10 UTC), which covers a nine-inning game with nearly five hours to spare
+ * and every extra-inning game this endpoint has been asked about.
+ *
+ * Deliberately NOT in the reader's local time: whether a game has finished is a fact about
+ * the game, and a reader in Auckland does not make an Oakland game end sooner.
+ */
+export const dayIsFinal = (date: string, now: Date = new Date()): boolean =>
+	now.getTime() >= Date.parse(`${date}T00:00:00Z`) + 34 * 3_600_000
+
+/**
  * Both sides of the ball, in parallel, failure as a state.
  *
  * A partial answer is worth having and is reported as partial: if pitching comes back

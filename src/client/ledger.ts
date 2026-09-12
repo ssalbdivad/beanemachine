@@ -54,7 +54,35 @@ const Entry = type({
 	had: Side.array(),
 	/** Adds and drops proposed that day, names only: a move is graded by what the man
 	 *  did, and the board that priced him is gone by the time it is graded. */
-	moves: type({ add: "string", drop: "string | null" }).array()
+	moves: type({ add: "string", drop: "string | null" }).array(),
+	/**
+	 * THE DAY, SETTLED — written once, when that day's real results first become reachable.
+	 *
+	 * Grading a day needs the actual points every man scored on it, which is one read per
+	 * side of the ball per DATE. Sixty days of history would be 120 requests and about 2.3
+	 * MB on the wire to render one strip, every time the strip is rendered, for a set of
+	 * answers that cannot change — a finished day is finished.
+	 *
+	 * So each day is graded exactly once, on the morning it becomes yesterday, and the
+	 * verdict is kept. The running record is then arithmetic over what is already here and
+	 * costs nothing: the screen asks MLB about one date, ever.
+	 *
+	 * Absent means "not yet settled", which is a real state and the one every entry starts
+	 * in. It never means zero, and `gradeRecord` is written to keep those apart.
+	 */
+	"graded?": {
+		/** What the lineup it asked for actually scored. */
+		asked: "number",
+		/** What the lineup already in place actually scored. Null when the seats were
+		 *  never read that day, which makes the day ungradeable rather than a tie. */
+		had: "number | null",
+		/** `asked - had`. Null whenever `had` is. */
+		worth: "number | null",
+		/** True when it asked for the lineup that was already there. */
+		unchanged: "boolean",
+		/** When the grading happened, so a stale verdict can be told from a fresh one. */
+		at: "string"
+	}
 })
 
 export type LedgerEntry = typeof Entry.infer
@@ -140,6 +168,28 @@ const record = (league: string, entry: LedgerEntry): LedgerEntry[] => {
 	return write({ ...all, [league]: next })[league]!
 }
 
+/**
+ * Write a day's verdict, and never overwrite one.
+ *
+ * Idempotent on purpose: the strip that settles a day re-renders whenever anything in the
+ * browser changes, and a second grading of the same day would be a second write loop — the
+ * same hazard the recording side guards with a signature. It is also the honest rule. A
+ * verdict is about a finished day and cannot improve; a grading run twice could only differ
+ * if something upstream had changed, and in that case the FIRST answer is the one taken
+ * while the evidence was freshest.
+ *
+ * A day with no entry is not created here. Nothing can be graded that was never recommended.
+ */
+const settle = (league: string, date: string, graded: NonNullable<LedgerEntry["graded"]>): void => {
+	const all = read()
+	const mine = all[league] ?? []
+	const at = mine.findIndex(e => e.date === date)
+	if (at < 0 || mine[at]!.graded) return
+	const next = [...mine]
+	next[at] = { ...next[at]!, graded }
+	write({ ...all, [league]: next })
+}
+
 const clear = (league: string): void => {
 	const { [league]: _, ...kept } = read()
 	write(kept)
@@ -155,4 +205,4 @@ const reset = (): void => {
 	}
 }
 
-export const ledgerStore = { of, record, clear, reset }
+export const ledgerStore = { of, record, settle, clear, reset }

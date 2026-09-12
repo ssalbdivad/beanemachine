@@ -348,6 +348,10 @@ export const gradeRecord = (input: {
 		start: { key: string; name: string; slot: string | null; projected: number | null }[]
 		sit: { key: string; name: string; slot: string | null; projected: number | null }[]
 		had: { key: string; name: string; slot: string | null; projected: number | null }[]
+		/** A day already settled. Present from the second morning onwards for every day
+		 *  but yesterday's — see `settle` in src/client/ledger.ts for why a finished day is
+		 *  graded once and kept rather than re-graded from a fresh request. */
+		graded?: { asked: number; had: number | null; worth: number | null; unchanged: boolean }
 	}[]
 	/** Actual lines per date. A date with no entry here has no results yet and is
 	 *  skipped rather than scored as a scoreless day. */
@@ -358,6 +362,16 @@ export const gradeRecord = (input: {
 	const skipped: { date: string; why: string }[] = []
 
 	for (const e of [...input.entries].sort((a, b) => a.date.localeCompare(b.date))) {
+		/* A SETTLED DAY NEEDS NO REQUEST, and that is what makes a running record free.
+		   Sixty days of history graded from live reads would be 120 requests and about 2.3 MB
+		   every time the strip rendered, for answers that cannot change. `calls` is not
+		   stored — the per-man detail is only ever shown for yesterday, and keeping twenty
+		   names and two numbers each for sixty days is a quarter of a megabyte in this
+		   browser to render a line nobody asked for. */
+		if (e.graded) {
+			days.push({ ...e.graded, date: e.date, at: e.at, calls: [] })
+			continue
+		}
 		const lines = input.byDate.get(e.date)
 		if (!lines) {
 			skipped.push({ date: e.date, why: "last night's results aren't in yet" })

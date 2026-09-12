@@ -146,3 +146,20 @@
 .recap-in .recap-name { font-weight: 600 }
 .recap-in .recap-slot { color: var(--accent) }
 .recap-in .recap-pts { color: var(--ink) }
+
+/*
+  The record. Set like the bench line rather than like the headline, because it is a claim
+  ABOUT the app and the headline is a fact about the reader's team — and because it is
+  allowed to be negative, which a 32px figure would make into an accusation.
+*/
+.recap-record {
+	margin: var(--sp-3) 0 0;
+	max-width: 62ch;
+}
+.recap-record b {
+	font-family: var(--mono);
+	font-size: var(--fs-5);
+	font-weight: 700;
+	color: var(--accent);
+	font-variant-numeric: tabular-nums;
+}

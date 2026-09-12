@@ -1,12 +1,13 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { slotsFor } from "../engine/bscore.ts"
-import { recap, type RecapMan } from "../auto/recap.ts"
+import { gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
 import { roster, rosterKey } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
+import { ledgerStore } from "./ledger.ts"
 import { useStored } from "./stores.ts"
 import { useActuals, lastNight } from "./useActuals.ts"
 import "./recap.css"
@@ -154,6 +155,59 @@ export const Recap = ({
 		})
 	}, [actuals, league, men, date])
 
+	/**
+	 * BILLY'S RECORD, and it is the only number in this app that can be wrong in public.
+	 *
+	 * Everything above needs no history: it works on a first visit from public data. This
+	 * needs the recommendation as it stood before the games, which `src/client/ledger.ts`
+	 * has been recording since the Tonight card started writing it.
+	 *
+	 * One request total, ever. Yesterday is graded from the read this card already made, and
+	 * every earlier day comes back from the verdict stored when IT was yesterday. Sixty days
+	 * graded live would be 120 requests and about 2.3 MB every render, for answers that
+	 * cannot change.
+	 */
+	const record = useMemo(() => {
+		if (!leagueKey || !league || !actuals) return null
+		let entries
+		try {
+			entries = ledgerStore.of(leagueKey)
+		} catch {
+			// A damaged history is My league's to explain and the reader's to clear. This card
+			// still has last night, which needs none of it.
+			return null
+		}
+		if (!entries.length) return null
+		return gradeRecord({
+			entries,
+			byDate: new Map([[date, actuals.lines]]),
+			league
+		})
+	}, [leagueKey, league, actuals, date, rev])
+
+	/* Yesterday's verdict is written down the first morning it can be, so tomorrow's record
+	   needs no request for it. `settle` refuses to overwrite, which is what keeps this from
+	   being a write loop — the write bumps the revision, the revision recomputes `record`,
+	   and the second pass finds the day already settled. */
+	const settled = useRef<string | null>(null)
+	useEffect(() => {
+		if (!leagueKey || !record) return
+		const today = record.days.find(d => d.date === date)
+		if (!today || settled.current === date) return
+		settled.current = date
+		try {
+			ledgerStore.settle(leagueKey, date, {
+				asked: today.asked,
+				had: today.had,
+				worth: today.worth,
+				unchanged: today.unchanged,
+				at: new Date().toISOString()
+			})
+		} catch {
+			// nothing above depends on the write succeeding
+		}
+	}, [leagueKey, record, date])
+
 	// Nothing to say, and saying nothing is the right answer: a reader who has not told the
 	// page who his players are cannot be told what they scored, and a strip explaining that
 	// would be a third empty card on a screen that already has its own setup prompt.
@@ -257,6 +311,51 @@ export const Recap = ({
 					MLB&rsquo;s day-by-day record does not carry{" "}
 					{andList(result.unscoreable)}, so {result.unscoreable.length === 1 ? "it is" : "they are"}{" "}
 					missing from every total above rather than counted as nothing.
+				</p>
+			)}
+
+			{/*
+			  THE DENOMINATOR IS THE HONEST PART.
+			  
+			  Most days a lineup is already the best one and the advice is "leave it alone",
+			  which is worth exactly nothing — so a win rate over every recorded day would
+			  flatter itself with days on which nothing was claimed. Only the days Billy asked
+			  for a CHANGE are counted, and the net is allowed to come back negative.
+			  
+			  It also says how many days it is speaking about, because it can only speak about
+			  days the app was opened: a record that did not say so would read as a record of
+			  the season.
+			*/}
+			{record && record.changed > 0 && (
+				<p className="recap-record">
+					<b>{record.net > 0 ? `+${record.net}` : record.net}</b> points is what following
+					Billy&rsquo;s lineup would have been worth, over the {record.changed}{" "}
+					{record.changed === 1 ? "day" : "days"} he asked you to change something
+					&mdash; better on {record.better}, worse on {record.worse}, level on{" "}
+					{record.even}.
+					{record.unchanged > 0 && (
+						<>
+							{" "}
+							On {record.unchanged} other {record.unchanged === 1 ? "day" : "days"} he
+							left your lineup alone, which is worth nothing either way and is not
+							counted.
+						</>
+					)}
+				</p>
+			)}
+			{record && record.changed === 0 && record.days.length > 0 && (
+				<p className="sub">
+					{record.unchanged === record.days.length ?
+						<>
+							On {record.days.length === 1 ? "the one day" : `all ${record.days.length} days`}{" "}
+							on record, Billy asked for the lineup you already had. Nothing to score him
+							on yet.
+						</>
+					:	<>
+							Nothing on record can be scored yet &mdash;{" "}
+							{record.skipped[0]?.why ?? "last night\u2019s results aren\u2019t in"}.
+						</>
+					}
 				</p>
 			)}
 

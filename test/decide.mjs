@@ -156,6 +156,9 @@ const reserve = slot => /^(BN|IL|NA)/i.test(slot)
  * rename is one edit rather than seven: the comments around each assertion still
  * name the screen by its id, which is the thing that is actually stable.
  */
+const DAY_HITTING = JSON.parse(readFileSync(new URL("./fixtures/mlb-byDateRange-hitting-2026-09-11.json", import.meta.url), "utf8"))
+const DAY_PITCHING = JSON.parse(readFileSync(new URL("./fixtures/mlb-byDateRange-pitching-2026-09-11.json", import.meta.url), "utf8"))
+
 const TAB = { board: "Tonight", wire: "Pickups", trade: "My league" }
 const tab = async (page, label) => {
 	await page.click(`.views button:text-is("${label}")`)
@@ -181,11 +184,31 @@ const open = async (seeds, opts = {}) => {
 	 *  card has to fall back to the shipped capture. See the block at the foot of this
 	 *  file for why that fallback must never be silent. */
 	if (opts.noMlb) await page.route("**statsapi.mlb.com**", r => r.abort())
-	await page.addInitScript(([l, p, cfg]) => {
+	/**
+	 * LAST NIGHT, SERVED FROM THE COMMITTED FIXTURES, whatever date the card asks for.
+	 *
+	 * The recap card reads `byDateRange` for yesterday, so a suite that let it through would
+	 * assert against whichever eight of four hundred men happened to play last night — a
+	 * test that reports the schedule. The two fixtures are REAL responses for 2026-09-11
+	 * trimmed to eight men, which is what makes the numbers below hand-computable: every one
+	 * of them is what league 228947's table actually paid for that day. The date in the URL
+	 * is ignored on purpose; the card's own date LABEL still comes from the reader's clock,
+	 * which is the part worth asserting about it.
+	 */
+	if (opts.actuals)
+		await page.route("**stats?stats=byDateRange**", r =>
+			r.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify(r.request().url().includes("group=pitching") ? DAY_PITCHING : DAY_HITTING)
+			}))
+	await page.addInitScript(([l, p, cfg, ro, led]) => {
 		if (l) localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
 		if (p) localStorage.setItem("beanemachine:pool", JSON.stringify(p))
 		if (cfg) localStorage.setItem("beanemachine:config", JSON.stringify(cfg))
-	}, [seeds.lineup ?? null, seeds.pool ?? null, seeds.config ?? null])
+		if (ro) localStorage.setItem("beanemachine:roster", JSON.stringify(ro))
+		if (led) localStorage.setItem("beanemachine:ledger", JSON.stringify(led))
+	}, [seeds.lineup ?? null, seeds.pool ?? null, seeds.config ?? null, seeds.roster ?? null, seeds.ledger ?? null])
 	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
 	await page.waitForSelector(".decide", { timeout: 30000 })
 	await page.waitForTimeout(1500)
@@ -1331,6 +1354,143 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("and React logs no nesting complaint about the card",
 		!logs.some(l => /validateDOMNesting|cannot (?:appear|contain|be a (?:child|descendant))/i.test(l)),
 		logs.join(" | "))
+	await page.close()
+}
+
+/**
+ * LAST NIGHT — the only card in this app that states a fact rather than an estimate.
+ *
+ * Every number asserted below was hand-computed from the committed fixtures against league
+ * 228947's own table, in test/actuals.mjs, and is a number Yahoo actually paid out on
+ * 2026-09-11: Kyle Tucker 34.1 (two runs, a single, a triple, a homer, five RBI), Alex
+ * Bregman 25.8, Taj Bradley 29.5 off eighteen outs and six strikeouts, Ozzie Albies 1.9,
+ * Jo Adell 0.0 on an 0-for-4, Dustin May 40.1.
+ *
+ * THE CLAIM THIS BLOCK DEFENDS is the distinction the card is easiest to get wrong. Adell
+ * played and was worth nothing; a man with no line was not in the park. A card that printed
+ * the second as the first would tell a reader his outfielder had a bad night when he was
+ * resting, and the two sit side by side in this fixture on purpose.
+ */
+{
+	/* The shipped league, as the other blocks in this file seed it: its own scoring table is
+	   what makes every figure below a number Yahoo actually paid. */
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const man = (name, slot, positions) => ({ slot, name, positions, team: null })
+	/* Bregman is on the BENCH and outscored Adell, who had the Util seat — so the bench gap
+	   is 25.8 and one swap explains all of it. Everyone carries eligibility the league's own
+	   slot_accepts table can place, because an unplaceable starter makes the card refuse the
+	   comparison, which is a different assertion and is covered in test/actuals.mjs. */
+	const spots = [
+		man("Kyle Tucker", "OF", ["OF"]),
+		man("Jo Adell", "Util", ["OF"]),
+		man("Taj Bradley", "SP", ["SP"]),
+		man("Alex Bregman", "BN", ["3B"]),
+		man("Ozzie Albies", "BN", ["2B"]),
+		man("Dustin May", "IL", ["SP"])
+	]
+	const page = await open(
+		{ config: cfg, lineup: { [KEY]: { at: new Date().toISOString(), spots } } },
+		{ actuals: true }
+	)
+	await page.waitForSelector(".recap", { timeout: 30000 })
+	await page.waitForTimeout(1200)
+	const card = await page.$eval(".recap", e => e.innerText)
+
+	// 34.1 + 0 + 29.5 = 63.6 from the three startable seats. The IL man is not in a lineup.
+	t("last night's card leads with what your lineup scored", /63\.6/.test(card), card.slice(0, 200))
+	t("and says that is what it is", /from your lineup/.test(card))
+	// 63.6 + 25.8 + 1.9 + 40.1 = 131.4 for everyone held.
+	t("everyone you hold is a second, different number", /131\.4/.test(card), card)
+	t("and it says how many of them played", /6 of 6 of your men played/.test(card), card)
+
+	/* The best legal lineup, in THIS league's sixteen startable seats: Tucker at OF 34.1,
+	   Bregman at 3B 25.8, Albies at 2B 1.9, Adell in the other OF 0, Bradley at SP 29.5 =
+	   91.3, against 63.6 from the three seats he actually used. The gap is 27.7, which is
+	   both bench men seated and not just the big one — this league has room for them, and an
+	   earlier version of this assertion expected 25.8 because it had been reasoned against
+	   the four-seat shape used in test/actuals.mjs rather than against the league the card
+	   is actually running. The card was right and the expectation was wrong. */
+	t("the bench gap is the difference", /27\.7 points sat on your bench/.test(card), card)
+	t("and the best lineup it is measured against is stated", /worth 91\.3/.test(card), card)
+	t("labelled as hindsight rather than as a thing he should have known",
+		/knowing now what nobody knew then/.test(card), card)
+	t("and named down to the one seat that explains it",
+		/Alex Bregman/.test(card) && /scored 25\.8 more than/.test(card) && /Jo Adell/.test(card), card)
+	// Dustin May outscored everyone and was on the injured list: he could not have been
+	// started that day without a move the lineup did not have, so a regret built on him
+	// would be a fiction.
+	t("the man on the injured list is not the regret", !/Dustin May.*more than/.test(card), card)
+
+	const day = await page.$eval(".recap-day", e => e.innerText)
+	t("the date is the reader's own yesterday, not the fixture's", /\w/.test(day) && !/2026-09-11/.test(day), day)
+
+	await page.click(".recap-all summary")
+	await page.waitForTimeout(200)
+	const list = await page.$eval(".recap-list", e => e.innerText)
+	t("every man you hold is listed", ["Kyle Tucker", "Jo Adell", "Taj Bradley", "Alex Bregman", "Ozzie Albies", "Dustin May"].every(n => list.includes(n)), list)
+	t("best night first", list.indexOf("Dustin May") < list.indexOf("Ozzie Albies"), list)
+	t("a night is explained by the categories that carried it", /HR/.test(list) && /OUT/.test(list), list)
+	// THE DISTINCTION. 0-for-4 is a zero; never being in the park is not.
+	t("0-for-4 is a zero", /Jo Adell\n0\b/.test(list) || /Jo Adell[\s\S]{0,8}\b0\b/.test(list), list)
+	const ghost = await open(
+		{
+			config: cfg,
+			lineup: { [KEY]: { at: new Date().toISOString(), spots: [...spots, man("Pete Alonso", "BN", ["1B"])] } }
+		},
+		{ actuals: true }
+	)
+	await ghost.waitForSelector(".recap", { timeout: 30000 })
+	await ghost.waitForTimeout(1000)
+	await ghost.click(".recap-all summary")
+	await ghost.waitForTimeout(200)
+	const withGhost = await ghost.$eval(".recap-list", e => e.innerText)
+	t("a man who never took the field says so rather than showing a zero",
+		/Pete Alonso[\s\S]{0,24}didn/.test(withGhost), withGhost.slice(-200))
+	await ghost.close()
+
+	/* BILLY'S RECORD, from days already settled. A stored verdict needs no request, which is
+	   what makes a running record free — and the denominator is the honest part: the day he
+	   left the lineup alone is worth nothing and is not counted as a win. */
+	const ago = n => {
+		const d = new Date(Date.now() - n * 86400_000)
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+	}
+	const graded = (date, worth, unchanged = false) => ({
+		date, at: `${date}T22:00:00.000Z`, start: [], sit: [], had: [], moves: [],
+		graded: { asked: 80, had: 80 - worth, worth, unchanged, at: `${date}T23:00:00.000Z` }
+	})
+	const withRecord = await open(
+		{
+			config: cfg,
+			lineup: { [KEY]: { at: new Date().toISOString(), spots } },
+			ledger: { [KEY]: [graded(ago(4), 18.2), graded(ago(3), -6.1), graded(ago(2), 0, true)] }
+		},
+		{ actuals: true }
+	)
+	await withRecord.waitForSelector(".recap-record", { timeout: 30000 })
+	const rec = await withRecord.$eval(".recap-record", e => e.innerText)
+	t("the record sums the days it graded", /\+12\.1 points/.test(rec), rec)
+	t("over the days he asked for a change, and says how many", /over the 2 days/.test(rec), rec)
+	t("with both sides of it", /better on 1, worse on 1/.test(rec), rec)
+	// The day he left the lineup alone is worth nothing either way, and a win rate over
+	// every recorded day would flatter itself with days on which nothing was claimed.
+	t("and the day he left it alone is named and not counted",
+		/On 1 other day he left your lineup alone/.test(rec), rec)
+	await withRecord.close()
+
+	/* The card writes what it recommended BEFORE the games, because the comparison is
+	   impossible afterwards. Asserted as a store write rather than as rendered text, since
+	   nothing on screen claims it — which is itself deliberate. */
+	const wrote = await page.evaluate(() => {
+		try { return JSON.parse(localStorage.getItem("beanemachine:ledger") ?? "null") } catch { return null }
+	})
+	const mine = wrote?.[Object.keys(wrote ?? {})[0]] ?? []
+	t("tonight's recommendation is written down while the outcome is unknown", mine.length > 0, JSON.stringify(wrote).slice(0, 160))
+	t("with the whole lineup it asked for, not only the changes", (mine[0]?.start?.length ?? 0) > 0, JSON.stringify(mine[0] ?? null).slice(0, 200))
+	t("and every man keyed the way a real line is keyed", (mine[0]?.start ?? []).every(x => /^\d+:(hitting|pitching)$/.test(x.key)), JSON.stringify(mine[0]?.start ?? []).slice(0, 200))
+	// One entry per league per day: a reader who opens the app twice has not been advised
+	// twice, and a second row would flatter the record's own denominator.
+	t("one entry for the day, however many times it rendered", mine.filter(e => e.date === mine[0].date).length === 1, String(mine.length))
 	await page.close()
 }
 

@@ -330,6 +330,30 @@ const ghostStart = gradeRecord({
 t("starting a man who never played is scored as nothing, not skipped", near(ghostStart.days[0].asked, 0) && near(ghostStart.days[0].worth, -1.9), JSON.stringify(ghostStart.days[0]))
 t("and his own line still reads as did-not-play", ghostStart.days[0].calls.find(c => c.name === "Nobody Played").actual === null)
 
+// A day already settled needs no results at all, which is what makes a running record
+// free: sixty days graded from live reads would be 120 requests and about 2.3 MB of wire
+// every time the strip rendered, for answers that cannot change.
+const settled = gradeRecord({
+  entries: [
+    { date: "2026-08-01", at: "x", start: [], sit: [], had: [],
+      graded: { asked: 90, had: 70, worth: 20, unchanged: false } },
+    { date: "2026-08-02", at: "x", start: [], sit: [], had: [],
+      graded: { asked: 50, had: 62, worth: -12, unchanged: false } },
+    { date: "2026-08-03", at: "x", start: [], sit: [], had: [],
+      graded: { asked: 44, had: 44, worth: 0, unchanged: true } },
+    won
+  ],
+  byDate, league: LEAGUE
+})
+t("a stored verdict is used without a request", settled.days.length === 4, String(settled.days.length))
+t("and counts towards the record exactly as a fresh grade does", settled.changed === 3 && settled.better === 2 && settled.worse === 1, JSON.stringify({ changed: settled.changed, better: settled.better, worse: settled.worse }))
+t("a stored unchanged day is still not a win", settled.unchanged === 1)
+t("the net sums stored and fresh days together", near(settled.net, 42.1), String(settled.net))
+// Yesterday is the only day the per-man detail is ever shown for, so it is the only day
+// it is carried. A stored day has none and must not pretend to.
+t("a stored day carries no invented per-man detail", settled.days.find(d => d.date === "2026-08-01").calls.length === 0)
+t("while the freshly graded day has it", settled.days.find(d => d.date === "2026-09-11").calls.length > 0)
+
 // --- one live request ----------------------------------------------------------
 
 // Yesterday, from MLB, for real. Asserted loosely on purpose: the claim is that the

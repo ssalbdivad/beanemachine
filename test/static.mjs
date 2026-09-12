@@ -2359,6 +2359,55 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   }
 }
 
+/**
+ * AND THE ANSWER IS ABOVE THE FOLD ON THE PHONE HE ASKED IT ON.
+ *
+ * Measured on this build at 390x844, straight after a first visit entered a team: the preset
+ * notice was 356px tall and the Tonight card did not start until y=643 — 42% of the screen
+ * between a reader who had just told the app his team and the answer he asked for, with the
+ * first instruction on the card 34px below the fold. The sentence that cannot be left out is
+ * one line; the paragraph and the list of values to check belong on the screen with the values
+ * on it.
+ *
+ * Asserted as a pixel budget rather than as an exact height, because the words in it are
+ * allowed to change and 122 is not a magic number. What is not allowed is the notice growing
+ * back into the screen.
+ */
+{
+  const ph = await b.newPage({ viewport: { width: 390, height: 844 } })
+  await ph.route("**/api/**", r => r.abort())
+  await ph.goto(BASE, { waitUntil: "domcontentloaded" })
+  await ph.waitForSelector(".dock-bar", { timeout: 30000 })
+  await ph.click(".dock-bar button")
+  await ph.waitForSelector("[data-ctl=onboard-team]")
+  await ph.fill("[data-ctl=onboard-team]",
+    "C Cal Raleigh\n1B Ben Rice\nOF Aaron Judge\nSP Tarik Skubal\nOF Juan Soto\n2B Ozzie Albies\n3B Alex Bregman\nSS Bobby Witt Jr\nSP Paul Skenes")
+  await ph.click(".onboard-go button")
+  await ph.waitForTimeout(1200)
+  const done = await ph.$(".onboard-done button")
+  if (done) await done.click()
+  await ph.waitForTimeout(2500)
+  const geom = await ph.evaluate(() => {
+    const at = s => {
+      const e = document.querySelector(s)
+      if (!e) return null
+      const r = e.getBoundingClientRect()
+      return { top: Math.round(r.top + scrollY), h: Math.round(r.height) }
+    }
+    return { note: at(".preset-note"), decide: at(".decide"), row: at(".decide-list li") }
+  })
+  t("the borrowed-values notice is one line on the answer screen, not a page of it",
+    !!geom.note && geom.note.h < 170, JSON.stringify(geom.note))
+  t("and it names whose values they are even so",
+    /not read from yours/.test(await ph.$eval(".preset-note", e => e.innerText)),
+    await ph.$eval(".preset-note", e => e.innerText))
+  t("and the list of values to check is not on this screen",
+    (await ph.$$(".preset-note .flags li")).length === 0)
+  t("so tonight's card starts inside the first screen of the phone",
+    !!geom.decide && geom.decide.top < 844, JSON.stringify(geom.decide))
+  await ph.close()
+}
+
 await b.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

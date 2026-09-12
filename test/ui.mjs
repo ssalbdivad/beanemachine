@@ -789,6 +789,17 @@ const preset = await fp.locator(".preset-note").first().textContent()
 t("the board says the values were not read from your league",
   /not read from yours|not read from your league/i.test(preset) && /one real Yahoo league/i.test(preset),
   preset.slice(0, 160))
+/* NAMED ON THE SCREEN THE VALUES ARE ON, which is where this assertion now looks.
+
+   The notice rendered its full paragraph and its list of values-to-check above all three
+   tabs, and measured on a 390x844 phone straight after setup that was 356px — 42% of the
+   screen between a reader who had just entered his team and the answer he asked for, with
+   the first instruction on the card 34px below the fold. The list is rendered on My league
+   now, where checking them happens. The claim is unchanged: the app must name which values
+   to check, from the league's own needs_review, and it is asserted here on the screen that
+   carries them. The one sentence that cannot be left out is still on every screen and is
+   asserted above. */
+await screen(fp, MY_LEAGUE)
 t("and it names what to check, from the league's own needs_review",
   (await fp.$$eval(".preset-note .flags li", n => n.length)) >= 3,
   String(await fp.$$eval(".preset-note .flags li", n => n.length)))

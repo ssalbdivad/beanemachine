@@ -927,6 +927,11 @@ export const App = () => {
 			{league && isPreset(league) && key && (
 				<PresetNote
 					league={league}
+					/* The long form only on the league's own screen — see `full`. The same
+					   condition `onOpenSetup` is already keyed on, written out rather than
+					   inferred from it, because one of the two is about a button and the other is
+					   about 276 vertical pixels on a phone. */
+					full={view === "trade"}
 					onOpenSetup={view === "trade" ? undefined : () => go({ view: "trade" })}
 					onChecked={() =>
 						void run(async () => {

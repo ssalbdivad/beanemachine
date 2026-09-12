@@ -590,7 +590,8 @@ export const isPreset = (league: League | null | undefined): boolean =>
 export const PresetNote = ({
 	league,
 	onOpenSetup,
-	onChecked
+	onChecked,
+	full
 }: {
 	league: League
 	/** Absent when the league's own tab is already the open one. */
@@ -599,6 +600,23 @@ export const PresetNote = ({
 	 *  that can never be satisfied is one people learn to read past, including on
 	 *  the league where it is still true. */
 	onChecked?: () => void
+	/**
+	 * WHETHER THIS IS THE SCREEN WITH THE VALUES ON IT.
+	 *
+	 * The same notice rendered above all three tabs, and measured on a 390x844 phone
+	 * immediately after setup it was 356px tall with the Tonight card starting at y=643 —
+	 * 42% of the screen, between a reader who has just told the app his team and the
+	 * answer he asked for, and the first actual instruction ("Bench Tarik Skubal") sat
+	 * 34px below the fold. The chip directly above it already reads "not from your
+	 * league".
+	 *
+	 * So the paragraph and the drawer — the part that lists WHICH values to check — are
+	 * rendered only on the league's own screen, which is where checking them happens and
+	 * where the same four lines are already printed in full by the Needs review card. The
+	 * other two screens keep the one sentence that cannot be left out, and the button
+	 * that goes to the rest. Measured after: 356px to about 80px.
+	 */
+	full?: boolean
 }) => {
 	/**
 	 * Scored stats, counted the way `leagueGaps` counts them: a stat sitting at 0 is
@@ -619,7 +637,7 @@ export const PresetNote = ({
 			    pushed below the fold. It says the one thing that cannot be left out —
 			    whose numbers these are — with the figures read from the league so they
 			    stay true after an edit. */}
-			<p>
+			<p className={full ? "" : "preset-short"}>
 				{/* "The board is ranking on …" was wrong on one of the three screens this
 				    notice sits above: it renders over whichever tab is open, and the tab
 				    that holds the league's own values holds no board. "Every number you are
@@ -632,12 +650,17 @@ export const PresetNote = ({
 					    sentences tell him to do, finds not one number that matches and concludes
 					    the app is broken. The app's own "values to check" drawer has been saying
 					    the true thing all along: these point values are another league's. */}
-				<b>These values are copied from one real Yahoo league, not read from yours.</b>{" "}
-				Every number you
-				are shown is priced on {stats} scored stats, {seats} roster seats and{" "}
-				{league.meta.max_teams ?? "no stated number of"} teams, all copied from a league
-				that was read off its own settings page. A wrong point value silently reprices
-				every player, and a wrong team count moves every ranking on the board.
+				<b>These values are copied from one real Yahoo league, not read from yours.</b>
+				{full && (
+					<>
+						{" "}
+						Every number you are shown is priced on {stats} scored stats, {seats} roster
+						seats and {league.meta.max_teams ?? "no stated number of"} teams, all copied
+						from a league that was read off its own settings page. A wrong point value
+						silently reprices every player, and a wrong team count moves every ranking on
+						the board.
+					</>
+				)}
 			</p>
 			{/* Folded, and the paragraph above is why it can be: it already names every
 			    borrowed value. Measured at 1280x1200 with the four lines open, this
@@ -647,7 +670,7 @@ export const PresetNote = ({
 			    with the paragraph trimmed to three lines: 163px and y=1278. The same
 			    lines are listed in full, unfolded, on My league's Needs review
 			    card. */}
-			{league.needs_review.length > 0 && (
+			{full && league.needs_review.length > 0 && (
 				<details>
 					<summary>
 						{/* Measured 2026-09-11 on the published build: with a league carrying a
@@ -682,7 +705,12 @@ export const PresetNote = ({
 			    that a person compared them, and it records it as manual entry rather
 			    than as a read: `verified` stays false, because importing the league is
 			    still the only thing that makes it true. */}
-			{onChecked && (
+			{/* AND ONLY ON THE SCREEN WHERE CHECKING IS POSSIBLE. "I've checked these against my
+			    league" on the Tonight card is a button a reader can press without ever having
+			    seen the values, and on a phone it is a second stacked line — 46 of the 180px
+			    this notice still costs there. The way out lives with the list of what to check,
+			    one tap away behind the button above. */}
+			{full && onChecked && (
 				<button onClick={onChecked}>I&rsquo;ve checked these against my league</button>
 			)}
 		</div>

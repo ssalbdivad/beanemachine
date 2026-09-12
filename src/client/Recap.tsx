@@ -835,7 +835,29 @@ export const Recap = ({
 					{result.men.map(m => (
 						<li key={m.key} className={m.started ? "recap-in" : ""}>
 							<span className="recap-slot">{m.slot ?? ""}</span>
-							<span className="recap-name">{m.name}</span>
+							{/*
+							  A TWO-WAY PLAYER IS TWO MEN ON THIS LIST, and until now nothing said so.
+							  
+							  A roster entry is `id:group`, which is right: Ohtani the hitter and Ohtani
+							  the pitcher are two separate holdings with two separate lines, and a league
+							  pays for both. What the reader saw was his name twice, one above the other,
+							  with two different numbers and no way to tell which was which — the same
+							  shape a duplicated row would have, on a screen whose whole job is to be
+							  trusted about numbers.
+							  
+							  Said only where it is ambiguous. A man held on one side of the ball needs no
+							  label, and putting "hitting" beside every bat would be the software
+							  narrating itself at the reader.
+							*/}
+							<span className="recap-name">
+								{m.name}
+								{result.men.some(o => o.name === m.name && o.key !== m.key) && (
+									<span className="recap-side">
+										{" "}
+										{m.key.endsWith(":pitching") ? "pitching" : "batting"}
+									</span>
+								)}
+							</span>
 							<span className="recap-pts">
 								{/* A man with no line DID NOT PLAY, and that is not a zero. Jo Adell
 								    went 0-for-4 on this day and is worth exactly 0.0; a man who was

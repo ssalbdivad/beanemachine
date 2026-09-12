@@ -301,6 +301,24 @@ t("a day of baseball none of whose games were yours is not an empty day", theirs
 t("and none of his men played", theirsNotMine.played === 0)
 t("a day somebody played is counted", r.played === 6, String(r.played))
 
+// A TWO-WAY PLAYER IS TWO MEN ON THIS LIST. Both entries are real holdings in one league and
+// both are paid for, so the card prints his name twice with two different numbers — which is
+// correct and, until the rows said which side of the ball each was, indistinguishable from a
+// duplicated row. The UI labels them off these keys, so the keys are what is asserted.
+const twoWay = recap({
+  date: "2026-09-11",
+  men: [
+    { key: "663656:hitting", name: "Kyle Tucker", slot: "OF", positions: ["OF"] },
+    { key: "671737:pitching", name: "Kyle Tucker", slot: "SP", positions: ["SP"] }
+  ],
+  lines, league: LEAGUE, shape: SHAPE
+})
+t("one name on two sides of the ball is two rows, not one",
+  twoWay.men.length === 2 && new Set(twoWay.men.map(m => m.key)).size === 2, JSON.stringify(twoWay.men.map(m => m.key)))
+t("and each row carries the side it was scored on",
+  twoWay.men.some(m => m.key.endsWith(":hitting")) && twoWay.men.some(m => m.key.endsWith(":pitching")))
+t("and both are counted, because a league pays for both", near(twoWay.ownedTotal, 63.6), String(twoWay.ownedTotal))
+
 // THE MAN COMING IN MUST HAVE PLAYED. A bench man who never took the field scores the
 // same nothing an empty seat does — but a starter can score BELOW zero, and the
 // subtraction then made a "swap" out of a man who did not pitch. No man in the committed

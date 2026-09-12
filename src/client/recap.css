@@ -120,6 +120,10 @@
 	text-align: right;
 }
 .recap-name { min-width: 0; overflow-wrap: break-word }
+/* Which side of the ball, and only on the rows where the same name appears twice — a
+   two-way player is two roster entries with two real totals. Quieter than the name and
+   never bolder, because it is a qualifier on the name and not part of it. */
+.recap-side { font-size: var(--fs-1); color: var(--faint); font-weight: 400 }
 .recap-pts {
 	font-family: var(--mono);
 	text-align: right;

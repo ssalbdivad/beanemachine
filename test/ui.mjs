@@ -1281,6 +1281,18 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await bp.waitForSelector(TOOLBAR_SETUP)
 	await bp.click(TOOLBAR_SETUP)
 	await bp.waitForSelector(".dock-sheet .onboard")
+	/* EIGHTEEN LINES, typed before the Escape, because the gesture that dismisses a phone
+	   keyboard used to dismiss the work as well.
+	   
+	   The sheet is mounted by App as `{docked && <Dock>}` and `docked` is `onboarding ||
+	   !league`; closing it with a league in existence takes both halves false and unmounts
+	   the whole dock — measured here, `.dock-sheet` and `aside.dock` are both gone after the
+	   Escape below. src/client/Dock.tsx keeps its children mounted across open/close for
+	   exactly this reason and cannot help once its parent goes, so the TEXT is kept in the
+	   browser as it is typed (src/client/typing.ts). Eighteen is the count from the walk that
+	   found it. */
+	const typed = Array.from({ length: 18 }, (_, i) => `Player Number ${i + 1}`).join("\n")
+	await bp.fill("[data-ctl=onboard-team]", typed)
 	const depth = await bp.evaluate(() => history.length)
 	await bp.keyboard.press("Escape")
 	await bp.waitForTimeout(600)
@@ -1291,6 +1303,20 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	t("so Back after Escape goes to the previous screen, not back into the sheet",
 		(await sheetUp()) !== true && (await tabNow()) !== "(none)",
 		`sheet ${await sheetUp()}, tab ${await tabNow()}`)
+
+	/* And the typing is still there when he comes back, which is the whole point of the
+	   store. Asserted on the unmount rather than on the close: there is no `.dock-sheet` in
+	   the document between these two lines, so nothing about a mounted component can be what
+	   makes this pass. */
+	t("the Escape took the whole dock with it", (await bp.locator("aside.dock").count()) === 0)
+	await bp.click("nav button:nth-child(3)")
+	await bp.waitForTimeout(700)
+	await bp.waitForSelector(TOOLBAR_SETUP)
+	await bp.click(TOOLBAR_SETUP)
+	await bp.waitForSelector("[data-ctl=onboard-team]")
+	t("and eighteen typed lines survived it",
+		(await bp.inputValue("[data-ctl=onboard-team]")) === typed,
+		JSON.stringify((await bp.inputValue("[data-ctl=onboard-team]")).slice(0, 60)))
 	await bp.close()
 }
 

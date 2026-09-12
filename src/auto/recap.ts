@@ -48,6 +48,11 @@ export interface RecapMan {
 }
 
 export interface RecapPlayer {
+	/** `id:group`, carried through from the roster. A name is not an identity — two men
+	 *  called Max Muncy have played in the same season, and a man held on both sides of
+	 *  the ball is two roster entries with one name. React keys and every lookup off this
+	 *  list use this, never the name. */
+	key: string
 	name: string
 	slot: string | null
 	/** Points in THIS league's scoring, or null when he did not appear. Never zero for
@@ -57,6 +62,10 @@ export interface RecapPlayer {
 	top: { code: string; points: number }[]
 	/** True when he was in a startable seat as the seats were last read. */
 	started: boolean
+	/** True when MLB's record for HIS side of the ball did not answer. `points` is null
+	 *  either way, and the two nulls mean opposite things: this one is "nobody could say",
+	 *  the other is "he did not play". A screen that prints them the same way is lying. */
+	unread: boolean
 }
 
 export interface Recap {
@@ -71,10 +80,22 @@ export interface Recap {
 	best: { total: number; seated: { slot: string; name: string; points: number }[] }
 	/** `best.total - startedTotal`, or null when there is no lineup to compare against. */
 	leftOnBench: number | null
-	/** The single swap that explains the most of that gap, when there is one. */
-	biggest: { in: string; out: string; swing: number } | null
+	/** The single swap that explains the most of that gap, when there is one. `outPoints`
+	 *  is null when the man who HAD the seat never played, which is a different sentence
+	 *  from one who played badly and must be written as one. */
+	biggest: { in: string; out: string; swing: number; inPoints: number; outPoints: number | null } | null
 	/** Why a number above is missing, in the reader's terms. Empty when nothing is. */
 	blocked: string[]
+	/** How many of your men actually took the field. Zero is a real answer on an off day
+	 *  and must not be rendered as a scoreless night. */
+	played: number
+	/** Sides of the ball that did not answer, so men on them could not be checked at all.
+	 *  Non-empty means every total below except `ownedTotal` is refused, and `ownedTotal`
+	 *  covers only the side that answered — `blocked` says so in the reader's words. */
+	unread: ("hitting" | "pitching")[]
+	/** True when MLB has no box scores AT ALL for the date. An off day, a rained-out
+	 *  Monday, the All-Star break — not a night on which your team scored nothing. */
+	noGames: boolean
 	/** League categories MLB's day read cannot source, surfaced rather than zeroed. */
 	unscoreable: string[]
 }
@@ -96,6 +117,10 @@ export const recap = (input: {
 	lines: Map<string, ActualLine>
 	league: League
 	shape: RosterShape
+	/** Sides of the ball the read did not get, straight from `fetchActuals`. Everything
+	 *  this function refuses when it is non-empty is refused for one reason: a man nobody
+	 *  could ask about is indistinguishable, in a sum, from a man who went 0-for-4. */
+	missing?: ("hitting" | "pitching")[]
 }): Recap => {
 	const { date, men, lines, shape } = input
 	const blocked: string[] = []
@@ -107,22 +132,67 @@ export const recap = (input: {
 	   no seats and that is the common case, not the edge one. */
 	const seatsKnown = men.some(m => m.slot !== null && m.slot.trim() !== "")
 
+	const unread = input.missing ?? []
 	const scored = men.map(m => {
 		const line = lines.get(m.key)
 		const group = m.key.endsWith(":pitching") ? "pitching" : "hitting"
 		if (!line)
-			return { man: m, points: null as number | null, top: [] as { code: string; points: number }[] }
+			return {
+				man: m,
+				points: null as number | null,
+				top: [] as { code: string; points: number }[],
+				unread: unread.includes(group)
+			}
 		const result = scoreStats(line.stats, tableFor(input.league, group), group)
 		for (const code of result.unscoreable) unscoreable.add(code)
-		return { man: m, points: result.points, top: topThree(result.breakdown) }
+		return { man: m, points: result.points, top: topThree(result.breakdown), unread: false }
 	})
 
+	const played = scored.filter(s => s.points !== null).length
 	const ownedTotal = r2(scored.reduce((a, s) => a + (s.points ?? 0), 0))
+
+	/*
+	   THE TWO STATES THAT LOOK EXACTLY LIKE A BAD NIGHT, AND ARE NOT ONE.
+
+	   Every number below this point is a sum over `scored`, and a sum cannot tell the
+	   difference between a man who did not play and a man nobody could ask about. Both
+	   arrive here as `points: null`. So the two cases where that difference is load-bearing
+	   are named before any arithmetic is allowed to use them:
+
+	   A SIDE OF THE BALL DID NOT ANSWER. `fetchActuals` keeps a partial day on purpose —
+	   half of real results beside a sentence about the other half beats a blank screen —
+	   and the cost of that choice is paid here: if the hitting read failed, every hitter
+	   you hold looks like he sat out, the lineup total comes out as the pitchers alone, and
+	   the bench gap is measured against a lineup of nine absent men. `ownedTotal` survives,
+	   because it is the true total of the men who WERE checked; everything that compares
+	   one lineup with another is refused and says why.
+
+	   MLB HAS NO BOX SCORES FOR THE DATE AT ALL. An off day, an All-Star break, a date
+	   before the season opened. `lines` is empty for the whole of baseball, not just for
+	   your team, and "your lineup scored 0" is then a statement about the calendar dressed
+	   up as a statement about your team.
+	*/
+	const noGames = lines.size === 0 && !unread.length
+	const unreadMen = scored.filter(s => s.unread).length
+	const complete = !unreadMen && !noGames
+	if (noGames)
+		blocked.push(
+			"MLB has no box scores at all for that date — nobody in baseball played, so there " +
+				"is nothing to report rather than nothing scored."
+		)
+	else if (unreadMen)
+		blocked.push(
+			`MLB's record of what ${unread.length === 2 ? "anybody" : unread[0] === "pitching" ? "pitchers" : "hitters"} ` +
+				`did that day did not answer, so ${unreadMen} of your men could not be checked at ` +
+				`all. They are missing from the total above rather than counted as nothing, and ` +
+				`nothing is claimed about your lineup or your bench until the read succeeds.`
+		)
 
 	const started = scored.filter(
 		s => seatsKnown && s.man.slot !== null && !isBench(s.man.slot) && !isReserve(s.man.slot)
 	)
-	const startedTotal = seatsKnown ? r2(started.reduce((a, s) => a + (s.points ?? 0), 0)) : null
+	const startedTotal =
+		seatsKnown && complete ? r2(started.reduce((a, s) => a + (s.points ?? 0), 0)) : null
 	if (!seatsKnown)
 		blocked.push(
 			"Nobody told this page which of your men were in your lineup, so it can say what " +
@@ -140,7 +210,10 @@ export const recap = (input: {
 	const accepts = shape.slot_accepts
 	let best: Recap["best"] = { total: 0, seated: [] }
 	let biggest: Recap["biggest"] = null
-	if (!accepts)
+	if (!complete) {
+		/* No sentence here: the reason was stated above, once, in the reader's terms, and
+		   the same refusal said twice reads as two different problems. */
+	} else if (!accepts)
 		blocked.push(
 			"This league has never said which players its seats accept, so the best lineup " +
 				"you could have set cannot be worked out."
@@ -177,9 +250,25 @@ export const recap = (input: {
 				const legal = legalSlotsFor(b.man.positions, accepts)
 				for (const s of started) {
 					if (s.man.slot === null || !legal.includes(s.man.slot)) continue
-					const swing = r2((b.points ?? 0) - (s.points ?? 0))
+					/* THE MAN COMING IN MUST HAVE PLAYED. A bench man who never took the
+					   field scores the same nothing an empty seat does, so "you should have
+					   started him" is not a sentence about a missed swap — and with a starter
+					   who went NEGATIVE (a pitcher who got shelled prices below zero in most
+					   scoring) the subtraction made one anyway: it named a man who did not
+					   pitch as the fix, four lines under this card's own "did not play". His
+					   null stays a null; only the man going OUT may be counted as the nothing
+					   he actually contributed, because that nothing was a real cost of
+					   starting him. */
+					if (b.points === null) continue
+					const swing = r2(b.points - (s.points ?? 0))
 					if (swing > 0 && (!biggest || swing > biggest.swing))
-						biggest = { in: b.man.name, out: s.man.name, swing }
+						biggest = {
+							in: b.man.name,
+							out: s.man.name,
+							swing,
+							inPoints: r2(b.points),
+							outPoints: s.points === null ? null : r2(s.points)
+						}
 				}
 			}
 		}
@@ -237,11 +326,13 @@ export const recap = (input: {
 					a.man.name.localeCompare(b.man.name)
 			)
 			.map(s => ({
+				key: s.man.key,
 				name: s.man.name,
 				slot: s.man.slot,
 				points: s.points,
 				top: s.top,
-				started: seatsKnown && s.man.slot !== null && !isBench(s.man.slot) && !isReserve(s.man.slot)
+				started: seatsKnown && s.man.slot !== null && !isBench(s.man.slot) && !isReserve(s.man.slot),
+				unread: s.unread
 			})),
 		ownedTotal,
 		startedTotal,
@@ -249,6 +340,9 @@ export const recap = (input: {
 		leftOnBench: comparable ? r2(best.total - startedTotal!) : null,
 		biggest,
 		blocked,
+		played,
+		unread,
+		noGames,
 		unscoreable: [...unscoreable].sort()
 	}
 }
@@ -377,6 +471,16 @@ export const gradeRecord = (input: {
 			skipped.push({ date: e.date, why: "last night's results aren't in yet" })
 			continue
 		}
+		/* AN EMPTY MAP IS NOT AN EMPTY DAY. A read that failed and a date with no baseball
+		   on it both arrive here as a map with nothing in it, and scoring two lineups
+		   against nothing gives both of them zero — which this function would then record
+		   as a day where following Billy came out exactly level, and `settle` would FREEZE
+		   that verdict and never ask again. A day nobody can see is a day this record does
+		   not speak about. */
+		if (!lines.size) {
+			skipped.push({ date: e.date, why: "no results came back for that day" })
+			continue
+		}
 		if (!e.start.length) {
 			skipped.push({ date: e.date, why: "no lineup was recommended that day" })
 			continue
@@ -444,15 +548,28 @@ export const gradeRecord = (input: {
  * three-homer game are denominated in the same currency, and splitting them would be a claim
  * that they are not comparable — which is exactly what a points league denies.
  */
+/** One of the best nights in baseball. `key` is `id:group` — the same key a roster uses,
+ *  and it is here because a NAME is not an identity: two men called Max Muncy played in
+ *  2025, and a list keyed by name renders one of them and silently drops the other. */
+export interface BestNight {
+	key: string
+	name: string
+	team: string | null
+	group: "hitting" | "pitching"
+	points: number
+	top: { code: string; points: number }[]
+}
+
 export const bestNights = (
 	lines: Map<string, ActualLine>,
 	league: League,
 	take = 10
-): { name: string; team: string | null; group: "hitting" | "pitching"; points: number; top: { code: string; points: number }[] }[] => {
-	const out: { name: string; team: string | null; group: "hitting" | "pitching"; points: number; top: { code: string; points: number }[] }[] = []
+): BestNight[] => {
+	const out: BestNight[] = []
 	for (const line of lines.values()) {
 		const scored = scoreStats(line.stats, tableFor(league, line.group), line.group)
 		out.push({
+			key: line.key,
 			name: line.name,
 			team: line.team,
 			group: line.group,

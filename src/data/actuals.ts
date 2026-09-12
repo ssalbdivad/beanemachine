@@ -140,7 +140,14 @@ export const fetchActuals = async (
 	/** Which sides of the ball to ask for. The innings floor needs only pitchers, and
 	 *  asking for hitters too would double a request for a number nothing reads. */
 	groups: ("hitting" | "pitching")[] = ["hitting", "pitching"]
-): Promise<{ actuals: Actuals; error: string | null }> => {
+): Promise<{
+	actuals: Actuals
+	error: string | null
+	/** The sides of the ball that did NOT answer. A caller has to be able to tell a man
+	 *  who sat out from a man nobody could ask about, and `error` is prose — this is the
+	 *  machine-readable half, and src/auto/recap.ts refuses totals on the strength of it. */
+	missing: ("hitting" | "pitching")[]
+}> => {
 	const deadline = AbortSignal.timeout(timeoutMs)
 	const abort = signal ? AbortSignal.any([signal, deadline]) : deadline
 	const one = async (group: "hitting" | "pitching"): Promise<ActualLine[]> => {
@@ -155,6 +162,7 @@ export const fetchActuals = async (
 	const failed = both.filter(r => r.status === "rejected") as PromiseRejectedResult[]
 	return {
 		actuals: { date, lines },
+		missing: groups.filter((_, i) => both[i]!.status === "rejected"),
 		error:
 			!failed.length ? null
 			: deadline.aborted ? `MLB did not answer within ${timeoutMs / 1000}s`

@@ -1428,12 +1428,22 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("and the best lineup it is measured against is stated", /worth 91\.3/.test(card), card)
 	t("labelled as hindsight rather than as a thing he should have known",
 		/knowing now what nobody knew then/.test(card), card)
+	/* THE SENTENCE CHANGED, and this assertion changed with it rather than being relaxed.
+	   It used to read "Bregman scored 25.8 more than Jo Adell", and the difference is what
+	   that phrasing does when the man in the seat never played: the subtraction treats his
+	   absence as a zero, so the card compared a real number with nothing and said "more
+	   than" about it. Both men's own numbers are printed now, which states the same gap
+	   and cannot be said about a man with no box score. Each half is still asserted —
+	   both names, the gap's two ends, and the seat. */
 	t("and named down to the one seat that explains it",
-		/Alex Bregman/.test(card) && /scored 25\.8 more than/.test(card) && /Jo Adell/.test(card), card)
+		/Alex Bregman/.test(card) && /scored 25\.8 where/.test(card) && /Jo Adell scored 0 in the seat/.test(card), card)
 	// Dustin May outscored everyone and was on the injured list: he could not have been
 	// started that day without a move the lineup did not have, so a regret built on him
-	// would be a fiction.
-	t("the man on the injured list is not the regret", !/Dustin May.*more than/.test(card), card)
+	// would be a fiction. Asserted against the sentence that names the swap rather than
+	// against the old "more than" phrasing, which no longer appears anywhere and would
+	// have made this pass without testing anything.
+	t("the man on the injured list is not the regret",
+		!/Dustin May scored/.test(card) && !/than .?Dustin May/.test(card), card)
 
 	/* THE WEEK, under the night. One number, three qualifications, all in the sentence: which
 	   days, that it counts every man he holds rather than the men he started, and that it is

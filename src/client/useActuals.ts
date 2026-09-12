@@ -25,6 +25,10 @@ import { localDate } from "../data/today.ts"
 export interface ActualsState {
 	actuals: Actuals | null
 	error: string | null
+	/** Sides of the ball that did not answer. Empty on a clean read. The recap needs this
+	 *  and not just `error`, because half a day of results looks exactly like a roster of
+	 *  men who did not play, and the difference decides which numbers may be printed. */
+	missing: ("hitting" | "pitching")[]
 	loading: boolean
 }
 
@@ -47,17 +51,22 @@ export const useActuals = (
 	 *  page nothing is never charged 38 KB for a screen that would have nothing on it. */
 	enabled: boolean
 ): ActualsState => {
-	const [state, setState] = useState<ActualsState>({ actuals: null, error: null, loading: false })
+	const [state, setState] = useState<ActualsState>({
+		actuals: null,
+		error: null,
+		missing: [],
+		loading: false
+	})
 
 	useEffect(() => {
 		if (!enabled || season === null || date === null) {
-			setState({ actuals: null, error: null, loading: false })
+			setState({ actuals: null, error: null, missing: [], loading: false })
 			return
 		}
 		const ctl = new AbortController()
 		let live = true
 		setState(s => ({ ...s, loading: true }))
-		void fetchActuals(season, date, ctl.signal).then(({ actuals, error }) => {
+		void fetchActuals(season, date, ctl.signal).then(({ actuals, error, missing }) => {
 			if (!live) return
 			/* A PARTIAL answer is kept, unlike the slate's. `fetchActuals` fetches both sides
 			   of the ball independently and reports which failed, and half a day of real
@@ -66,7 +75,7 @@ export const useActuals = (
 			   all-or-nothing rule is right for a slate, where a missing game reads as a club
 			   with no game; here a missing side reads as men who did not play, which is why
 			   `error` has to be rendered and not merely stored. */
-			setState({ actuals, error, loading: false })
+			setState({ actuals, error, missing, loading: false })
 		})
 		return () => {
 			live = false

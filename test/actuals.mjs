@@ -235,6 +235,78 @@ const noAccepts = recap({
 t("a league that never said what its seats accept gets no best lineup", noAccepts.best.total === 0 && noAccepts.blocked.some(b => /which players its seats accept/.test(b)), noAccepts.blocked.join(" | "))
 t("but still gets what his men scored", near(noAccepts.ownedTotal, 131.4))
 
+// --- the three states that look exactly like a bad night -------------------------
+
+// Everything above this line is a sum over men, and a sum cannot tell "did not play"
+// from "nobody could ask". These assert the three places that difference is
+// load-bearing, all three of which shipped as a confident zero and were found by a
+// refute pass rather than by a walk.
+
+// ONE SIDE OF THE BALL DID NOT ANSWER. `fetchActuals` keeps a partial day on purpose, so
+// the cost lands here: with the hitting read failed, every hitter held looks like he sat
+// out. The total of the men who WERE checked survives; every comparison is refused.
+const partial = recap({
+  date: "2026-09-11",
+  men: team,
+  lines: new Map(pitching.map(l => [l.key, l])),
+  league: LEAGUE, shape: SHAPE,
+  missing: ["hitting"]
+})
+t("a side that did not answer is named as unread, not as absent", partial.men.find(m => m.name === "Kyle Tucker").unread === true)
+t("a man on the side that DID answer is not marked unread", partial.men.find(m => m.name === "Taj Bradley").unread === false)
+t("what the answered side scored is still totalled", near(partial.ownedTotal, 69.6), String(partial.ownedTotal))
+t("the lineup total is refused under a partial read", partial.startedTotal === null, String(partial.startedTotal))
+t("and so is the bench gap and the regret", partial.leftOnBench === null && partial.biggest === null)
+t("the refusal counts the men nobody could check", partial.blocked.some(b => /4 of your men could not be checked/.test(b)), partial.blocked.join(" | "))
+t("and says it once rather than twice", partial.blocked.length === 1, partial.blocked.join(" | "))
+t("the sides that failed come out on the recap", partial.unread.join(",") === "hitting")
+
+// NO BASEBALL AT ALL. An off day, a break, a date before the season: `lines` is empty for
+// the whole of baseball, and "your lineup scored 0" is then a statement about the
+// calendar wearing a statement about your team's clothes.
+const offDay = recap({ date: "2026-04-01", men: team, lines: new Map(), league: LEAGUE, shape: SHAPE })
+t("an empty day for all of baseball is flagged as one", offDay.noGames === true)
+t("and every total that would read as a shutout is refused", offDay.startedTotal === null && offDay.leftOnBench === null && offDay.biggest === null)
+t("with the reason in the reader's words", offDay.blocked.some(b => /no box scores at all/.test(b)), offDay.blocked.join(" | "))
+t("nobody played, and it is counted rather than implied", offDay.played === 0)
+
+// MY MEN DID NOT PLAY, WHICH IS A DIFFERENT THING. Baseball happened; none of it was
+// his. `noGames` is false, the zero is honest, and the count is what lets the card say
+// which of the two it is.
+const theirsNotMine = recap({
+  date: "2026-09-11",
+  men: [{ key: "999999:hitting", name: "Nobody Played", slot: "OF", positions: ["OF"] }],
+  lines, league: LEAGUE, shape: SHAPE
+})
+t("a day of baseball none of whose games were yours is not an empty day", theirsNotMine.noGames === false)
+t("and none of his men played", theirsNotMine.played === 0)
+t("a day somebody played is counted", r.played === 6, String(r.played))
+
+// THE MAN COMING IN MUST HAVE PLAYED. A bench man who never took the field scores the
+// same nothing an empty seat does — but a starter can score BELOW zero, and the
+// subtraction then made a "swap" out of a man who did not pitch. No man in the committed
+// fixture scored negative, so this line is CONSTRUCTED: three outs and seven earned runs,
+// which is a real shelling and prices at 3 - 21 - 6.5 = -24.5 in this league.
+const shelled = new Map(lines)
+shelled.set("671737:pitching", {
+  key: "671737:pitching", id: "671737", group: "pitching", name: "Taj Bradley",
+  stats: { outs: 3, earnedRuns: 7, hits: 5, baseOnBalls: 0, strikeOuts: 0, wins: 0, saves: 0, hitByPitch: 0 }
+})
+const ghostOverShelling = recap({
+  date: "2026-09-11",
+  men: [
+    seated(MAN.bradley, "SP"),
+    seated(MAN.tucker, "OF"),
+    { key: "999998:pitching", name: "Never Pitched", slot: "BN", positions: ["SP"] }
+  ],
+  lines: shelled, league: LEAGUE, shape: SHAPE
+})
+t("the constructed shelling really is negative", near(ghostOverShelling.men.find(m => m.name === "Taj Bradley").points, -24.5), String(ghostOverShelling.men.find(m => m.name === "Taj Bradley").points))
+t("a man who did not play is never the swap you missed", ghostOverShelling.biggest === null, JSON.stringify(ghostOverShelling.biggest))
+// And the swap that IS real carries what each man actually did, because "scored 25.8
+// more than him" over a man with no box score is a comparison with nothing.
+t("a real swap carries both men's own numbers", near(r.biggest.inPoints, 25.8) && r.biggest.outPoints === 0, JSON.stringify(r.biggest))
+
 // --- Billy, graded against the lineup you already had ---------------------------
 
 // The comparison the whole record rests on: two lineups, one that was recommended and

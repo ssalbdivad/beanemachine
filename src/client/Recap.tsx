@@ -160,7 +160,7 @@ export const Recap = ({
 	  estimates. It is gated on a LEAGUE rather than on a roster, because the points have to
 	  be denominated in something, and the preset says on the card that they are borrowed.
 	*/
-	const { actuals, error, loading } = useActuals(season, date, !!league)
+	const { actuals, error, missing, loading } = useActuals(season, date, !!league)
 
 	/** What the best nights in baseball were worth, for a reader with no team yet. */
 	const best = useMemo(
@@ -283,13 +283,14 @@ export const Recap = ({
 			men: men.men,
 			lines: actuals.lines,
 			league,
+			missing,
 			shape: {
 				slots: league.roster.slots,
 				slot_order: league.roster.slot_order,
 				slot_accepts: league.roster.slot_accepts
 			}
 		})
-	}, [actuals, league, men, date])
+	}, [actuals, league, men, date, missing])
 
 	/**
 	 * BILLY'S RECORD, and it is the only number in this app that can be wrong in public.
@@ -385,7 +386,7 @@ export const Recap = ({
 						    decade. The club is spelled out on the line below instead, where there
 						    is room for it. */}
 						{best.map((b, i) => (
-							<li key={`${b.name}-${b.group}`}>
+							<li key={b.key}>
 								<span className="recap-slot">{i + 1}</span>
 								<span className="recap-name">{b.name}</span>
 								<span className="recap-pts">{b.points}</span>
@@ -420,6 +421,27 @@ export const Recap = ({
 			</section>
 		)
 
+	/*
+	  NO BASEBALL IS ITS OWN SCREEN.
+	  
+	  `recap` has already refused every total, so rendering the normal card would print a
+	  bold 0 over a sentence explaining that the 0 means nothing. The date is the subject
+	  here and the team is not mentioned, because the team had nothing to do with it.
+	*/
+	if (result.noGames)
+		return (
+			<section className="card full recap">
+				<header className="recap-head">
+					<h2>Last night</h2>
+					<span className="recap-day">{day}</span>
+				</header>
+				<p className="sub">
+					There was no baseball on {plainDay(date)} &mdash; MLB has no box scores for that
+					date at all, so there is nothing to report rather than nothing scored.
+				</p>
+			</section>
+		)
+
 	/** The headline is whichever of the two totals the page is entitled to state. */
 	const headline = result.startedTotal ?? result.ownedTotal
 	/**
@@ -449,7 +471,8 @@ export const Recap = ({
 			<p className="recap-score">
 				<b>{headline}</b>{" "}
 				<span>
-					{result.startedTotal === null ? "from your players"
+					{result.unread.length ? "from the players MLB answered for"
+					: result.startedTotal === null ? "from your players"
 					: seatsAfter ? "from the lineup you have now"
 					: "from your lineup"}
 				</span>
@@ -492,18 +515,43 @@ export const Recap = ({
 					nobody knew then, the best lineup you could have set was worth{" "}
 					{result.best.total}.
 					{result.biggest && (
+						/* Two sentences, because a starter who was BAD and a starter who never
+						   took the field are not the same miss, and "scored 12 more than him"
+						   over a man with no box score at all is a comparison with nothing. */
 						<>
 							{" "}
 							Most of it was one seat: <b>{result.biggest.in}</b> scored{" "}
-							{result.biggest.swing} more than <b>{result.biggest.out}</b>, who had the
-							seat he could have filled.
+							{result.biggest.inPoints}
+							{result.biggest.outPoints === null ?
+								<>
+									{" "}
+									and <b>{result.biggest.out}</b>, who had the seat he could have filled,
+									never played.
+								</>
+							:	<>
+									{" "}
+									where <b>{result.biggest.out}</b> scored {result.biggest.outPoints} in the
+									seat he could have filled.
+								</>
+							}
 						</>
 					)}
 				</p>
 			)}
-			{result.leftOnBench === 0 && (
+			{/* `played > 0` because "nothing sat on your bench, that was the best lineup
+			    available to you" is technically true of a night nobody played and reads as
+			    praise for a lineup that did not exist. The line below says what happened. */}
+			{result.leftOnBench === 0 && result.played > 0 && (
 				<p className="recap-bench recap-perfect">
 					Nothing sat on your bench. That was the best lineup available to you.
+				</p>
+			)}
+
+			{result.played === 0 && !result.unread.length && (
+				<p className="sub">
+					None of your men played on {plainDay(date)} &mdash; every one of their clubs was
+					off or out of the day&rsquo;s record, so the {headline} above is an empty day
+					rather than a bad one.
 				</p>
 			)}
 
@@ -699,7 +747,7 @@ export const Recap = ({
 				<summary>Every man, best night first</summary>
 				<ul className="recap-list recap-each">
 					{result.men.map(m => (
-						<li key={m.name} className={m.started ? "recap-in" : ""}>
+						<li key={m.key} className={m.started ? "recap-in" : ""}>
 							<span className="recap-slot">{m.slot ?? ""}</span>
 							<span className="recap-name">{m.name}</span>
 							<span className="recap-pts">

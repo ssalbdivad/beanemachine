@@ -53,6 +53,13 @@ const STORES = [
 	   history: there is nothing to lose until something writes it, and naming a record he
 	   cannot have would be a sentence the code does not do. */
 	"beanemachine:ledger",
+	/* src/client/typing.ts — the half-typed contents of the setup and opponent boxes. On this
+	   list because the button beside the error has to take everything out, and first on the
+	   list of things a reader would WANT removed: if an unreadable draft is somehow what is
+	   wrong, the box it belongs to is the box he is trying to use. It is forgiving on read and
+	   so cannot itself be what throws during render. The paragraph the reader reads does not
+	   name it, because losing an unsent draft is not a loss he needs warning about. */
+	"beanemachine:typing",
 	/* src/client/opponent.ts. Forgiving on read like the lineup store, so it cannot itself be
 	   what throws during render — but it is on this list for the same reason every other key is:
 	   the button beside the error has to be the button that fixes it, and a clear list missing a

@@ -6,6 +6,7 @@ import { rosterFromPaste, type PastedRoster } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
 import { leagueGaps } from "./panels.tsx"
+import { typingStore, type Box } from "./typing.ts"
 
 /**
  * The first thing a stranger sees.
@@ -124,10 +125,21 @@ export const Onboard = ({
 	onDone: () => void
 }) => {
 	const [where, setWhere] = useState<Where | null>(null)
-	const [pasted, setPasted] = useState("")
+	/*
+	  THE TWO BOXES SURVIVE THE SHEET BEING CLOSED, and they did not.
+	  
+	  This sheet is mounted by App as `{docked && <Dock>}`, and closing it with a league in
+	  existence — which there is, from the moment a first visit adopts the borrowed one —
+	  takes `docked` false and unmounts everything here. Escape is the gesture a phone
+	  keyboard teaches, and it was throwing away eighteen typed lines. The text is kept in
+	  the browser as it is typed instead, so it survives Escape, Back, a tab press and a
+	  reloaded phone. See src/client/typing.ts for why the draft rather than the component.
+	*/
+	const draft = (box: Box): ((t: string) => void) => t => typingStore.set(leagueKey, box, t)
+	const [pasted, setPasted] = useState(() => typingStore.of(leagueKey, "settings"))
 	const [note, setNote] = useState<string | null>(null)
 	const [url, setUrl] = useState("")
-	const [team, setTeam] = useState("")
+	const [team, setTeam] = useState(() => typingStore.of(leagueKey, "team"))
 	const [teamNote, setTeamNote] = useState<string | null>(null)
 	/** The last read of the team box, kept so the sheet can name every player back and
 	 *  quote every line that produced nobody. */
@@ -168,6 +180,9 @@ export const Onboard = ({
 		const seats = Object.values(made.roster.slots).reduce((a, b) => a + b, 0)
 		onCreateLeague(where, made)
 		setPasted("")
+		/* Read into a league, so the draft goes with it: a box that re-offers text the app
+		   has already acted on invites the reader to send it twice. */
+		typingStore.clear(leagueKey, "settings")
 		setNote(
 			`Read ${stats} scored stats` +
 				(seats ? `, ${seats} roster seats` : "") +
@@ -209,6 +224,12 @@ export const Onboard = ({
 			if (got.spots.length)
 				lineupStore.set(key, got.spots, new Date().toISOString())
 			setTeam("")
+			/* BOTH KEYS, because this gesture can be the thing that creates the league: when
+			   `leagueKey` was null the draft was stored under the empty key and `key` is the
+			   one the preset just adopted. Clearing only the new one would leave the text to
+			   be re-offered on the next visit. */
+			typingStore.clear(key, "team")
+			if (leagueKey !== key) typingStore.clear(leagueKey, "team")
 			// Cleared on success: the answer block below names every player back, which is
 			// the confirmation, and `note` here would repeat it in smaller type.
 			setTeamNote(null)
@@ -264,7 +285,10 @@ export const Onboard = ({
 				<textarea
 					data-ctl="onboard-team"
 					value={team}
-					onChange={e => setTeam(e.currentTarget.value)}
+					onChange={e => {
+						setTeam(e.currentTarget.value)
+						draft("team")(e.currentTarget.value)
+					}}
 					placeholder={PLACEHOLDER}
 					rows={5}
 					aria-label="The players on your team"
@@ -529,7 +553,10 @@ export const Onboard = ({
 							<textarea
 								data-ctl="paste-settings"
 								value={pasted}
-								onChange={e => setPasted(e.currentTarget.value)}
+								onChange={e => {
+									setPasted(e.currentTarget.value)
+									draft("settings")(e.currentTarget.value)
+								}}
 								placeholder={"Max Teams\t10\nRoster Positions\tC, 1B, 2B, 3B, SS, OF, …"}
 								rows={4}
 								aria-label="Paste your league's settings page here"

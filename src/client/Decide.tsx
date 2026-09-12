@@ -453,6 +453,11 @@ export const Decide = ({
 	 * against one day's points would price almost every seat as a hole.
 	 */
 
+	/** Bumped when a lock passes, and a dependency of the memo below. See the timer that arms
+	 *  it further down for why the card has to be able to re-derive itself on the clock alone,
+	 *  with nothing upstream of it having changed. */
+	const [crossed, setCrossed] = useState(0)
+
 	const today = useMemo(() => {
 		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length) return null
 		/*
@@ -699,11 +704,22 @@ export const Decide = ({
 		 *  changes it is NOT offering rather than look like it found fewer. */
 		/* Only men whose OWN game has started: the sentence this feeds says exactly that, and
 		   a man held back because somebody else cannot move is in `stuck` instead, with the
-		   reason that is true of him. */
-		const locked = [...new Set([
-			...startAll.filter(st => shut(st.name)).map(st => st.name),
-			...benchAll.filter(sp => shut(sp.name)).map(sp => sp.name)
-		])]
+		   reason that is true of him.
+		
+		   IT CARRIES THE DEADLINE RATHER THAN THE EVENT. The sentence used to say "his game has
+		   started", which is not the fact the code has: what it knows is that the scheduled
+		   first pitch has passed, and a rain-delayed 7:05 game is locked on the platform while
+		   MLB still calls it Pre-Game. The time is what a reader can check against his own
+		   clock, and it is the thing that actually closed the seat. */
+		const lockAt = (name: string): number | null =>
+			slate ? lockFor(byName.get(normalizeName(name))?.player.teamId, slate) : null
+		const locked = [
+			...new Map(
+				[...startAll, ...benchAll]
+					.filter(m => shut(m.name))
+					.map(m => [m.name, { name: m.name, at: lockAt(m.name) }] as const)
+			).values()
+		]
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked, stuck,
 			/** What the lineup reaches if the reader does everything the card still offers.
@@ -824,7 +840,43 @@ export const Decide = ({
 					)
 				:	null
 		}
-	}, [snapshot, league, seats, slate, injuries])
+	}, [snapshot, league, seats, slate, injuries, crossed])
+
+	/*
+	 * THE CARD IS DERIVED AT A MOMENT, AND THE MOMENT HAS TO BE NOW.
+	 *
+	 * `const now = Date.now()` sits inside the `today` memo, whose deps are the snapshot, the
+	 * league, the seats, the slate and the injuries. Nothing in the page ticks, so every
+	 * answer that depends on the clock — which seats are frozen, what the plan can still
+	 * reach, the "next lock 7:05pm" in the header, the order the change rows are sorted in —
+	 * was re-derived only when one of those five changed. In practice that meant waiting for
+	 * MLB to flip a game Pre-Game → In Progress and then up to 180 seconds of poll latency,
+	 * so a reader could be offered a seat the platform had already closed minutes earlier.
+	 * This is the specific failure the slate's poll was written to end, surviving in the
+	 * consumer.
+	 *
+	 * ONE TIMER, ARMED AT THE NEXT LOCK, not an interval. The moments at which the answer
+	 * changes are known exactly — they are the first pitches of the clubs his men are on, and
+	 * `nextLock` already picks the earliest one still ahead. So staleness goes to about a
+	 * second, and the 1,446-player re-rate happens once per lock boundary instead of sixty
+	 * times an hour on a phone. Re-armed on `visibilitychange` as well, because a suspended
+	 * tab's timer does not fire and the commonest way to read this card is to come back to it.
+	 */
+	useEffect(() => {
+		const at = today?.nextLock
+		if (at == null) return
+		let timer = 0 as unknown as ReturnType<typeof setTimeout>
+		const arm = (): void => {
+			clearTimeout(timer)
+			timer = setTimeout(() => setCrossed(c => c + 1), Math.max(0, at - Date.now()) + 1_000)
+		}
+		arm()
+		document.addEventListener("visibilitychange", arm)
+		return () => {
+			clearTimeout(timer)
+			document.removeEventListener("visibilitychange", arm)
+		}
+	}, [today?.nextLock])
 
 	/**
 	 * Men who are worth too much over the REST OF THE SEASON to give away for a week.
@@ -1031,14 +1083,18 @@ export const Decide = ({
 	 * sides, which is the only way the card can stop contradicting itself.
 	 */
 	const fillTonight = useMemo(() => {
-		if (!league || !today?.unfilled.length || !today.ratedToday.length) return []
-		if (!candidates.length) return []
+		const nothing = { fills: [] as { slot: string; name: string; points: number; team: string | null }[], lockedOut: 0 }
+		if (!league || !today?.unfilled.length || !today.ratedToday.length) return nothing
+		if (!candidates.length) return nothing
 		const free = new Set(candidates.map(p => normalizeName(p.name)))
 		const seen = new Set<string>()
 		/** One man can only fill one seat. Sam Antonacci is eligible at 2B, 3B, OF and
 		 *  Util in this league, so without this he was offered for four of them at once
 		 *  — four adds that are really one, and three seats still empty afterwards. */
 		const taken = new Set<string>()
+		/** Seats whose best answer exists and has already locked. A different sentence from a
+		 *  seat nobody is eligible for, and at 9pm it is the common one. */
+		const shut_out = new Set<string>()
 		const out: { slot: string; name: string; points: number; team: string | null }[] = []
 		for (const slot of today.unfilled) {
 			if (seen.has(slot)) continue
@@ -1060,6 +1116,28 @@ export const Decide = ({
 					return live.kind !== "no-game" && live.kind !== "benched"
 				})
 				.sort((a, b) => b.points - a.points)[0]
+			/*
+			   AND HIS GAME MUST NOT HAVE STARTED, which is the half of "on a card tonight" this
+			   block claimed and did not check.
+			
+			   `statusOf` says the same "starting" about a man in the ninth inning as about one
+			   at 7:04pm, so at 9pm the seat offer read "Add X · 6.2 projected tonight" for a man
+			   whose game had ended an hour before — a move and a player spent for the same zero
+			   the seat already had. The reader's own rows have been gated on exactly this since
+			   the freeze (`shut`, a few hundred lines up), so the card was freezing his own
+			   shortstop for a 1:05pm lock and offering him a free agent from a 2:20pm game on the
+			   same screen.
+			
+			   The scheduled first pitch rather than the game's state, for the reason in `locked`:
+			   a delayed game is closed on the platform while MLB still calls it Pre-Game.
+			*/
+			if (best && slate) {
+				const at = lockFor(best.player.teamId, slate)
+				if (at !== null && at <= Date.now()) {
+					shut_out.add(slot)
+					continue
+				}
+			}
 			if (best && best.points > 0) {
 				taken.add(normalizeName(best.player.name))
 				out.push({
@@ -1070,8 +1148,8 @@ export const Decide = ({
 				})
 			}
 		}
-		return out.slice(0, 4)
-	}, [today, candidates, league, slate])
+		return { fills: out.slice(0, 4), lockedOut: shut_out.size }
+	}, [today, candidates, league, slate, crossed])
 
 	/**
 	 * WHAT WAS RECOMMENDED, WRITTEN DOWN BEFORE THE GAMES ARE PLAYED.
@@ -1168,7 +1246,8 @@ export const Decide = ({
 				...(today?.bench ?? []).map(b => b.name),
 				...(today?.start ?? []).map(x => x.name),
 				...(today?.shifts ?? []).map(x => x.name),
-				...(today?.locked ?? [])
+				...(today?.locked ?? []).map(l => l.name),
+				...(today?.stuck ?? []).map(st => st.in)
 			].map(normalizeName)
 		)
 		const by = new Map<string, string[]>()
@@ -1609,12 +1688,14 @@ export const Decide = ({
 						<p className="sub decide-locked">
 							{today.locked.length === 1 ?
 								<>
-									<b>{today.locked[0]}</b>&rsquo;s game has started, so that seat is left
-									as it is.
+									<b>{today.locked[0]!.name}</b>&rsquo;s game was due to start
+									{today.locked[0]!.at !== null ? ` at ${clock(today.locked[0]!.at)}` : ""},
+									so that seat is no longer yours to change.
 								</>
 							:	<>
-									{today.locked.length} of your seats have already started &mdash;{" "}
-									{andList(today.locked)} &mdash; so they are left as they are.
+									{today.locked.length} of your seats were due to start before now
+									&mdash; {andList(today.locked.map(l => l.name))} &mdash; so they are no
+									longer yours to change.
 								</>
 							}
 						</p>
@@ -1650,7 +1731,12 @@ export const Decide = ({
 					  TONIGHT, because a free agent who is not playing fills the seat with the
 					  same zero it already has.
 					*/}
-					{fillTonight.length > 0 && (
+					{/* THE HEADING IS ABOUT THE SEATS, so it is rendered whenever a seat is empty
+					    rather than only when there is somebody to put in one. It used to be gated
+					    on the rows, and once the offers are gated on the lock that becomes the
+					    ordinary nine-o'clock case: empty seats, nobody left who can fill them, and
+					    a card that said nothing about either. */}
+					{today.unfilled.length > 0 && (
 						<>
 							<h3 className="decide-head decide-fill-head">
 								Empty seats
@@ -1661,7 +1747,7 @@ export const Decide = ({
 								</span>
 							</h3>
 							<ul className="decide-list decide-fill">
-								{fillTonight.map(f => (
+								{fillTonight.fills.map(f => (
 									<li key={`${f.slot}-${f.name}`}>
 										<span className="decide-slot">{f.slot}</span>
 										<span>
@@ -1674,23 +1760,38 @@ export const Decide = ({
 								))}
 							</ul>
 							{/*
-							  THE SEATS IT COULD NOT FILL, counted rather than left to be inferred.
+							  THE SEATS IT COULD NOT FILL, counted rather than left to be inferred,
+							  and in TWO sentences because there are two reasons.
 							  
 							  The heading says "4 seats score nothing tonight" and the list under it
-							  named two. The other two had nobody: either no free man is eligible
-							  there, or the ones who are are not on a card tonight, or one man was
-							  the best answer for two seats and can only take one. A reader left to
-							  work that out from a list that is shorter than its own heading reads
-							  it as the app having run out of room.
+							  named two. A reader left to work that out from a list shorter than its
+							  own heading reads it as the app having run out of room.
+							  
+							  And the single sentence it used to give asserted one reason for every
+							  such seat — "no free man eligible there is on a card tonight. Leaving
+							  them empty is the right answer." That is true of a seat nobody is
+							  eligible for. It is false of a seat whose best answer exists and has
+							  already locked, which is the commonest kind after the first pitch, and
+							  "leaving it empty is the right answer" is not advice about that seat at
+							  all: nothing can be done about it now, which is a different thing to be
+							  told and the thing that stops a reader going to look.
 							*/}
-							{today.unfilled.length > fillTonight.length && (
+							{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut > 0 && (
 								<p className="sub decide-fill-rest">
-									{today.unfilled.length - fillTonight.length === 1 ?
-										"The other seat has"
-									:	`The other ${today.unfilled.length - fillTonight.length} have`}{" "}
-									nobody: no free man eligible there is on a card tonight. Leaving{" "}
-									{today.unfilled.length - fillTonight.length === 1 ? "it" : "them"} empty
-									is the right answer.
+									{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut === 1 ?
+										"One other seat has"
+									:	`${today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut} others have`}{" "}
+									nobody: no free man eligible there is on a card tonight.
+								</p>
+							)}
+							{fillTonight.lockedOut > 0 && (
+								<p className="sub decide-fill-shut">
+									{fillTonight.lockedOut === 1 ?
+										"One seat had somebody, and his game has already begun"
+									:	`${fillTonight.lockedOut} of them had somebody, and those games have already begun`}{" "}
+									&mdash; so {fillTonight.lockedOut === 1 ? "it scores" : "they score"} nothing
+									tonight and there is nothing left to do about{" "}
+									{fillTonight.lockedOut === 1 ? "it" : "them"}.
 								</p>
 							)}
 						</>

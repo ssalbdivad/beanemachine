@@ -339,11 +339,18 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		) ?? [])[1] ?? NaN
 	)
 	const rest = (await page.$$eval(".decide-fill-rest", n => n.map(e => e.textContent.trim())))[0] ?? ""
-	t("every seat the heading counts is either offered a man or explained",
-		Number.isNaN(openSeats) ||
-			openSeats === fills.length ||
-			new RegExp(`other ${openSeats - fills.length}\\b|other seat`).test(rest),
-		`${openSeats} open, ${fills.length} offered, rest: ${rest || "(nothing said)"}`)
+	const shutOut = (await page.$$eval(".decide-fill-shut", n => n.map(e => e.textContent.trim())))[0] ?? ""
+	/* THE ACCOUNTING IS NOW ACROSS TWO SENTENCES, and this assertion adds them up rather than
+	   matching one of them. The single sentence it used to read asserted one reason for every
+	   unfilled seat — "no free man eligible there is on a card tonight" — which is true of a
+	   seat nobody is eligible for and false of a seat whose best answer has already locked,
+	   the commonest kind after the first pitch. "One" and "one other" are spelled out in both
+	   sentences, so the word counts as 1. */
+	const said = t =>
+		/^(One|one)\b/.test(t) ? 1 : Number((/(\d+)/.exec(t) ?? [])[1] ?? (t ? NaN : 0))
+	t("every seat the heading counts is offered a man, or explained by one of the two reasons",
+		Number.isNaN(openSeats) || fills.length + said(rest) + said(shutOut) === openSeats,
+		`${openSeats} open, ${fills.length} offered, nobody-eligible: ${rest || "(none)"}, already-locked: ${shutOut || "(none)"}`)
 	/*
 	 * The seat phrase has to come off the name before the name is compared.
 	 *
@@ -1989,6 +1996,76 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	} else {
 		t("the per-man fold is still on the card when the read failed", false, card.slice(0, 300))
 	}
+	await page.close()
+}
+
+/**
+ * THE CARD RE-DERIVES ITSELF WHEN A LOCK PASSES, with nothing upstream having changed.
+ *
+ * `const now = Date.now()` lives inside the memo that builds this card, and that memo's
+ * dependencies are the snapshot, the league, the seats, the slate and the injuries. Nothing in
+ * the page ticked, so every answer that depends on the clock — which seats are frozen, what
+ * the plan can still reach, the "next lock" in the header, the order the rows are sorted in —
+ * waited for MLB to flip a game Pre-Game → In Progress and then up to 180 seconds of poll
+ * latency. A reader could be offered a seat the platform had already closed minutes earlier,
+ * which is the exact failure the slate's own poll was written to end.
+ *
+ * THE STATE IS PINNED FOR THE WHOLE RUN. Every game in this stub says "Pre-Game" from start to
+ * finish and the body never changes, so the only thing that can move the card is the clock
+ * crossing a first pitch — and a rain-delayed game really does stay Pre-Game at MLB while
+ * being locked on the platform, which is why the card keys on the scheduled time at all.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const teams = [...new Set(snap.players.map(p => p.teamId).filter(Boolean))]
+	const SOON = 6_000
+	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	const firstPitch = new Date(Date.now() + SOON).toISOString()
+	await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>
+		r.fulfill({
+			status: 200,
+			contentType: "application/json",
+			body: JSON.stringify({
+				dates: [{
+					games: teams.map((id, i) => ({
+						gamePk: 2000 + i,
+						gameDate: firstPitch,
+						status: { detailedState: "Pre-Game" },
+						teams: { home: { team: { id, abbreviation: "HOM" } }, away: { team: { id: 999, abbreviation: "AWY" } } },
+						lineups: {}
+					}))
+				}]
+			})
+		}))
+	await page.route("**statsapi.mlb.com/api/v1/transactions**", r =>
+		r.fulfill({ status: 200, contentType: "application/json", body: '{"transactions":[]}' }))
+	await page.route("**stats?stats=byDateRange**", r =>
+		r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(DAY_HITTING) }))
+	await page.addInitScript(([l, c, pool]) => {
+		localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+		localStorage.setItem("beanemachine:config", JSON.stringify(c))
+		localStorage.setItem("beanemachine:pool", JSON.stringify(pool))
+	}, [{ [KEY]: { at: new Date().toISOString(), spots } }, cfg, seedPool])
+	await page.goto(BASE, { waitUntil: "domcontentloaded" })
+	await page.waitForSelector(".decide", { timeout: 30000 })
+	await page.waitForTimeout(2500)
+	const before = await page.$eval(".decide", e => e.innerText)
+	t("before the first pitch the card offers changes and says when they lock",
+		/next lock/.test(before) && !/no longer yours to change/.test(before), before.slice(0, 400))
+	/* Past the pitch, plus the timer's own one-second margin, plus room for one re-rate. No
+	   schedule request can have changed anything: the route returns the same body, and the
+	   slate's poll is 180s. */
+	await page.waitForTimeout(SOON + 4_000)
+	const after = await page.$eval(".decide", e => e.innerText)
+	t("and once it passes, the same card says those seats are no longer his to change",
+		/no longer yours to change/.test(after), after.slice(0, 500))
+	t("and stops naming a next lock that is already behind him",
+		!/next lock/.test(after), after.slice(0, 300))
+	/* The deadline, not the event: what the code knows is that the scheduled first pitch has
+	   passed, and the sentence says so. It used to say "his game has started", which is a claim
+	   about a game that may be sitting under a tarpaulin. */
+	t("and says it as a deadline rather than as a thing it watched happen",
+		/was due to start|were due to start/.test(after), after.slice(0, 500))
 	await page.close()
 }
 

@@ -255,7 +255,12 @@ t("league selected", (await page.inputValue(".bar select")) === "yahoo:228947")
 // chips reflect real imported data
 const chips = await page.$$eval(".chip", n => n.map(e => e.textContent.trim()))
 t("chip shows team", chips.some(c => c.includes("Mrs. Met's Harem")), chips.join(" / "))
-t("chip shows provenance", chips.includes("read from source"), chips.join(" / "))
+/* Was `chips.includes("read from source")`. The chip now reads "from your league": "source"
+   is a word about where a PROGRAM got something, and the house rule is that nothing
+   user-facing talks about the software — a chip is the shortest possible place to break that,
+   because there is no sentence around it to work out what it meant. The fact asserted is
+   unchanged: this league's values were read off its own pages. */
+t("chip says the values came off the league's own pages", chips.includes("from your league"), chips.join(" / "))
 
 // scoring tables rendered with the real values
 const codes = await page.$$eval(BATTING + " .code", n => n.map(e => e.textContent))
@@ -750,7 +755,12 @@ await fp.click('.bar button:text-is("New")')
 // Wire came up empty for a freshly created preset league, the preset would be useless
 // no matter how complete its stored values were.
 await screen(fp, PICKUPS)
-await fp.waitForSelector(".board-row", { timeout: 25000 })
+try {
+  await fp.waitForSelector(".board-row", { timeout: 25000 })
+} catch {
+  console.log("DIAG tab:", await fp.$$eval("nav button", bs => bs.filter(x=>x.className.includes("on")).map(x=>x.innerText.trim()).join()))
+  console.log("DIAG main:", (await fp.$eval("main", e => e.innerText)).replace(/\n+/g, " | ").slice(0, 400))
+}
 t("choosing the preset lands on a board that actually ranks",
   (await fp.$$eval(".board-row", n => n.length)) > 50,
   String(await fp.$$eval(".board-row", n => n.length)))
@@ -780,8 +790,10 @@ t("the board says the values were not read from your league",
 t("and it names what to check, from the league's own needs_review",
   (await fp.$$eval(".preset-note .flags li", n => n.length)) >= 3,
   String(await fp.$$eval(".preset-note .flags li", n => n.length)))
-t("and the provenance chip reads unverified, not read from source",
-  (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).includes("unverified"),
+/* Was `.includes("unverified")`. Same fact, stated as a fact about the league rather than as
+   what a form says when it distrusts you. */
+t("and the chip says these values did not come off his league",
+  (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).includes("not from your league"),
   (await fp.$$eval(".chip", n => n.map(e => e.textContent.trim()))).join(" / "))
 
 // The notice has to be able to END, or it is a warning people learn to read past —
@@ -808,8 +820,17 @@ t("and the one line left says where the values came from and that it is still un
   checked.needs_review.length === 1 && /preset/.test(checked.needs_review[0]) &&
     /unverified/.test(checked.needs_review[0]),
   JSON.stringify(checked.needs_review))
+/* The tab press is new, and it is the assertion's subject moving rather than the assertion
+   changing. A first visit used to land on the ranked board; it now lands on Tonight, because
+   the board's first five rows before any setup were three White Sox and two men from the two
+   worst teams in baseball — correct output from a value-over-replacement ranking and the worst
+   available answer to "what is this?". So the board has to be opened before it can be asserted
+   about. The claim is untouched: checking the preset's values by hand must not stop the board
+   ranking. */
+await screen(fp, PICKUPS)
 t("and the board still ranks, because the values did not change",
-  (await fp.$$eval(".board-row", n => n.length)) > 50)
+  (await fp.$$eval(".board-row", n => n.length)) > 50,
+  String(await fp.$$eval(".board-row", n => n.length)))
 
 // Route 2: the file a Yahoo user carries from a local run. Everything a hosted page
 // cannot read for a Yahoo league has to survive the trip — not just the leagues,
@@ -1088,8 +1109,14 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
   await lp.waitForSelector(".decide", { timeout: 25000 })
   const ageChip = await lp.locator(".chip", { hasText: /player data/ }).first()
   const ageText = (await ageChip.textContent()).replace(/\s+/g, " ").trim()
+  /* The anchored `$` went when the stale case gained a clause. The chip used to carry the
+     age and nothing else, with "is this old enough to matter" said only by its colour —
+     which is not a sentence, and a reader who cannot see the difference got nothing. A
+     stale chip now reads "player data 4d ago — a day of games has happened since". The age
+     is still required to be there and still required to be one of the four shapes
+     `freshness()` can produce; what is no longer required is that it be the whole chip. */
   t("the page still says how old the data behind the numbers is",
-    /^player data (just now|\d+h ago|\d+d ago|age unknown)$/.test(ageText), ageText)
+    /^player data (just now|\d+h ago|\d+d ago|age unknown)\b/.test(ageText), ageText)
   // And it is FLAGGED, not just printed. The committed capture is stamped
   // 2026-09-08; anything past 36h is stale by `freshness()`'s own line, and a stale
   // age that renders in the same grey as a fresh one is the draft banner's failure
@@ -1154,6 +1181,95 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 			/reload/i.test(text), text.slice(-160))
 	}
 	await page.close()
+}
+
+/**
+ * BACK GOES BACK, which it has never done.
+ *
+ * The oldest entry in docs/FINDINGS.md: nothing in this app pushed a history entry, so Back
+ * left the site from anywhere — with the setup sheet open and eighteen lines typed it went to
+ * about:blank, and after Tonight → Pickups it exited rather than returning. On a phone Back is
+ * how people dismiss a keyboard and undo a tap, so every press of it was a reader leaving.
+ *
+ * The shape that does NOT work is documented in src/client/Dock.tsx and is why this is worth a
+ * suite: an effect keyed on `open` that pops in its cleanup passes against a production build
+ * and fails against the dev server, because StrictMode double-invokes effects and a cleanup
+ * that navigates cannot be idempotent. So it is asserted on the dev server, under StrictMode,
+ * which is the configuration the broken version passed under everywhere else.
+ */
+{
+	const bp = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	await stubSlate(bp)
+	await bp.goto(BASE, { waitUntil: "domcontentloaded" })
+	await bp.waitForSelector("nav button")
+	await bp.waitForTimeout(1500)
+	const tabNow = () =>
+		bp.$$eval("nav button", bs =>
+			bs.filter(x => x.className.includes("on")).map(x => x.innerText.trim()).join() || "(none)")
+	const sheetUp = () =>
+		bp.evaluate(() => {
+			const el = document.querySelector("#dock-sheet")
+			return el ? !el.hidden : null
+		})
+
+	// Forward through two tabs, then back down the stack.
+	const first = await tabNow()
+	await bp.click("nav button:nth-child(2)")
+	await bp.waitForTimeout(500)
+	const second = await tabNow()
+	await bp.click("nav button:nth-child(3)")
+	await bp.waitForTimeout(500)
+	t("three tabs pressed leaves three different screens behind",
+		first !== second && second !== (await tabNow()), `${first} → ${second} → ${await tabNow()}`)
+	await bp.goBack()
+	await bp.waitForTimeout(500)
+	t("Back returns to the tab he came from", (await tabNow()) === second, await tabNow())
+	await bp.goBack()
+	await bp.waitForTimeout(500)
+	t("and again, rather than leaving the site", (await tabNow()) === first, await tabNow())
+	t("and the page is still this page",
+		/127\.0\.0\.1|localhost/.test(await bp.url()), await bp.url())
+
+	/* THE SHEET, which is the half that loses typed work. The dock only exists once the
+	   reader has asked for the setup, so this takes the toolbar route into it — the same one
+	   `openDock` uses when a league is already stored. */
+	await bp.click("nav button:nth-child(3)")
+	await bp.waitForTimeout(800)
+	await bp.waitForSelector(TOOLBAR_SETUP)
+	await bp.click(TOOLBAR_SETUP)
+	await bp.waitForSelector(".dock-sheet .onboard")
+	t("the sheet is up", (await sheetUp()) === true)
+	await bp.fill("#dock-sheet textarea", "Judge\nSoto\nAlonso")
+	await bp.goBack()
+	await bp.waitForTimeout(700)
+	t("Back takes the sheet down instead of leaving the site", (await sheetUp()) === false)
+	/* The whole point of the defect: eighteen lines typed and Back used to throw them away by
+	   leaving. The sheet is mounted-and-hidden rather than unmounted, so they survive. */
+	t("and what was typed into it is still there",
+		(await bp.$eval("#dock-sheet textarea", e => e.value)) === "Judge\nSoto\nAlonso",
+		await bp.$eval("#dock-sheet textarea", e => e.value))
+
+	/* Escape POPS rather than pushing, which is not a detail: pushing a second entry whose
+	   only difference is the sheet being down made Back REOPEN it, measured on the dev server.
+	   Closing a thing is the undo of opening it. */
+	/* Back to My league first: the guided button lives in the management block on that
+	   screen, and the Back presses above have left us on Tonight. */
+	await bp.click("nav button:nth-child(3)")
+	await bp.waitForTimeout(700)
+	await bp.waitForSelector(TOOLBAR_SETUP)
+	await bp.click(TOOLBAR_SETUP)
+	await bp.waitForSelector(".dock-sheet .onboard")
+	const depth = await bp.evaluate(() => history.length)
+	await bp.keyboard.press("Escape")
+	await bp.waitForTimeout(600)
+	t("Escape leaves no entry behind", (await bp.evaluate(() => history.length)) === depth,
+		`${depth} → ${await bp.evaluate(() => history.length)}`)
+	await bp.goBack()
+	await bp.waitForTimeout(700)
+	t("so Back after Escape goes to the previous screen, not back into the sheet",
+		(await sheetUp()) !== true && (await tabNow()) !== "(none)",
+		`sheet ${await sheetUp()}, tab ${await tabNow()}`)
+	await bp.close()
 }
 
 await browser.close()

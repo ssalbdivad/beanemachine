@@ -650,20 +650,29 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	}
 
 	/*
-	 * Same shape, same reasoning, for the innings-floor caveat.
+	 * BOTH HALVES OF THE FLOOR, and this block used to assert the opposite.
 	 *
-	 * The line can only count innings STILL TO COME — what has already been thrown is
-	 * on his team page, which nothing here reads — and that is a fact about this page
-	 * rather than about his week. It is the thing a reader has to know before acting,
-	 * so the clause stays on the line; why the page cannot do better is folded.
+	 * It read: "the innings line says it counts only what is still to come" and "why it
+	 * cannot count the rest is folded" — because what had already been thrown was on the
+	 * reader's team page, which nothing here read. That was the old truth and it is no longer
+	 * true: one byDateRange request covers a whole period for every pitcher in baseball, so
+	 * the line now states the banked innings, the projection, and the total against the floor.
+	 *
+	 * Asserted as a DISJUNCTION rather than pinned to the new wording alone. The read is live,
+	 * and a suite that required it to have landed would be a suite that reports MLB's
+	 * availability — so either the full sentence is there or the old one is, and in neither
+	 * case may the page compare the floor against a total it could not source. The one thing
+	 * forbidden outright is the retracted claim that nothing here reads the thrown innings.
 	 */
 	if (/innings a week/.test(text)) {
-		t("the innings line says it counts only what is still to come",
-			/still to come only/.test(text), text.slice(-700))
-		t("and why it cannot count the rest is folded, not dropped",
-			/why not the whole week/i.test(text) &&
-				!/Innings already thrown this period are on your team page/.test(text) &&
-				/Innings already thrown this period are on your team page/.test(deep),
+		const banked = /have thrown [\d.]+ in it so far and project [\d.]+ more/.test(text)
+		t("the innings line states what was thrown as well as what is coming, or says it could not",
+			banked || /still to come only/.test(text), text.slice(-700))
+		t("and a floor is only compared against a total the page could source",
+			banked ? /against \d/.test(text) : !/against \d/.test(text), text.slice(-400))
+		t("the fold explains whichever of the two it printed, and never the retracted claim",
+			/what these two numbers are|why not the whole week/i.test(text) &&
+				!/are on your team page, which\s+nothing here reads/.test(deep),
 			deep.slice(-900))
 	}
 

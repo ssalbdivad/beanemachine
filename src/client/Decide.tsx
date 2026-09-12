@@ -1942,11 +1942,29 @@ export const Decide = ({
 										:	"still to come only, from their scheduled turns"}
 									</em>
 									<details className="decide-fine">
-										<summary>why not the whole week</summary>
-										Innings already thrown this period are on your team page, which
-										nothing here reads — so this can tell you what is left, not whether
-										you will clear the floor. The turns themselves are MLB&rsquo;s
-										published probables, which are an announcement about a plan.
+										<summary>{banked !== null ? "what these two numbers are" : "why not the whole week"}</summary>
+										{/* The old version of this said "Innings already thrown this period are
+										    on your team page, which nothing here reads — so this can tell you
+										    what is left, not whether you will clear the floor." That was true
+										    and is not any more: one `byDateRange` read covers the whole period
+										    for every pitcher in baseball. The sentence is kept for the case
+										    where the read did not land, because then it is true again. */}
+										{banked !== null ?
+											<>
+												The innings already thrown come from MLB&rsquo;s own day-by-day
+												record for this period, counted for every pitcher you hold now —
+												so a man you added on Wednesday brings what he threw on Monday
+												with him, which is the one direction this can be wrong in. The
+												turns still to come are MLB&rsquo;s published probables, which
+												are an announcement about a plan.
+											</>
+										:	<>
+												Innings already thrown this period could not be read, so this can
+												tell you what is left and not whether you will clear the floor.
+												The turns themselves are MLB&rsquo;s published probables, which
+												are an announcement about a plan.
+											</>
+										}
 									</details>
 								</div>
 							</li>

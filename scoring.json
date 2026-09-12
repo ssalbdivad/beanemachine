@@ -283,7 +283,7 @@
         "platform": "yahoo",
         "sport": "mlb",
         "league_id": null,
-        "league_name": "Yahoo H2H points (preset)",
+        "league_name": "Yahoo head-to-head points",
         "league_url": null,
         "team_id": null,
         "team_name": null,

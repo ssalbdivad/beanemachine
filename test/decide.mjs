@@ -1696,7 +1696,15 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	/* The first seated hitter on the constructed team, and his club. His club's order is
 	   published WITHOUT him, so `statusOf` returns "not in today's lineup" — the one state
 	   that means a man who could have played is not playing. */
-	const victim = spots.find(sp => !/^(BN|IL|NA)/i.test(sp.slot) && sp.team)
+/* `sp.team` IS ALWAYS NULL IN THIS FIXTURE, and requiring it skipped this whole block.
+	   `seat()` at the top of the file pushes `team: null` for every spot — the seats a reader
+	   pastes carry a club, the ones this suite builds do not — so `spots.find(sp => … && sp.team)`
+	   never matched and every assertion below was silently unrun. The club comes from the
+	   snapshot, which is where `him` was getting it two lines later anyway. Found on 2026-09-12
+	   when a new block copied the same guard and also reported nothing. */
+	const victim = spots.find(
+		sp => !/^(BN|IL|NA)/i.test(sp.slot) && snap.players.some(p => p.name === sp.name && p.teamId)
+	)
 	const him = victim && snap.players.find(p => p.name === victim.name)
 	if (him?.teamId) {
 		const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
@@ -2226,6 +2234,85 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	   112" and "on pace for" are both claims the data cannot carry. */
 	t("and never puts it over the projection or calls it a pace",
 		!/of \d|on pace/.test(live.said), live.said)
+}
+
+/**
+ * A GAME THAT WAS CALLED OFF IS NEWS, and the card computed it and never said it.
+ *
+ * `src/data/today.ts` has parsed postponements into `slate.called` since the day a postponed
+ * game was seating men, and its own comment says the games stay in `games` "so a screen can
+ * SAY a game was called off". No screen did: the only trace was the game count going down by
+ * one, which a reader cannot tell from a light Wednesday. Before the seat locks it is the one
+ * change that is free — a man whose game has gone is a guaranteed zero — and afterwards it is
+ * the difference between a seat he got wrong and a seat nothing could be done about.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	/* Resolved through the snapshot, not through `sp.team`, which is null for every seat this
+	   suite builds — see the note in the scratch block above. */
+	const starter = spots.find(
+		sp => !/^(BN|IL|NA)/i.test(sp.slot) && snap.players.some(p => p.name === sp.name && p.teamId)
+	)
+	const him = starter && snap.players.find(p => p.name === starter.name)
+	/* AND ONE CLUB THAT IS STILL PLAYING, which is both the realistic shape and the only one
+	   that tests anything: with every game on the card called off, nobody of his can score at
+	   all, the Today block gives way to the period lineup, and the line under test is not on
+	   the screen to be asserted about. One postponement among a normal evening is the case a
+	   reader actually meets. */
+	const other = spots.find(
+		sp =>
+			sp !== starter &&
+			!/^(BN|IL|NA)/i.test(sp.slot) &&
+			snap.players.some(p => p.name === sp.name && p.teamId && p.teamId !== him?.teamId)
+	)
+	const otherClub = other && snap.players.find(p => p.name === other.name)?.teamId
+	if (him?.teamId && otherClub) {
+		const page = await browser.newPage({ viewport: { width: 420, height: 1400 } })
+		await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>
+			r.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify({
+					dates: [{
+						games: [
+							{
+								gamePk: 77,
+								gameDate: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+								/* The real string MLB sends, verbatim, rather than the word this app
+								   matches on — `isCalledOff` prefix-matches "Postponed", and a suite
+								   that sent the app's own vocabulary back to it would assert nothing. */
+								status: { detailedState: "Postponed" },
+								teams: { home: { team: { id: him.teamId, abbreviation: "HOM" } }, away: { team: { id: 999, abbreviation: "AWY" } } },
+								lineups: {}
+							},
+							{
+								gamePk: 78,
+								gameDate: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+								status: { detailedState: "Pre-Game" },
+								teams: { home: { team: { id: otherClub, abbreviation: "HOM2" } }, away: { team: { id: 998, abbreviation: "AWY2" } } },
+								lineups: {}
+							}
+						]
+					}]
+				})
+			}))
+		await page.route("**statsapi.mlb.com/api/v1/transactions**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: '{"transactions":[]}' }))
+		await page.route("**stats?stats=byDateRange**", r => r.abort())
+		await page.addInitScript(([l, c]) => {
+			localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+			localStorage.setItem("beanemachine:config", JSON.stringify(c))
+		}, [{ [KEY]: { at: new Date().toISOString(), spots } }, cfg])
+		await page.goto(BASE, { waitUntil: "domcontentloaded" })
+		await page.waitForSelector(".decide", { timeout: 30000 })
+		await page.waitForTimeout(5000)
+		const said = (await page.$$eval(".decide-called", n => n.map(e => e.innerText)))[0] ?? ""
+		t("a man whose game has been called off is named on the card",
+			said.includes(him.name), said || "(nothing said)")
+		t("and told what it costs that seat, whoever is in it",
+			/called off/.test(said) && /nothing tonight/.test(said), said)
+		await page.close()
+	}
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

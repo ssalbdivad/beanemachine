@@ -6,7 +6,7 @@ import { isReserveSlot, ownershipCut, rateAll, slotsFor } from "../engine/bscore
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
 import { scoreStats, tableFor } from "../engine/points.ts"
 import {
-	activeSlots, freezeShut, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
+	activeSlots, freezeShut, isBench, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
 import { freshness, tab } from "./panels.tsx"
@@ -646,6 +646,31 @@ export const Decide = ({
 		   Called-off games are excluded here as everywhere else on this card: a postponed game
 		   is not a game he is waiting on.
 		*/
+		/*
+		   A GAME THAT WAS CALLED OFF IS NEWS, and the card computed it and never said it.
+		
+		   `src/data/today.ts` has parsed postponements, suspensions and cancellations into
+		   `slate.called` since the day a postponed game was seating men — and its own comment
+		   says the games "stay in `games` so a screen can SAY a game was called off". No screen
+		   did. The only trace was the game COUNT going down by one, which a reader cannot
+		   distinguish from a light Wednesday.
+		
+		   It matters at two different moments. Before the seat locks, it is the one change that
+		   is free: a man whose game has gone is a guaranteed zero, and anybody playing beats
+		   him. Afterwards, it is the difference between a seat he got wrong and a seat nothing
+		   could be done about — which is what stops him going to look for the mistake.
+		
+		   Named for men in STARTABLE seats only. A bench man whose game is off costs him
+		   nothing, and a card that reports it is a card that reports the weather.
+		*/
+		const calledOff: string[] = []
+		for (const sp of seats.spots) {
+			if (isReserveSlot(sp.slot) || isBench(sp.slot)) continue
+			const id = byName.get(normalizeName(sp.name))?.player.teamId
+			if (typeof id !== "number" || !slate) continue
+			if (slate.games.some(g => slate.called.has(g.gamePk) && (g.homeTeamId === id || g.awayTeamId === id)))
+				calledOff.push(sp.name)
+		}
 		const clubs = new Set<number>()
 		for (const sp of seats.spots) {
 			const id = byName.get(normalizeName(sp.name))?.player.teamId
@@ -758,6 +783,7 @@ export const Decide = ({
 		]
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked, stuck, mineGames,
+			calledOff,
 			/** What the lineup reaches if the reader does everything the card still offers.
 			 *  Equal to `lineup.pointsPlanned` when nothing is frozen. */
 			pointsReach: Number((lineup.pointsPlanned - lostToLocks).toFixed(2)),
@@ -1591,6 +1617,18 @@ export const Decide = ({
 					{today.scratched.length === 1 ? "" : "s"} &mdash;{" "}
 					{today.scratched.length === 1 ? "that seat scores" : "those seats score"} nothing
 					unless you change {today.scratched.length === 1 ? "it" : "them"}.
+				</p>
+			)}
+
+			{/* The games that are NOT being played after all, beside the men who are not in the
+			    ones that are. Same shape as the scratch line above and for the same reason: it
+			    is somebody else's decision about his team, not this app's judgement. */}
+			{today && today.calledOff.length > 0 && (
+				<p className="sub decide-called">
+					<b>{andList(today.calledOff)}</b>&rsquo;s{" "}
+					{today.calledOff.length === 1 ? "game has" : "games have"} been called off &mdash;{" "}
+					{today.calledOff.length === 1 ? "that seat scores" : "those seats score"} nothing
+					tonight, whoever is in {today.calledOff.length === 1 ? "it" : "them"}.
 				</p>
 			)}
 

@@ -55,3 +55,71 @@ const snapshot = (): number => revision
  */
 export const useStored = (): number =>
 	useSyncExternalStore(subscribe, snapshot, snapshot)
+
+/**
+ * The one way into localStorage, and the one sentence said when there isn't one.
+ *
+ * Reaching localStorage at all throws in a private window, and `setItem` throws when
+ * the quota is full. Both are the store failing, so both read as one — which is why
+ * every store here goes through a small accessor rather than touching
+ * `window.localStorage` where it stands.
+ *
+ * The problem was that there were FOUR of those accessors, character-for-character
+ * identical: roster.ts lines 38-49 before this change, pool.ts 83-94, lineup.ts 36-45
+ * and ledger.ts 79-88. With them came four copies of the sentence they throw, and only
+ * roster.ts's copy carried the second half — "A private window usually does this." —
+ * which is the half that tells the reader what is actually wrong. It is true of all
+ * four stores; the other three had simply never been given it. That is how a
+ * duplicated string fails: not all at once but one copy at a time, and the docs in
+ * this repo have already lost a sentence that way.
+ *
+ * So the sentence lives here once and takes the noun as an argument. The noun stays
+ * the reader's own word for the thing — "a roster", "your lineup", "a record of what
+ * was recommended" — because a shared message that degrades to "there is nowhere to
+ * keep your data" would be worse than the four copies it replaced. Parameterise the
+ * specific part; share the part that must not drift.
+ *
+ * The ERROR CLASS is an argument rather than one shared class, and the first reason given
+ * for that was wrong. The claim was that Boundary.tsx, which prints `error.name` into the
+ * text a reader is asked to paste into a bug report, would say "RosterError" against
+ * "LedgerError" and so name WHICH store is unreadable. It does not. Every one of the five
+ * is `class X extends ApiError {}` (or `extends Error`) with no `name` of its own, so each
+ * inherits the plain string "Error" — measured by calling this accessor with no `window`
+ * defined, which is the same failure a private window produces:
+ *
+ *   node --experimental-strip-types --input-type=module -e '
+ *     const { storageFor } = await import("./src/client/stores.ts")
+ *     const { RosterError } = await import("./src/client/roster.ts")
+ *     try { storageFor("a roster", RosterError) } catch (e) { console.log(e.constructor.name, "|", e.name) }'
+ *   → RosterError | Error
+ *
+ * The first value is `constructor.name`, which nothing renders; the second is `name`,
+ * which Boundary prints. All five stores answer the same way. So the only thing that tells a reader which store broke is the
+ * SENTENCE, and the five sentences differ — which is the argument for parameterising the
+ * noun, not for parameterising the class. Whether these classes should set `name` is a
+ * real question and a user-facing change; it is not answered here.
+ *
+ * What does survive as a reason is api.ts. pool.ts deliberately cannot import it — api.ts
+ * imports pool.ts, and `extends ApiError` is evaluated at module scope, so the cycle would
+ * hit `ApiError` in its temporal dead zone and take the whole bundle down (the note at the
+ * top of pool.ts has the detail). An accessor that imported `ApiError` here to throw one
+ * shared class would have locked out the one store that could not follow, which is the
+ * store with the least in common with the others and the most to gain. Each class also
+ * stays declared beside the store it belongs to, so a screen that ever does need to tell a
+ * damaged roster from a damaged history has something to catch; today none of them does
+ * (`grep -rn 'instanceof RosterError\|instanceof LedgerError' src/` finds nothing — every
+ * catch site in Board.tsx and Trade.tsx tests `instanceof ApiError` and shows `e.message`).
+ */
+export const storageFor = (
+	keeping: string,
+	Fail: new (message: string) => Error
+): Storage => {
+	try {
+		return window.localStorage
+	} catch (e) {
+		throw new Fail(
+			`This browser won't let the page use local storage (${(e as Error).message}), ` +
+				`so there is nowhere to keep ${keeping}. A private window usually does this.`
+		)
+	}
+}

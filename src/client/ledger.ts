@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored } from "./stores.ts"
+import { stored, storageFor } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -76,16 +76,10 @@ type Stored = typeof Stored.infer
  */
 export const KEEP_DAYS = 60
 
-const storage = (): Storage => {
-	try {
-		return window.localStorage
-	} catch (e) {
-		throw new LedgerError(
-			`This browser won't let the page use local storage (${(e as Error).message}), ` +
-				`so there is nowhere to keep a record of what was recommended.`
-		)
-	}
-}
+/** Shared with the other three stores — see `storageFor` in stores.ts. The noun stays
+ *  this store's own, because "a record of what was recommended" is the only phrasing a
+ *  reader who has never opened the history would recognise. */
+const storage = (): Storage => storageFor("a record of what was recommended", LedgerError)
 
 const read = (): Stored => {
 	const raw = storage().getItem(STORE_KEY)

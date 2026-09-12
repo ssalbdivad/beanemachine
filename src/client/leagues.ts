@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored } from "./stores.ts"
+import { stored, storageFor } from "./stores.ts"
 import { Config, League } from "../schema.ts"
 import { ApiError } from "./api.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
@@ -27,6 +27,20 @@ const STORE_KEY = "beanemachine:config"
 
 /** A stored config is as much a source as the API, so its failures surface the same way. */
 export class StoreError extends ApiError {}
+
+/**
+ * The fifth user of the shared accessor, and the one that had no accessor at all.
+ *
+ * roster.ts, pool.ts, lineup.ts and ledger.ts each kept an identical copy of a
+ * try/catch around `window.localStorage`; this file, which is the store the other four
+ * are keyed beside, simply said `localStorage.getItem` and `localStorage.setItem` bare.
+ * In a private window that throws before anything here runs, out of the very first read
+ * on the very first render, and what reached the reader was the browser's own exception
+ * with no sentence of ours attached — the one store whose failure stops the whole app
+ * was the one that explained itself least. It now says what the other four say, with its
+ * own noun and its own class. See `storageFor` in src/client/stores.ts.
+ */
+const storage = (): Storage => storageFor("your leagues", StoreError)
 
 /*
  * WHAT A READER IS TOLD WHEN THE STORE IS DAMAGED, and what he is not.
@@ -71,14 +85,14 @@ const write = (config: Config): Config => {
 	const out = Config(rest)
 	if (out instanceof type.errors)
 		throw new StoreError(`Refusing to store an invalid config:\n${out}`)
-	localStorage.setItem(STORE_KEY, JSON.stringify(out))
+	storage().setItem(STORE_KEY, JSON.stringify(out))
 	// tell the screens to look again — see src/client/stores.ts
 	stored()
 	return out
 }
 
 const read = (): Config | null => {
-	const raw = localStorage.getItem(STORE_KEY)
+	const raw = storage().getItem(STORE_KEY)
 	if (raw === null) return null
 	try {
 		return parse(raw, "What this browser saved about your leagues")

@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored } from "./stores.ts"
+import { stored, storageFor } from "./stores.ts"
 
 /**
  * The free agents in YOUR league, exactly as they were read — carried in a file.
@@ -80,18 +80,11 @@ export const StoredPoolShape = Entry
 
 export type StoredPool = typeof Entry.infer
 
-/** Reaching localStorage at all throws in a private window, and setItem throws
- *  when the quota is full. Both are the store failing, so both read as one. */
-const storage = (): Storage => {
-	try {
-		return window.localStorage
-	} catch (e) {
-		throw new PoolError(
-			`This browser won't let the page use local storage (${(e as Error).message}), ` +
-				`so there is nowhere to keep your league's free agents.`
-		)
-	}
-}
+/** Shared with the other three stores — see `storageFor` in stores.ts, which takes the
+ *  error CLASS as an argument precisely so this file can use it: stores.ts imports
+ *  nothing from api.ts, so `PoolError extends Error` survives the hoist untouched and
+ *  the cycle described above stays broken. */
+const storage = (): Storage => storageFor("your league's free agents", PoolError)
 
 /**
  * An unreadable pool is DISCARDED rather than surfaced, which is what lineup.ts

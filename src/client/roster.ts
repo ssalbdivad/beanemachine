@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored } from "./stores.ts"
+import { stored, storageFor } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -35,18 +35,11 @@ export const rosterKey = (player: { id: number; group: string }): string =>
 const Stored = type({ "[string]": type(/^\d+:(hitting|pitching)$/).array() })
 type Stored = typeof Stored.infer
 
-/** Reaching localStorage at all throws in a private window, and setItem throws
- *  when the quota is full. Both are the store failing, so both read as one. */
-const storage = (): Storage => {
-	try {
-		return window.localStorage
-	} catch (e) {
-		throw new RosterError(
-			`This browser won't let the page use local storage (${(e as Error).message}), ` +
-				`so there is nowhere to keep a roster. A private window usually does this.`
-		)
-	}
-}
+/** The shared accessor bound to this store's noun and its own error class. It used to
+ *  be an inlined copy of the try/catch and the sentence, which three other stores also
+ *  held; the sentence now lives once in stores.ts, including the "A private window
+ *  usually does this." half that only this copy ever had. */
+const storage = (): Storage => storageFor("a roster", RosterError)
 
 const read = (): Stored => {
 	const raw = storage().getItem(STORE_KEY)

@@ -36,7 +36,23 @@ const STORES = [
 	"beanemachine:lineup",
 	"beanemachine:pool",
 	"beanemachine:view",
-	"beanemachine:draft"
+	/* Written by src/client/Draft.tsx, which commit 3fc3ec7 deleted when four tabs became
+	   three. Nothing writes it any more and it stays on this list anyway: a reader who used
+	   a build from before that commit still has the key sitting in his browser, and this
+	   button is the only thing that will ever take it out. */
+	"beanemachine:draft",
+	/* src/client/ledger.ts, which arrived in 34c3525. `grep -rn ledgerStore src/` finds no
+	   caller yet, so on every browser alive right now this line removes nothing. It is here
+	   ahead of the first writer because the ledger is one of the three stores — with the
+	   config and the roster — that THROW on a read they cannot parse rather than quietly
+	   returning empty, and a store that throws during render is precisely the blank page
+	   this component exists to replace. A reader who hits that needs the button beside the
+	   error to be the button that fixes it; a clear list missing the key would reload him
+	   into the same error forever, which is the failure mode the list's own comment above
+	   is warning about. The paragraph the reader reads deliberately does NOT name the
+	   history: there is nothing to lose until something writes it, and naming a record he
+	   cannot have would be a sentence the code does not do. */
+	"beanemachine:ledger"
 ]
 
 export class Boundary extends Component<{ children: ReactNode }, State> {

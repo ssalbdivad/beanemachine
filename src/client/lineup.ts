@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored } from "./stores.ts"
+import { stored, storageFor } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -33,16 +33,10 @@ type Stored = typeof Stored.infer
 
 export type StoredLineup = typeof Stored.infer[string]
 
-const storage = (): Storage => {
-	try {
-		return window.localStorage
-	} catch (e) {
-		throw new LineupError(
-			`This browser won't let the page use local storage (${(e as Error).message}), ` +
-				`so there is nowhere to keep your lineup.`
-		)
-	}
-}
+/** Shared with the other three stores — see `storageFor` in stores.ts. This file's copy
+ *  of the sentence was one of the three missing "A private window usually does this." —
+ *  the half that names the likely cause — which it now gets. */
+const storage = (): Storage => storageFor("your lineup", LineupError)
 
 const read = (): Stored => {
 	const raw = storage().getItem(STORE_KEY)

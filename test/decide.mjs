@@ -2128,6 +2128,106 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	await full.close()
 }
 
+/**
+ * WHAT HIS LINEUP HAS ACTUALLY SCORED TONIGHT, which no screen in this app could say.
+ *
+ * Every number on this card is a projection, and the recap is hard-wired to yesterday —
+ * correctly, it is the morning-after screen — so between the first pitch and midnight the app
+ * knew nothing about what was happening. The fixtures are the same real 2026-09-11 responses
+ * the recap is asserted against, served for whatever date is asked for, which is what makes
+ * the figure below hand-computable: Tucker 34.1 + Adell 0 + Bradley 29.5 + Bregman 25.8 +
+ * Albies 1.9 = 91.3 from the five startable seats, with May on the bench and not counted.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const men = ["Kyle Tucker", "Jo Adell", "Taj Bradley", "Alex Bregman", "Ozzie Albies", "Dustin May"]
+		.map(n => snap.players.find(p => p.name === n))
+	const seats = [
+		{ slot: "OF", name: "Kyle Tucker", positions: ["OF"], team: null },
+		{ slot: "Util", name: "Jo Adell", positions: ["OF"], team: null },
+		{ slot: "SP", name: "Taj Bradley", positions: ["SP"], team: null },
+		{ slot: "3B", name: "Alex Bregman", positions: ["3B"], team: null },
+		{ slot: "2B", name: "Ozzie Albies", positions: ["2B"], team: null },
+		{ slot: "BN", name: "Dustin May", positions: ["SP"], team: null }
+	]
+	const clubs = [...new Set(men.map(m => m?.teamId).filter(Boolean))]
+	/** @param state what every one of HIS clubs' games says, and `null` for "not started yet" */
+	const card = async (state, hours) => {
+		const page = await browser.newPage({ viewport: { width: 420, height: 1400 } })
+		const asked = []
+		await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>
+			r.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify({
+					dates: [{
+						games: clubs.map((id, i) => ({
+							gamePk: 4000 + i,
+							gameDate: new Date(Date.now() + hours * 3_600_000).toISOString(),
+							/* One of his clubs finished and the rest are still playing, which is what a
+							   nine-o'clock evening actually looks like — and it is the shape that makes
+							   the two counts in the sentence distinguishable. */
+							status: {
+								detailedState:
+									state === null ? "Pre-Game"
+									: i === 0 ? state
+									: "In Progress"
+							},
+							teams: { home: { team: { id, abbreviation: "HOM" } }, away: { team: { id: 999, abbreviation: "AWY" } } },
+							lineups: {}
+						}))
+					}]
+				})
+			}))
+		await page.route("**statsapi.mlb.com/api/v1/transactions**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: '{"transactions":[]}' }))
+		await page.route("**stats?stats=byDateRange**", r => {
+			asked.push(r.request().url())
+			return r.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify(r.request().url().includes("group=pitching") ? DAY_PITCHING : DAY_HITTING)
+			})
+		})
+		await page.addInitScript(([l, c]) => {
+			localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+			localStorage.setItem("beanemachine:config", JSON.stringify(c))
+		}, [{ [KEY]: { at: new Date().toISOString(), spots: seats } }, cfg])
+		await page.goto(BASE, { waitUntil: "domcontentloaded" })
+		await page.waitForSelector(".decide", { timeout: 30000 })
+		await page.waitForTimeout(4000)
+		const said = (await page.$$eval(".decide-sofar", n => n.map(e => e.innerText)))[0] ?? ""
+		await page.close()
+		return { said, asked }
+	}
+
+	/* THE GAMES HAVE NOT STARTED, so there is nothing to say and nothing to ask. A
+	   `byDateRange` read for a date with no games played comes back as about 500 bytes of
+	   empty splits, and a man missing from it means "did not play" rather than zero — so a
+	   pre-game total would render as a shut-out. The assertion is on the REQUESTS as well as
+	   on the text, because not charging him for it is half the claim. */
+	const early = await card(null, 3)
+	const TODAY = new Date().toLocaleDateString("en-CA")
+	t("before his games start the card says nothing about tonight's points",
+		early.said === "", early.said)
+	t("and does not ask MLB about a day that has not happened",
+		!early.asked.some(u => u.includes(`startDate=${TODAY}&endDate=${TODAY}`)),
+		early.asked.filter(u => u.includes(TODAY)).join(" | ") || "(none for today)")
+
+	/* ONE FINAL, THE REST UNDERWAY. The total is what his five startable seats have actually
+	   scored, and the bench man is not in it. */
+	const live = await card("Final", -2)
+	t("once they are being played it says what his lineup has actually scored",
+		/your lineup has scored/.test(live.said) && /91\.3/.test(live.said), live.said)
+	t("and says how much of his evening is already in the figure",
+		/1 game is final/.test(live.said), live.said)
+	/* NO ARITHMETIC BETWEEN THE TWO NUMBERS. This league pays -3 for an earned run, so
+	   tonight's figure can fall, and the projection covers seats whose games are over. "43 of
+	   112" and "on pace for" are both claims the data cannot carry. */
+	t("and never puts it over the projection or calls it a pace",
+		!/of \d|on pace/.test(live.said), live.said)
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

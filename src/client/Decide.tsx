@@ -4,6 +4,7 @@ import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { isReserveSlot, ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
+import { scoreStats, tableFor } from "../engine/points.ts"
 import {
 	activeSlots, freezeShut, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
@@ -17,7 +18,7 @@ import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { andList } from "../data/names.ts"
 import { useSlate } from "./useSlate.ts"
-import { lastNight, usePeriodActuals } from "./useActuals.ts"
+import { lastNight, useActuals, usePeriodActuals } from "./useActuals.ts"
 import { useStored } from "./stores.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { statusOf, lockFor, nextLock, clock, localDate, asSlateGames, type TodayStatus } from "../data/today.ts"
@@ -633,6 +634,41 @@ export const Decide = ({
 		 * allows it. Rendering fourteen rows and saying nothing about the other four
 		 * is not — the card would read as a complete lineup.
 		 */
+		/*
+		   HOW MUCH OF TONIGHT HAS ALREADY HAPPENED, counted in games rather than guessed at.
+		
+		   Three states per game and they are three different sentences: a club of his that is
+		   FINAL has everything it is going to have, one that is UNDERWAY is still adding, and
+		   one still TO COME has not contributed anything. The same three decide whether the
+		   running total below is worth reading at all, whether it is still worth asking for,
+		   and whether it has become a fact.
+		
+		   Called-off games are excluded here as everywhere else on this card: a postponed game
+		   is not a game he is waiting on.
+		*/
+		const clubs = new Set<number>()
+		for (const sp of seats.spots) {
+			const id = byName.get(normalizeName(sp.name))?.player.teamId
+			if (typeof id === "number") clubs.add(id)
+		}
+		const mine = (slate?.games ?? []).filter(
+			g =>
+				!slate?.called.has(g.gamePk) &&
+				(clubs.has(g.homeTeamId) || clubs.has(g.awayTeamId))
+		)
+		const isFinal = (st: string): boolean => /^(Final|Game Over|Completed)/i.test(st)
+		/* Its own read of the clock rather than the `now` the freeze uses, because that one is
+		   declared a hundred lines further down this memo and reaching forward to it is a
+		   temporal-dead-zone crash — which is exactly what the first version of this block was.
+		   Both are fresh: the whole memo re-derives when a lock passes. */
+		const atNow = Date.now()
+		const started = (g: { homeTeamId: number }): boolean =>
+			!!slate && (lockFor(g.homeTeamId, slate) ?? Infinity) <= atNow
+		const mineGames = {
+			final: mine.filter(g => isFinal(g.state)).length,
+			underway: mine.filter(g => !isFinal(g.state) && started(g)).length,
+			toCome: mine.filter(g => !isFinal(g.state) && !started(g)).length
+		}
 		const used = new Map<string, number>()
 		for (const st of lineup.starters) used.set(st.slot, (used.get(st.slot) ?? 0) + 1)
 		const unfilled: string[] = []
@@ -721,7 +757,7 @@ export const Decide = ({
 			).values()
 		]
 		return {
-			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked, stuck,
+			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked, stuck, mineGames,
 			/** What the lineup reaches if the reader does everything the card still offers.
 			 *  Equal to `lineup.pointsPlanned` when nothing is frozen. */
 			pointsReach: Number((lineup.pointsPlanned - lostToLocks).toFixed(2)),
@@ -992,6 +1028,65 @@ export const Decide = ({
 		lastNight(),
 		!!periodStart && ownedIds.some(k => k.endsWith(":pitching"))
 	)
+	/**
+	 * WHAT HIS LINEUP HAS ACTUALLY SCORED TONIGHT, which no screen in this app could say.
+	 *
+	 * Every number on this card is a projection, and at nine in the evening the one thing a
+	 * manager wants is the running total. The recap is hard-wired to yesterday — correctly,
+	 * it is the morning-after screen — so between the first pitch and midnight the app knew
+	 * nothing at all about what was happening.
+	 *
+	 * GATED ON HIS OWN GAMES, not on the clock. Before the first of them starts, the read is
+	 * worthless and is not made: `byDateRange` for a date with no games played answers in
+	 * about 500 bytes of empty splits, and a man missing from it is "did not play" rather than
+	 * zero, which would make a pre-game total look like a shut-out.
+	 *
+	 * POLLED WHILE, AND ONLY WHILE, ONE OF HIS GAMES IS LIVE. A total that never moves is
+	 * worse than no total — a reader checks it, sees the same figure, and concludes nothing is
+	 * happening. At the same 180s cadence as the slate, so the two live reads on this screen
+	 * stay in step. Once his last game is final the number is a fact and asking again cannot
+	 * change it, so the poll stops.
+	 *
+	 * NOTHING ABOUT TONIGHT MAY REACH THE LEDGER. `settle` writes a verdict once and never
+	 * asks again, which is why the recap gates it on `dayIsFinal`; this read is on a different
+	 * date and never touches that path.
+	 */
+	const liveGames = today?.mineGames ?? null
+	const tonightStarted = !!liveGames && liveGames.final + liveGames.underway > 0
+	const tonightDone = !!liveGames && liveGames.underway === 0 && liveGames.toCome === 0
+	const sofar = useActuals(
+		typeof snapshot?.season === "number" ? snapshot.season : null,
+		localDate(),
+		tonightStarted,
+		tonightStarted && !tonightDone ? 180_000 : 0
+	)
+	/**
+	 * HIS LINEUP'S OWN TOTAL, or his men's where nobody has told this page the seats.
+	 *
+	 * Two numbers and a comma, and deliberately no arithmetic between this and the
+	 * projection: this league pays -3 for an earned run, so tonight's figure can go DOWN, and
+	 * the projection covers seats whose games are already over. "43 of 112" and "on pace for"
+	 * are both claims the data cannot carry.
+	 */
+	const scoredTonight = useMemo((): { points: number; lineup: boolean } | null => {
+		if (!sofar.actuals || !league || !seats?.spots.length || !today) return null
+		/* A half-read evening is not a running total: with the hitting side missing, every bat
+		   he has looks like a man who has not come up yet. Same rule as the recap's. */
+		if (sofar.missing.length) return null
+		const by = new Map(today.ratedToday.map(r => [normalizeName(r.player.name), r]))
+		let sum = 0
+		let any = false
+		for (const sp of seats.spots.filter(sp => !isReserveSlot(sp.slot))) {
+			const r = by.get(normalizeName(sp.name))
+			if (!r) continue
+			const line = sofar.actuals.lines.get(`${r.player.id}:${r.player.group}`)
+			if (!line) continue
+			any = true
+			sum += scoreStats(line.stats, tableFor(league, r.player.group), r.player.group).points
+		}
+		return any ? { points: Number(sum.toFixed(1)), lineup: !!seats.at } : null
+	}, [sofar.actuals, sofar.missing, league, seats, today])
+
 	const banked = useMemo((): number | null => {
 		/* A PERIOD THAT OPENED TODAY HAS THROWN NOTHING, and that is a fact rather than an
 		   absence. The hook asks for no range in that case — a window running backwards is not
@@ -1587,6 +1682,31 @@ export const Decide = ({
 							:	<>your lineup projects {today.lineup.pointsNow}</>
 							}
 						</span>
+						{/*
+						  AND WHAT IT HAS ACTUALLY SCORED, once any of his games has started.
+						  
+						  The first fact on a card made entirely of projections, and it is the number
+						  a manager actually wants at nine in the evening. Two numbers and a comma:
+						  no "43 of 112", no "on pace for" and no gap between this and the
+						  projection, because this league pays -3 for an earned run — so tonight's
+						  figure can FALL — and the projection covers seats whose games are already
+						  over. See `scoredTonight` for what is counted and `sofar` for when it is
+						  asked for.
+						*/}
+						{scoredTonight && (
+							<span className="decide-gain decide-sofar">
+								{scoredTonight.lineup ? "your lineup has" : "your men have"} scored{" "}
+								<b>{scoredTonight.points}</b> so far tonight
+								{today.mineGames.final > 0 && (
+									<>
+										{" "}
+										&middot; {today.mineGames.final}{" "}
+										{today.mineGames.final === 1 ? "game is" : "games are"} final
+									</>
+								)}
+								{today.mineGames.toCome > 0 && <> &middot; {today.mineGames.toCome} still to come</>}
+							</span>
+						)}
 						{/* The assumption, on the heading it qualifies rather than in a footnote.
 						    A league whose lineup locks for the whole period cannot act on any of
 						    this, and nobody has told us which kind this is — so the changes below

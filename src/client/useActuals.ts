@@ -49,7 +49,22 @@ export const useActuals = (
 	date: string | null,
 	/** False until there is a team to say anything about, so a visitor who has told the
 	 *  page nothing is never charged 38 KB for a screen that would have nothing on it. */
-	enabled: boolean
+	enabled: boolean,
+	/**
+	 * HOW OFTEN TO ASK AGAIN, and zero — not asking again — is the right answer for every
+	 * caller but one.
+	 *
+	 * A finished day does not change, which is why this hook has never polled. TODAY does:
+	 * the Tonight card's running total is a number that moves all evening, and a total that
+	 * never moves is worse than no total at all, because a reader checks it and concludes
+	 * nothing is happening. 180_000 is the slate's own cadence (`POLL_MS` in useSlate.ts),
+	 * matched deliberately so the two live reads on that screen stay in step rather than
+	 * interleaving.
+	 *
+	 * The caller is responsible for stopping: pass 0 once the last of his games is final,
+	 * because at that point the number is a fact and re-asking cannot change it.
+	 */
+	pollMs = 0
 ): ActualsState => {
 	const [state, setState] = useState<ActualsState>({
 		actuals: null,
@@ -66,22 +81,26 @@ export const useActuals = (
 		const ctl = new AbortController()
 		let live = true
 		setState(s => ({ ...s, loading: true }))
-		void fetchActuals(season, date, ctl.signal).then(({ actuals, error, missing }) => {
-			if (!live) return
-			/* A PARTIAL answer is kept, unlike the slate's. `fetchActuals` fetches both sides
-			   of the ball independently and reports which failed, and half a day of real
-			   results beside a sentence saying the other half is missing is worth more than a
-			   blank screen — the men who are there are still correctly priced. The slate's
-			   all-or-nothing rule is right for a slate, where a missing game reads as a club
-			   with no game; here a missing side reads as men who did not play, which is why
-			   `error` has to be rendered and not merely stored. */
-			setState({ actuals, error, missing, loading: false })
-		})
+		const read = (): Promise<void> =>
+			fetchActuals(season, date, ctl.signal).then(({ actuals, error, missing }) => {
+				if (!live) return
+				/* A PARTIAL answer is kept, unlike the slate's. `fetchActuals` fetches both
+				   sides of the ball independently and reports which failed, and half a day of
+				   real results beside a sentence saying the other half is missing is worth more
+				   than a blank screen — the men who are there are still correctly priced. The
+				   slate's all-or-nothing rule is right for a slate, where a missing game reads
+				   as a club with no game; here a missing side reads as men who did not play,
+				   which is why `error` has to be rendered and not merely stored. */
+				setState({ actuals, error, missing, loading: false })
+			})
+		void read()
+		const timer = pollMs > 0 ? setInterval(() => void read(), pollMs) : null
 		return () => {
 			live = false
+			if (timer !== null) clearInterval(timer)
 			ctl.abort()
 		}
-	}, [season, date, enabled])
+	}, [season, date, enabled, pollMs])
 
 	return state
 }

@@ -4,6 +4,12 @@
 }
 .decide h3.decide-head:first-of-type{margin-top:var(--sp-3)}
 .decide-gain{font-size:var(--fs-2);font-weight:400;color:var(--muted)}
+/* The one fact on a card of projections, so it is the one clause in this header that is not
+   grey — and it is a figure that moves while he is looking at it. Its own line, because it is
+   a different KIND of number from everything beside it and a reader scanning for it should not
+   have to find it inside a sentence about estimates. */
+.decide-sofar{display:block;color:var(--ink)}
+.decide-sofar b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--accent)}
 .decide-window{margin:0 0 var(--sp-2)}
 .decide-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--sp-2)}
 .decide-list li{display:flex;gap:var(--sp-2);align-items:baseline}

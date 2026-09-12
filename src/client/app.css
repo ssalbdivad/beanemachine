@@ -1121,8 +1121,18 @@ kbd{
 .pick-more[open]>summary{display:block;margin:var(--sp-2) 0 2px}
 
 /* The masthead chips are a status line, not a paragraph: one row that scrolls if it
-   has to, rather than three rows of stacked pills pushing the ranking down a phone. */
+   has to, rather than three rows of stacked pills pushing the ranking down a phone.
+
+   AND THE ONE A READER CAN PRESS COMES FIRST. Measured on a first visit at 390px: the row is
+   917px wide in a 346px window — the league 0–155, "10 teams" 161–253, "player data 4d ago"
+   259–602, and then the BUTTON, "free agents estimated — make it exact", at 608–917. The only
+   control in the row, and the only chip that improves the answer, started entirely off-screen;
+   the three before it are labels. `order` rather than a change to the JSX, because the DOM
+   order is right for a screen reader and for every wider viewport — the league names itself
+   first — and this is a phone-width layout problem. The fade at the right edge still says
+   there is more to the row. */
 @media(max-width:640px){
+  .wrap>.chips>button{order:-1}
   .wrap>.chips{
     flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
     -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);

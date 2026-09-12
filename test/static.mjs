@@ -2421,6 +2421,32 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
     (await ph.$$(".preset-note .flags li")).length === 0)
   t("so tonight's card starts inside the first screen of the phone",
     !!geom.decide && geom.decide.top < 844, JSON.stringify(geom.decide))
+
+  /* AND THE ONE CHIP HE CAN PRESS IS ON THE SCREEN.
+  
+     Measured at 390px with a league in place: the status row is 917px wide in a 346px window —
+     the league 0–155, "10 teams" 161–253, "player data 4d ago" 259–602, and then the BUTTON,
+     "free agents estimated — make it exact", at 608–917. The only control in the row, and the
+     only chip that improves the answer, started entirely off-screen; the three ahead of it are
+     labels. It is ordered first at phone width, in CSS rather than in the markup, because the
+     DOM order is right for a screen reader and for every wider viewport. */
+  const chips = await ph.evaluate(() => {
+    const row = document.querySelector(".wrap>.chips")
+    if (!row) return null
+    const r = row.getBoundingClientRect()
+    const btn = row.querySelector("button")
+    if (!btn) return { noButton: true }
+    const b = btn.getBoundingClientRect()
+    return {
+      overflows: row.scrollWidth > row.clientWidth,
+      left: Math.round(b.left - r.left),
+      right: Math.round(b.right - r.left),
+      window: row.clientWidth
+    }
+  })
+  t("the only chip a reader can press is not scrolled off the screen",
+    !chips || chips.noButton || (chips.left === 0 && chips.right <= chips.window),
+    JSON.stringify(chips))
   await ph.close()
 }
 

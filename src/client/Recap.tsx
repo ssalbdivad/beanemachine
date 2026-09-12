@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { slotsFor } from "../engine/bscore.ts"
+import { scoreStats, tableFor } from "../engine/points.ts"
+import { resolvePeriod } from "../engine/period.ts"
 import { bestNights, gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
@@ -9,8 +11,15 @@ import { roster, rosterKey } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
 import { ledgerStore } from "./ledger.ts"
 import { useStored } from "./stores.ts"
-import { useActuals, lastNight } from "./useActuals.ts"
+import { useActuals, usePeriodActuals, lastNight } from "./useActuals.ts"
+import { localDate } from "../data/today.ts"
 import "./recap.css"
+
+/** "Sep 12" from an ISO date, at noon so a zone west of Greenwich cannot print yesterday.
+ *  Same helper and same reason as `plainDate` in src/client/Decide.tsx and `span` in
+ *  src/client/Trade.tsx — three screens naming a window must spell it the same way. */
+const plainDay = (iso: string): string =>
+	new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })
 
 /**
  * LAST NIGHT.
@@ -68,8 +77,8 @@ export const Recap = ({
 	 * available — nothing in the stored seats states a side of the ball. Where there is no
 	 * seat, the roster's own key settles it outright, because the roster stores the side.
 	 */
-	const men = useMemo((): { men: RecapMan[]; error: string | null } => {
-		if (!leagueKey || !snapshot) return { men: [], error: null }
+	const men = useMemo((): { men: RecapMan[]; error: string | null; seatsAt: string | null } => {
+		if (!leagueKey || !snapshot) return { men: [], error: null, seatsAt: null }
 		let ids: string[] = []
 		try {
 			ids = roster.of(leagueKey)
@@ -77,7 +86,7 @@ export const Recap = ({
 			/* A store the app has declared unreadable must not be acted on silently — My
 			   league owns the explaining and the repair, and this card's job is to withhold.
 			   Same rule as the Tonight card's `owned` memo. */
-			return { men: [], error: e instanceof Error ? e.message : String(e) }
+			return { men: [], error: e instanceof Error ? e.message : String(e), seatsAt: null }
 		}
 		const seats = lineupStore.of(leagueKey)
 		const elig = snapshot.eligibility ?? {}
@@ -108,7 +117,7 @@ export const Recap = ({
 					positions: sp.positions.length ? sp.positions : slotsFor(p, elig[String(p.id)])
 				})
 			}
-			if (out.length) return { men: out, error: null }
+			if (out.length) return { men: out, error: null, seatsAt: seats.at }
 		}
 
 		/* No seats: a team typed by hand, which is the only route a Yahoo user has in a
@@ -130,7 +139,7 @@ export const Recap = ({
 					}]
 				:	[]
 		})
-		return { men: out, error: null }
+		return { men: out, error: null, seatsAt: null }
 	}, [leagueKey, snapshot, rev])
 
 	const season =
@@ -170,6 +179,54 @@ export const Recap = ({
 		() => (actuals && league && !men.men.length ? bestNights(actuals.lines, league, 6) : null),
 		[actuals, league, men]
 	)
+
+	/**
+	 * THIS MATCHUP SO FAR, which is the only honest thing this app can say about a week.
+	 *
+	 * One number, and the restraint is the whole design. What every man you hold has scored
+	 * inside the league's own scoring period, from MLB's day-by-day record. Not "what your
+	 * lineup scored": the seats changed every day of that week and this browser holds only
+	 * today's, so a lineup total over a period would be today's seats applied to Monday, which
+	 * is a confident number about a team that did not exist.
+	 *
+	 * It is also not the SCORE. Yahoo pays only the men in your lineups, and the app can see
+	 * neither your past lineups nor any of your opponent's — grep across src/ finds nothing
+	 * that reads a rival roster or a scoreboard, and the Tonight card says so in its own words.
+	 * What this is is the size of your week, which is the thing a streaming decision is made
+	 * against, and the sentence says which of the two it is.
+	 *
+	 * One request pays for it and the innings floor both: same window, same dates, and
+	 * `usePeriodActuals` is shared so the pitching rows are not fetched twice.
+	 */
+	/* The league's own period, resolved the same way every other screen resolves it — from the
+	   league and the capture's last scheduled day, never from a guess about a week. Null where
+	   the snapshot has not arrived, which is the state the hook below refuses to fetch in. */
+	const period = useMemo(
+		() => (league && snapshot ? resolvePeriod(league, localDate(), snapshot.horizon.end) : null),
+		[league, snapshot]
+	)
+	const periodTo = lastNight()
+	const soFar = usePeriodActuals(
+		season,
+		/* The period's OWN first day, not `start`, which is today wherever today is inside the
+		   period — that edge is for a forward-looking rating and this question is about what has
+		   already happened. See `periodStart` in src/engine/period.ts. */
+		period?.periodStart ?? null,
+		periodTo,
+		!!period?.periodStart && period.periodStart <= periodTo && men.men.length > 0,
+		["hitting", "pitching"]
+	)
+	const periodTotal = useMemo((): number | null => {
+		if (!soFar.lines || !league || !men.men.length) return null
+		let sum = 0
+		for (const m of men.men) {
+			const line = soFar.lines.get(m.key)
+			if (!line) continue
+			const group = m.key.endsWith(":pitching") ? "pitching" : "hitting"
+			sum += scoreStats(line.stats, tableFor(league, group), group).points
+		}
+		return Number(sum.toFixed(1))
+	}, [soFar.lines, league, men])
 
 	const result = useMemo(() => {
 		if (!actuals || !league || !men.men.length) return null
@@ -317,6 +374,21 @@ export const Recap = ({
 
 	/** The headline is whichever of the two totals the page is entitled to state. */
 	const headline = result.startedTotal ?? result.ownedTotal
+	/**
+	 * WHETHER THOSE SEATS WERE HIS SEATS THAT NIGHT.
+	 *
+	 * `lineupStore` holds one set of seats per league and stamps when they were read. If that
+	 * stamp is AFTER the day being recapped — a roster pasted this morning, which is the
+	 * commonest case, because the morning is when a reader opens this card — then the seats
+	 * describe today's team and not last night's. Calling that total "your lineup" would be a
+	 * confident claim about a lineup nobody recorded.
+	 *
+	 * It is still worth printing: what the lineup he has NOW would have scored on those games
+	 * is exactly the question a reader asks when he is deciding whether to change it. So the
+	 * number stays and the label changes, which is the whole difference between this and a
+	 * guess.
+	 */
+	const seatsAfter = !!men.seatsAt && men.seatsAt.slice(0, 10) > date
 	const played = result.men.filter(m => m.points !== null).length
 
 	return (
@@ -329,9 +401,22 @@ export const Recap = ({
 			<p className="recap-score">
 				<b>{headline}</b>{" "}
 				<span>
-					{result.startedTotal !== null ? "from your lineup" : "from your players"}
+					{result.startedTotal === null ? "from your players"
+					: seatsAfter ? "from the lineup you have now"
+					: "from your lineup"}
 				</span>
 			</p>
+
+			{/* The stamp, where it lands after the games. Said once, under the figure it
+			    qualifies, because a reader who has just pasted a roster is the reader most
+			    likely to be looking at this card. */}
+			{seatsAfter && result.startedTotal !== null && (
+				<p className="sub">
+					Those are the seats you gave this page on{" "}
+					{plainDay(men.seatsAt!.slice(0, 10))}, which is after the games below &mdash; so
+					that is what the lineup you have NOW would have scored, not what yours did.
+				</p>
+			)}
 
 			{/* The second number, and it is a different claim: everybody you hold, started or
 			    not. Only shown where it differs, because "your lineup scored 83.4 and your
@@ -392,6 +477,25 @@ export const Recap = ({
 			)}
 
 			{/*
+			  THE WEEK, under the night, because the night is what he came for.
+			  
+			  One number and three qualifications, all of them in the sentence rather than in a
+			  fold: which days it covers, that it counts every man he holds rather than the men
+			  he started, and that it is therefore the size of his week and not the score. The
+			  third is the one that matters — Yahoo pays only the men in a lineup, this browser
+			  holds only today's seats, and nothing in this app can see an opponent at all.
+			*/}
+			{periodTotal !== null && period?.periodStart && (
+				<p className="sub">
+					In this {period.kind === "matchup" ? "matchup" : "scoring period"} so far (
+					{plainDay(period.periodStart!)} to {plainDay(periodTo)}), every man you hold has
+					scored{" "}
+					<b>{periodTotal}</b> — counted for the men on your team now, whatever seat each
+					was in at the time, so it is the size of your week rather than the score.
+				</p>
+			)}
+
+			{/*
 			  THE DENOMINATOR IS THE HONEST PART.
 			  
 			  Most days a lineup is already the best one and the advice is "leave it alone",
@@ -420,6 +524,47 @@ export const Recap = ({
 					)}
 				</p>
 			)}
+			{/*
+			  THE DAYS BEHIND THE NUMBER, because a record nobody can check is a boast.
+			  
+			  One line per day it graded: what the lineup it asked for scored, what the lineup
+			  already there scored, and the difference. That is the whole of the claim made
+			  visible, which is the only form in which this app is allowed to make it — and it is
+			  how a reader finds the day that is carrying the total, which is usually one day.
+			  
+			  Behind a tap rather than on the card, because the aggregate is the answer and
+			  sixty lines of working is not. Ungradeable days are not in here: they are not
+			  evidence about anything, and `skipped` says how many there were and why.
+			*/}
+			{record && record.changed > 0 && (
+				<details className="recap-all">
+					<summary>Every day it is counting</summary>
+					<ul className="recap-list recap-days">
+						{[...record.days]
+							.filter(d => d.worth !== null && !d.unchanged)
+							.reverse()
+							.map(d => (
+								<li key={d.date}>
+									<span className="recap-slot">{plainDay(d.date)}</span>
+									<span className="recap-name">
+										asked {d.asked}, you had {d.had}
+									</span>
+									<span className="recap-pts">
+										{d.worth! > 0 ? `+${d.worth}` : d.worth}
+									</span>
+								</li>
+							))}
+					</ul>
+					{record.skipped.length > 0 && (
+						<p className="sub">
+							{record.skipped.length}{" "}
+							{record.skipped.length === 1 ? "other day is" : "other days are"} on record and
+							not counted &mdash; {record.skipped[0]!.why}.
+						</p>
+					)}
+				</details>
+			)}
+
 			{record && record.changed === 0 && record.days.length > 0 && (
 				<p className="sub">
 					{record.unchanged === record.days.length ?

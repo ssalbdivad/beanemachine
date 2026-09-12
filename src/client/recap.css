@@ -163,3 +163,9 @@
 	color: var(--accent);
 	font-variant-numeric: tabular-nums;
 }
+
+/* The days behind the record. Same three tracks as the men list, so one reader's eye does
+   not have to learn a second layout — the gutter holds the date instead of a seat, and the
+   right-hand number is a difference rather than a total, which is why it may be negative. */
+.recap-days .recap-slot { text-align: left; color: var(--muted) }
+.recap-days .recap-pts { font-variant-numeric: tabular-nums }

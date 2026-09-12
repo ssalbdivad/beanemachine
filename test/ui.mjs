@@ -883,11 +883,14 @@ t("and it is still a valid config, so a file from an older build still loads",
 
 // Wipe the browser and drop the file back on the page — no file dialog, no toolbar.
 await fp.evaluate(() => localStorage.clear())
-await fp.reload({ waitUntil: "networkidle" })
-// Under `npx vite` the cleared store re-seeds from the committed scoring.json, so a
-// league is back and the app opens on Today. Waiting for `.decide` rather than
-// `.board-row` is not a weaker wait: what this needs is "the app has mounted and its
-// window drop handler is registered", and Today is what mounts.
+/* THE SCREEN IS IN THE ADDRESS NOW, so a plain `reload()` comes back to whatever the page was
+   last showing rather than to Tonight — which is the point of putting it there, and which made
+   this wait time out the first run after it landed. The clear-and-reload is what matters here
+   (an empty store on a fresh load, so the drop has to do all the work), so the load names the
+   screen it wants instead of assuming the default.
+   Waiting on `.decide` rather than `.board-row` is still not a weaker wait: what this needs is
+   "the app has mounted and its window drop handler is registered", and Tonight is what mounts. */
+await fp.goto(`${BASE}#tonight`, { waitUntil: "networkidle" })
 await fp.waitForSelector(".decide", { timeout: 25000 })
 const dropped = readFileSync(await taken.path(), "utf8")
 const dt = await fp.evaluateHandle(text => {

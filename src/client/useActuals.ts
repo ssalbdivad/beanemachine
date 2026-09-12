@@ -78,8 +78,12 @@ export const useActuals = (
 }
 
 /**
- * INNINGS ALREADY THROWN IN THIS SCORING PERIOD, which is the half of the innings floor
- * the app has never been able to state.
+ * WHAT HAS ALREADY HAPPENED IN THIS SCORING PERIOD — the half of a week the app could never
+ * see.
+ *
+ * Two callers, one read. The innings floor needs the pitching side of it and the period total
+ * needs both, and because the window and the dates are identical they share this hook rather
+ * than fetching the same pitching rows twice.
  *
  * The floor is a weekly quantity — this league forfeits its pitching side under twenty
  * innings — and the card could only ever say how many innings were STILL TO COME. Measured
@@ -94,13 +98,20 @@ export const useActuals = (
  * request rather than one per day: a seven-day week costs one read, not seven. Pitching only
  * — asking for hitters would double it for a number nothing here reads.
  */
-export const useThrownInnings = (
+export const usePeriodActuals = (
 	season: number | null,
 	/** First day of the scoring period, inclusive. */
 	start: string | null,
 	/** Last day with results, inclusive — yesterday, because today is not finished. */
 	end: string | null,
-	enabled: boolean
+	enabled: boolean,
+	/**
+	 * Which sides of the ball. The innings floor needs only pitchers; the period total needs
+	 * both, and asking for both is ONE extra request rather than a second read — the window
+	 * and the date are the same, so the two callers would otherwise fetch the same pitching
+	 * rows twice.
+	 */
+	groups: ("hitting" | "pitching")[] = ["pitching"]
 ): { lines: Map<string, ActualLine> | null; error: string | null; loading: boolean } => {
 	const [state, setState] = useState<{
 		lines: Map<string, ActualLine> | null
@@ -119,7 +130,7 @@ export const useThrownInnings = (
 		const ctl = new AbortController()
 		let live = true
 		setState(s => ({ ...s, loading: true }))
-		void fetchActuals(season, start, ctl.signal, undefined, end, ["pitching"]).then(
+		void fetchActuals(season, start, ctl.signal, undefined, end, groups).then(
 			({ actuals, error }) => {
 				if (!live) return
 				setState({ lines: error ? null : actuals.lines, error, loading: false })
@@ -129,7 +140,10 @@ export const useThrownInnings = (
 			live = false
 			ctl.abort()
 		}
-	}, [season, start, end, enabled])
+		/* `groups` is a fresh array on every render, so it is joined into a primitive rather
+		   than listed — a dependency that is never equal to itself re-fetches forever. */
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [season, start, end, enabled, groups.join()])
 
 	return state
 }

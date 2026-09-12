@@ -17,7 +17,7 @@ import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { andList } from "../data/names.ts"
 import { useSlate } from "./useSlate.ts"
-import { lastNight, useThrownInnings } from "./useActuals.ts"
+import { lastNight, usePeriodActuals } from "./useActuals.ts"
 import { useStored } from "./stores.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { statusOf, lockFor, nextLock, clock, localDate, asSlateGames, type TodayStatus } from "../data/today.ts"
@@ -536,6 +536,8 @@ export const Decide = ({
 		/** Men MLB has actually put in tonight's card — a published batting order or an
 		 *  announced start. A claim, not a silence. */
 		const placed = new Set<string>()
+		/** Men in startable seats MLB has left out of tonight's posted order. */
+		const scratched: string[] = []
 		/** Men whose club is playing and about whom MLB has said nothing yet. Most of any
 		 *  given day, and not the same as men who will sit. */
 		const waiting = new Set<string>()
@@ -564,6 +566,21 @@ export const Decide = ({
 			const onField =
 				live ? live.kind !== "no-game" && live.kind !== "benched"
 				:	r.player.teamId != null && w.games.has(r.player.teamId)
+			/*
+			   A SCRATCH IS NOT AN OPTIMISATION, so it does not queue behind the optimisations.
+			   
+			   A man MLB has left out of tonight's posted order, sitting in a startable seat, is
+			   the single most actionable thing this screen can say in an evening: that seat
+			   scores nothing unless the reader moves, and unlike every other row on the card it
+			   is a FACT rather than a ranking. It was reaching him grouped with everybody else
+			   under "not in today's lineup", below the change rows, in a list ordered by lock
+			   time — findable, and not led with.
+			   
+			   Only men in seats that can score. `isReserveSlot` covers the bench and the injured
+			   list both, which is the right test here: a scratch on the bench is not news.
+			*/
+			if (live?.kind === "benched" && !isReserveSlot(sp.slot))
+				scratched.push(sp.name)
 			const plays = r.rateable && onField
 			if (plays) {
 				playing.add(normalizeName(sp.name))
@@ -688,6 +705,7 @@ export const Decide = ({
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked,
 			placed: placed.size,
+			scratched,
 			waiting: waiting.size,
 			/** Whether the live read answered at all. With no slate there is nothing to
 			 *  split a headcount on and the header says the one number it has. */
@@ -884,7 +902,7 @@ export const Decide = ({
 	 * a direction the reader can see and correct for.
 	 */
 	const periodStart = rated?.period.start ?? null
-	const thrown = useThrownInnings(
+	const thrown = usePeriodActuals(
 		typeof snapshot?.season === "number" ? snapshot.season : null,
 		periodStart,
 		lastNight(),
@@ -1316,6 +1334,30 @@ export const Decide = ({
 					For <b>{PERIOD_NAME[rated.period.kind]}</b>, {plainDate(rated.period.start)} to{" "}
 					{plainDate(rated.period.end)}
 					{rated.period.assumed && " — assumed, your league states no scoring period"}.
+				</p>
+			)}
+
+			{/*
+			  A SCRATCH LEADS, because it is the one thing on this screen that is not a ranking.
+			  
+			  A man MLB has left out of tonight's posted order while he sits in a startable seat
+			  is the most actionable sentence the app can produce in an evening: that seat scores
+			  nothing unless the reader moves, and it is a FACT rather than an opinion about who
+			  is better. It was reaching him grouped with everybody else under "not in today's
+			  lineup", beneath the change rows, in a list ordered by lock time — findable, and
+			  not led with.
+			  
+			  Above the Today heading rather than inside it, because the heading is already four
+			  clauses long at 390px and because this is categorically different from the rest:
+			  every other row is the app's judgement, and this is somebody else's lineup card.
+			*/}
+			{today && today.scratched.length > 0 && (
+				<p className="sub decide-scratch">
+					<b>{andList(today.scratched)}</b>{" "}
+					{today.scratched.length === 1 ? "is" : "are"} not in tonight&rsquo;s posted lineup
+					{today.scratched.length === 1 ? "" : "s"} &mdash;{" "}
+					{today.scratched.length === 1 ? "that seat scores" : "those seats score"} nothing
+					unless you change {today.scratched.length === 1 ? "it" : "them"}.
 				</p>
 			)}
 

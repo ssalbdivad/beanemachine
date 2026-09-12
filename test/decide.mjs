@@ -1407,7 +1407,12 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 
 	// 34.1 + 0 + 29.5 = 63.6 from the three startable seats. The IL man is not in a lineup.
 	t("last night's card leads with what your lineup scored", /63\.6/.test(card), card.slice(0, 200))
-	t("and says that is what it is", /from your lineup/.test(card))
+	/* "from your lineup" OR "from the lineup you have now", and which one is itself asserted
+	   forty lines down. The seats this suite seeds are stamped with the current time, so they
+	   postdate the night being recapped and the card correctly refuses to call them the lineup
+	   he had — the claim here is only that the figure says which lineup it is ABOUT, rather
+	   than standing as a bare number. */
+	t("and says whose lineup that is", /from (your lineup|the lineup you have now)/.test(card), card.slice(0, 200))
 	// 63.6 + 25.8 + 1.9 + 40.1 = 131.4 for everyone held.
 	t("everyone you hold is a second, different number", /131\.4/.test(card), card)
 	t("and it says how many of them played", /6 of 6 of your men played/.test(card), card)
@@ -1429,6 +1434,31 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	// started that day without a move the lineup did not have, so a regret built on him
 	// would be a fiction.
 	t("the man on the injured list is not the regret", !/Dustin May.*more than/.test(card), card)
+
+	/* THE WEEK, under the night. One number, three qualifications, all in the sentence: which
+	   days, that it counts every man he holds rather than the men he started, and that it is
+	   therefore the size of his week and not the score — because Yahoo pays only the men in a
+	   lineup, this browser holds only today's seats, and nothing here can see an opponent.
+	   The stub answers every byDateRange read with the same fixture, so the figure equals the
+	   day's; what is asserted is the shape and the three caveats, which is what can regress. */
+	/* WHOSE SEATS THOSE WERE. `lineupStore` stamps when the seats were read, and this suite
+	   seeds them with `new Date()` — so they are always AFTER the night being recapped, which is
+	   also the commonest real case, because the morning is when a reader pastes a roster and
+	   when he opens this card. Calling that total "your lineup" would be a confident claim about
+	   a lineup nobody recorded; it is still worth printing, because what the lineup he has NOW
+	   would have scored is exactly the question he is asking. */
+	t("a lineup read after the games is labelled as the one he has now",
+		/from the lineup you have now/.test(card), card.slice(0, 200))
+	t("and the stamp says which day those seats came from",
+		/Those are the seats you gave this page on \w+ \d+/.test(card) &&
+			/not what yours did/.test(card), card)
+
+	t("the week so far is named as well as the night",
+		/In this (matchup|scoring period) so far \(\w+ \d+ to \w+ \d+\)/.test(card), card)
+	t("and it says it counts every man he holds, not the men he started",
+		/every man you hold has\s+scored/.test(card), card)
+	t("and that it is the size of his week rather than the score",
+		/size of your week rather than the score/.test(card), card)
 
 	const day = await page.$eval(".recap-day", e => e.innerText)
 	t("the date is the reader's own yesterday, not the fixture's", /\w/.test(day) && !/2026-09-11/.test(day), day)
@@ -1501,6 +1531,75 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	// twice, and a second row would flatter the record's own denominator.
 	t("one entry for the day, however many times it rendered", mine.filter(e => e.date === mine[0].date).length === 1, String(mine.length))
 	await page.close()
+}
+
+/**
+ * A SCRATCH LEADS, because it is the one thing on this card that is not a ranking.
+ *
+ * A man MLB has left out of tonight's posted order while he sits in a startable seat is the
+ * most actionable sentence the screen can produce in an evening: that seat scores nothing
+ * unless the reader moves, and it is a FACT rather than an opinion about who is better. It
+ * used to reach him grouped with everybody else under "not in today's lineup", beneath the
+ * change rows, in a list ordered by lock time.
+ *
+ * THE SLATE IS STUBBED HERE, which is the only way to assert it: a real evening may have no
+ * scratch on a constructed roster, and a suite that waited for one would be a suite that
+ * reports tonight's lineup cards. One club is given a posted order that omits a man the
+ * seeded team starts — which is exactly what a scratch is — and the rest of the slate is
+ * left empty.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	/* The first seated hitter on the constructed team, and his club. His club's order is
+	   published WITHOUT him, so `statusOf` returns "not in today's lineup" — the one state
+	   that means a man who could have played is not playing. */
+	const victim = spots.find(sp => !/^(BN|IL|NA)/i.test(sp.slot) && sp.team)
+	const him = victim && snap.players.find(p => p.name === victim.name)
+	if (him?.teamId) {
+		const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+		await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>
+			r.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify({
+					dates: [{
+						games: [{
+							gamePk: 99,
+							gameDate: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+							status: { detailedState: "Pre-Game" },
+							teams: { home: { team: { id: him.teamId, abbreviation: "HOM" } }, away: { team: { id: 999, abbreviation: "AWY" } } },
+							/* Nine ids that are not his: the order IS posted, and he is not in it. */
+							lineups: { homePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(id => ({ id })), awayPlayers: [] }
+						}]
+					}]
+				})
+			}))
+		await page.route("**statsapi.mlb.com/api/v1/transactions**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: '{"transactions":[]}' }))
+		await page.route("**stats?stats=byDateRange**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(DAY_HITTING) }))
+		await page.addInitScript(([l, c]) => {
+			localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+			localStorage.setItem("beanemachine:config", JSON.stringify(c))
+		}, [{ [KEY]: { at: new Date().toISOString(), spots } }, cfg])
+		await page.goto(BASE, { waitUntil: "domcontentloaded" })
+		await page.waitForSelector(".decide", { timeout: 30000 })
+		await page.waitForTimeout(2000)
+		const line = await page.$(".decide-scratch")
+		t("a man left out of tonight's posted order is named before anything else",
+			!!line && (await line.innerText()).includes(him.name),
+			line ? await line.innerText() : "(no scratch line)")
+		if (line) {
+			const scratchY = await line.evaluate(e => Math.round(e.getBoundingClientRect().top))
+			const changes = await page.$(".decide-changes")
+			const changesY = changes ? await changes.evaluate(e => Math.round(e.getBoundingClientRect().top)) : Infinity
+			t("and it sits above the changes, not inside them",
+				scratchY < changesY, `scratch y=${scratchY}, changes y=${changesY}`)
+			t("and says what it costs him if he does nothing",
+				/scores nothing unless you change/.test(await line.innerText()), await line.innerText())
+		}
+		await page.close()
+	}
 }
 
 /**

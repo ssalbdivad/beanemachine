@@ -26,6 +26,11 @@
 .decide-notes ul{margin:var(--sp-2) 0 0;padding-left:var(--sp-4);display:flex;flex-direction:column;gap:4px}
 .decide-changes .decide-slot{color:var(--accent)}
 .decide-rest,.decide-read,.decide-locked{margin:var(--sp-2) 0 0;color:var(--muted)}
+/* A scratch is the one line on this card that is somebody else's fact rather than this app's
+   judgement, and the only one a reader loses points by missing. It takes the negative colour
+   the innings warning uses — not a panel, not an icon: the sentence is the alarm. */
+.decide-scratch{margin:var(--sp-3) 0 0;color:var(--ink);max-width:62ch}
+.decide-scratch b{color:var(--neg)}
 .decide-cta{font-size:var(--fs-1);padding:6px 14px}
 .decide-blocked .decide-notes{margin-top:var(--sp-3)}
 

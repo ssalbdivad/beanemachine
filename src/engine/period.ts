@@ -41,6 +41,19 @@ export interface ResolvedPeriod {
 	end: string
 	/** The period's own last day, even where `end` was clipped to the slate. */
 	periodEnd: string | null
+	/**
+	 * The period's own FIRST day, which is not `start`.
+	 *
+	 * `start` is where a forward-looking decision accrues from, so it is today wherever today
+	 * is inside the period — that is the window a streaming add is rated over and it is the
+	 * right default for every consumer that existed when this interface was written. A second
+	 * kind of question arrived with MLB's day-by-day record: what has ALREADY happened in this
+	 * period, which needs the edge `start` deliberately moved past.
+	 *
+	 * Null for the windows that have no such edge — a rolling seven days has no first day of a
+	 * period, because it is not a period.
+	 */
+	periodStart: string | null
 	/** `days` is a window the READER asked for by length — see `withinDays`. The
 	 *  other three are windows the LEAGUE implies. */
 	kind: "matchup" | "daily" | "rolling" | "days"
@@ -85,6 +98,7 @@ export const resolvePeriod = (
 			start: today,
 			end: end > slateEnd ? slateEnd : end,
 			periodEnd: null,
+			periodStart: null,
 			kind: "rolling",
 			assumed: true,
 			clipped: end > slateEnd,
@@ -102,6 +116,7 @@ export const resolvePeriod = (
 			start: today,
 			end: today,
 			periodEnd: today,
+			periodStart: today,
 			kind: "daily",
 			assumed: false,
 			clipped: today > slateEnd,
@@ -133,6 +148,7 @@ export const resolvePeriod = (
 		start: from,
 		end,
 		periodEnd,
+		periodStart: start,
 		kind: "matchup",
 		assumed: assumptions.length > 0,
 		clipped: periodEnd > slateEnd,

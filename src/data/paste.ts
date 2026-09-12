@@ -725,8 +725,14 @@ export const rosterFromPaste = (
 	const note =
 		!found.players.length ?
 			pastedPage ?
-				"No players found in that. Select your whole roster page — the names are what " +
-				"this matches on, so extra columns and adverts do no harm."
+				/* THE ROSTER LIST, NOT THE WHOLE PAGE. It said "Select your whole roster page",
+				   and a walk that followed that instruction literally pulled two men nobody owns
+				   onto a test roster out of the news and trending modules that sit beside the
+				   list on a real team page. The names are still what this matches on and extra
+				   columns still do no harm; what does harm is a second list of players in the
+				   same selection. */
+				"No players found in that. Select the list of your players — the names are what " +
+				"this matches on, so extra columns and times do no harm."
 			:	"No players found in that. Write each man's first and last name, one to a line. " +
 				"A surname on its own works where only one man in baseball has it; where two " +
 				"share it, say which. A nickname matches nobody."

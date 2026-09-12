@@ -558,7 +558,10 @@ t("and he is told why, rather than a number being invented for him",
  * "unknown" and fall back to outs-per-team-game, so a 28-start pitcher whose club had
  * named all of its starters — none of them him — was ranked on the streaming board.
  */
-const absent = covered.filter(r => /published a starter for every game/.test(r.unrateable ?? ""))
+/* The reason was cut from 26 words to six — "not scheduled to pitch in this window" — because
+   five benched pitchers share one grouped row on the Tonight card and the explanation was four
+   times the size of the fact. Matched on the surviving words, which are the claim itself. */
+const absent = covered.filter(r => /not scheduled to pitch in this window/.test(r.unrateable ?? ""))
 t("a covered window with no start for him is treated as an observation",
   absent.length > 0, `${absent.length}`)
 t("and none of them is ranked anyway", absent.every(r => !r.rateable))
@@ -569,7 +572,7 @@ t("every excluded man is a pitcher who is predominantly a starter",
 // reliever appears, so excluding them would be inventing an observation
 t("relievers are not excluded by a covered window",
   covered.filter(r => r.player.group === "pitching" && share(r) > 0 && share(r) < 0.8)
-    .every(r => !/published a starter for every game/.test(r.unrateable ?? "")))
+    .every(r => !/not scheduled to pitch in this window/.test(r.unrateable ?? "")))
 t("injury still wins the reason, because it is the more informative one",
   covered.filter(r => r.injury && !r.rateable).every(r => /return date/.test(r.unrateable ?? "")))
 

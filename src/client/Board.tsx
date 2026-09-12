@@ -16,7 +16,7 @@ import {
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { purpose, tab } from "./panels.tsx"
-import { andList } from "../data/names.ts"
+import { andList, statLabel } from "../data/names.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -3004,7 +3004,9 @@ const Detail = ({
 				<dl>
 					{top.map(([code, value]) => (
 						<div className="pair" key={code}>
-							<dt>{code}</dt>
+							{/* Through the same label map the recap uses, or the same pitcher reads
+							    "Outs" on one screen and "OUT" on the other. See `statLabel`. */}
+							<dt>{statLabel(code)}</dt>
 							<dd className={value < 0 ? "neg" : ""}>{value}</dd>
 						</div>
 					))}

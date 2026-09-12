@@ -566,8 +566,16 @@ const arms = pick("pitching", 3)
 		Array.from({ length: 14 }, (_, i) => `Bench\tNobody Atall ${i}\tSEA\t0.0`).join("\n"),
 		snap
 	)
-	t("and a pasted page that matches nobody is still told to take the whole page",
-		pasted.players.length === 0 && /roster page/i.test(pasted.note), pasted.note)
+	/* IT NO LONGER SAYS "the whole page", and that is the point of the change rather than a
+	   loosening: a walk that followed "select your whole roster page" literally pulled two men
+	   nobody owns into a roster, out of the news and trending modules beside the list. The claim
+	   under test is unchanged — a paste gets paste advice and not "write each man's name" — so
+	   it is matched on the advice's own subject, the list of players. */
+	t("and a pasted page that matches nobody is still told to select the list, not to type",
+		pasted.players.length === 0 &&
+			/list of your players/i.test(pasted.note) &&
+			!/one to a line/i.test(pasted.note),
+		pasted.note)
 }
 
 /*

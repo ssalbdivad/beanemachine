@@ -1487,7 +1487,12 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	const list = await page.$eval(".recap-each", e => e.innerText)
 	t("every man you hold is listed", ["Kyle Tucker", "Jo Adell", "Taj Bradley", "Alex Bregman", "Ozzie Albies", "Dustin May"].every(n => list.includes(n)), list)
 	t("best night first", list.indexOf("Dustin May") < list.indexOf("Ozzie Albies"), list)
-	t("a night is explained by the categories that carried it", /HR/.test(list) && /OUT/.test(list), list)
+	/* "Outs", not "OUT". The code a league's table stores is the reader's own vocabulary for
+	   almost every category — he chose HR and RBI and K — but `OUT` is this app's spelling of
+	   the category Yahoo calls Outs, and in a row where every other code is a credit it reads as
+	   making an out, which is the opposite of what it pays for. One shared label map, so the
+	   same pitcher does not read "Outs" on one fold and "OUT" on another. */
+	t("a night is explained by the categories that carried it", /HR/.test(list) && /Outs/.test(list), list)
 	// THE DISTINCTION. 0-for-4 is a zero; never being in the park is not.
 	t("0-for-4 is a zero", /Jo Adell\n0\b/.test(list) || /Jo Adell[\s\S]{0,8}\b0\b/.test(list), list)
 	const ghost = await open(

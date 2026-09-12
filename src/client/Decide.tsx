@@ -1778,10 +1778,14 @@ export const Decide = ({
 						    still true of THIS card, and points at what answers the rest. A line
 						    that keeps claiming an absence the app has filled is as wrong as one
 						    that claims an ability it lacks. */}
-						This reads tonight&rsquo;s schedule, the batting orders that have been posted
-						and the injured list. Nothing here is playing for or against a lead &mdash;
-						it does not know your league&rsquo;s scoreboard, and how your week stands is
-						on <b>Last night</b>, against an opponent you tell it about.
+						{/* The first sentence used to be an inputs list — "This reads tonight's
+						    schedule, the batting orders that have been posted and the injured list"
+						    — which is the software describing itself, and a reader who has just been
+						    told who is scratched and who is hurt has watched it do all three. What he
+						    is owed here is the ABSENCE, which is the rest of the paragraph. */}
+						Nothing here is playing for or against a lead &mdash; it does not know your
+						league&rsquo;s scoreboard, and how your week stands is on <b>Last night</b>,
+						against an opponent you tell it about.
 					</p>
 				</>
 			)}
@@ -1885,7 +1889,13 @@ export const Decide = ({
 						{plan.swaps.moves.length === 0 ? "none clear the bar"
 						: plan.swaps.moves.length < DEFAULTS.maxMoves ?
 							`${plan.swaps.moves.length} clear${plan.swaps.moves.length === 1 ? "s" : ""} the bar`
-						:	`stopping at ${plan.swaps.moves.length}, which is this app's own limit and not a measured best`}
+						:	/* The tail "which is this app's own limit and not a measured best" came off
+						     this line: it is the page being unsure of itself in the middle of the
+						     advice, at the exact moment it is asking to be trusted, and a reader can
+						     do nothing with it. The retraction is not lost — it is the last item in
+						     the "How this was decided" fold, in full, where a reader who wants to
+						     know how the number was arrived at will find it. */
+							`stopping at ${plan.swaps.moves.length}`}
 						{rules.cap !== null && ` · your league allows ${rules.cap}`}
 					</span>
 				)}
@@ -2161,12 +2171,20 @@ export const Decide = ({
 						{plan.swaps.notes.map(n => (
 							<li key={n}>{n}</li>
 						))}
+						{/* "bscores" was shipped to the reader in this sentence: a word this app
+						    coined, inside an explanation of how a limit was measured, on the one
+						    surface where a reader goes looking for reassurance. The retraction it
+						    carries is the valuable part and survives without the word — what the
+						    older sweep did was compare the two players' own ratings, where these
+						    are priced on what the whole lineup projects afterwards, and neither
+						    clause needs naming anything in this repository. */}
 						<li>
 							Stopping at {DEFAULTS.maxMoves} a week is inherited rather than
 							established: {DEFAULTS.maxMoves} beat one and beat three across 111 weeks
-							and five seasons, but that sweep scored a swap as a difference of two
-							bscores, and these are scored on what your lineup projects afterwards. No
-							season has been played against this scoring yet.
+							and five seasons, but that sweep priced a swap by comparing the two
+							players&rsquo; own ratings, where these are priced on what your whole
+							lineup projects afterwards. No season has been played against the newer
+							way of pricing them.
 						</li>
 					</ul>
 				</details>

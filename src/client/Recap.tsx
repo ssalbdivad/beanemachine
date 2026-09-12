@@ -7,7 +7,7 @@ import { resolvePeriod } from "../engine/period.ts"
 import { bestNights, gradeRecord, recap, weekShape, type RecapMan } from "../auto/recap.ts"
 import { dayIsFinal } from "../data/actuals.ts"
 import { normalizeName } from "../data/names.ts"
-import { andList } from "../data/names.ts"
+import { andList, statLabel } from "../data/names.ts"
 import { roster, rosterKey } from "./roster.ts"
 import { opponentStore } from "./opponent.ts"
 import { typingStore } from "./typing.ts"
@@ -301,6 +301,13 @@ export const Recap = ({
 	 * which has no last day to count to.
 	 */
 	const daysLeft = useMemo((): number | null => {
+		/* NOT WHERE THE PERIOD IS THIS APP'S OWN GUESS. `resolvePeriod` falls back to seven
+		   days from Monday where a league has stated nothing, and every other screen that
+		   prints that window prints "assumed" beside it. A COUNT cannot carry that clause
+		   without becoming a sentence, and "two days left" is exactly the kind of number a
+		   reader acts on without re-reading — so where the window is assumed there is no
+		   count, and the margin stands on its own as it did before. */
+		if (period?.assumed) return null
 		if (!period?.periodEnd) return null
 		const left =
 			Math.round(
@@ -483,7 +490,7 @@ export const Recap = ({
 								<span className="recap-name">{b.name}</span>
 								<span className="recap-pts">{b.points}</span>
 								<span className="recap-top">
-									{[b.team, b.top.map(c => `${c.code} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")]
+									{[b.team, b.top.map(c => `${statLabel(c.code)} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")]
 										.filter(Boolean)
 										.join("  \u00b7  ")}
 								</span>
@@ -684,7 +691,7 @@ export const Recap = ({
 			{result.unscoreable.length > 0 && (
 				<p className="sub">
 					MLB&rsquo;s day-by-day record does not carry{" "}
-					{andList(result.unscoreable)}, so {result.unscoreable.length === 1 ? "it is" : "they are"}{" "}
+					{andList(result.unscoreable.map(statLabel))}, so {result.unscoreable.length === 1 ? "it is" : "they are"}{" "}
 					missing from every total above rather than counted as nothing.
 				</p>
 			)}
@@ -702,9 +709,8 @@ export const Recap = ({
 				<p className="sub">
 					In this {period.kind === "matchup" ? "matchup" : "scoring period"} so far (
 					{plainDay(period.periodStart!)} to {plainDay(periodTo)}), every man you hold has
-					scored{" "}
-					<b>{periodTotal}</b> — counted for the men on your team now, whatever seat each
-					was in at the time, so it is the size of your week rather than the score.
+					scored <b>{periodTotal}</b> &mdash; the size of your week rather than the score,
+					because it counts every man on your team now and not the men you started.
 				</p>
 			)}
 
@@ -1004,7 +1010,7 @@ export const Recap = ({
 								: m.points}
 							</span>
 							<span className="recap-top">
-								{m.top.map(c => `${c.code} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")}
+								{m.top.map(c => `${statLabel(c.code)} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")}
 							</span>
 						</li>
 					))}

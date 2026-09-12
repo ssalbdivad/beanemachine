@@ -52,3 +52,24 @@ export const normalizeName = (n: string): string =>
  */
 export const andList = (xs: string[]): string =>
 	xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`
+
+/**
+ * A SCORING CODE AS A READER WOULD SPELL IT.
+ *
+ * Almost every code in a league's scoring table is already the reader's own vocabulary — he
+ * chose HR and RBI and K, they are what his platform's settings page calls them, and
+ * expanding them would be the app talking down to him.
+ *
+ * `OUT` is the exception, and it is the first named number a stranger meets: the best-nights
+ * list on a first visit prints a pitcher as "K +24 OUT +19 W +8". He never chose that code —
+ * the borrowed preset did — and in a row where every other code is a credit, "OUT" reads as
+ * making an out, which is the opposite of what it pays for. Yahoo spells the same category
+ * Outs.
+ *
+ * NOT "Innings Pitched", which is a different code at a different price, and not "outs
+ * recorded": the row is 243px wide at 390px and already wraps, so the noun is all there is
+ * room for. Anything not listed comes back exactly as the league wrote it.
+ */
+const STAT_LABEL: Record<string, string> = { OUT: "Outs" }
+
+export const statLabel = (code: string): string => STAT_LABEL[code] ?? code

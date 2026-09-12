@@ -279,8 +279,22 @@ export const Onboard = ({
 				  readers, and never the first thing anybody is asked.
 				*/}
 				<h2>Who&rsquo;s on your team?</h2>
+				{/* THE PASTE WAS ALREADY THE FRONT DOOR AND THE SCREEN DID NOT SAY SO.
+				
+				    This read "First and last name, one to a line. Put the position first if you
+				    know it." — which a reader on a phone correctly hears as "type your 27 names
+				    in by hand", and closes the sheet. `rosterFromPaste` has always matched names
+				    inside arbitrary text: a walk pasted a real tab-delimited Yahoo roster copy,
+				    game times and eleven stat columns per line, and got every name back with no
+				    errors. The capability was there, advertised nowhere, and the instruction
+				    pointed at the slowest route to it.
+				
+				    The roster LIST rather than the whole page, deliberately: pasting a whole team
+				    page pulls in the news and trending modules, which is how two men nobody owns
+				    ended up on a test roster. */}
 				<p className="sub">
-					First and last name, one to a line. Put the position first if you know it.
+					Paste your roster list straight off your team page &mdash; extra columns and
+					times do no harm. Or type them in, one to a line, first and last name.
 				</p>
 				<textarea
 					data-ctl="onboard-team"

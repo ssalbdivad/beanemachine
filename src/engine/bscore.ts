@@ -521,8 +521,13 @@ export const rateAll = (o: RateOptions): Rated[] => {
 					`${injury} — no source states a return date, so there is no honest ` +
 						`projection over this horizon. The Stash view ranks him anyway.`
 				: scheduled === 0 ?
-					`MLB has published a starter for every game of this window and he is not ` +
-						`one of them, so he is not scheduled to pitch in it.`
+					/* SIX WORDS, NOT TWENTY-SIX. This read "MLB has published a starter for every
+					   game of this window and he is not one of them, so he is not scheduled to
+					   pitch in it" — three lines on a card where five benched pitchers share one
+					   grouped row, which made the explanation four times the size of the fact. The
+					   fact is the whole of what a reader does anything with; how the page knows is
+					   the kind of sentence that makes a screen feel like it is arguing with him. */
+					`not scheduled to pitch in this window.`
 				: !scores[player.group] ?
 					`this league scores nothing on the ${player.group} side, so there is no ` +
 						`points total to rank him by — import your league's scoring, or enter it.`

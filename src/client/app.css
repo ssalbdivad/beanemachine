@@ -287,11 +287,26 @@ h1 b{font-weight:600;color:var(--accent)}
    two equal greys and no hierarchy. Not italic — this sheet spends italics on
    quiet asides (.empty, .tiny-note), so an italic line here would read as a
    footnote rather than as a subtitle. */
-/* Beside the wordmark, not under it — and gone on a phone, where 390px has no
-   room for a line nobody reads twice. */
+/* Beside the wordmark on a wide screen, under it on a phone — see the note below the
+   rule, which is where the "gone on a phone" version of this comment was retracted. */
 .tagline{margin:0;font-family:var(--serif);font-size:var(--fs-4);color:var(--faint);
   line-height:var(--lh-tight);flex:1 1 auto;min-width:0}
-@media(max-width:700px){.tagline{display:none}}
+/*
+  THE APP'S ONLY JOKE EXISTED ONLY ON DESKTOP.
+
+  This was `display:none` below 700px, which is every phone — so the line the whole product is
+  named around ("How can you not be robotic about baseball?", which is Moneyball's own line
+  with one word changed) was invisible to the readers who actually open it. Measured at 390px:
+  the string appeared nowhere in the rendered text.
+
+  It was hidden because at 700px it was competing with the wordmark for one line. The fix is
+  two lines rather than none: it wraps under the wordmark at phone width, at the smaller of the
+  two sizes, and costs 16px of a screen that has 844 of them. A joke is not furniture — it is
+  the one thing on the first screen that tells a stranger a person made this.
+*/
+@media(max-width:700px){
+  .tagline{font-size:var(--fs-3);line-height:var(--lh-snug);margin-top:2px}
+}
 @media(max-width:640px){
   header{padding:var(--sp-6) 0 var(--sp-4)}
   h1{font-size:var(--fs-8)}

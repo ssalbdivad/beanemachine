@@ -817,7 +817,13 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 			out.push(`${m.add}${m.drop ? ` for ${m.drop}` : ""} gains ${m.gain}, below the ${options.minGain} bar`)
 		if (!input.availableNames.has(add)) out.push(`${m.add} is not in the free-agent pool`)
 		if (onRoster.has(add)) out.push(`${m.add} is already on the roster`)
-		if (byName.get(add)?.injury) out.push(`${m.add} is on the IL (${byName.get(add)!.injury})`)
+		/* "is on the IL" was true of every value this field could hold until
+		   src/data/injuries.ts started reading options, designations, outrights and
+		   releases off the transactions feed. An optioned man is not on the injured list,
+		   so the rail says what the field actually means — he cannot play — and quotes
+		   MLB's own words for why. */
+		if (byName.get(add)?.injury)
+			out.push(`${m.add} cannot play (${byName.get(add)!.injury})`)
 		if (seenAdd.has(add)) out.push(`${m.add} is added twice`)
 		// the two halves of a plan must agree about the same man
 		if (

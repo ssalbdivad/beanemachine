@@ -137,6 +137,93 @@ t("the URL pins sportId=1, without which the rows are minor-league noise",
   }
 }
 
+// --- out of the majors is not an injury, and is not available either ---------------
+//
+// This file's own comment used to say, correctly, that "an option, a recall or a waiver claim
+// is a real move and not an injury" — and then dropped those rows, which left the board
+// ranking men who cannot appear in a major-league box score. Measured against the live feed for
+// 2026-09-05 to 2026-09-12: 199 rows, 36 options, 14 designations, 9 outrights, 5 releases, and
+// 50 of those men carried rows on the committed board — eleven of them with real playing time,
+// Jasson Domínguez among them. The cost is not a bad recommendation, it is a wasted waiver
+// claim, and the shipped league allows six a week.
+//
+// These rows need no sentence reading: MLB stamps each with a `typeCode`, so the two sets are
+// an enumeration rather than a parse. That is why this half is safer than the injury half.
+{
+	const tx = (rows) => ({ transactions: rows })
+	const row = (id, typeCode, description, effectiveDate = "2026-09-10") =>
+		({ person: { id }, typeCode, description, effectiveDate })
+
+	const out = readMoves(tx([
+		row(1, "OPT", "San Francisco Giants optioned RHP Ryan Walker to Sacramento River Cats."),
+		row(2, "DES", "Los Angeles Dodgers designated CF Alek Thomas for assignment."),
+		row(3, "OUT", "Colorado Rockies sent RF Tyler Freeman outright to Albuquerque Isotopes."),
+		row(4, "REL", "Miami Marlins released 3B Leo Jiménez."),
+		row(5, "CU", "New York Yankees recalled RF Jasson Domínguez from Scranton.")
+	]))
+	t("every way out of the majors is read", out.sent.size === 4, [...out.sent.values()].map(m => m.status).join(", "))
+	t("and each is called what MLB called it",
+		out.sent.get(1).status === "optioned to the minors" &&
+			out.sent.get(2).status === "designated for assignment" &&
+			out.sent.get(3).status === "sent outright to the minors" &&
+			out.sent.get(4).status === "released",
+		[...out.sent.values()].map(m => m.status).join(" | "))
+	t("a recall is the other direction", out.back.has(5) && !out.sent.has(5))
+	// None of this is an injury, and reporting it as one would put a false sentence on the card.
+	t("and none of it is reported as an injury", out.placed.size === 0 && out.activated.size === 0)
+	// The unread counter exists to say how much of the INJURY feed cannot be read. Rows that
+	// are not injuries must not inflate it or the number means nothing.
+	t("nor counted as injury rows this parser could not read", out.unparsed === 0, String(out.unparsed))
+
+	// FEED ORDER, LAST WORD WINS, which is the rule the injury half already follows. Taken from
+	// a real pair: the Yankees recalled Jasson Domínguez on 2026-09-05 and optioned him again on
+	// 2026-09-11, so on the 12th he cannot play.
+	const flip = readMoves(tx([
+		row(9, "CU", "New York Yankees recalled RF Jasson Domínguez from Scranton.", "2026-09-05"),
+		row(9, "OPT", "New York Yankees optioned RF Jasson Domínguez to Scranton.", "2026-09-11")
+	]))
+	t("recalled then optioned is optioned", flip.sent.has(9) && !flip.back.has(9))
+	const back = readMoves(tx([
+		row(9, "OPT", "New York Yankees optioned RF Jasson Domínguez to Scranton.", "2026-09-05"),
+		row(9, "CU", "New York Yankees recalled RF Jasson Domínguez from Scranton.", "2026-09-11")
+	]))
+	t("and optioned then recalled is available", back.back.has(9) && !back.sent.has(9))
+
+	// CONSERVATISM, which is the rule the whole file is written under. A rehab assignment
+	// happens to a man already on the injured list, and a minor-league signing is not a return
+	// to the majors — so neither set claims them.
+	const neither = readMoves(tx([
+		row(11, "ASG", "Arizona Diamondbacks sent RHP Ryne Nelson on a rehab assignment to Visalia."),
+		row(12, "SFA", "San Diego Padres signed free agent RHP Trevor Gott to a minor league contract."),
+		row(13, "ZZZ", "Something MLB has not done before.")
+	]))
+	t("a rehab assignment changes nothing", !neither.sent.has(11) && !neither.back.has(11))
+	t("a minor-league signing changes nothing", !neither.sent.has(12) && !neither.back.has(12))
+	t("and a code this file does not know changes nothing",
+		neither.sent.size === 0 && neither.back.size === 0)
+
+	// THE MERGE. The engine asks one question of this map — can he play — so both kinds belong
+	// in it, and the later, larger fact wins where a man is both.
+	const merged = withMoves(new Map([[2, "Injured 60-Day"], [7, "Injured 10-Day"]]), readMoves(tx([
+		row(2, "OUT", "Colorado Rockies sent 2B somebody outright to Albuquerque."),
+		row(7, "CU", "Somebody recalled 7 from somewhere."),
+		row(8, "OPT", "Somebody optioned 8 to somewhere.")
+	])))
+	t("a man both hurt and outrighted reads as outrighted",
+		merged.get(2) === "sent outright to the minors", String(merged.get(2)))
+	// A recall does NOT clear an injury — they are different facts, and the capture's injury
+	// stands until an activation says otherwise.
+	t("but a recall does not clear an injury the capture recorded",
+		merged.get(7) === "Injured 10-Day", String(merged.get(7)))
+	t("and an optioned man joins the map the engine reads",
+		merged.get(8) === "optioned to the minors", String(merged.get(8)))
+	// The strings are written to read after "MLB lists him", which is the frame src/auto/plan.ts
+	// puts an unavailability in.
+	t("every reason reads as a sentence about him",
+		[...merged.values()].every(v => /^(Injured \d+-Day|optioned to the minors|designated for assignment|sent outright to the minors|released)$/.test(v)),
+		[...new Set(merged.values())].join(" | "))
+}
+
 // A hang is a failure too — see the same note in test/today.mjs.
 {
   const t0 = Date.now()

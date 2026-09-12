@@ -469,8 +469,14 @@ const caught = (name, forgery, pattern, input = wire) =>
 		JSON.stringify(railViolations(forgery, input)))
 
 caught("a drop above the keep floor", forged({ drop: "Stu Stud", dropScore: 60, gain: 10 }), /keep floor/)
-caught("an add MLB lists on the IL",
-	forged({ add: "Hurt Ace", addScore: 120, gain: 116 }), /on the IL/, ilWire)
+/* THE OLD TRUTH: this matched /on the IL/, because every value the `injury` field could hold
+   was an injured-list status. src/data/injuries.ts now also reads options, designations,
+   outrights and releases off MLB's transactions feed — an optioned man cannot appear in a
+   major-league box score either, and calling him "on the IL" would be a false sentence. So the
+   rail says what the field means, and quotes MLB's own words for why. The claim is unchanged:
+   a man the feed says cannot play is never proposed as an add. */
+caught("an add MLB says cannot play",
+	forged({ add: "Hurt Ace", addScore: 120, gain: 116 }), /cannot play \(Injured 60-Day\)/, ilWire)
 caught("an add nobody could actually claim", forged({ add: "Some Guy", addScore: 70 }), /free-agent pool/)
 caught("a swap below the bar", forged({ addScore: 5, gain: 1 }), /below the 5 bar/)
 caught("a gain that is not the difference it claims", forged({ gain: 66.5 }), /is not/)

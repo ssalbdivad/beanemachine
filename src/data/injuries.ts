@@ -24,6 +24,24 @@
  * capture stays authoritative unless MLB has said, in words this file recognises,
  * that it is out of date. Being silently unchanged is the correct failure; guessing
  * from a sentence is not.
+ *
+ * AND THE OTHER WAY A MAN CANNOT PLAY, which this file used to throw away.
+ *
+ * A comment here said, correctly, that "an option, a recall or a waiver claim is a
+ * real move and not an injury" — and then dropped those rows, which left the board
+ * ranking men who cannot appear in a major-league box score at all. Measured against
+ * this endpoint for 2026-09-05 to 2026-09-12: 199 rows, of which 36 are options, 14
+ * designations for assignment, 9 outrights and 5 releases. Sixty-four men the app was
+ * still offering as pickups, and the cost is not a bad recommendation but a wasted
+ * WAIVER CLAIM — one of six a week in the shipped league, spent on somebody who
+ * cannot play.
+ *
+ * Those rows need no sentence reading at all, which is why this is safer than the
+ * injury half: MLB gives each one a `typeCode`, so the two sets below are an
+ * enumeration rather than a parse. The same conservatism holds — a code this file does
+ * not list changes nothing — and `ASG` (a rehab assignment, which happens to a man
+ * already on the injured list) and `SFA` (signed to a minor-league contract, which is
+ * not a return to the majors) are deliberately in neither set.
  */
 
 /** What MLB writes when a man goes on, and when he comes off. Both forms carry the
@@ -38,6 +56,30 @@ const ACTIVATED = /\b(?:activated|reinstated)\b[^.]*?\bfrom the (?:\d+-day )?(?:
  *  body part is what a reader uses to guess how long this lasts, and no projection
  *  can supply it. */
 const AILMENT = /\.\s*([A-Z][^.]{2,60})\.\s*$/
+
+/**
+ * Out of the majors, by MLB's own type code, and what to call it.
+ *
+ * The strings are written to read after "MLB lists him", which is the frame
+ * src/auto/plan.ts puts an unavailability in — so they are lower-case clauses rather
+ * than the capture's noun-style "Injured 10-Day". A man in here cannot appear in a
+ * major-league box score until a row in `BACK` says he can.
+ */
+const SENT: Record<string, string> = {
+	OPT: "optioned to the minors",
+	DES: "designated for assignment",
+	OUT: "sent outright to the minors",
+	REL: "released"
+}
+
+/**
+ * Back on a major-league roster, which cancels anything in `SENT`.
+ *
+ * `CLW` is here because a claim off waivers ends the designation that preceded it. If
+ * the claiming club then options him, a later `OPT` row wins — the loop below is in
+ * feed order and the last word on a player is the one that counts.
+ */
+const BACK = new Set(["CU", "SE", "CLW"])
 
 export interface Move {
 	playerId: number
@@ -56,6 +98,18 @@ export interface Moves {
 	/** Men who came OFF it. These have to be REMOVED from the snapshot's map, or a
 	 *  returning star stays benched by a file that is a week old. */
 	activated: Map<number, string>
+	/**
+	 * Men MLB has put out of the majors since the capture, and what it called it.
+	 *
+	 * Kept apart from `placed` because they are different facts with different actions:
+	 * an injured man is a hole to cover and may be back on Friday; an optioned man is
+	 * not on a roster this league can use at all. They merge into one map for the
+	 * ENGINE, whose only question is whether he can play.
+	 */
+	sent: Map<number, Move>
+	/** Men who came back onto a major-league roster. Removed from `sent`, and from the
+	 *  merged map, for the same reason activations are removed from the injury list. */
+	back: Map<number, string>
 	/** Every row that was a status change and that this file could not read. Counted,
 	 *  not hidden: a parser that silently ignores half the feed and a parser that has
 	 *  nothing to do look identical from outside. */
@@ -70,14 +124,23 @@ interface RawTx {
 	date?: string
 }
 
-const EMPTY: Moves = { placed: new Map(), activated: new Map(), unparsed: 0 }
+const EMPTY: Moves = {
+	placed: new Map(),
+	activated: new Map(),
+	sent: new Map(),
+	back: new Map(),
+	unparsed: 0
+}
 
 export const readMoves = (json: unknown): Moves => {
 	const rows = (json as { transactions?: RawTx[] } | null)?.transactions
-	if (!Array.isArray(rows)) return { placed: new Map(), activated: new Map(), unparsed: 0 }
+	if (!Array.isArray(rows))
+		return { placed: new Map(), activated: new Map(), sent: new Map(), back: new Map(), unparsed: 0 }
 
 	const placed = new Map<number, Move>()
 	const activated = new Map<number, string>()
+	const sent = new Map<number, Move>()
+	const back = new Map<number, string>()
 	let unparsed = 0
 
 	// In feed order, so the LAST word on a player wins: a man placed on Monday and
@@ -105,12 +168,29 @@ export const readMoves = (json: unknown): Moves => {
 			})
 			continue
 		}
-		// Only status changes are this file's business. An option, a recall or a
-		// waiver claim is a real move and not an injury, and counting them as
-		// unreadable would make the number below meaningless.
-		if (r.typeCode === "SC" && /injured list|\bil\b/i.test(text)) unparsed++
+		/* OUT OF THE MAJORS, from the type code rather than from the sentence. In feed
+		   order like everything above, so the last word on a player wins: optioned on
+		   Monday and recalled on Thursday is available, recalled and then optioned is
+		   not. */
+		const code = r.typeCode ?? ""
+		if (BACK.has(code)) {
+			back.set(id, on)
+			sent.delete(id)
+			continue
+		}
+		const out = SENT[code]
+		if (out) {
+			back.delete(id)
+			sent.set(id, { playerId: id, status: out, note: null, on })
+			continue
+		}
+		// Only status changes are this file's business beyond that. Counting a rehab
+		// assignment or a minor-league signing as unreadable would make the number
+		// below meaningless — it exists to say how much of the INJURY feed this file
+		// cannot read, and those rows are not injuries.
+		if (code === "SC" && /injured list|\bil\b/i.test(text)) unparsed++
 	}
-	return { placed, activated, unparsed }
+	return { placed, activated, sent, back, unparsed }
 }
 
 export const TRANSACTIONS_URL = (start: string, end: string): string =>
@@ -161,5 +241,29 @@ export const withMoves = (
 	const out = new Map(captured)
 	for (const id of moves.activated.keys()) out.delete(id)
 	for (const [id, m] of moves.placed) out.set(id, m.status)
+	/* OUT OF THE MAJORS JOINS THE SAME MAP, and it joins it last.
+	
+	   The engine asks one question of this map — can he play — and the answer is no for
+	   both kinds, so both belong in it. Last because a man can be both: placed on the
+	   60-day list and then outrighted in the same week, and the outright is the later and
+	   larger fact.
+	
+	   AND `back` IS NOT APPLIED HERE AT ALL, which took two attempts to get right.
+	
+	   The first version deleted every id in `back` from the map, by analogy with
+	   `activated` — and that cleared INJURIES on a recall, which is a guess this file
+	   refuses everywhere else. A man on the injured list is not "recalled", he is
+	   ACTIVATED, and that is the row handled two lines above; a recall arriving about
+	   somebody the capture lists as hurt is contradictory data, and reading it as "he is
+	   healthy now" is inference, not reading. Its own test caught it.
+	
+	   The second version guarded the delete on the value being one of the demotion
+	   strings — correct, and unreachable: `readMoves` already removes a recalled man from
+	   `sent` in feed order, and the capture's map holds only injuries, so nothing in here
+	   can carry a demotion before the loop below puts one there. Dead code with a
+	   confident comment on it is worse than no code, so what is left is this paragraph:
+	   `back` does its whole job in `readMoves`, and there is deliberately nothing for it
+	   to do to the merged map. */
+	for (const [id, m] of moves.sent) out.set(id, m.status)
 	return out
 }

@@ -755,12 +755,14 @@ await fp.click('.bar button:text-is("New")')
 // Wire came up empty for a freshly created preset league, the preset would be useless
 // no matter how complete its stored values were.
 await screen(fp, PICKUPS)
-try {
-  await fp.waitForSelector(".board-row", { timeout: 25000 })
-} catch {
-  console.log("DIAG tab:", await fp.$$eval("nav button", bs => bs.filter(x=>x.className.includes("on")).map(x=>x.innerText.trim()).join()))
-  console.log("DIAG main:", (await fp.$eval("main", e => e.innerText)).replace(/\n+/g, " | ").slice(0, 400))
-}
+/* The wait is allowed to time out rather than taking the suite down with it, and that is a
+   deliberate downgrade from a crash to a failed assertion. Observed once under load — two
+   other agents were driving browsers on this machine at the time — the board took longer than
+   25 seconds to rate 1,446 players and the whole run died on line 758 with everything after it
+   unrun. The claim is not weakened: the assertion on the next line counts the rows and fails
+   if there are none, so an empty board is still a failure. It is one failure instead of fifty
+   unrun assertions. */
+await fp.waitForSelector(".board-row", { timeout: 25000 }).catch(() => {})
 t("choosing the preset lands on a board that actually ranks",
   (await fp.$$eval(".board-row", n => n.length)) > 50,
   String(await fp.$$eval(".board-row", n => n.length)))

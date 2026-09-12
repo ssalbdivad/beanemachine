@@ -261,14 +261,38 @@ const arms = pick("pitching", 3)
      * keeps it off prose and off a pasted page: 0 of the 44 one-word lines in README.md
      * and docs/ look like a unique surname, and a roster page's lines carry columns.
      *
-     * Still an OFFER. It never puts anybody on a team; the reader taps the name.
+     * AND IT IS NOW ACCEPTED RATHER THAN OFFERED, which is the assertion that changed.
+     *
+     * THE OLD TRUTH, asserted here until 2026-09-12: "a unique surname on its own is offered
+     * — never accepted" and "it still puts nobody on the team by itself". That was the
+     * cautious reading and walking the live app showed what it cost. Typed into the setup
+     * box, one to a line: Judge / Soto / Ohtani / Skenes / Witt / Rodón. Nothing was added,
+     * and the screen said "I couldn't find a player in these lines: «Judge», «Soto»,
+     * «Ohtani», «Skenes», «Witt», «Rodón». Nothing in them is counted anywhere." — with five
+     * tappable buttons reading Aaron Judge, Shohei Ohtani, Paul Skenes, Bobby Witt Jr. and
+     * Carlos Rodón directly beneath it. It knew who they were on the same screen it refused
+     * them: nine taps and twelve seconds to a recommendation, five of them spent re-accepting
+     * men the app had already identified.
+     *
+     * The caution belonged to `nearestName`, which GUESSES which man a misspelling meant and
+     * still only offers. A unique surname identifies one, and there is nothing to confirm.
+     * «Soto» is two men and is still refused, which is the whole distinction.
      */
-    t("a unique surname on its own is offered — never accepted, and never a wrong man",
-      sug("Raleigh").length === 1 && sug("Raleigh")[0].name === "Cal Raleigh",
-      JSON.stringify(sug("Raleigh")))
-    t("and it still puts nobody on the team by itself",
-      rosterFromPaste("Raleigh", snap).players.length === 0,
+    t("a unique surname on its own is accepted, and it is the right man",
+      rosterFromPaste("Raleigh", snap).players.length === 1 &&
+        rosterFromPaste("Raleigh", snap).players[0].name === "Cal Raleigh",
       JSON.stringify(rosterFromPaste("Raleigh", snap).players))
+    // It carries no seat, because one word cannot say where he was sitting, and an invented
+    // "BN" would be a claim about his lineup rather than about his name.
+    t("and he arrives with no seat, because the line carried none",
+      rosterFromPaste("Raleigh", snap).players[0].slot === null &&
+        rosterFromPaste("Raleigh", snap).spots.length === 0,
+      JSON.stringify(rosterFromPaste("Raleigh", snap).spots))
+    // Nothing is left to ask about, so nothing is asked: the chip and the refusal were the
+    // two halves of the defect and both go together.
+    t("and nothing is offered or reported unmatched about him",
+      sug("Raleigh").length === 0 && rosterFromPaste("Raleigh", snap).unmatched.length === 0,
+      `${JSON.stringify(sug("Raleigh"))} / ${JSON.stringify(rosterFromPaste("Raleigh", snap).unmatched)}`)
     {
       // A surname two men share says nothing, and says it by offering nothing.
       const bySur = new Map()
@@ -486,6 +510,35 @@ const arms = pick("pitching", 3)
     ms < 3000, `${ms}ms`)
 }
 
+// --- a surname two men share says why, rather than reading like a typo ------------
+//
+// Once a unique surname is accepted, the one-word line left over is the one two men carry —
+// and the reader was told only "I couldn't find a player in this line: «Soto»", which is true,
+// unhelpful, and indistinguishable from a misspelling. He typed a real surname and the app
+// knows exactly what is wrong with it.
+{
+	const r = rosterFromPaste("Judge\nSoto\nOhtani", snap)
+	t("the unique surnames are taken and the shared one is not",
+		r.players.length === 2 && r.unmatched.join() === "Soto",
+		`${r.players.map(p => p.name).join(", ")} / ${JSON.stringify(r.unmatched)}`)
+	t("and the note says why that one was left out",
+		/«Soto» is a surname more than one man in baseball has/.test(r.note) &&
+			/add a first name/.test(r.note),
+		r.note)
+	// No names offered, deliberately: "Juan Soto or Gregory Soto" as buttons is the guess this
+	// whole path refuses, and a tappable wrong answer beside a tappable right one is how a
+	// reader ends up owning a roster he did not assemble.
+	t("and offers neither of them as a chip",
+		!r.suggestions.some(s => /Soto/.test(s.name)), JSON.stringify(r.suggestions))
+	// Plural and singular are different sentences, and the plural one is the commoner.
+	const two = rosterFromPaste("Soto\nGarcía", snap)
+	t("two shared surnames read as two", /are surnames/.test(two.note) || two.unmatched.length < 2,
+		`${JSON.stringify(two.unmatched)} — ${two.note}`)
+	// Quoted the same way the unmatched-lines message quotes a line, so one screen does not
+	// quote the same string two ways.
+	t("quoted the way the rest of the message quotes a line", /«Soto»/.test(r.note), r.note)
+}
+
 /*
  * THE ADVICE MATCHES THE ROUTE HE TOOK.
  *
@@ -496,7 +549,13 @@ const arms = pick("pitching", 3)
  * reads after failing.
  */
 {
-	const typed = rosterFromPaste("Judge\nVladdy\nSkubal\nWitt Jr", snap)
+	/* THE OLD FIXTURE WAS "Judge / Vladdy / Skubal / Witt Jr", and it stopped matching nobody
+	   on 2026-09-12 — "Judge" and "Skubal" are surnames exactly one man in the pool carries, so
+	   they are now accepted rather than refused, which is the change that landed that day. The
+	   claim under test is about the ADVICE a failure gives, so the fixture is now four lines
+	   that genuinely resolve to nobody: two nicknames, one surname two men share, and gibberish.
+	   That the old fixture no longer fits is itself evidence the surname rule works. */
+	const typed = rosterFromPaste("Vladdy\nBig Dumper\nSoto\nasdfgh", snap)
 	t("a typed list that matches nobody is told how to write a name",
 		typed.players.length === 0 &&
 			/first and last name/i.test(typed.note) &&

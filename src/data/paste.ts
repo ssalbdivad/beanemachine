@@ -507,6 +507,60 @@ export interface PastedRoster {
 	suggestions: PasteSuggestion[]
 }
 
+/**
+ * Whether this looks like a page somebody COPIED or a list somebody TYPED.
+ *
+ * Two things turn on it and both used to compute it inline: which advice the failure note
+ * gives, and whether a three-character line counts as furniture. A pasted page carries tabs or
+ * runs to many lines, and a typed list is a handful of short ones. Where it is ambiguous the
+ * typed reading is the safer of the two, because its advice is also true of a paste — a page
+ * whose names do not match will not match them under any instruction — while the paste advice
+ * is simply inapplicable to a phone.
+ */
+/** The same guillemets the unmatched-lines message uses, so one screen quotes a line the
+ *  same way twice. */
+const andNamesQuoted = (xs: string[]): string => andList(xs.map(x => `\u00ab${x}\u00bb`))
+
+const looksPasted = (text: string): boolean => {
+	const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+	return /\t/.test(text) || lines.length > 12 || lines.some(l => l.length > 60)
+}
+
+/**
+ * A line is unmatched when no player this read found appears anywhere in it.
+ *
+ * Compared on the same normalised form the matcher used, so a line that produced a player
+ * under a different spelling ("RICE, BEN" for Ben Rice) is not reported as a failure. Blank
+ * lines and lines too short to hold a name are skipped: a reader pasting a page has plenty of
+ * both, and quoting page furniture back at him as something the app failed to read would bury
+ * the two lines that matter.
+ *
+ * THE LENGTH FLOOR APPLIES TO A PASTE AND NOT TO A TYPED LIST. `length > 3` exists because a
+ * copied roster page is full of three-character furniture — a column of ordinal numbers, a
+ * stray "OF", an advert's "x" — and quoting those back would bury the two lines that matter.
+ * On a list somebody typed, every line is his, and dropping one silently is the failure this
+ * whole field exists to prevent: pasting "asdfgh / 12345 / ???" reported only «asdfgh» while
+ * saying "Nothing in THEM is counted anywhere", which is a plural about a list the reader
+ * cannot see.
+ *
+ * A FUNCTION rather than an inline filter because it is now asked twice: once to find the
+ * one-word lines a unique surname can resolve, and again afterwards to report what is left.
+ * Two copies of this rule would be two chances for "reported as unmatched" and "actually
+ * matched" to disagree about punctuation.
+ */
+const unmatchedLines = (text: string, players: PastedPlayer[]): string[] => {
+	const seen = players.map(f => norm(f.name))
+	const pasted = looksPasted(text)
+	return text
+		.split(/\r?\n/)
+		.map(l => l.trim())
+		.filter(l => (pasted ? l.length > 3 : l.length > 0) && /[\w]/.test(l))
+		.filter(l => {
+			const line = norm(l)
+			return !seen.some(name => line.includes(name) || name.split(" ").every(w => line.includes(w)))
+		})
+}
+
 export const rosterFromPaste = (
 	text: string,
 	snapshot: {
@@ -514,8 +568,60 @@ export const rosterFromPaste = (
 		eligibility?: Record<string, string[]>
 	}
 ): PastedRoster => {
-	const found = playersInText(text, snapshot.players)
+	const matched = playersInText(text, snapshot.players)
 	const byId = new Map(snapshot.players.map(p => [p.id, p]))
+
+	/**
+	 * A SURNAME THAT BELONGS TO EXACTLY ONE MAN IS A MATCH, not a question.
+	 *
+	 * This was the worst thing on a first visit, and it was measured by walking it. Typed
+	 * into the setup box, one to a line, no positions: Judge / Soto / Ohtani / Skenes /
+	 * Witt / Rodón. Nothing was added. The screen then said "I couldn't find a player in
+	 * these lines: «Judge», «Soto», «Ohtani», «Skenes», «Witt», «Rodón». Nothing in them is
+	 * counted anywhere." — and directly under it offered five tappable buttons reading Aaron
+	 * Judge, Shohei Ohtani, Paul Skenes, Bobby Witt Jr. and Carlos Rodón. It knew who they
+	 * were, on the same screen it refused them. Nine taps and twelve seconds from an empty
+	 * profile to a recommendation, five of them spent re-accepting men the app had already
+	 * identified.
+	 *
+	 * `uniqueSurname` is not a guess and its own note says why: on the committed capture
+	 * 1,445 men carry 1,445 surnames of which 984 are unique, so 68% are reachable this way
+	 * and NONE can resolve to the wrong man, because a unique surname belongs to exactly
+	 * one. The 461 who share theirs resolve to nothing and are still refused — «Soto» is
+	 * genuinely two men and stays a question.
+	 *
+	 * So the distinction the code was already computing is the right one, and it was being
+	 * thrown away. `nearestName` — the one-typo path — stays an OFFER, because a typo can be
+	 * a different man and the comment in src/client/Onboard.tsx is right that a reader who
+	 * accepts a plausible name without reading it ends up owning a roster he did not
+	 * assemble. That argument does not reach a name there is only one of.
+	 *
+	 * One word only, which is what makes it safe on a pasted page: see `uniqueSurname` for
+	 * the measurement against this repo's own prose.
+	 */
+	const bySurname: PastedPlayer[] = []
+	const resolved = new Set<string>()
+	{
+		const held = new Set(matched.players.map(f => f.id))
+		const ambiguous = new Set(matched.ambiguous.map(norm))
+		for (const line of unmatchedLines(text, matched.players)) {
+			if (norm(line).includes(" ")) continue
+			/* A name the matcher already called ambiguous must not be resolved here by the
+			   back door. It cannot be — two men sharing a surname make `uniqueSurname` return
+			   null — but the two rules are independent and a reader told "neither was added"
+			   and then handed one of them would have caught the app contradicting itself. */
+			if (ambiguous.has(norm(line))) continue
+			const one = uniqueSurname(line, snapshot.players)
+			if (!one || held.has(one.id)) continue
+			held.add(one.id)
+			resolved.add(norm(line))
+			bySurname.push({ name: one.name, id: one.id, group: one.group, slot: null })
+		}
+	}
+	const found: PasteResult =
+		bySurname.length ?
+			{ ...matched, players: [...matched.players, ...bySurname] }
+		:	matched
 
 	/**
 	 * A two-way player is one man and TWO rows in the snapshot, because he is
@@ -615,17 +721,15 @@ export const rosterFromPaste = (
 	 * also true of a paste — a page whose names do not match will not match them under any
 	 * instruction — while the paste advice is simply inapplicable to a phone.
 	 */
-	const typedLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-	const looksPasted =
-		/\t/.test(text) || typedLines.length > 12 || typedLines.some(l => l.length > 60)
+	const pastedPage = looksPasted(text)
 	const note =
 		!found.players.length ?
-			looksPasted ?
+			pastedPage ?
 				"No players found in that. Select your whole roster page — the names are what " +
 				"this matches on, so extra columns and adverts do no harm."
 			:	"No players found in that. Write each man's first and last name, one to a line. " +
-				"A surname on its own is not enough to add anybody, though where only one man " +
-				"in baseball has it you will be offered him below; a nickname matches nobody."
+				"A surname on its own works where only one man in baseball has it; where two " +
+				"share it, say which. A nickname matches nobody."
 		:	`Found ${found.players.length} player${found.players.length === 1 ? "" : "s"}` +
 			(spots.length ?
 				`, ${spots.length} with the seat they were in — tonight's lineup can be given to you as the CHANGES to make, rather than as a lineup to set from scratch.`
@@ -644,36 +748,54 @@ export const rosterFromPaste = (
 			:	"") +
 			(found.ambiguous.length ?
 				` Two different players share ${found.ambiguous.join(" and ")}, so neither was added — search for the one you own below.`
+			:	"") +
+			/* WHAT A ONE-WORD LINE BECAME, said rather than left to be noticed. A reader who
+			   typed "Judge" and got Aaron Judge is owed the full name back: it is the only way
+			   he can check that the man the app resolved is the man he meant, and the resolution
+			   is certain only because the surname is unique in the pool — which is a fact about
+			   the pool and not about his intention. Three at most, for the same reason the
+			   did-you-mean list stops at three: the point is to be read. */
+			(bySurname.length ?
+				` ${bySurname.length === 1 ? "One name was" : `${bySurname.length} names were`} just a ` +
+				`surname, and only one man in baseball has ${bySurname.length === 1 ? "it" : "each"}: ` +
+				`${
+					bySurname.length > 3 ?
+						/* Comma-joined when it is truncated, because `andList` puts an "and" before
+						   the last item and the count adds a second one: "Judge, Ohtani and Skenes
+						   and 2 more" reads as four things. */
+						`${bySurname.slice(0, 3).map(p => p.name).join(", ")} and ${bySurname.length - 3} more`
+					:	andList(bySurname.map(p => p.name))
+				}.`
 			:	"")
 
+	/* Both rules live in `unmatchedLines` above, which is asked twice — once to find the
+	   one-word lines a unique surname can resolve, and again here for what is left. */
+	const unmatched = unmatchedLines(text, found.players).filter(l => !resolved.has(norm(l)))
+
 	/**
-	 * A line is unmatched when no player this read found appears anywhere in it.
+	 * A SURNAME TWO MEN SHARE IS A DEAD END UNLESS IT SAYS WHY.
 	 *
-	 * Compared on the same normalised form the matcher used, so a line that produced a
-	 * player under a different spelling ("RICE, BEN" for Ben Rice) is not reported as a
-	 * failure. Blank lines and lines too short to hold a name are skipped: a reader
-	 * pasting a page has plenty of both, and quoting page furniture back at him as
-	 * something the app failed to read would bury the two lines that matter.
-	 */
-	const seen = found.players.map(f => norm(f.name))
-	/*
-	 * The length floor applies to a PASTE and not to a typed list.
+	 * Once a unique surname is accepted, the one-word line that is left is the one two men
+	 * carry — and the reader was told only "I couldn't find a player in this line: «Soto»",
+	 * which is true, unhelpful and indistinguishable from a typo. He typed a real surname and
+	 * the app knows exactly what is wrong with it.
 	 *
-	 * `l.length > 3` exists because a copied roster page is full of three-character
-	 * furniture — a column of ordinal numbers, a stray "OF", an advert's "x" — and quoting
-	 * those back would bury the two lines that matter. On a list somebody typed, every line
-	 * is his, and dropping one silently is the failure this whole field exists to prevent:
-	 * pasting "asdfgh / 12345 / ???" reported only «asdfgh» while saying "Nothing in THEM
-	 * is counted anywhere", which is a plural about a list the reader cannot see.
+	 * No names are offered, deliberately. Offering "Juan Soto or Gregory Soto" as buttons is
+	 * the guess this whole path refuses: he meant one of them and the app cannot know which,
+	 * and a tappable wrong answer beside a tappable right one is how a reader ends up owning a
+	 * roster he did not assemble. What it can do is name the problem so his next edit fixes
+	 * it, which takes one word from him rather than a tap from the app.
 	 */
-	const unmatched = text
-		.split(/\r?\n/)
-		.map(l => l.trim())
-		.filter(l => (looksPasted ? l.length > 3 : l.length > 0) && /[\w]/.test(l))
-		.filter(l => {
-			const line = norm(l)
-			return !seen.some(name => line.includes(name) || name.split(" ").every(w => line.includes(w)))
-		})
+	const shared = unmatched.filter(l => {
+		const word = norm(l)
+		if (!word || word.includes(" ")) return false
+		const ids = new Set<number>()
+		for (const p of snapshot.players) {
+			const parts = norm(p.name).split(" ")
+			if (parts.length > 1 && parts[parts.length - 1] === word) ids.add(p.id)
+		}
+		return ids.size > 1
+	})
 
 	/**
 	 * One question per unmatched line, and never about a man already on the team.
@@ -704,6 +826,12 @@ export const rosterFromPaste = (
 	 * Three names at most. The point is to be read, and a reader who mistyped nine
 	 * names is better served by fixing three and reading again than by a paragraph.
 	 */
+	const sharedNote = shared.length ?
+			` ${andNamesQuoted(shared)} ${shared.length === 1 ? "is a surname" : "are surnames"} ` +
+			`more than one man in baseball has, so ${shared.length === 1 ? "it was" : "they were"} ` +
+			`left out — add a first name to ${shared.length === 1 ? "it" : "each"}.`
+		:	""
+
 	const meant = suggestions.slice(0, 3).map(s => s.name)
 	const asked =
 		!suggestions.length ? ""
@@ -720,7 +848,7 @@ export const rosterFromPaste = (
 		ambiguous: found.ambiguous,
 		keys,
 		spots,
-		note: note + asked,
+		note: note + sharedNote + asked,
 		unmatched,
 		suggestions
 	}

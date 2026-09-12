@@ -1254,6 +1254,23 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	/* Escape POPS rather than pushing, which is not a detail: pushing a second entry whose
 	   only difference is the sheet being down made Back REOPEN it, measured on the dev server.
 	   Closing a thing is the undo of opening it. */
+	/* THE ADDRESS BAR NAMES THE SCREEN, which is what makes a reload and a shared link work.
+	   The URL used to be the same string on all three screens, so nothing was bookmarkable and
+	   a reload always returned to Tonight — and a phone reloads a backgrounded tab on its own.
+	   A hash rather than a path because this is a static site served from one file. */
+	t("the address bar says which screen this is",
+		/#pickups$|#tonight$|#my-league$/.test(await bp.url()), await bp.url())
+	await bp.goto(`${BASE}#my-league`, { waitUntil: "domcontentloaded" })
+	await bp.waitForSelector("nav button")
+	await bp.waitForTimeout(900)
+	t("and a link to one lands on it", (await tabNow()).toLowerCase() === "my league",
+		`${await tabNow()} — ${await bp.url()}`)
+	await bp.reload({ waitUntil: "domcontentloaded" })
+	await bp.waitForSelector("nav button")
+	await bp.waitForTimeout(900)
+	t("and a reload comes back to the screen he was on, not to the default",
+		(await tabNow()).toLowerCase() === "my league", `${await tabNow()} — ${await bp.url()}`)
+
 	/* Back to My league first: the guided button lives in the management block on that
 	   screen, and the Back presses above have left us on Tonight. */
 	await bp.click("nav button:nth-child(3)")

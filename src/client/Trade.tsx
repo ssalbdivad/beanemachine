@@ -31,6 +31,13 @@ import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } f
  *  trade is priced against the numbers the reader just saw on it. */
 const TRADE_FILTERS: Filters = { ...DEFAULT_FILTERS }
 
+/** "Sep 12", from an ISO date, in the reader's own locale. Noon so a zone west of
+ *  Greenwich cannot print yesterday — an ISO date parses as UTC midnight. Same helper and
+ *  same reason as `plainDate` in src/client/Decide.tsx; two screens naming one window must
+ *  spell it the same way. */
+const span = (iso: string): string =>
+	new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+
 /** One spot's worth, to a tenth. */
 const pts = (v: number) => v.toFixed(1)
 /** A whole lineup, or the difference between two, at the same two decimals the
@@ -98,7 +105,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	// caveat. Nothing else here reads it, and the board's own filtering is untouched:
 	// `useBoard` is still called without a free-agent list, so `cut` is always the
 	// ownership estimate rather than null.
-	const { rated, scored, availability } = useBoard(snapshot, league, TRADE_FILTERS)
+	const { rated, scored, availability, period } = useBoard(snapshot, league, TRADE_FILTERS)
 	const [owned, setOwned] = useState<string[]>([])
 	const [storeError, setStoreError] = useState<string | null>(null)
 	const [give, setGive] = useState<string[]>([])
@@ -667,7 +674,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			// a colon rather than a dash: four of the five engine reasons carry an em
 			// dash of their own, and two in one sentence read as one clause too many
 			label: (n: number) =>
-				`${n} the model cannot price: ${why} What giving one up costs is unknown, not zero.`
+				/* "the model" is the software naming itself, which is the one thing no
+				   user-facing sentence here may do. What the reader needs is that there is no
+				   number for these men, which is what "no projection" says without introducing a
+				   noun he has to learn. */
+				`${n} with no projection: ${why} What giving one up costs is unknown, not zero.`
 		}))
 	})()
 
@@ -1047,7 +1058,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							    that wrapped to two rows was spending the height the fold saved. */}
 							<summary>
 								{mine.length} player{mine.length === 1 ? "" : "s"} on this team
-								{unrateable > 0 && ` · ${unrateable} the model cannot price`}
+								{unrateable > 0 && ` · ${unrateable} with no projection`}
 							</summary>
 							<LineLegend unrated={unrateable > 0} />
 							{mine
@@ -1107,6 +1118,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				barMen={barMen}
 				wireRead={!!gettable}
 				cut={availability.cut}
+				window={period ? { from: span(period.start), to: span(period.end) } : null}
 			/>
 
 			{/* The two sides are symmetric now. The right has always been a search box;
@@ -1409,11 +1421,17 @@ const LineupCard = ({
 	count,
 	barMen,
 	wireRead,
-	cut
+	cut,
+	window: win
 }: {
 	league: League
 	lineup: Lineup
 	count: number
+	/** The window every number on this card is over, as two formatted dates, or null where
+	 *  the period could not be resolved. Passed in rather than derived here because
+	 *  `useBoard` already resolved it for the list above and two resolutions of one window
+	 *  is how two numbers on one screen come to disagree. */
+	window: { from: string; to: string } | null
 	/** Who each slot's replacement bar actually is, best first, so a spot the wire
 	 *  covers can name him instead of leaving the reader to guess — and so two seats
 	 *  of the same slot name two different men. */
@@ -1466,7 +1484,25 @@ const LineupCard = ({
 					    should find this number, and nothing else on the summary said so. */}
 					<span className="lineup-total">{total(lineup.points)}</span>
 					<span className="lineup-unit">
-						projected points, every spot below added up ·{" "}
+						{/*
+						  THE WINDOW IS NAMED, because without it two screens about one team
+						  disagreed by a factor of forty-six and neither said why.
+						  
+						  Measured on a five-man roster in one session: this card read "1523.92
+						  projected points, every spot below added up" while Tonight, for the same
+						  roster, read "your lineup projects 0, or 33.17 once you make these
+						  changes". Both true — one is a scoring period and the other is a night —
+						  and a reader with both open had nothing on either screen to reconcile them
+						  with. Tonight says "Today" in its own heading; this said nothing at all.
+						  
+						  The dates rather than a phrase, because `Filters.days` is null here and
+						  resolves to the LEAGUE's own period: naming a fortnight would be a
+						  sentence the code does not do, and the previous note in this file made
+						  exactly that argument for saying nothing. Saying the dates is true
+						  whatever the period turns out to be.
+						*/}
+						projected points{win ? ` from ${win.from} to ${win.to}` : ""}, every spot below
+						added up ·{" "}
 						{lineup.starters.filter(s => s.source === "roster").length} of{" "}
 						{lineup.starters.length} spots filled by your own players
 						{lineup.holes.length > 0 &&

@@ -408,7 +408,7 @@
         }
       },
       "eligibility": {
-        "source": "Not read from your league. Yahoo's position-eligibility thresholds as they were read from league 228947's own eligibility grid — see that league's provenance for when.",
+        "source": "Not read from your league. These are Yahoo's own position-eligibility thresholds, copied from one real Yahoo league's settings page on 2026-09-08.",
         "tracked_positions": [
           "C",
           "1B",
@@ -449,7 +449,7 @@
         "sources": [
           "https://baseball.fantasysports.yahoo.com/b1/228947/settings"
         ],
-        "method": "preset: copied from Yahoo league 228947 — a real 10-team Head-to-Head Points league this repo read from its own settings page (see scoring.json → leagues → yahoo:228947, which carries the URLs and the date it was read). Not one value here was read from your league.",
+        "method": "preset: copied from Yahoo league 228947 \u2014 a real 10-team Head-to-Head Points league this repo read from its own settings page (see scoring.json \u2192 leagues \u2192 yahoo:228947, which carries the URLs and the date it was read). Not one value here was read from your league.",
         "verified": false
       },
       "needs_review": [

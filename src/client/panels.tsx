@@ -769,6 +769,26 @@ export const tradesClosed = (
  */
 export const tab = (id: View): string => VIEWS.find(v => v.id === id)?.label ?? id
 
+/**
+ * The word in the address bar for each screen.
+ *
+ * Separate from the id on purpose, and for the same reason the ids are not the labels: an id
+ * is what this browser has stored for years and cannot be renamed without dropping every
+ * returning reader on the default screen, while a hash is what a person reads and sends to
+ * somebody. "board" and "wire" are the ids; "tonight" and "pickups" are what the tabs say.
+ */
+export const VIEW_HASH: Record<View, string> = {
+	board: "tonight",
+	wire: "pickups",
+	trade: "my-league"
+}
+
+export const viewFromHash = (hash: string): View | null => {
+	const want = hash.replace(/^#/, "").toLowerCase()
+	const hit = (Object.keys(VIEW_HASH) as View[]).find(id => VIEW_HASH[id] === want)
+	return hit ?? null
+}
+
 export const VIEWS: { id: View; label: string; purpose: string; season: number }[] = [
 	{
 		id: "board",
@@ -1040,10 +1060,15 @@ export const Setup = ({
 export const freshness = (
 	capturedAt: string | undefined,
 	now: number
-): { label: string; stale: boolean } => {
+): { label: string; stale: boolean; days: number } => {
 	const hours = capturedAt == null ? NaN : (now - Date.parse(capturedAt)) / 3_600_000
-	if (!Number.isFinite(hours)) return { label: "age unknown", stale: true }
-	if (hours < 1) return { label: "just now", stale: false }
-	if (hours < 36) return { label: `${Math.round(hours)}h ago`, stale: false }
-	return { label: `${Math.round(hours / 24)}d ago`, stale: true }
+	if (!Number.isFinite(hours)) return { label: "age unknown", stale: true, days: 0 }
+	if (hours < 1) return { label: "just now", stale: false, days: 0 }
+	if (hours < 36) return { label: `${Math.round(hours)}h ago`, stale: false, days: 0 }
+	/* `days` is returned so the chip's own sentence can count rather than say "a day" about
+	   every stale capture — it understated an 84-hour-old one by three days, beside a label
+	   already reading "4d ago". FLOORED, not rounded, because the sentence is about days of
+	   games that have actually finished: 84.3 hours is three whole days since, and the label
+	   rounds to four for a different and equally honest reason. */
+	return { label: `${Math.round(hours / 24)}d ago`, stale: true, days: Math.floor(hours / 24) }
 }

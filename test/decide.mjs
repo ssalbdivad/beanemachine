@@ -1504,6 +1504,82 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 }
 
 /**
+ * NOBODY IS EXPLAINED TWICE ON ONE CARD.
+ *
+ * A man on the 60-day injured list sitting in an active seat reached the reader twice, in two
+ * different sets of words: "Bench him — MLB lists him Injured 60-Day" in the change rows, and
+ * "One player on your roster could not be priced, so nothing above counts him: Injured 60-Day —
+ * no source states a return date" at the foot. Both true, one man, and nothing on screen tying
+ * them together, so a reader checking whether he has understood finds what looks like two
+ * separate problems with the same player.
+ *
+ * The claim asserted is the general one rather than that one case, because the general one is
+ * what a future reason can break: no name the card has already named may appear again in the
+ * could-not-be-priced block. What that block still exists for — a man in a RESERVE seat, or one
+ * the board has no row for, who never reaches the change rows at all — is asserted in the same
+ * breath, because a de-duplication that silently swallowed those would be worse than the
+ * duplication it replaced.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
+	const named = await page.$$eval(".decide-changes b", bs => bs.map(b => b.textContent.trim()))
+	const unpriced = await page.$$eval(".decide-list li", ls =>
+		ls
+			.filter(l => /could not be priced/.test(l.textContent ?? ""))
+			.flatMap(l => [...l.querySelectorAll("b")].map(b => b.textContent.trim())))
+	t("no man the change rows name is named again as unpriceable",
+		unpriced.every(n => !named.includes(n)),
+		`changes: ${named.join(", ") || "(none)"}\n  unpriced: ${unpriced.join(", ") || "(none)"}`)
+	await page.close()
+
+	/*
+	 * AND THE BLOCK STILL DOES ITS JOB, which is the half a de-duplication could silently eat.
+	 *
+	 * The first version of this assertion reached for the suite's IL+ man and was wrong about
+	 * him: `planLineup` skips a man in a reserve seat SILENTLY when a source says he is hurt,
+	 * because an injured man on the injured list needs no explaining. The line it does produce
+	 * is for the opposite case — a man parked in a reserve seat whom nothing says is hurt,
+	 * which is a seat the reader may be wasting — so that is the case seeded here.
+	 *
+	 * He never appears in the change rows, because a reserve seat is not a lineup decision. If
+	 * the de-duplication above ever widened to drop him, this is what would fail.
+	 */
+	const healthy = snap.players.find(
+		p =>
+			p.group === "hitting" &&
+			!snap.injuries?.[String(p.id)] &&
+			(p.stats?.plateAppearances ?? 0) > 300 &&
+			!spots.some(sp => sp.name === p.name)
+	)
+	if (healthy) {
+		const parked = await open({
+			config: cfg,
+			pool: seedPool,
+			lineup: {
+				[KEY]: {
+					at: new Date().toISOString(),
+					spots: [
+						...spots.filter(sp => !/^IL/i.test(sp.slot)).slice(0, 6),
+						{
+							slot: "IL",
+							name: healthy.name,
+							positions: [healthy.position ?? "Util"],
+							team: healthy.team ?? null
+						}
+					]
+				}
+			}
+		})
+		const text = await parked.$eval(".decide", e => e.innerText)
+		t("a man parked in a reserve seat that nothing says he needs is still reported",
+			text.includes(healthy.name) && /could not be priced|parked in the/.test(text),
+			`${healthy.name} — ${text.slice(0, 240).replace(/\n+/g, " | ")}`)
+		await parked.close()
+	}
+}
+
+/**
  * THE FIRST THIRTY SECONDS, with nothing in this browser.
  *
  * The hardest screen in the product. Measured on the published build at 390x844 before this
@@ -1533,12 +1609,24 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("and said to be box scores rather than projections", /Real box scores, not projections/.test(card), card)
 	t("the biggest night in the fixture leads", /Dustin May/.test(card) && /40\.1/.test(card), card)
 	t("and a scoreless night is not in it", !/Jo Adell/.test(card), card)
-	/* Eight rows of real names on the first screen of a 390px phone, where there used to be
-	   none. Asserted as "inside the first viewport" rather than at a pixel, because the rows
-	   are the claim and their exact offsets are app.css's business. */
-	const above = await page.$$eval(".recap-best li", ls =>
-		ls.filter(l => l.getBoundingClientRect().top < 844).length)
-	t("real players are on the first screen of a phone", above >= 5, String(above))
+	/* Real names on the first screen of a 390px phone, where there used to be none. Asserted as
+	   "inside the first viewport" rather than at a pixel, because the rows are the claim and
+	   their exact offsets are app.css's business.
+	
+	   AND NONE OF THEM IS BEHIND THE DOCK. The list was eight and the setup dock owned the
+	   pixels rows seven and eight were drawn in at rest, so a list of eight showed six — which
+	   is why it is six. `elementFromPoint` at each row's own centre is the only check that
+	   catches that: a row can be inside the viewport and still be under something. */
+	const rows = await page.$$eval(".recap-best li", ls =>
+		ls.map(l => {
+			const r = l.getBoundingClientRect()
+			const at = document.elementFromPoint(Math.round(r.left + 8), Math.round(r.top + r.height / 2))
+			return { inside: r.top >= 0 && r.bottom <= innerHeight, covered: !l.contains(at) }
+		}))
+	t("real players are on the first screen of a phone",
+		rows.filter(r => r.inside).length >= 5, JSON.stringify(rows))
+	t("and not one of them is drawn under the setup bar",
+		rows.every(r => !r.covered), JSON.stringify(rows))
 	await page.close()
 }
 

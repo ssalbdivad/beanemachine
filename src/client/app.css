@@ -1316,7 +1316,26 @@ kbd{
   there is no reason to leave 100px of a landscape screen unused.
 */
 @media (max-height:520px) and (min-width:720px){
-  .dock-sheet{max-height:min(90vh,760px)}
+  /*
+    THE FIRST VERSION OF THIS LINE PUT THE SHEET'S HEADINGS OFF THE TOP OF THE SCREEN, which
+    is worse than the overflow it cured, and it is recorded rather than quietly corrected.
+
+    It was `max-height:min(90vh,760px)`, reasoning that 74vh of a 390px viewport is 288px and
+    there is no reason to leave 100px of a landscape screen unused. But `.dock` is
+    `position:fixed; bottom:0` with no top and a column of bar plus sheet, so its height is
+    content-driven: 90vh of sheet PLUS the bar is more than the viewport, and a fixed element
+    anchored at the bottom grows upward. Measured at 844x390: `aside.dock` computed to
+    `top:-32.34px; height:422.34px`, which put "Who's on your team?" at a client-rect top of
+    -14px — entirely off screen — and sliced the line under it at -6px.
+
+    So the cap goes on the DOCK instead of on the sheet. `100dvh` rather than `100vh` because
+    a phone's dynamic viewport is what is actually visible with the URL bar out, and the sheet
+    becomes a flex item that may shrink — `min-height:0` is what allows that, since a flex
+    item's default `min-height:auto` refuses to go below its content and is exactly how this
+    kind of rule silently does nothing.
+  */
+  .dock{max-height:100dvh}
+  .dock-sheet{max-height:none;flex:1 1 auto;min-height:0}
   .onboard{
     display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
     gap:var(--sp-5);align-items:start;

@@ -1312,16 +1312,31 @@ clean("after pricing a trade")
 // thing that must NOT survive: it was never stored, and an offer that reappeared
 // would be one nobody made.
 //
-// A reload also lands on Today rather than on the screen the reader was standing on
-// — `view` is React state and only the HORIZON is persisted — so the order of the
-// three checks below follows the reload, not the journey: Today, then Wire, then
-// Setup.
+// A reload now lands on THE SCREEN HE WAS ON, which is the opposite of what this block used
+// to assert, and the change is the point rather than a regression.
+//
+// THE OLD TRUTH: "a reload lands back on Tonight", because `view` was React state, only the
+// horizon was persisted, and the URL was the same string on all three screens. That cost three
+// things a reader notices — nothing was bookmarkable, nothing was shareable, and a phone that
+// reloads a backgrounded tab on its own threw away whatever he was reading. The screen is in
+// the address bar now (#tonight / #pickups / #my-league), so a reload returns to it.
+//
+// What the block still proves is the thing it was written for: everything above lives in this
+// browser rather than on a server, so a reload is the only evidence it was ever written — and a
+// half-built offer, which was never stored, must NOT survive it.
 
 const teamBefore = await page.$$eval(".trade-own .who b", n => n.map(e => e.textContent.trim()).sort())
-at("a reload lands back on the screen a visit starts on")
+at("a reload lands back on the screen he was reading")
+const standingOn = await current()
 await page.reload({ waitUntil: "domcontentloaded" })
+await page.waitForSelector(".views button", { timeout: 30000 })
+await page.waitForTimeout(1200)
+t("a reload lands back on the screen he was on, not on the default",
+	(await current()) === standingOn, `${await current()} — was ${standingOn}`)
+/* And the rest of this block reads Tonight, so it goes there by the tab rather than by
+   assuming the reload did it. */
+await tab(TONIGHT)
 await onToday()
-t("a reload lands back on Tonight", (await current()) === TONIGHT, await current())
 
 /**
  * Rewritten from "the draft board survived the reload, and now counts the man added

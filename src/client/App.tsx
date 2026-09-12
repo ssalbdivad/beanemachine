@@ -23,6 +23,8 @@ import {
 	EligibilityPanel,
 	Fragment2,
 	freshness,
+	VIEW_HASH,
+	viewFromHash,
 	isPreset,
 	leagueReady,
 	PresetNote,
@@ -112,7 +114,25 @@ export const App = () => {
 	const [busy, setBusy] = useState(false)
 	// Billy's lenses light for a moment when a save lands
 	const [acknowledged, setAcknowledged] = useState(false)
-	const [view, setView] = useState<View>("board")
+	/**
+	 * WHICH SCREEN, AND IT IS IN THE ADDRESS NOW.
+	 *
+	 * The URL never changed. It was the same string on Tonight, on Pickups and on My league,
+	 * which cost three things a reader notices: nothing was bookmarkable, nothing was
+	 * shareable, and a reload always returned to Tonight whatever he had been reading. The
+	 * last is the one that stings — a phone reloads a backgrounded tab on its own.
+	 *
+	 * A hash rather than a path, because this is a static site served from one file and a path
+	 * would 404 on a refresh unless the host rewrites. Read once here so the first paint is
+	 * already the right screen and no effect has to correct it.
+	 */
+	const [view, setView] = useState<View>(() => {
+		try {
+			return viewFromHash(window.location.hash) ?? "board"
+		} catch {
+			return "board"
+		}
+	})
 	/**
 	 * Whether the first-run setup is on screen.
 	 *
@@ -204,7 +224,16 @@ export const App = () => {
 			if (next.view !== undefined) setView(next.view)
 			if (next.sheet !== undefined) setSetupOpen(next.sheet)
 			try {
-				history.pushState({ bm: { view: toView, sheet: toSheet, depth: depth + 1 } }, "")
+				/* The URL carries the SCREEN and not the sheet. A sheet is a thing a reader
+				   opened over the page he is on, not a place — sharing "the setup sheet on
+				   Pickups" is not a thing anybody wants to send, and a reload landing with it
+				   open would be the page deciding what he is doing. So the hash names the
+				   screen, and the history entry carries both. */
+				history.pushState(
+					{ bm: { view: toView, sheet: toSheet, depth: depth + 1 } },
+					"",
+					`#${VIEW_HASH[toView]}`
+				)
 			} catch {
 				// A browser that refuses pushState still gets a working app; it just gets the
 				// old Back behaviour, which is the one this is improving and not relying on.
@@ -218,7 +247,8 @@ export const App = () => {
 			if (!(history.state as { bm?: unknown } | null)?.bm)
 				history.replaceState(
 					{ ...(history.state as object | null), bm: { view, sheet: setupOpen, depth: 0 } },
-					""
+					"",
+					`#${VIEW_HASH[view]}`
 				)
 		} catch {
 			/* see `go` */
@@ -232,8 +262,19 @@ export const App = () => {
 			setView(at.view)
 			setSetupOpen(at.sheet)
 		}
+		/* A hash EDITED in the address bar fires `hashchange` and not `popstate`, and a link
+		   pasted into the same tab is exactly that. Nothing here pushes, so the two listeners
+		   cannot feed each other. */
+		const onHash = () => {
+			const at = viewFromHash(window.location.hash)
+			if (at) setView(at)
+		}
 		window.addEventListener("popstate", onPop)
-		return () => window.removeEventListener("popstate", onPop)
+		window.addEventListener("hashchange", onHash)
+		return () => {
+			window.removeEventListener("popstate", onPop)
+			window.removeEventListener("hashchange", onHash)
+		}
 		/* Mounted once and never re-bound. The handler reads only the event, so it needs no
 		   dependency on `view` or `setupOpen` — and a listener re-bound on every state change
 		   is a listener that can be mid-swap when a gesture fires. */
@@ -1753,9 +1794,17 @@ const Status = ({
 			  calls anything past thirty-six hours stale, which is the point at which a day's
 			  games have happened since the numbers were taken.
 			*/}
+			{/* The clause COUNTS, because the first version of it understated by three days. It
+			    read "— a day of games has happened since" for every stale case, and on a capture
+			    84.3 hours old, beside a label already reading "4d ago", that is the app
+			    understating its own staleness next to the number that contradicts it.
+			    `freshness` calls anything past thirty-six hours stale, so the smallest true
+			    version of this is still one day. */}
 			<span className={data.className}>
 				player data <b>{data.value}</b>
-				{age.stale && !snapshotError && snapshot ? " — a day of games has happened since" : ""}
+				{age.stale && !snapshotError && snapshot ?
+					` — ${age.days === 1 ? "a day" : `${age.days} days`} of games since`
+				:	""}
 			</span>
 			<WireChip league={league} wire={wire} onFix={onFixWire} />
 		</div>
@@ -2395,7 +2444,14 @@ const LeagueEditor = ({
 
 				<section className="card">
 					<h2>Needs review</h2>
-					<p className="sub">Anything the source didn't state is left null and listed here.</p>
+					{/* "null" is not a word about baseball, and "the source" is a word about where a
+					    program got something. The five `needs_review` strings that named field paths
+					    were fixed earlier; this intro line was left behind and says both in one
+					    sentence. */}
+					<p className="sub">
+						Anything your league&rsquo;s own pages did not state is left blank and listed
+						here.
+					</p>
 					{draft.needs_review.length ?
 						<ul className="flags">
 							{draft.needs_review.map(f => (

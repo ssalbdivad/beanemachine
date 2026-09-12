@@ -153,7 +153,21 @@ export const Recap = ({
 
 	/** What the best nights in baseball were worth, for a reader with no team yet. */
 	const best = useMemo(
-		() => (actuals && league && !men.men.length ? bestNights(actuals.lines, league, 8) : null),
+		/*
+		  SIX, NOT EIGHT, and the number comes off the screen rather than out of the air.
+		  
+		  Measured at 390x844 on the published build with eight: at rest (`scrollY` 0) the setup
+		  dock owns the pixels rows seven and eight are drawn in — `document.elementFromPoint`
+		  between y=725 and y=844 returns `DIV.dock-bar`, `P.dock-say` and `BUTTON.primary` over
+		  them — and at the other end of the document the sticky masthead owns row eight's. So a
+		  list of eight showed six at either end of its scroll, and the two it hid were the two
+		  a reader would have had to go looking for.
+		  
+		  Six is what fits the state the screen is actually IN when he arrives, which is at rest
+		  with the dock up. The men it drops are the seventh and eighth best nights in baseball;
+		  nothing downstream reads this list, so the cost is exactly two rows of interest.
+		*/
+		() => (actuals && league && !men.men.length ? bestNights(actuals.lines, league, 6) : null),
 		[actuals, league, men]
 	)
 

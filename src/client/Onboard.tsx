@@ -362,9 +362,30 @@ export const Onboard = ({
 											   adopting one — so every chip a visitor tapped disappeared,
 											   the sheet said "Got them", and storage held nothing. */
 											onClick={() => {
-												void onAddSuggested(g.id, g.group, g.name).then(
-													ok => ok && setAdded(a => [...a, g.id])
-												)
+												void onAddSuggested(g.id, g.group, g.name).then(ok => {
+													if (!ok) return
+													setAdded(a => [...a, g.id])
+													/*
+													  THE LINE LEAVES THE BOX WITH HIM.
+													  
+													  It used to stay, and the consequence was measured: tap
+													  every chip, then press the button again, and the whole
+													  six-line rejection comes back over a roster that is now
+													  correct — because the text is re-parsed and those lines
+													  still do not match. The false claim was one tap away
+													  rather than on screen, and it cleared only on reload.
+													  
+													  Removed by exact line rather than by index, because the
+													  reader may have edited the box between the read and the
+													  tap, and an index would then delete somebody else's line.
+													*/
+													setTeam(t =>
+														t
+															.split(/\r?\n/)
+															.filter(l => l.trim() !== g.line.trim())
+															.join("\n")
+													)
+												})
 											}}
 										>
 											{g.name}

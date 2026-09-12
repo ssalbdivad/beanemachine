@@ -181,7 +181,7 @@
         }
       },
       "eligibility": {
-        "source": "Not read from your league. Yahoo's position-eligibility thresholds as they were read from league 228947's own eligibility grid — see that league's provenance for when.",
+        "source": "Not read from your league. These are Yahoo's own position-eligibility thresholds, copied from one real Yahoo league's settings page on 2026-09-08.",
         "tracked_positions": [
           "C",
           "1B",

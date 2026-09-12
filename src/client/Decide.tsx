@@ -69,6 +69,12 @@ const readAgo = (at: string): string => {
 	return `${Math.round(hours / 24)} days ago`
 }
 
+/** "Sep 12", from an ISO date, in the reader's own locale. Noon so a timezone cannot
+ *  move it to the day before — an ISO date parses as UTC midnight, and in any zone west
+ *  of Greenwich `toLocaleDateString` would then print yesterday. */
+const plainDate = (iso: string): string =>
+	new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+
 const PERIOD_NAME: Record<string, string> = {
 	matchup: "this matchup",
 	daily: "today",
@@ -1102,10 +1108,41 @@ export const Decide = ({
 	 * rows of one sentence is not sixteen decisions.
 	 */
 	const skippedWhy = useMemo(() => {
+		/*
+		 * NOBODY IS EXPLAINED TWICE ON ONE CARD, and this is where it was happening.
+		 *
+		 * A man on the 60-day injured list in an active seat reached the reader twice, in
+		 * two different sets of words. The bench rows said "Bench him — MLB lists him
+		 * Injured 60-Day", which is the actionable one; this block said "One player on your
+		 * roster could not be priced, so nothing above counts him: Injured 60-Day — no
+		 * source states a return date." Both true, one man, two sentences, and nothing on
+		 * screen tying them together — a reader checking whether he has understood finds
+		 * what looks like two separate problems with the same player.
+		 *
+		 * So this block names only men the card has not already named. It keeps its whole
+		 * job where that job is real: a man in a RESERVE seat, or one the board has no row
+		 * for, never appears in the bench rows at all, and the lineup above is silently
+		 * planned as if the reader owned twenty-two players when he owns twenty-four. That
+		 * absence is what this block exists to state, and it still states it.
+		 *
+		 * The bench rows are the survivors rather than this one for two reasons: they carry
+		 * the action (the seat has to be changed in Yahoo either way), and they are grouped
+		 * by MLB's answer about TONIGHT, which is newer than the engine's answer about the
+		 * window.
+		 */
+		const named = new Set(
+			[
+				...(today?.bench ?? []).map(b => b.name),
+				...(today?.start ?? []).map(x => x.name),
+				...(today?.shifts ?? []).map(x => x.name),
+				...(today?.locked ?? [])
+			].map(normalizeName)
+		)
 		const by = new Map<string, string[]>()
 		for (const line of plan?.lineup.skipped ?? []) {
 			const at = line.indexOf(": ")
 			const name = at === -1 ? line : line.slice(0, at)
+			if (named.has(normalizeName(name))) continue
 			const why =
 				at === -1 ?
 					"No projection could be made for him, so he is neither started nor offered up."
@@ -1113,7 +1150,7 @@ export const Decide = ({
 			by.set(why, [...(by.get(why) ?? []), name])
 		}
 		return [...by].map(([why, men]) => ({ why, men }))
-	}, [plan])
+	}, [plan, today])
 
 	if (!league) return null
 
@@ -1271,7 +1308,13 @@ export const Decide = ({
 			<h2>What should I do?</h2>
 			{rated && (
 				<p className="sub decide-window">
-					For <b>{PERIOD_NAME[rated.period.kind]}</b>, {rated.period.start} to {rated.period.end}
+					{/* Dates a person reads, not dates a machine writes. This printed
+					    "2026-09-12 to 2026-09-18" on the same screen as "Friday, Sep 11" — two
+					    formats for one kind of fact, and the ISO one is the format a file uses.
+					    The year is dropped because the whole app is about this season and a
+					    reader deciding tonight's lineup does not need telling which year it is. */}
+					For <b>{PERIOD_NAME[rated.period.kind]}</b>, {plainDate(rated.period.start)} to{" "}
+					{plainDate(rated.period.end)}
 					{rated.period.assumed && " — assumed, your league states no scoring period"}.
 				</p>
 			)}
@@ -1318,7 +1361,8 @@ export const Decide = ({
 							)}
 							{today.live && today.placed + today.waiting > 0 ?
 								<>
-									{today.placed} of your men are in tonight&rsquo;s card
+									{today.placed} of your men {today.placed === 1 ? "is" : "are"} in
+									tonight&rsquo;s card
 									{today.waiting > 0 && <> · {today.waiting} waiting on a lineup</>} ·{" "}
 								</>
 							:	<>{today.playing} of your men can score · </>}
@@ -1749,13 +1793,17 @@ export const Decide = ({
 						    scoring, before swaps were priced on the lineup that follows them, and
 						    src/auto/plan.ts says in so many words that the cap is NOT YET
 						    RE-MEASURED. A summary must not outrun the drawer it summarises — the
-						    reader who never opens the fold is the one the claim reaches. So the
-						    cap now says where it came from, which is the honest version of the
-						    same six words. */}
+						    reader who never opens the fold is the one the claim reaches.
+						    
+						    The first attempt at the honest version said "a cap carried over from an
+						    earlier version and not re-measured since", which is a fact about this
+						    repository in a heading about baseball. What a reader needs is that the
+						    number is a limit somebody chose rather than a finding, which is the
+						    same information without the changelog. */}
 						{plan.swaps.moves.length === 0 ? "none clear the bar"
 						: plan.swaps.moves.length < DEFAULTS.maxMoves ?
 							`${plan.swaps.moves.length} clear${plan.swaps.moves.length === 1 ? "s" : ""} the bar`
-						:	`stopping at ${plan.swaps.moves.length}, a cap carried over from an earlier version and not re-measured since`}
+						:	`stopping at ${plan.swaps.moves.length}, which is this app's own limit and not a measured best`}
 						{rules.cap !== null && ` · your league allows ${rules.cap}`}
 					</span>
 				)}

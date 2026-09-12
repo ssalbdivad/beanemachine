@@ -23,6 +23,7 @@ import {
 	EligibilityPanel,
 	Fragment2,
 	freshness,
+	purpose,
 	VIEW_HASH,
 	viewFromHash,
 	isPreset,
@@ -764,7 +765,12 @@ export const App = () => {
 				{VIEWS.map(v => (
 					<button
 						key={v.id}
-						title={shown ? v.purpose : `${v.purpose} — set a league up first`}
+						/* The hover is gone where the screen now says its own sentence — a hover
+						   that repeats visible text is noise, and a hover that is the only copy of a
+						   sentence was the defect. What survives is the DISABLED case, which is
+						   information no screen can carry: a tab that highlights and then shows the
+						   same setup card reads as a broken button. */
+						title={shown ? undefined : `${v.purpose} — set a league up first`}
 						aria-current={view === v.id ? "page" : undefined}
 						className={view === v.id ? "on" : ""}
 						// Nothing on any of them exists yet. A tab that highlights and then
@@ -775,12 +781,27 @@ export const App = () => {
 						// is live" signal .modes and .chip-btn already use for a selected control
 						style={view === v.id ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}
 						onClick={() => {
-							// Choosing a tab is choosing to leave the setup. It reopens by
-							// itself if the last league is ever removed.
-							setOnboarding(false)
-							/* Through `go`, so Back returns to the tab he came from. See the note
-							   on `go` — a tab press is a forward step and is the commonest one. */
-							go({ view: v.id })
+							/*
+							 * A TAB PRESS CLOSES THE SHEET AND KEEPS THE BAR, and the version that
+							 * did otherwise threw away what the reader had typed.
+							 *
+							 * This was `setOnboarding(false)`, on the reasoning that choosing a tab
+							 * is choosing to leave the setup. `docked` is `onboarding || !league`,
+							 * so the moment a league exists — which is the moment the preset is
+							 * adopted, in the middle of the first visit — that line UNMOUNTED the
+							 * dock, and an unmounted sheet loses its textarea. The sheet is kept
+							 * mounted and merely hidden precisely so that closing it by any route
+							 * does not discard eighteen typed lines (see src/client/Dock.tsx); this
+							 * route was the exception nobody had walked, and test/static.mjs caught
+							 * it by navigating the way a reader does rather than by the hash.
+							 *
+							 * So the sheet closes and the one-line bar stays. He gets the screen he
+							 * asked for, his typing is still there, and the way back is still on
+							 * screen. `onboarding` goes false where it means something: "Show me the
+							 * board" at the end of the setup, a loaded file, and the dock's own
+							 * close-with-a-league, which is a reader saying he is finished.
+							 */
+							go({ view: v.id, sheet: false })
 						}}
 					>
 						{v.label}
@@ -967,6 +988,24 @@ export const App = () => {
 				*/
 				<div className="grid">
 					{/*
+					  THE SCREEN SAYS WHAT IT IS FOR, in text, because the hover never reached a
+					  phone.
+					  
+					  The three tab sentences in `VIEWS` are the best orientation copy in this app
+					  and all three were `title` attributes on the nav buttons — a hover, on a
+					  product opened on a phone, where 68 of the 70 attributes on one screen were
+					  longer than six words and not one of them was reachable by a thumb. Pickups
+					  renders its own through `purpose("wire")`; these two are composed by App out
+					  of several cards, so App is where the screen-level sentence belongs rather
+					  than inside whichever card happens to come first.
+					  
+					  Measured cost for the same pattern on Pickups: 113px at 390x844 and 75px at
+					  1280x1000, with that screen's answer card still whole above the fold.
+					*/}
+					<div className="full">
+						<p className="sub board-intro">{purpose("board")}</p>
+					</div>
+					{/*
 					  LAST NIGHT SITS ABOVE TONIGHT, and the order is the argument.
 					  
 					  It was going to be a fourth tab. Measured at 390px: the tab strip is 344px
@@ -1038,6 +1077,12 @@ export const App = () => {
 				*/
 				<>
 					<div className="grid">
+						{/* The third of the three, for the same reason — and it is the longest and
+						    says the thing nothing else on any screen says: everything the other two
+						    screens tell you is priced in these values. */}
+						<div className="full">
+							<p className="sub board-intro">{purpose("trade")}</p>
+						</div>
 						{/*
 						  No `key={wireKey}` here, and that is the point.
 						  

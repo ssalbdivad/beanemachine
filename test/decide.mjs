@@ -1463,9 +1463,9 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	const day = await page.$eval(".recap-day", e => e.innerText)
 	t("the date is the reader's own yesterday, not the fixture's", /\w/.test(day) && !/2026-09-11/.test(day), day)
 
-	await page.click(".recap-all summary")
+	await page.click(".recap-men summary")
 	await page.waitForTimeout(200)
-	const list = await page.$eval(".recap-list", e => e.innerText)
+	const list = await page.$eval(".recap-each", e => e.innerText)
 	t("every man you hold is listed", ["Kyle Tucker", "Jo Adell", "Taj Bradley", "Alex Bregman", "Ozzie Albies", "Dustin May"].every(n => list.includes(n)), list)
 	t("best night first", list.indexOf("Dustin May") < list.indexOf("Ozzie Albies"), list)
 	t("a night is explained by the categories that carried it", /HR/.test(list) && /OUT/.test(list), list)
@@ -1480,9 +1480,9 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	)
 	await ghost.waitForSelector(".recap", { timeout: 30000 })
 	await ghost.waitForTimeout(1000)
-	await ghost.click(".recap-all summary")
+	await ghost.click(".recap-men summary")
 	await ghost.waitForTimeout(200)
-	const withGhost = await ghost.$eval(".recap-list", e => e.innerText)
+	const withGhost = await ghost.$eval(".recap-each", e => e.innerText)
 	t("a man who never took the field says so rather than showing a zero",
 		/Pete Alonso[\s\S]{0,24}didn/.test(withGhost), withGhost.slice(-200))
 	await ghost.close()
@@ -1530,6 +1530,93 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	// One entry per league per day: a reader who opens the app twice has not been advised
 	// twice, and a second row would flatter the record's own denominator.
 	t("one entry for the day, however many times it rendered", mine.filter(e => e.date === mine[0].date).length === 1, String(mine.length))
+	await page.close()
+}
+
+/**
+ * AM I WINNING — the question this app has never answered, answered the only honest way.
+ *
+ * There is no feed: Yahoo stopped answering the read that would have supplied a rival roster,
+ * there is no backend, and nothing here may invent one. What the app can do is the thing it does
+ * for everything else — be told. An opponent's roster goes through the same parser the reader's
+ * own team goes through, and `src/data/actuals.ts` prices both sides over the league's own period
+ * from MLB's day-by-day record.
+ *
+ * THE CLAIM UNDER TEST IS THE CAVEAT AS MUCH AS THE NUMBER. Neither figure is what the league
+ * will pay, because Yahoo pays only the men in a lineup and this page can see neither side's; so
+ * both count every man HELD, the gap is measured the same way twice, and the card has to say so.
+ * A version of this that printed a score would be worse than the silence it replaced.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const page = await open(
+		{ config: cfg, lineup: { [KEY]: { at: new Date().toISOString(), spots } } },
+		{ actuals: true }
+	)
+	await page.waitForSelector(".recap", { timeout: 30000 })
+	await page.waitForTimeout(1200)
+	const fold = await page.$('.recap details summary:text-is("Who are you playing?")')
+	t("the card offers to be told who the opponent is", !!fold,
+		(await page.$eval(".recap", e => e.innerText)).slice(0, 200))
+	if (fold) {
+		await fold.click()
+		await page.waitForTimeout(200)
+		/* Two men from the committed fixture who are NOT on the seeded team, because a man on
+		   both sides is caught by design and suppresses the gap — which is asserted a few lines
+		   down, and which this block accidentally exercised first: the fixture's Alex Bregman is
+		   a top-plate-appearance third baseman and `bestAt` had already seated him.
+		
+		   One is typed as a full name and one as a bare surname, so the same parser path the
+		   reader's own team goes through is the path his opponent's goes through too. */
+		const fixtureMen = [
+			...DAY_HITTING.stats[0].splits.map(x => x.player.fullName),
+			...DAY_PITCHING.stats[0].splits.map(x => x.player.fullName)
+		]
+		const hisTwo = fixtureMen.filter(n => !spots.some(sp => sp.name === n)).slice(0, 2)
+		t("the fixture holds two men who are not on the seeded team", hisTwo.length === 2, fixtureMen.join(", "))
+		await page.fill(
+			".recap-rival textarea",
+			`${hisTwo[0]}\n${(hisTwo[1] ?? "").split(" ").slice(-1)[0]}`
+		)
+		await page.click('.recap-rival button:text-is("That\u2019s his team")')
+		await page.waitForTimeout(1500)
+		const card = await page.$eval(".recap", e => e.innerText)
+		t("his men are counted and the two totals are put side by side",
+			/His men have scored [\d.]+ to your [\d.]+/.test(card), card.slice(0, 400))
+		t("and it says which way the gap runs",
+			/you are (ahead|behind) by [\d.]+|level/.test(card), card)
+		// The caveat is the assertion. Both sides the same way, and not the score.
+		t("and that both sides are counted the same way",
+			/Both sides count every man held/.test(card), card)
+		t("and that it is not the score the league will pay",
+			/not the score your league will pay/.test(card), card)
+		t("two men are on record, the bare surname among them",
+			/2 of his men are on record/.test(card), card)
+		// The parser's note is written for the reader's OWN team and says things that are wrong
+		// of this one — "no seats were in that text, so tonight's lineup comes back as the lineup
+		// to SET" is about HIS roster box. Nothing here uses his seats.
+		t("and nothing about the reader's own lineup is said under his opponent's roster",
+			!/lineup comes back as the lineup to SET/.test(card), card)
+		/* A MAN CANNOT BE ON BOTH TEAMS. The realistic mistake is pasting your own roster page
+		   into the opponent box — the two gestures are identical and the boxes are one tap apart
+		   — and the result would be a gap of zero reported with total confidence. It is also the
+		   only check available on a rival roster, because any twelve real men are a possible team. */
+		const mineName = spots[0].name
+		await page.fill(".recap-rival textarea", mineName)
+		await page.click('.recap-rival button:text-is("That\u2019s his team")')
+		await page.waitForTimeout(1200)
+		const clash = await page.$eval(".recap", e => e.innerText)
+		t("a man entered on both sides is caught and named",
+			clash.includes(mineName) && /on YOUR team as well/.test(clash), clash.slice(0, 400))
+		t("and no gap is reported while that is true",
+			!/His men have scored/.test(clash), clash.slice(0, 400))
+
+		await page.click('.recap-rival button:text-is("Forget him")')
+		await page.waitForTimeout(800)
+		t("and he can be forgotten again",
+			!/His men have scored/.test(await page.$eval(".recap", e => e.innerText)),
+			(await page.$eval(".recap", e => e.innerText)).slice(0, 200))
+	}
 	await page.close()
 }
 

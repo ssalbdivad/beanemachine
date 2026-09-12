@@ -1739,9 +1739,18 @@ export const Decide = ({
 					  with no measurement behind it, dressed as a feature.
 					*/}
 					<p className="sub decide-read">
+						{/* "It does not know your matchup or the score" was true of the whole app
+						    when it was written and is now true of only half of it: the card above
+						    will compare your week against an opponent you paste, which is the one
+						    honest thing available — both sides counted the same way, neither of
+						    them the score Yahoo will pay. So this sentence narrows to what is
+						    still true of THIS card, and points at what answers the rest. A line
+						    that keeps claiming an absence the app has filled is as wrong as one
+						    that claims an ability it lacks. */}
 						This reads tonight&rsquo;s schedule, the batting orders that have been posted
-						and the injured list. It does not know your matchup or the score, so nothing
-						above is playing for or against a lead.
+						and the injured list. Nothing here is playing for or against a lead &mdash;
+						it does not know your league&rsquo;s scoreboard, and how your week stands is
+						on <b>Last night</b>, against an opponent you tell it about.
 					</p>
 				</>
 			)}

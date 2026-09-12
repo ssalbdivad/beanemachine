@@ -52,7 +52,14 @@ const STORES = [
 	   is warning about. The paragraph the reader reads deliberately does NOT name the
 	   history: there is nothing to lose until something writes it, and naming a record he
 	   cannot have would be a sentence the code does not do. */
-	"beanemachine:ledger"
+	"beanemachine:ledger",
+	/* src/client/opponent.ts. Forgiving on read like the lineup store, so it cannot itself be
+	   what throws during render — but it is on this list for the same reason every other key is:
+	   the button beside the error has to be the button that fixes it, and a clear list missing a
+	   key leaves whatever is in it behind for ever. The paragraph the reader reads names the
+	   roster and the leagues and not this, because an opponent is re-pasted in one gesture and
+	   listing it would make the warning longer without making it truer. */
+	"beanemachine:opponent"
 ]
 
 export class Boundary extends Component<{ children: ReactNode }, State> {

@@ -169,3 +169,24 @@
    right-hand number is a difference rather than a total, which is why it may be negative. */
 .recap-days .recap-slot { text-align: left; color: var(--muted) }
 .recap-days .recap-pts { font-variant-numeric: tabular-nums }
+
+/*
+  The opponent's team, behind a tap on the card where the answer appears.
+
+  Deliberately plain: a textarea, a primary button and a way out. It is the same gesture the
+  reader already made for his own team, so it should look like the same gesture — the sheet's
+  own box is styled by app.css and this borrows its shape rather than inventing a second one.
+*/
+.recap-rival { margin-top: var(--sp-2) }
+.recap-rival textarea {
+	width: 100%;
+	margin-top: var(--sp-2);
+	font: var(--fs-4)/var(--lh-body) var(--sans);
+	resize: vertical;
+}
+.recap-rival-go {
+	display: flex;
+	gap: var(--sp-2);
+	flex-wrap: wrap;
+	margin: var(--sp-2) 0 0;
+}

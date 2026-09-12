@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { slotsFor } from "../engine/bscore.ts"
@@ -8,6 +8,8 @@ import { bestNights, gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
 import { roster, rosterKey } from "./roster.ts"
+import { opponentStore } from "./opponent.ts"
+import { rosterFromPaste } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { ledgerStore } from "./ledger.ts"
 import { useStored } from "./stores.ts"
@@ -216,6 +218,46 @@ export const Recap = ({
 		!!period?.periodStart && period.periodStart <= periodTo && men.men.length > 0,
 		["hitting", "pitching"]
 	)
+	/**
+	 * AND WHAT HIS MEN SCORED, once the reader has told the page who they are.
+	 *
+	 * The same arithmetic on the same read, over the same window, against the same scoring
+	 * table — which is what makes the comparison fair in the one way it can be. Neither figure
+	 * is what Yahoo will pay, because Yahoo pays only the men in a lineup and this page can see
+	 * neither his lineups nor the reader's past ones; both count every man held, so the GAP is
+	 * measured the same way on both sides, and the sentence says that out loud twice.
+	 */
+	const rivalKeys = useMemo(() => {
+		if (!leagueKey) return []
+		try {
+			return opponentStore.of(leagueKey)
+		} catch {
+			return []
+		}
+	}, [leagueKey, rev])
+
+	const periodTotalFor = (keys: string[]): number | null => {
+		if (!soFar.lines || !league || !keys.length) return null
+		let sum = 0
+		for (const key of keys) {
+			const line = soFar.lines.get(key)
+			if (!line) continue
+			const group = key.endsWith(":pitching") ? "pitching" : "hitting"
+			sum += scoreStats(line.stats, tableFor(league, group), group).points
+		}
+		return Number(sum.toFixed(1))
+	}
+	const rivalTotal = useMemo(
+		() => periodTotalFor(rivalKeys),
+		[soFar.lines, league, rivalKeys]
+	)
+	/** Men the reader has entered on both sides, by name, so the card can say whose. */
+	const both = useMemo(() => {
+		if (!rivalKeys.length || !men.men.length) return []
+		const his = new Set(rivalKeys)
+		return men.men.filter(m => his.has(m.key)).map(m => m.name)
+	}, [rivalKeys, men])
+
 	const periodTotal = useMemo((): number | null => {
 		if (!soFar.lines || !league || !men.men.length) return null
 		let sum = 0
@@ -525,6 +567,68 @@ export const Recap = ({
 				</p>
 			)}
 			{/*
+			  THE OTHER HALF OF THE MATCHUP, once the reader has said who it is.
+			  
+			  "Am I winning?" is the question a head-to-head manager asks most and the one this app
+			  has never answered. The absence was correct — Yahoo stopped answering the read that
+			  would have supplied it, there is no backend, and nothing here may invent a rival
+			  roster — but "we cannot know" was never the only option. The app learns everything
+			  else by being told, and an opponent's roster is the same gesture against a different
+			  name.
+			  
+			  The paste lives HERE, behind a tap, on the card where the answer appears. Not on My
+			  league: a reader meets this at the moment he is looking at his own week's number,
+			  which is the moment the question occurs to him, and a box on another screen would be
+			  a feature he has to go and find. Nothing else on any screen changes.
+			  
+			  IT IS NOT THE SCORE and says so in both places. Both figures count every man held,
+			  because neither side's lineups are visible; the gap is therefore measured the same
+			  way on both sides, which is the only kind of fairness available and is enough to
+			  settle the question it is asked for — whether to chase the high-variance arm tonight.
+			*/}
+			{periodTotal !== null && period?.periodStart && (
+				<details className="recap-all" open={rivalTotal !== null}>
+					<summary>{rivalTotal === null ? "Who are you playing?" : "How the week stands"}</summary>
+					{/*
+					  A MAN CANNOT BE ON BOTH TEAMS, so a paste that says he is gets caught.
+					  
+					  The realistic mistake here is pasting your own roster page into the opponent
+					  box — the two gestures are identical and the boxes are one tap apart — and
+					  the result would be a gap of zero reported with total confidence. It is also
+					  the only check available: nothing else about a rival roster can be validated,
+					  because any twelve real men are a possible team.
+					*/}
+					{both.length > 0 && (
+						<p className="recap-bench">
+							<b>{both.length}</b> of the men you just entered are on YOUR team as well
+							&mdash; {andList(both.slice(0, 3))}
+							{both.length > 3 ? ` and ${both.length - 3} more` : ""}. One man cannot be
+							on both sides of a matchup, so this is probably your own roster. Paste his
+							and the comparison will mean something.
+						</p>
+					)}
+					{rivalTotal !== null && both.length === 0 && (
+						<p className="recap-bench">
+							His men have scored <b>{rivalTotal}</b> to your {periodTotal} &mdash;{" "}
+							{periodTotal === rivalTotal ?
+								"level"
+							: periodTotal > rivalTotal ?
+								`you are ahead by ${Number((periodTotal - rivalTotal).toFixed(1))}`
+							:	`you are behind by ${Number((rivalTotal - periodTotal).toFixed(1))}`}
+							. Both sides count every man held, because this page can see neither
+							lineup &mdash; so it is the gap, measured the same way twice, and not the
+							score your league will pay.
+						</p>
+					)}
+					<OpponentBox
+						leagueKey={leagueKey}
+						snapshot={snapshot}
+						count={rivalKeys.length}
+					/>
+				</details>
+			)}
+
+			{/*
 			  THE DAYS BEHIND THE NUMBER, because a record nobody can check is a boast.
 			  
 			  One line per day it graded: what the lineup it asked for scored, what the lineup
@@ -581,9 +685,13 @@ export const Recap = ({
 				</p>
 			)}
 
-			<details className="recap-all">
+			{/* Its own class, because there are three `.recap-all` folds on this card now — the
+			    opponent, the days behind the record, and this — and a selector that depended on
+			    which came first in the DOM is how a test ends up opening the wrong one, which is
+			    exactly what happened the first run after the other two landed. */}
+			<details className="recap-all recap-men">
 				<summary>Every man, best night first</summary>
-				<ul className="recap-list">
+				<ul className="recap-list recap-each">
 					{result.men.map(m => (
 						<li key={m.name} className={m.started ? "recap-in" : ""}>
 							<span className="recap-slot">{m.slot ?? ""}</span>
@@ -604,5 +712,104 @@ export const Recap = ({
 				</ul>
 			</details>
 		</section>
+	)
+}
+
+/**
+ * The paste, and it is the same parser the reader's own team goes through.
+ *
+ * `rosterFromPaste` does all the work — names matched against the capture, a unique surname
+ * accepted, an ambiguous one refused with the reason, a pasted page's furniture ignored — so an
+ * opponent's team can be typed from memory or pasted off his roster page exactly like the
+ * reader's own. Nothing here understands Yahoo's table, which is what makes it survive a
+ * redesign.
+ *
+ * What it does NOT keep is the seats. A paste carries them and they are thrown away: nothing on
+ * this card can use his lineup, so storing it would be keeping a fact to make no claim with.
+ */
+const OpponentBox = ({
+	leagueKey,
+	snapshot,
+	count
+}: {
+	leagueKey: string | null
+	snapshot: Snapshot | null
+	count: number
+}) => {
+	const [text, setText] = useState("")
+	const [note, setNote] = useState<string | null>(null)
+	if (!leagueKey || !snapshot) return null
+	return (
+		<div className="recap-rival">
+			<p className="sub">
+				{count > 0 ?
+					`${count} of his men are on record. Paste his team again to replace them.`
+				:	"Paste his roster page, or type his players one to a line \u2014 first and last name, or a surname only one man in baseball has."}
+			</p>
+			<textarea
+				value={text}
+				onChange={e => setText(e.currentTarget.value)}
+				rows={4}
+				aria-label="Your opponent's team"
+				placeholder={"Aaron Judge\nJuan Soto\nSkubal"}
+			/>
+			<p className="recap-rival-go">
+				<button
+					type="button"
+					className="primary"
+					onClick={() => {
+						const got = rosterFromPaste(text, snapshot)
+						/*
+						 * THE NOTE IS BUILT HERE, not borrowed from the parser.
+						 *
+						 * `got.note` is written for the reader's OWN team and says things that are
+						 * true of that and wrong of this — measured on the first paste through
+						 * this box: "No seats were in that text, so tonight's lineup comes back as
+						 * the lineup to SET rather than as the changes to make", a sentence about
+						 * the reader's lineup printed under his opponent's roster. Nothing on this
+						 * card uses his seats, so their absence is not news.
+						 *
+						 * What IS worth repeating is the parser's own two refusals, because they
+						 * are the only reason a name he typed is missing: a line nothing matched,
+						 * and a surname two men share. Both are in `unmatched`, so one clause
+						 * covers them and it quotes them the way the rest of the app quotes a line.
+						 */
+						const missed =
+							got.unmatched.length ?
+								` ${got.unmatched.length} line${got.unmatched.length === 1 ? "" : "s"} matched nobody: ${got.unmatched.map(l => `\u00ab${l}\u00bb`).join(", ")}.`
+							:	""
+						if (!got.keys.length)
+							return setNote(`Nobody in that matched a player.${missed}`)
+						try {
+							opponentStore.set(leagueKey, got.keys)
+							setText("")
+							setNote(
+								`${got.players.length} of his men are on record${missed ? "." + missed : "."}`
+							)
+						} catch (e) {
+							setNote(e instanceof Error ? e.message : String(e))
+						}
+					}}
+				>
+					That&rsquo;s his team
+				</button>
+				{count > 0 && (
+					<button
+						type="button"
+						onClick={() => {
+							try {
+								opponentStore.clear(leagueKey)
+								setNote(null)
+							} catch (e) {
+								setNote(e instanceof Error ? e.message : String(e))
+							}
+						}}
+					>
+						Forget him
+					</button>
+				)}
+			</p>
+			{note && <p className="sub">{note}</p>}
+		</div>
 	)
 }

@@ -18,6 +18,18 @@ genuinely worth different amounts in different leagues and a ranking denominated
 somebody else's scoring is a ranking of somebody else's team. It is the second
 screen, not the first.
 
+And it tells you **what happened**. Every other number here is a projection and says so;
+last night's is a fact, read from MLB's own day-by-day record and priced in your league's
+scoring. What your lineup scored, what sat on your bench, and the one seat that explains
+most of the gap. Over time it also keeps score of *itself* — what following its lineup
+would have been worth against the lineup you already had, counted only over the days it
+asked you to change something, and allowed to come back negative. A recommendation engine
+that cannot be held to its recommendations is asking for trust it has not earned.
+
+The one thing it cannot do is read your league's scoreboard, and it says so rather than
+guessing: paste your opponent's roster and it will price both sides the same way over the
+same week, which is the gap and not the score.
+
 ## Deploying the API (the one thing that makes Yahoo automatic)
 
 Yahoo sends no CORS headers — measured 2026-09-09, HTTP 200 with no

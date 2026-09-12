@@ -202,12 +202,6 @@ found it, so the next pass starts from evidence.
   engine — there is no per-player variance anywhere in `src/engine`, so a margin cannot steer a
   recommendation, only the reader's own decision. Adding it also makes the Tonight card's "it
   does not know your league's scoreboard" false as written.
-- **The first screen never says "fantasy" or "Yahoo".** Measured on the published build at
-  390x844 with an empty profile: the masthead at y9, the tagline at y47, tab labels at y101,
-  chips at y162, the one explaining sentence at y206, and then 509px — 60% of the screen — of
-  last night's best nights in baseball, five men belonging to nobody. Every measurement was
-  confirmed by the checker. What a Yahoo manager wants to know in five seconds is whether this
-  will read HIS league, and nothing on that screen says so.
 - **In-game state is one query parameter away.** Adding `,linescore` to the schedule hydrate
   costs a measured 4,703 extra wire bytes (14,839 → 19,542) and carries `currentInning`,
   `inningState`, `outs` and the score. Nothing in `src/` reads it. The card can now say what a

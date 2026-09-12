@@ -17,6 +17,7 @@ import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { andList } from "../data/names.ts"
 import { useSlate } from "./useSlate.ts"
+import { lastNight, useThrownInnings } from "./useActuals.ts"
 import { useStored } from "./stores.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { statusOf, lockFor, nextLock, clock, localDate, asSlateGames, type TodayStatus } from "../data/today.ts"
@@ -526,6 +527,12 @@ export const Decide = ({
 		/** What MLB says about each man tonight, where the live read succeeded. */
 		const liveStatus = new Map<string, TodayStatus | null>()
 		const playing = new Set<string>()
+		/** Men MLB has actually put in tonight's card — a published batting order or an
+		 *  announced start. A claim, not a silence. */
+		const placed = new Set<string>()
+		/** Men whose club is playing and about whom MLB has said nothing yet. Most of any
+		 *  given day, and not the same as men who will sit. */
+		const waiting = new Set<string>()
 		const idle: string[] = []
 		/** Men the board has no row for at all — a capture that predates a call-up, a
 		 *  spelling Yahoo and MLB disagree on. Not the same as a man with no game, and
@@ -552,8 +559,27 @@ export const Decide = ({
 				live ? live.kind !== "no-game" && live.kind !== "benched"
 				:	r.player.teamId != null && w.games.has(r.player.teamId)
 			const plays = r.rateable && onField
-			if (plays) playing.add(normalizeName(sp.name))
-			else if (!isReserveSlot(sp.slot)) idle.push(sp.name)
+			if (plays) {
+				playing.add(normalizeName(sp.name))
+				/*
+				   PLACED IN TONIGHT'S CARD is a different fact from CAN SCORE, and the header
+				   was printing the second while sounding like the first.
+				   
+				   Measured on a real 24-man roster at 18:40: "22 of your men can score" counted
+				   every non-IL man but the one scratch — including eight pitchers MLB had not
+				   named for tonight and a catcher whose club's order was not posted. The honest
+				   count was fourteen: twelve hitters in a published order and two announced
+				   starters. The other eight were not a claim about them, they were silence.
+				   
+				   `statusOf` already draws the line and the comment on `TodayStatus` explains why
+				   the four states are not collapsed: "starting" and "pitching" are MLB saying he
+				   is in it, "waiting" is MLB not having said anything yet, and most of any given
+				   day is "waiting". So the two are counted separately and the header says both.
+				*/
+				if (live && (live.kind === "starting" || live.kind === "pitching"))
+					placed.add(normalizeName(sp.name))
+				else if (live && live.kind === "waiting") waiting.add(normalizeName(sp.name))
+			} else if (!isReserveSlot(sp.slot)) idle.push(sp.name)
 		}
 		const lineup = planLineup({
 			roster: seats.spots
@@ -655,6 +681,11 @@ export const Decide = ({
 		])]
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked,
+			placed: placed.size,
+			waiting: waiting.size,
+			/** Whether the live read answered at all. With no slate there is nothing to
+			 *  split a headcount on and the header says the one number it has. */
+			live: !!slate,
 			/** Seat changes within the lineup, minus any man whose game has started —
 			 *  see the note on `frozen` above; a shift is a change to HIS seat, so only
 			 *  his own lock can stop it. */
@@ -836,6 +867,40 @@ export const Decide = ({
 	 * the half that answers anything — and it is the half that says whether dropping
 	 * a pitcher is safe.
 	 */
+	/**
+	 * INNINGS ALREADY BANKED, which is the half of the innings floor this card has never had.
+	 *
+	 * Counted for every pitcher the reader holds NOW, whatever seat each was in at the time,
+	 * because that is the most this page can know: nothing records which men were active on
+	 * the third of the period, and the honest unit is therefore the men rather than the
+	 * seats. The sentence on screen says so. A man added yesterday brings the innings he
+	 * threw before he was yours, which is the one direction this can be wrong in, and it is
+	 * a direction the reader can see and correct for.
+	 */
+	const periodStart = rated?.period.start ?? null
+	const thrown = useThrownInnings(
+		typeof snapshot?.season === "number" ? snapshot.season : null,
+		periodStart,
+		lastNight(),
+		!!periodStart && ownedIds.some(k => k.endsWith(":pitching"))
+	)
+	const banked = useMemo((): number | null => {
+		/* A PERIOD THAT OPENED TODAY HAS THROWN NOTHING, and that is a fact rather than an
+		   absence. The hook asks for no range in that case — a window running backwards is not
+		   a request worth making — and returning null here would make the card fall back to
+		   the sentence that cannot answer the question, on the one day when the answer is
+		   certain. Measured on the shipped league, whose week opens on a Monday: this is one
+		   day in seven. */
+		if (!thrown.lines)
+			return periodStart && periodStart > lastNight() ? 0 : null
+		let outs = 0
+		for (const k of ownedIds) {
+			if (!k.endsWith(":pitching")) continue
+			outs += thrown.lines.get(k)?.stats.outs ?? 0
+		}
+		return Number((outs / 3).toFixed(1))
+	}, [thrown.lines, ownedIds, periodStart])
+
 	const rules = useMemo(() => {
 		const raw = ((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
 			?.raw_settings ?? {}) as Record<string, string>
@@ -1230,16 +1295,73 @@ export const Decide = ({
 							    and fourteen empty seats, and a reader who is not told that only five
 							    clubs are playing concludes the app has lost his team. It is the
 							    schedule, and saying so costs three words. */}
+							{/*
+							  THE DEADLINE LEADS, and it used to be fourth of four.
+							  
+							  The header is the whole card for anybody who reads one line, and at
+							  390px it wraps to four lines of which the deadline was the last. It is
+							  also the only thing on the row that EXPIRES: a game count and a
+							  projection are equally true at 6pm and at 9pm, while "next lock 7:05pm"
+							  stops being true at 7:05 and is the one fact that decides whether the
+							  reader acts now or after dinner. `nextLock` is null once they have all
+							  started, which is itself worth leading with.
+							*/}
+							{today.nextLock !== null ?
+								<>
+									<b>next lock {clock(today.nextLock)}</b> ·{" "}
+								</>
+							:	<>every seat has started ·{" "}</>}
 							{today.games !== null && (
 								<>
 									{today.games} {today.games === 1 ? "game" : "games"} today ·{" "}
 								</>
 							)}
-							{today.playing} of your men can score · your lineup projects{" "}
-							{today.lineup.pointsPlanned}
-							{today.nextLock !== null && (
-								<> · next lock {clock(today.nextLock)}</>
-							)}
+							{today.live && today.placed + today.waiting > 0 ?
+								<>
+									{today.placed} of your men are in tonight&rsquo;s card
+									{today.waiting > 0 && <> · {today.waiting} waiting on a lineup</>} ·{" "}
+								</>
+							:	<>{today.playing} of your men can score · </>}
+							{/*
+							  "PROJECTS 128" WAS THE TOTAL AFTER MAKING EVERY CHANGE BELOW.
+							  
+							  `pointsPlanned` means the planned lineup, which is the point of the
+							  name, and the sentence said "your lineup projects" — so a reader who
+							  made none of the changes was told his lineup was worth a number it was
+							  not. The two differ by exactly the gain the card is arguing for, which
+							  is the worst possible place to be loose: it quietly credits the reader
+							  with the advice before he has taken it.
+							  
+							  Both numbers are now named, and only where they differ — "projects 112,
+							  or 128 once you make these changes". Where the lineup is already the
+							  planned one there is one number and one clause, because "112, or 112
+							  once you make no changes" is a sentence about nothing.
+							*/}
+							{/*
+							  The pair is printed only where the plan is WORTH MORE, and that is not a
+							  formality — measured on a constructed roster, `pointsPlanned` came back
+							  82.22 against a `pointsNow` of 117.85.
+							  
+							  It is not a planner bug. A man currently in a seat this app cannot prove
+							  he is eligible for contributes to the lineup as it stands and can be
+							  seated nowhere by the solver, so he drops out of the planned total — and
+							  the league's own eligibility grid covers 328 of the capture's 1,446
+							  players, so it is not a rare shape. Printing "or 82.22 once you make these
+							  changes" in that state advertises a downgrade. The changes below are still
+							  worth reading, because some of them are forced: a man nobody says will
+							  play has to come out whatever the total does.
+							  
+							  So where the plan is better the reader sees both numbers and the gain is
+							  the argument; where it is not, he sees the lineup he actually has and the
+							  header makes no claim about the plan at all.
+							*/}
+							{today.lineup.pointsPlanned > today.lineup.pointsNow ?
+								<>
+									your lineup projects {today.lineup.pointsNow}, or{" "}
+									{today.lineup.pointsPlanned} once you make these changes
+								</>
+							:	<>your lineup projects {today.lineup.pointsNow}</>
+							}
 						</span>
 						{/* The assumption, on the heading it qualifies rather than in a footnote.
 						    A league whose lineup locks for the whole period cannot act on any of
@@ -1512,6 +1634,29 @@ export const Decide = ({
 							</>
 						}
 					</p>
+					{/*
+					  WHAT THIS CARD DOES NOT KNOW, said once, under the thing it qualifies.
+					  
+					  A heading reading "What should I do?" over nine instructions reads as
+					  exhaustive, and a reader is entitled to assume that anything it has not
+					  mentioned it checked and found unremarkable. Two of the biggest levers of a
+					  head-to-head evening are not in that set and cannot be: grep across src/
+					  finds nothing that reads a fantasy opponent's roster or a league scoreboard
+					  — the only "opponent" anywhere in the client is the MLB club a hitter faces
+					  — and Yahoo stopped answering the read that could have supplied it (see
+					  commit de44045). So the app does not know the score, and down sixty with two
+					  days left the right play is the high-variance arm while up sixty it is the
+					  safe one, and this card gives the same answer in both.
+					  
+					  The absence is stated rather than fixed, which is the house rule. Fixing it
+					  would mean a typed-in margin driving a re-sort by ceiling — a ranking change
+					  with no measurement behind it, dressed as a feature.
+					*/}
+					<p className="sub decide-read">
+						This reads tonight&rsquo;s schedule, the batting orders that have been posted
+						and the injured list. It does not know your matchup or the score, so nothing
+						above is playing for or against a lead.
+					</p>
 				</>
 			)}
 
@@ -1736,15 +1881,53 @@ export const Decide = ({
 								    the rule is about what the markup MEANS, not about which violations a
 								    framework happens to log. */}
 								<div>
-									Your league requires <b>{rules.floor} innings a week</b>. Your pitchers
-									project <b>{rules.projected} more</b> over what is left of this period
-									{rules.after !== null && rules.after !== rules.projected && (
+									Your league requires <b>{rules.floor} innings a week</b>.{" "}
+									{/*
+									  BOTH HALVES OF THE FLOOR, and the reason this sentence changed shape.
+									  
+									  It said only how many innings were still to come, which is the half
+									  that cannot answer the question. Measured with the shipped league and
+									  a real roster: "Your league requires 20 innings a week. Your pitchers
+									  project 4 more over what is left of this period." A reader three days
+									  into a week reads 4 against 20 and claims a panic streamer — the
+									  single most expensive move available to him — when he may already
+									  have banked fifteen. The same line also HALVED during one evening
+									  with nothing having happened, because the window it counted shrank
+									  while the fixed 20 did not.
+									  
+									  Now the banked innings lead, the projection follows, and the total is
+									  the thing compared against the floor. Where the read has not landed
+									  or could not be made, the old sentence is what survives — a missing
+									  half is stated as missing, never as zero, because zero banked
+									  innings is exactly the alarming reading that started this.
+									*/}
+									{banked !== null ?
 										<>
-											{" "}
-											— <b>{rules.after}</b> if you make the moves above
+											Your pitchers have thrown <b>{banked}</b> in it so far and project{" "}
+											<b>{rules.projected} more</b> from their scheduled turns &mdash;{" "}
+											<b>{Number((banked + rules.projected).toFixed(1))}</b> against{" "}
+											{rules.floor}
+											{rules.after !== null && rules.after !== rules.projected && (
+												<>
+													, or{" "}
+													<b>{Number((banked + rules.after).toFixed(1))}</b> if you make the
+													moves above
+												</>
+											)}
+											.{" "}
 										</>
-									)}
-									.{" "}
+									:	<>
+											Your pitchers project <b>{rules.projected} more</b> over what is left
+											of this period
+											{rules.after !== null && rules.after !== rules.projected && (
+												<>
+													{" "}
+													&mdash; <b>{rules.after}</b> if you make the moves above
+												</>
+											)}
+											.{" "}
+										</>
+									}
 									{/* One clause on the line, the rest a tap away. What a reader has
 									    to know before acting is that this counts only what is STILL TO
 									    COME; why it cannot count the rest is a fact about this page, not
@@ -1754,7 +1937,9 @@ export const Decide = ({
 									    and a browser handed that quietly closes the <em> early — which
 									    puts the fold outside the element it is styled inside. */}
 									<em className="decide-why">
-										still to come only, from their scheduled turns
+										{banked !== null ?
+											"counted for every pitcher you hold now, whatever seat he was in at the time \u2014 which is the most this page can know"
+										:	"still to come only, from their scheduled turns"}
 									</em>
 									<details className="decide-fine">
 										<summary>why not the whole week</summary>

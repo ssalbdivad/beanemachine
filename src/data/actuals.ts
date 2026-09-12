@@ -45,14 +45,24 @@ export interface Actuals {
 	lines: Map<string, ActualLine>
 }
 
+/**
+ * One day by default, a RANGE when asked — and the range is what makes the second caller
+ * cheap.
+ *
+ * `byDateRange` accumulates strictly inside the window, so "every inning my pitchers have
+ * already thrown in this scoring period" is ONE request per side of the ball rather than one
+ * per day: a seven-day period costs two reads, not fourteen. The recap wants a single day and
+ * passes one date; the innings floor wants the period so far and passes two.
+ */
 export const ACTUALS_URL = (
 	season: number,
 	group: "hitting" | "pitching",
-	date: string
+	start: string,
+	end: string = start
 ): string =>
 	`https://statsapi.mlb.com/api/v1/stats?stats=byDateRange&group=${group}` +
 	`&season=${season}&sportId=1&playerPool=All&limit=3000` +
-	`&startDate=${date}&endDate=${date}`
+	`&startDate=${start}&endDate=${end}`
 
 const asNumber = (v: unknown): number | null => {
 	if (typeof v === "number") return Number.isFinite(v) ? v : null
@@ -124,16 +134,21 @@ export const fetchActuals = async (
 	season: number,
 	date: string,
 	signal?: AbortSignal,
-	timeoutMs: number = TIMEOUT_MS
+	timeoutMs: number = TIMEOUT_MS,
+	/** Inclusive end of the window. Defaults to `date`, which is one day. */
+	end: string = date,
+	/** Which sides of the ball to ask for. The innings floor needs only pitchers, and
+	 *  asking for hitters too would double a request for a number nothing reads. */
+	groups: ("hitting" | "pitching")[] = ["hitting", "pitching"]
 ): Promise<{ actuals: Actuals; error: string | null }> => {
 	const deadline = AbortSignal.timeout(timeoutMs)
 	const abort = signal ? AbortSignal.any([signal, deadline]) : deadline
 	const one = async (group: "hitting" | "pitching"): Promise<ActualLine[]> => {
-		const res = await fetch(ACTUALS_URL(season, group, date), { signal: abort })
+		const res = await fetch(ACTUALS_URL(season, group, date, end), { signal: abort })
 		if (!res.ok) throw new Error(`MLB answered HTTP ${res.status} for ${group}`)
 		return readActuals(group, await res.json())
 	}
-	const both = await Promise.allSettled([one("hitting"), one("pitching")])
+	const both = await Promise.allSettled(groups.map(one))
 	const lines = new Map<string, ActualLine>()
 	for (const r of both)
 		if (r.status === "fulfilled") for (const line of r.value) lines.set(line.key, line)

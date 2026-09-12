@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { slotsFor } from "../engine/bscore.ts"
-import { gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
+import { bestNights, gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
 import { roster, rosterKey } from "./roster.ts"
@@ -138,7 +138,24 @@ export const Recap = ({
 		: typeof league?.meta.season === "number" ? league.meta.season
 		: null
 
-	const { actuals, error, loading } = useActuals(season, date, men.men.length > 0)
+	/*
+	  THE READ HAPPENS EVEN WITH NO TEAM, which is the one place this card spends a request on
+	  somebody who has told the page nothing — and it is the best 38 KB in the product.
+	  
+	  Before any setup, every number this app can show a stranger is about a borrowed league
+	  and a board ranked by value over replacement, which correctly puts unrostered men on top
+	  and to a Yahoo manager reads as five names he has never heard of. Last night's real
+	  points need nothing from him, are about players he knows, and are facts rather than
+	  estimates. It is gated on a LEAGUE rather than on a roster, because the points have to
+	  be denominated in something, and the preset says on the card that they are borrowed.
+	*/
+	const { actuals, error, loading } = useActuals(season, date, !!league)
+
+	/** What the best nights in baseball were worth, for a reader with no team yet. */
+	const best = useMemo(
+		() => (actuals && league && !men.men.length ? bestNights(actuals.lines, league, 8) : null),
+		[actuals, league, men]
+	)
 
 	const result = useMemo(() => {
 		if (!actuals || !league || !men.men.length) return null
@@ -208,10 +225,61 @@ export const Recap = ({
 		}
 	}, [leagueKey, record, date])
 
-	// Nothing to say, and saying nothing is the right answer: a reader who has not told the
-	// page who his players are cannot be told what they scored, and a strip explaining that
-	// would be a third empty card on a screen that already has its own setup prompt.
-	if (!men.men.length || men.error) return null
+	const day = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+		weekday: "long",
+		month: "short",
+		day: "numeric"
+	})
+
+	/*
+	  A READER WITH NO TEAM GETS LAST NIGHT ANYWAY, and this is the first thing he sees.
+	  
+	  It used to render nothing at all here, on the reasoning that a man who has not said who
+	  his players are cannot be told what they scored. True, and the conclusion was wrong: what
+	  he CAN be told is what the best nights in baseball were worth, which needs nothing from
+	  him, names players he knows, and is the only thing on a first visit that is a fact rather
+	  than an estimate. The borrowed scoring is stated on the card, in the same words the board
+	  uses about itself.
+	  
+	  A damaged roster store falls through to here too, and that is right: it means the card
+	  stops claiming to be about HIS team without going blank, and My league still owns the
+	  explaining and the repair.
+	*/
+	if (!men.men.length || men.error)
+		return best && best.length ?
+				<section className="card full recap">
+					<header className="recap-head">
+						<h2>Last night</h2>
+						<span className="recap-day">{day}</span>
+					</header>
+					<p className="sub">
+						The best nights in baseball, worth what one real league&rsquo;s scoring would have
+						paid for them. Real box scores, not projections &mdash; put your team in and this
+						becomes your team&rsquo;s night.
+					</p>
+					<ul className="recap-list recap-best">
+						{/* The gutter holds the RANK here, not a seat: there is no lineup on this
+						    version of the list, and a club abbreviated into four characters was
+						    tried and abandoned — initials gave "Milwaukee Brewers" as B and "New
+						    York Yankees" as YY, and a thirty-club table would be one more thing to
+						    keep current against a league that has moved a franchise twice this
+						    decade. The club is spelled out on the line below instead, where there
+						    is room for it. */}
+						{best.map((b, i) => (
+							<li key={`${b.name}-${b.group}`}>
+								<span className="recap-slot">{i + 1}</span>
+								<span className="recap-name">{b.name}</span>
+								<span className="recap-pts">{b.points}</span>
+								<span className="recap-top">
+									{[b.team, b.top.map(c => `${c.code} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")]
+										.filter(Boolean)
+										.join("  \u00b7  ")}
+								</span>
+							</li>
+						))}
+					</ul>
+				</section>
+			:	null
 
 	if (loading)
 		return (
@@ -233,11 +301,6 @@ export const Recap = ({
 			</section>
 		)
 
-	const day = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
-		weekday: "long",
-		month: "short",
-		day: "numeric"
-	})
 	/** The headline is whichever of the two totals the page is entitled to state. */
 	const headline = result.startedTotal ?? result.ownedTotal
 	const played = result.men.filter(m => m.points !== null).length

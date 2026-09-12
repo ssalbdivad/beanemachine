@@ -17,7 +17,7 @@
 //
 // One live request is made at the end, to one public endpoint, once per run.
 import { readActuals, fetchActuals, ACTUALS_URL } from "../src/data/actuals.ts"
-import { recap, gradeRecord } from "../src/auto/recap.ts"
+import { recap, gradeRecord, bestNights } from "../src/auto/recap.ts"
 import { readFileSync } from "node:fs"
 
 let pass = 0, fail = 0
@@ -353,6 +353,29 @@ t("the net sums stored and fresh days together", near(settled.net, 42.1), String
 // it is carried. A stored day has none and must not pretend to.
 t("a stored day carries no invented per-man detail", settled.days.find(d => d.date === "2026-08-01").calls.length === 0)
 t("while the freshly graded day has it", settled.days.find(d => d.date === "2026-09-11").calls.length > 0)
+
+// --- the best nights in baseball, for a reader who has told the page nothing ------
+
+// The one thing the app can put in front of a stranger that needs nothing from him. Before
+// this existed, every number a first visit could see was about a borrowed league and a board
+// ranked by value over replacement — which correctly puts unrostered men on top and, measured
+// on the committed capture, made the first five names three White Sox and two men from the two
+// worst teams in baseball.
+{
+  const top = bestNights(lines, LEAGUE, 8)
+  t("the biggest night in the fixture leads", top[0].name === "Dustin May" && near(top[0].points, POINTS.may), JSON.stringify(top[0]))
+  t("both sides of the ball are in one list", top.some(x => x.group === "hitting") && top.some(x => x.group === "pitching"))
+  t("it is ordered by what the night was worth", top.every((x, i) => i === 0 || x.points <= top[i - 1].points), top.map(x => x.points).join(","))
+  t("each night says what carried it", top[0].top[0].code === "K" || top[0].top[0].code === "OUT", JSON.stringify(top[0].top))
+  t("the club comes through", top[0].team === "Milwaukee Brewers", String(top[0].team))
+  // A night worth nothing is not one of the best nights. Jo Adell went 0-for-4 in this
+  // fixture, and a list headed "the best nights" with a 0.0 at the foot reads as a list that
+  // ran out. An exact tie between two men is kept in name order so two runs agree.
+  t("a scoreless night is not one of the best", !top.some(x => x.name === "Jo Adell"), top.map(x => x.name).join(","))
+  t("and the list is as long as there are nights worth showing", top.length === 7, String(top.length))
+  t("a tie is broken by name so two runs agree", top[1].name === "Brice Turang" && top[2].name === "Kyle Tucker", top.map(x => x.name).join(","))
+  t("asking for fewer gives the best of them", bestNights(lines, LEAGUE, 3).length === 3)
+}
 
 // --- one live request ----------------------------------------------------------
 

@@ -177,7 +177,7 @@ const tab = async (page, label) => {
  *               at the foot of this file.
  */
 const open = async (seeds, opts = {}) => {
-	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	const page = await browser.newPage({ viewport: opts.phone ? { width: 390, height: 844 } : { width: 1100, height: 1400 } })
 	if (opts.logs) page.on("console", m => m.type() === "error" && opts.logs.push(m.text()))
 	if (opts.offline) await page.route("**/api/available", r => r.abort())
 	/** Cut the two LIVE MLB reads — the schedule and the transactions feed — so the
@@ -1491,6 +1491,45 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	// One entry per league per day: a reader who opens the app twice has not been advised
 	// twice, and a second row would flatter the record's own denominator.
 	t("one entry for the day, however many times it rendered", mine.filter(e => e.date === mine[0].date).length === 1, String(mine.length))
+	await page.close()
+}
+
+/**
+ * THE FIRST THIRTY SECONDS, with nothing in this browser.
+ *
+ * The hardest screen in the product. Measured on the published build at 390x844 before this
+ * changed: a first visit landed on the ranked board, 489 vertical pixels of filters with ZERO
+ * ranked rows on the first screen, and the first name it did reach was a White Sox rookie
+ * reliever with a 32px number beside it — correct output from a value-over-replacement board
+ * and the worst available answer to "what is this?".
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const page = await open({ config: cfg }, { actuals: true, phone: true })
+	await page.waitForSelector(".recap", { timeout: 30000 })
+	await page.waitForTimeout(800)
+	const on = await page.$$eval("nav button", bs =>
+		bs.filter(b => b.className.includes("on")).map(b => b.innerText.trim()))
+	/* Case-folded, because `.views button` is uppercased by CSS and `innerText` reports what
+	   is PAINTED: the label in panels.tsx is "Tonight" and the DOM says "TONIGHT". Comparing
+	   the two exactly is an assertion about a text-transform. */
+	t("a first visit lands on the tab the title names",
+		on.map(x => x.toLowerCase()).join() === TAB.board.toLowerCase(), JSON.stringify(on))
+	const card = await page.$eval(".recap", e => e.innerText)
+	t("and is shown what last night was actually worth", /best nights in baseball/.test(card), card.slice(0, 160))
+	t("with the scoring named as borrowed rather than as his",
+		/one real league\u2019s scoring|one real league's scoring/.test(card), card.slice(0, 300))
+	// Facts, not estimates — which is the distinction the whole card exists to carry onto a
+	// screen where everything else is a projection.
+	t("and said to be box scores rather than projections", /Real box scores, not projections/.test(card), card)
+	t("the biggest night in the fixture leads", /Dustin May/.test(card) && /40\.1/.test(card), card)
+	t("and a scoreless night is not in it", !/Jo Adell/.test(card), card)
+	/* Eight rows of real names on the first screen of a 390px phone, where there used to be
+	   none. Asserted as "inside the first viewport" rather than at a pixel, because the rows
+	   are the claim and their exact offsets are app.css's business. */
+	const above = await page.$$eval(".recap-best li", ls =>
+		ls.filter(l => l.getBoundingClientRect().top < 844).length)
+	t("real players are on the first screen of a phone", above >= 5, String(above))
 	await page.close()
 }
 

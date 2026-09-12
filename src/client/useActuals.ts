@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { fetchActuals, type Actuals } from "../data/actuals.ts"
+import { fetchActuals, type ActualLine, type Actuals } from "../data/actuals.ts"
 import { localDate } from "../data/today.ts"
 
 /**
@@ -73,6 +73,63 @@ export const useActuals = (
 			ctl.abort()
 		}
 	}, [season, date, enabled])
+
+	return state
+}
+
+/**
+ * INNINGS ALREADY THROWN IN THIS SCORING PERIOD, which is the half of the innings floor
+ * the app has never been able to state.
+ *
+ * The floor is a weekly quantity — this league forfeits its pitching side under twenty
+ * innings — and the card could only ever say how many innings were STILL TO COME. Measured
+ * on the dev server with the shipped league and a real roster: "Your league requires 20
+ * innings a week. Your pitchers project 4 more over what is left of this period." A reader
+ * three days into a week reads 4 against 20 and claims a panic streamer, which is the single
+ * most expensive wrong move available to him — he may already have banked fifteen. The same
+ * line halves during an evening with nothing having happened, because the window it counts
+ * shrinks while the fixed 20 does not.
+ *
+ * `byDateRange` accumulates strictly inside a window, so the whole period so far is ONE
+ * request rather than one per day: a seven-day week costs one read, not seven. Pitching only
+ * — asking for hitters would double it for a number nothing here reads.
+ */
+export const useThrownInnings = (
+	season: number | null,
+	/** First day of the scoring period, inclusive. */
+	start: string | null,
+	/** Last day with results, inclusive — yesterday, because today is not finished. */
+	end: string | null,
+	enabled: boolean
+): { lines: Map<string, ActualLine> | null; error: string | null; loading: boolean } => {
+	const [state, setState] = useState<{
+		lines: Map<string, ActualLine> | null
+		error: string | null
+		loading: boolean
+	}>({ lines: null, error: null, loading: false })
+
+	useEffect(() => {
+		/* An inverted window is a real state and not an error: a period that opened TODAY has
+		   no finished days in it, and the honest answer is zero innings thrown rather than a
+		   request for a range that runs backwards. */
+		if (!enabled || season === null || !start || !end || start > end) {
+			setState({ lines: null, error: null, loading: false })
+			return
+		}
+		const ctl = new AbortController()
+		let live = true
+		setState(s => ({ ...s, loading: true }))
+		void fetchActuals(season, start, ctl.signal, undefined, end, ["pitching"]).then(
+			({ actuals, error }) => {
+				if (!live) return
+				setState({ lines: error ? null : actuals.lines, error, loading: false })
+			}
+		)
+		return () => {
+			live = false
+			ctl.abort()
+		}
+	}, [season, start, end, enabled])
 
 	return state
 }

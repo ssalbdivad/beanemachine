@@ -423,3 +423,51 @@ export const gradeRecord = (input: {
 		skipped
 	}
 }
+
+/**
+ * LAST NIGHT'S BEST NIGHTS, for a reader who has told the page nothing.
+ *
+ * The hardest thing about this product is the first thirty seconds. Every number it can show
+ * a stranger is about a league he has not entered and players it ranks by value over
+ * replacement — which correctly puts unrostered men at the top, and to a Yahoo manager reads
+ * as a list of names he has never heard of. Measured on the committed capture before any
+ * setup, the top five were a White Sox rookie reliever, a White Sox infielder, a White Sox
+ * outfielder and two men off two of the worst teams in baseball. That is the entire first
+ * impression and it is nobody's fault: it is what the board is for.
+ *
+ * This is the one thing the app can put in front of a stranger that needs nothing from him
+ * and is interesting on sight: what the best nights in baseball were actually worth, last
+ * night, priced in a real scoring table. The names are the names everybody knows, because a
+ * big night is a big night, and the numbers are facts rather than estimates.
+ *
+ * Both sides of the ball in one list, deliberately. In a points league a start and a
+ * three-homer game are denominated in the same currency, and splitting them would be a claim
+ * that they are not comparable — which is exactly what a points league denies.
+ */
+export const bestNights = (
+	lines: Map<string, ActualLine>,
+	league: League,
+	take = 10
+): { name: string; team: string | null; group: "hitting" | "pitching"; points: number; top: { code: string; points: number }[] }[] => {
+	const out: { name: string; team: string | null; group: "hitting" | "pitching"; points: number; top: { code: string; points: number }[] }[] = []
+	for (const line of lines.values()) {
+		const scored = scoreStats(line.stats, tableFor(league, line.group), line.group)
+		out.push({
+			name: line.name,
+			team: line.team,
+			group: line.group,
+			points: scored.points,
+			top: topThree(scored.breakdown)
+		})
+	}
+	/* A night worth nothing is not one of the best nights, and a list headed that way with a
+	   0.0 at the foot of it reads as a list that ran out rather than as a top eight. On a real
+	   day this filter removes nothing — 353 hitters and 133 pitchers played on 2026-09-11 and
+	   the eighth-best night is worth twenty-odd points — but the committed eight-man fixture
+	   shows exactly what it looks like when it does bite, and so does a day with two games on
+	   it in April. */
+	return out
+		.filter(x => x.points > 0)
+		.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
+		.slice(0, take)
+}

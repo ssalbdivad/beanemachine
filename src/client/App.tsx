@@ -188,23 +188,40 @@ export const App = () => {
 		setKey(chosen)
 		setLoadError(null)
 		/*
-		 * With no league, the setup opens AND the board runs beside it on the preset.
+		 * WHERE A FIRST VISIT LANDS, and it has moved twice for the same reason.
 		 *
-		 * This used to open the setup instead of a board, on the reasoning that a
-		 * bscore is denominated in a league's own points and there is no honest board
-		 * without one. Both halves are true and the conclusion was wrong: a stranger
-		 * cannot tell whether this is worth two minutes of setup until he has seen what
-		 * it produces, and the ask that loses him is "fill in seventeen point values and
-		 * then I will show you". So he lands on Wire — the screen that ranks, and the
-		 * one Billy's pick is on — with the setup hovering at the foot of it and the board
-		 * saying whose scoring it is on.
+		 * It opened on the SETUP once, on the reasoning that a bscore is denominated in a
+		 * league's own points and there is no honest board without one. Both halves are
+		 * true and the conclusion was wrong: a stranger cannot tell whether this is worth
+		 * two minutes until he has seen what it produces, and "fill in seventeen point
+		 * values and then I will show you" is the ask that loses him. So it moved to the
+		 * ranked board, which at least produces something.
+		 *
+		 * Walking that as a stranger at 390x844 said the board was the wrong something.
+		 * Measured on the published build with an empty profile: 489 vertical pixels of
+		 * filters before any content and ZERO ranked rows on the first screen — the first
+		 * one sits at document y932 on an 844px phone. The first name he does reach is a
+		 * White Sox rookie reliever with a 32px number beside it, and the top five are
+		 * three White Sox and two men from the two worst teams in baseball. None of that
+		 * is a bug: a free-agent board ranked by value over replacement SHOULD be full of
+		 * men nobody has rostered. It is simply the worst available answer to "what is
+		 * this?" — and the sentence that explains whose scoring it is was measured
+		 * OCCLUDED behind the setup dock at first paint.
+		 *
+		 * Tonight is the better answer to the same argument, and only became so once
+		 * src/client/Recap.tsx existed. That screen now opens with what the best nights in
+		 * baseball were actually worth last night, priced in a real scoring table —
+		 * facts, not estimates, about players everybody has heard of, needing nothing from
+		 * the reader — above the app's clearest sentence about what it does, with one tap
+		 * through to the board for anyone who wants the thousand rows. The tab is also the
+		 * one the title names and the question a manager actually arrives with.
 		 *
 		 * Set here rather than in an effect so it is true on the first paint and never
 		 * flashes the wrong screen.
 		 */
 		if (!keys.length) {
 			setOnboarding(true)
-			setView("wire")
+			setView("board")
 		}
 	}, [])
 

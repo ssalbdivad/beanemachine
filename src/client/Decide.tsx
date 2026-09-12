@@ -14,10 +14,11 @@ import { lineupStore } from "./lineup.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
+import { andList } from "../data/names.ts"
 import { useSlate } from "./useSlate.ts"
 import { useStored } from "./stores.ts"
 import { useInjuries } from "./useInjuries.ts"
-import { statusOf, lockFor, nextLock, clock, type TodayStatus } from "../data/today.ts"
+import { statusOf, lockFor, nextLock, clock, localDate, asSlateGames, type TodayStatus } from "../data/today.ts"
 import "./decide.css"
 
 /**
@@ -376,7 +377,7 @@ export const Decide = ({
 		if (!snapshot || !league || league.meta.max_teams == null) return null
 		const h = hydrate(snapshot)
 		const slate = h.slate ?? []
-		const period = resolvePeriod(league, new Date().toISOString().slice(0, 10), h.seasonEnd)
+		const period = resolvePeriod(league, localDate(), h.seasonEnd)
 		const w = windowFrom(slate, period.start, period.end)
 		if (!w.games.size) return null
 		return {
@@ -471,8 +472,44 @@ export const Decide = ({
 		 */
 		if (league.scoring_period?.lineup_lock === "period") return null
 		const h = hydrate(snapshot)
-		const day = new Date().toISOString().slice(0, 10)
-		const w = windowFrom(h.slate ?? [], day, day)
+		/*
+		   `localDate()`, never `toISOString()`.
+		   
+		   `new Date().toISOString().slice(0, 10)` is the UTC date, and from 8pm Eastern
+		   onwards that is TOMORROW. Measured with the clock pinned to Sunday 2026-09-13
+		   20:30 EDT: the live feed was correctly requested for 2026-09-13 — `useSlate`
+		   already used `localDate()` — while this card read "For this matchup, 2026-09-14
+		   to 2026-09-20" and benched men whose clubs were playing at that moment, each with
+		   a true reason about the wrong day. Four hours of every evening, in the window a
+		   lineup is actually set, on the screen named for tonight.
+		   
+		   A slate is a local-calendar thing: a 7pm Eastern game is tonight's game to
+		   somebody in California too. See the note on `localDate` in src/data/today.ts.
+		*/
+		const day = localDate()
+		/*
+		   TONIGHT'S OWN SLATE RATES TONIGHT, where the live read succeeded.
+		   
+		   This passed `h.slate` — the CAPTURED schedule — to `windowFrom`, which is how
+		   the engine learns who plays, who they play, and who is announced to start.
+		   The capture is stamped days before the page is opened, and measured on the
+		   committed one, probables are published through 2026-09-11 and there are ZERO
+		   for 09-12 through 09-27. So this card asked the engine about tonight with no
+		   announced starters at all — coverage 0 published of 30 games — and the engine
+		   did the only honest thing available to it, which was to credit every starter a
+		   fractional turn (0.22 to 0.29 of a start) and rank him on his season rate.
+		   Eight pitcher seats planned as though nobody in baseball were pitching, with
+		   tonight's real probables already in memory one variable away.
+		   
+		   The fallback is the capture and not an empty window, because a failed live read
+		   must not take the card down: the capture is wrong about tonight's starters and
+		   right about who plays most nights, which beats saying nothing. `slate` is null
+		   whenever the read failed — see useSlate — and a successful read of a day with
+		   no baseball on it is a real answer, so the test is whether it has games rather
+		   than whether it exists.
+		*/
+		const live = slate && slate.date === day && slate.games.length > 0
+		const w = windowFrom(live ? asSlateGames(slate) : (h.slate ?? []), day, day)
 		if (!w.games.size) return null
 		const rows = rateAll({
 			players: h.players, league, teamGamesPlayed: h.teamGamesPlayed,
@@ -568,11 +605,59 @@ export const Decide = ({
 		 */
 		const seated = new Set(lineup.starters.map(st => normalizeName(st.name)))
 		const activeNow = seats.spots.filter(sp => !isReserveSlot(sp.slot))
-		const bench = activeNow.filter(sp => !seated.has(normalizeName(sp.name)))
+		const benchAll = activeNow.filter(sp => !seated.has(normalizeName(sp.name)))
 		const nowActive = new Set(activeNow.map(sp => normalizeName(sp.name)))
-		const start = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
+		const startAll = lineup.starters.filter(st => !nowActive.has(normalizeName(st.name)))
+
+		/*
+		   A SEAT THAT HAS ALREADY SHUT IS NOT AN INSTRUCTION.
+		   
+		   Measured at 18:40 on a real roster: row 1 of 9 under "Make these changes" read
+		   "SS Start Kevin McGonigle 7.35 projected today · locks 1:05pm" — his club had
+		   been In Progress since 13:05. The rows sort by lock time ascending, so the seats
+		   that had ALREADY GONE sorted first, and the list a reader works down top-first
+		   opened with the part of it he could no longer do.
+		   
+		   Dropping a row is not enough on its own, and getting that wrong is worse than
+		   the original. The changes are a NET accounting — N men in, N out — so the bench
+		   instruction paired with a locked start is still live: drop "Start McGonigle" and
+		   keep "Bench Gunnar Henderson" and obeying the card EMPTIES the shortstop seat,
+		   7.09 points turned into 0 by following advice. So both halves of a swap go or
+		   neither does, and `lineup.swaps` is what knows which row pairs with which.
+		   
+		   Three ways a man is frozen, and they are the same rule from three directions: he
+		   cannot be seated after his own game has started, he cannot be taken out of a
+		   seat whose game has started, and he cannot be shifted between two seats when one
+		   of them has. What is left is the set of changes the platform will still accept.
+		*/
+		const now = Date.now()
+		const shut = (name: string): boolean => {
+			const at = slate ? lockFor(byName.get(normalizeName(name))?.player.teamId, slate) : null
+			return at !== null && at <= now
+		}
+		const frozen = new Set<string>()
+		for (const st of startAll) if (shut(st.name)) frozen.add(normalizeName(st.name))
+		for (const sp of benchAll) if (shut(sp.name)) frozen.add(normalizeName(sp.name))
+		for (const sw of lineup.swaps) {
+			if (!frozen.has(normalizeName(sw.start)) && !(sw.sit && frozen.has(normalizeName(sw.sit))))
+				continue
+			frozen.add(normalizeName(sw.start))
+			if (sw.sit) frozen.add(normalizeName(sw.sit))
+		}
+		const bench = benchAll.filter(sp => !frozen.has(normalizeName(sp.name)))
+		const start = startAll.filter(st => !frozen.has(normalizeName(st.name)))
+		/** Men whose seats the platform has already closed, so the card can say the
+		 *  changes it is NOT offering rather than look like it found fewer. */
+		const locked = [...new Set([
+			...startAll.filter(st => frozen.has(normalizeName(st.name))).map(st => st.name),
+			...benchAll.filter(sp => frozen.has(normalizeName(sp.name))).map(sp => sp.name)
+		])]
 		return {
-			day, lineup, idle, unmatched, unfilled, playing: playing.size,
+			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked,
+			/** Seat changes within the lineup, minus any man whose game has started —
+			 *  see the note on `frozen` above; a shift is a change to HIS seat, so only
+			 *  his own lock can stop it. */
+			shifts: lineup.shifts.filter(sh => !frozen.has(normalizeName(sh.name))),
 			/** Nobody has said whether this league locks daily, so these changes are
 			 *  offered on the assumption that it does — which the heading states. */
 			assumedDaily: !league.scoring_period?.lineup_lock,
@@ -581,7 +666,11 @@ export const Decide = ({
 			ratedToday: rows,
 			/** How many clubs are on today at all. Thirteen empty seats reads as a
 			 *  broken app; "only five games are being played" reads as a Wednesday. */
-			games: slate ? slate.games.length : null,
+			/* Called-off games are not counted, for the same reason they no longer seat
+			   anybody: "15 games today" beside a lineup that cannot fill its seats is the
+			   exact confusion this count exists to prevent. See `called` in
+			   src/data/today.ts for what a postponed game used to look like from here. */
+			games: slate ? slate.games.length - slate.called.size : null,
 			readAt: seats.at,
 			/**
 			 * Three reasons a man comes out, and they are different claims.
@@ -694,7 +783,7 @@ export const Decide = ({
 		if (!snapshot || !league || league.meta.max_teams == null || !seats?.spots.length)
 			return new Set<string>()
 		const h = hydrate(snapshot)
-		const today = new Date().toISOString().slice(0, 10)
+		const today = localDate()
 		const w = windowFrom(h.slate ?? [], today, h.seasonEnd)
 		if (!w.games.size) return new Set<string>()
 		const rows = rateAll({
@@ -1134,7 +1223,7 @@ export const Decide = ({
 							{today.bench.length} {today.bench.length === 1 ? "man is" : "men are"} in
 							your active seats.
 						</p>
-					: today.bench.length || today.start.length || today.lineup.shifts.length ?
+					: today.bench.length || today.start.length || today.shifts.length ?
 						<>
 							<ul className="decide-list decide-changes">
 								{today.start.map(st => (
@@ -1192,7 +1281,7 @@ export const Decide = ({
 								    "Start Jac Caglianone at 1B" cannot be done while Aranda is in
 								    that seat, and the card never mentioned Aranda. `planLineup`
 								    reports these separately and they were dropped on the floor. */}
-								{today.lineup.shifts.map(sh => (
+								{today.shifts.map(sh => (
 									<li key={`shift-${sh.name}`}>
 										<span className="decide-slot">{sh.to}</span>
 										<span>
@@ -1211,7 +1300,7 @@ export const Decide = ({
 								const rest = Math.max(
 									today.lineup.starters.length -
 										today.start.length -
-										today.lineup.shifts.length,
+										today.shifts.length,
 									0
 								)
 								return rest > 0 ?
@@ -1226,6 +1315,24 @@ export const Decide = ({
 							Nothing to change — every seat already holds the right man for today.
 						</p>
 					}
+					{/* The changes NOT offered, named. Without this the card looks like it found
+					    fewer moves rather than like it refused to offer ones the platform will
+					    reject, and a reader who remembers seeing a shortstop swap an hour ago
+					    has no way to tell which of those two happened. */}
+					{today.locked.length > 0 && (
+						<p className="sub decide-locked">
+							{today.locked.length === 1 ?
+								<>
+									<b>{today.locked[0]}</b>&rsquo;s game has started, so that seat is left
+									as it is.
+								</>
+							:	<>
+									{today.locked.length} of your seats have already started &mdash;{" "}
+									{andList(today.locked)} &mdash; so they are left as they are.
+								</>
+							}
+						</p>
+					)}
 					{/*
 					  The seats that will score nothing, and the men who could stop that.
 					  

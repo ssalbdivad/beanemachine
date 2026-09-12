@@ -11,6 +11,7 @@ import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
 import { slotsFor } from "../engine/bscore.ts"
+import { localDate } from "../data/today.ts"
 import "./trade.css"
 import { tab, tradesClosed } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
@@ -186,7 +187,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 */
 	const [dealOpen, setDealOpen] = useState(false)
 	const tradeWindow = useMemo(
-		() => tradesClosed(league, new Date().toISOString().slice(0, 10)),
+		() => tradesClosed(league, localDate()),
 		[league]
 	)
 	const gettable = useMemo(

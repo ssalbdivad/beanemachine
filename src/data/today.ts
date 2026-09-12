@@ -24,6 +24,9 @@
  * to consult it.
  */
 
+/* Type only — erased at build, so this adds nothing to the bundle. */
+import type { SlateGame } from "./statsapi.ts"
+
 /** MLB's own ids are the snapshot's ids — `data/snapshot.json` is built from the
  *  same API — so nothing has to be matched by name here. */
 export interface TodayGame {
@@ -61,6 +64,22 @@ export interface Slate {
 	/** Which club each probable starter is throwing for, so an opponent can be
 	 *  named without another request. */
 	probableFor: Map<number, number>
+	/**
+	 * The games MLB has called off today, by `gamePk`.
+	 *
+	 * A postponed game used to read exactly like a game that will be played. Measured by
+	 * re-running an evening with CIN @ MIL marked `"detailedState": "Postponed"` and its
+	 * lineups removed: the Tonight card's text came back BYTE-IDENTICAL to the Pre-Game
+	 * version — still "15 games today", still seating William Contreras at C for 6.41 and
+	 * Sal Stewart at 2B for 8.81, 15.22 projected points out of a game nobody would play,
+	 * with no mention anywhere. On a makeup-doubleheader night that is two seats.
+	 *
+	 * These games stay in `games` so a screen can SAY a game was called off, and are kept
+	 * out of `playing`, `postedFor`, `battingOrder`, `probables` and `probableFor` — every
+	 * set that means "this man can score today". A club whose only game is called off is
+	 * therefore not playing, which is what `statusOf` already knows how to say.
+	 */
+	called: Set<number>
 }
 
 /** The shape `hydrate=lineups,probablePitcher,team` returns, narrowed to what is
@@ -91,8 +110,24 @@ const EMPTY = (date: string): Slate => ({
 	postedFor: new Set(),
 	battingOrder: new Map(),
 	probables: new Set(),
-	probableFor: new Map()
+	probableFor: new Map(),
+	called: new Set()
 })
+
+/**
+ * Whether MLB has called a game off.
+ *
+ * Matched on the PREFIX of MLB's own words, because the detail comes attached: the feed
+ * says "Postponed", but also "Suspended: Rain" and "Cancelled" — and `state` is kept
+ * verbatim on purpose, so a state this file does not know about cannot become one it
+ * does. A prefix test keeps that property while still catching the reason clause.
+ *
+ * "Delayed" is deliberately NOT here. A delayed game is still going to be played, the
+ * lineup still counts, and treating it as called off would bench a man who is about to
+ * bat. Only the three words that mean "not today" are listed.
+ */
+export const isCalledOff = (state: string): boolean =>
+	/^(Postponed|Suspended|Cancelled|Canceled)/i.test(state.trim())
 
 /**
  * The parse, separate from the fetch, so it can be tested against a captured
@@ -132,6 +167,14 @@ export const readSlate = (date: string, json: unknown): Slate => {
 				awayProbable: away?.probablePitcher?.id ?? null,
 				posted
 			})
+
+			// A game that will not be played contributes nothing to any set that means
+			// "this man can score today", but it is still a game on today's card and is
+			// still in `games`, so a screen can say what happened to it.
+			if (isCalledOff(g.status?.detailedState ?? "")) {
+				out.called.add(g.gamePk ?? 0)
+				continue
+			}
 
 			out.playing.add(homeId).add(awayId)
 			if (homeNames.length) out.postedFor.add(homeId)
@@ -285,3 +328,39 @@ export const statusOf = (
 	if (!slate.postedFor.has(teamId)) return { kind: "waiting", text: "lineup not posted" }
 	return { kind: "benched", text: "not in today's lineup" }
 }
+
+/**
+ * TONIGHT'S SLATE, IN THE SHAPE THE ENGINE ALREADY SPEAKS.
+ *
+ * `windowFrom` in src/engine/period.ts turns slate rows into the four things a rating
+ * needs about a stretch of schedule — games per club, who they play, who is announced to
+ * start, and how much of the window has a published starter. It was only ever fed the
+ * CAPTURED slate, and the capture is stamped days before the page is opened.
+ *
+ * What that cost, measured on data/snapshot.json: probables are published through
+ * 2026-09-11 and there are ZERO for 09-12 through 09-27. So the Tonight card asked the
+ * engine about tonight with no announced starters at all — coverage 0 published of 30
+ * games — and the engine did the only honest thing it could with that, which was to
+ * credit every starting pitcher a fractional turn (0.22 to 0.29 of a start) and rank him
+ * on his season rate. Eight pitcher seats planned as if nobody in baseball were pitching,
+ * on a screen that had tonight's real probables sitting in memory two variables away.
+ *
+ * The live read has them. This is the adapter, and it drops the called-off games on the
+ * way through: a club whose game is postponed plays no game, which is what every other
+ * consumer of the live slate now agrees about.
+ *
+ * `final` is read off MLB's own words rather than assumed false, because a slate fetched
+ * in the evening genuinely contains finished games — and `windowFrom`'s played-only path
+ * is the one caller that needs to tell them apart.
+ */
+export const asSlateGames = (slate: Slate): SlateGame[] =>
+	slate.games
+		.filter(g => !slate.called.has(g.gamePk))
+		.map(g => ({
+			date: slate.date,
+			home: g.homeTeamId,
+			away: g.awayTeamId,
+			homeProbable: g.homeProbable,
+			awayProbable: g.awayProbable,
+			final: /^(Final|Game Over|Completed)/i.test(g.state)
+		}))

@@ -25,6 +25,12 @@ public/snapshot.json
 dist-cli/
 .vercel
 
-# scratch scripts written while working on the UI; never source
+# scratch scripts written while working on the UI; never source.
+# `*.tmp.mjs` earns its own line the way `*.png` did: `flow.tmp.mjs` was committed on
+# 2026-09-11 because `.*.mjs` wants a LEADING dot, `probe*.mjs` wants that exact prefix,
+# and `*.tmp` wants the extension to BE .tmp — three patterns, none of which matched a
+# one-off Playwright probe named the obvious way. Measured: `git check-ignore -v
+# flow.tmp.mjs` returned no match, and the file shipped to Vercel for four commits.
 .*.mjs
 probe*.mjs
+*.tmp.mjs

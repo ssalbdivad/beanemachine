@@ -14,7 +14,7 @@
 // for most of any given day, silence about a hitter means nothing whatsoever.
 //
 // One live request is made at the end, to one public endpoint, once per run.
-import { readSlate, statusOf, localDate, SLATE_URL, fetchSlate } from "../src/data/today.ts"
+import { readSlate, statusOf, localDate, SLATE_URL, fetchSlate, isCalledOff, asSlateGames } from "../src/data/today.ts"
 
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
@@ -207,6 +207,104 @@ t("the URL asks for the three hydrations this file reads and nothing else",
   t("the clock reads the way a person says a time",
     /^\d{1,2}:\d{2}[ap]m$/.test(clock(Date.parse("2026-09-10T23:05:00Z"))),
     clock(Date.parse("2026-09-10T23:05:00Z")))
+}
+
+// --- a game that will not be played is not a game --------------------------------
+//
+// A postponed game used to read exactly like a game that will be played. Measured by
+// re-running an evening with CIN @ MIL marked Postponed and its lineups removed: the
+// Tonight card's text came back byte-identical to the Pre-Game version — still "15 games
+// today", still seating both clubs' men, 15.22 projected points out of a game nobody
+// would play, with no mention of it anywhere.
+{
+  const called = state => ({
+    dates: [{ games: [
+      { gamePk: 7, gameDate: "2026-09-10T23:10:00Z", status: { detailedState: state },
+        teams: { home: { team: { id: 158, abbreviation: "MIL" }, probablePitcher: { id: 700 } },
+                 away: { team: { id: 113, abbreviation: "CIN" }, probablePitcher: { id: 701 } } },
+        lineups: { homePlayers: [{ id: 61 }], awayPlayers: [{ id: 62 }] } },
+      { gamePk: 8, gameDate: "2026-09-10T23:40:00Z", status: { detailedState: "Pre-Game" },
+        teams: { home: { team: { id: 121, abbreviation: "NYM" }, probablePitcher: { id: 702 } },
+                 away: { team: { id: 120, abbreviation: "WSH" }, probablePitcher: { id: 703 } } },
+        lineups: { homePlayers: [{ id: 63 }], awayPlayers: [{ id: 64 }] } }
+    ] }]
+  })
+
+  t("MLB's own words for a called-off game are recognised",
+    isCalledOff("Postponed") && isCalledOff("Suspended: Rain") && isCalledOff("Cancelled") && isCalledOff("Canceled"))
+  // A delayed game is still going to be played and its lineup still counts; treating it
+  // as called off would bench a man who is about to bat.
+  t("and a delay is not one of them", !isCalledOff("Delayed Start: Rain") && !isCalledOff("Pre-Game") && !isCalledOff("In Progress"))
+
+  const off = readSlate("2026-09-10", called("Postponed"))
+  t("the called-off game is named", off.called.has(7) && !off.called.has(8), [...off.called].join(","))
+  t("neither of its clubs is playing", !off.playing.has(158) && !off.playing.has(113))
+  t("the other game's clubs still are", off.playing.has(121) && off.playing.has(120))
+  // The whole point: the men in a called-off game must read as having no game, which is
+  // what the card already knows how to say.
+  t("a hitter in a called-off game has no game today",
+    statusOf(61, 158, "hitting", off).kind === "no-game", statusOf(61, 158, "hitting", off).text)
+  t("and its announced starter is not pitching today",
+    statusOf(700, 158, "pitching", off).kind === "no-game", statusOf(700, 158, "pitching", off).text)
+  t("while the playable game's starter is", statusOf(702, 121, "pitching", off).kind === "pitching")
+  t("its batting order is not read as posted", !off.postedFor.has(158) && off.postedFor.has(121))
+  t("the game is still carried, so a screen can say what happened to it", off.games.length === 2)
+
+  // The adapter the Tonight card rates through. Before it existed, the card passed the
+  // CAPTURED slate to windowFrom — and the committed capture publishes probables through
+  // 2026-09-11 and none at all for 09-12 onwards, so every pitcher seat was planned with
+  // no announced starter in the window.
+  const rows = asSlateGames(off)
+  t("only the playable games reach the engine", rows.length === 1 && rows[0].home === 121, JSON.stringify(rows))
+  t("and they carry tonight's real probables", rows[0].homeProbable === 702 && rows[0].awayProbable === 703)
+  t("a scheduled game is not final", rows[0].final === false)
+  const over = readSlate("2026-09-10", called("Final"))
+  t("a finished game says so", asSlateGames(over).some(r => r.final === true))
+  t("and a finished game is still a game that was played", over.playing.has(158))
+}
+
+// --- the reader's day is not UTC's day -----------------------------------------
+//
+// The screens used to work out "today" with `new Date().toISOString().slice(0, 10)`,
+// which is the UTC date — so from 8pm Eastern onwards every one of them was a day
+// ahead. Measured with the clock pinned to Sunday 2026-09-13 20:30 EDT: the live slate
+// was correctly requested for 09-13, because useSlate already used `localDate()`, while
+// the Tonight card read "For this matchup, 2026-09-14 to 2026-09-20" and benched men
+// whose clubs were playing at that moment, each with a true reason about the wrong day.
+// Four hours of every evening, in exactly the window a lineup gets set.
+{
+  const evening = new Date("2026-09-14T00:30:00Z")
+  const local = `${evening.getFullYear()}-${String(evening.getMonth() + 1).padStart(2, "0")}-${String(evening.getDate()).padStart(2, "0")}`
+  t("localDate is the date on the reader's own calendar", localDate(evening) === local, `${localDate(evening)} vs ${local}`)
+  // The disagreement only exists in a zone with an offset, so it is asserted where one
+  // exists and reported where it does not, rather than pinning a suite to a machine's TZ.
+  if (evening.getTimezoneOffset() === 0)
+    console.log("SKIP  the two disagree after the UTC rollover (this machine runs at UTC+0)")
+  else
+    t("and it disagrees with the UTC date after the rollover",
+      localDate(evening) !== evening.toISOString().slice(0, 10),
+      `${localDate(evening)} vs ${evening.toISOString().slice(0, 10)}`)
+
+  // THE REGRESSION GUARD, and the reason it is a source grep rather than a rendered
+  // assertion: the bug was one expression copied into four files, and a browser test
+  // for it would have to pin the clock in each of them and would only ever cover the
+  // screens it happened to open. There were eight occurrences across Decide.tsx,
+  // useBoard.ts, App.tsx and Trade.tsx on 2026-09-12; this asserts there are none.
+  //
+  // Scoped to src/client deliberately. `src/engine/period.ts`, `src/data/snapshot.ts`
+  // and `src/import.ts` also format dates this way and are correct to: they convert a
+  // given timestamp for arithmetic or stamp a capture, rather than asking what day it
+  // is where the reader is standing.
+  const { readdirSync, readFileSync } = await import("node:fs")
+  const dir = new URL("../src/client/", import.meta.url)
+  // Comments are stripped before the grep, because the fix's own comment quotes the
+  // expression it replaced — and a guard that fires on the explanation of the bug is a
+  // guard nobody can leave in place.
+  const code = src => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+  const offenders = readdirSync(dir)
+    .filter(f => /\.tsx?$/.test(f))
+    .filter(f => /new Date\(\)\.toISOString\(\)\.slice\(0, ?10\)/.test(code(readFileSync(new URL(f, dir), "utf8"))))
+  t("no screen works out the reader's day from UTC", offenders.length === 0, offenders.join(", "))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

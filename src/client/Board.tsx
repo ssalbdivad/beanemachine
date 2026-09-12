@@ -16,6 +16,7 @@ import {
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
 import { tab } from "./panels.tsx"
+import { andList } from "../data/names.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -963,10 +964,6 @@ export const Board = ({
 	   changed under him; the note has to agree with the chips it is describing, or it says
 	   "SP is not offered" with SP on screen and pressed. */
 	const hiddenSlots = SLOTS.filter(s => s && !slotsRanked.has(s) && filters.slot !== s)
-	const andList = (xs: string[]) =>
-		xs.length < 2 ? (xs[0] ?? "")
-		: `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`
-
 	return (
 		<>
 			{/* Moved here from App so it can see the mode: it describes bscore, and the

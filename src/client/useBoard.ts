@@ -7,6 +7,7 @@ import {
 } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
 import { resolvePeriod, windowFrom, withinDays } from "../engine/period.ts"
+import { localDate } from "../data/today.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { normalizeName } from "../data/names.ts"
 
@@ -341,7 +342,7 @@ export const useBoard = (
 		if (!snapshot || !league) return null
 		const slate = snapshot.slate ?? []
 		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
-		const p = resolvePeriod(league, new Date().toISOString().slice(0, 10), seasonEnd)
+		const p = resolvePeriod(league, localDate(), seasonEnd)
 		// A day count is a STREAMING control. Applying it on the other two tabs would
 		// silently retitle their horizons — "This fortnight" ranked over three days —
 		// so it is read here and nowhere else, and leaving the tab restores the period.
@@ -408,7 +409,8 @@ export const useBoard = (
 	const longWindows = useMemo(() => {
 		if (!snapshot) return null
 		const slate = snapshot.slate ?? []
-		const today = new Date().toISOString().slice(0, 10)
+		// the reader's own day, not UTC's — see the note in src/client/Decide.tsx
+		const today = localDate()
 		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
 		const days = (d: string, n: number) =>
 			new Date(Date.parse(d) + n * 86400_000).toISOString().slice(0, 10)

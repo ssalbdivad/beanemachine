@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { resolvePeriod } from "../engine/period.ts"
+import { localDate } from "../data/today.ts"
 import type { Config, League, ScoringPeriod } from "../schema.ts"
 import { League as LeagueSchema } from "../schema.ts"
 import { api, ApiError, detectMode, getMode } from "./api.ts"
@@ -684,7 +685,7 @@ export const App = () => {
 								)
 							)
 								return
-							const on = new Date().toISOString().slice(0, 10)
+							const on = localDate()
 							const platform = league.meta.platform
 							// The preset marker goes, so the notice ends; `verified` does not,
 							// because nothing was read off the league and only an import can
@@ -1667,7 +1668,7 @@ const ScoringPeriodPanel = ({
 		[snapshot]
 	)
 	const resolved = useMemo(() => {
-		const today = new Date().toISOString().slice(0, 10)
+		const today = localDate()
 		// `resolvePeriod` takes a slate end only to clip the window to what was
 		// captured. With no snapshot there is nothing to clip to, so it is handed
 		// `today` and only `basis` — which period.ts derives from the league alone,

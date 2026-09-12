@@ -1,4 +1,5 @@
 import { normalizeName } from "./yahoo-pool.ts"
+import { andList } from "./names.ts"
 import { slotsFor } from "../engine/bscore.ts"
 import type { PlayerSeason } from "./statsapi.ts"
 
@@ -157,11 +158,6 @@ export const playersInText = (
  * belongs to somebody else's row and is not used: a wrong seat is worse than no seat,
  * because the card diffs against it.
  */
-/** "A and B", "A, B and C" — the same shape `andList` gives on the board, kept here
- *  because src/data/paste.ts must not import from src/client. */
-const andNames = (xs: string[]): string =>
-	xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`
-
 const slotBefore = (hay: string, at: number): string | null => {
 	// `at` is the index of the SPACE before the name, so the window has to reach one
 	// character past it or the nearest token loses its trailing space and cannot
@@ -635,12 +631,12 @@ export const rosterFromPaste = (
 				`, ${spots.length} with the seat they were in — tonight's lineup can be given to you as the CHANGES to make, rather than as a lineup to set from scratch.`
 			:	". No seats were in that text, so tonight's lineup comes back as the lineup to SET rather than as the changes to make.") +
 			(listedTwice.length ?
-				` ${andNames(listedTwice.map(([name, times]) => `${name} (${times} times)`))} ` +
+				` ${andList(listedTwice.map(([name, times]) => `${name} (${times} times)`))} ` +
 					`${listedTwice.length === 1 ? "appears" : "appear"} more than once in that text and ` +
 					`${listedTwice.length === 1 ? "was" : "were"} counted once.`
 			:	"") +
 			(twoWay.length ?
-				` ${andNames(twoWay)} ${twoWay.length === 1 ? "is a two-way player" : "are two-way players"}` +
+				` ${andList(twoWay)} ${twoWay.length === 1 ? "is a two-way player" : "are two-way players"}` +
 					`, counted as both a hitter and a pitcher — which is how your league lists ` +
 					`${twoWay.length === 1 ? "him" : "them"}, so that is ` +
 					`${keys.length} roster ${keys.length === 1 ? "entry" : "entries"} for ` +

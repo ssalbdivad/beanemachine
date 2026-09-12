@@ -81,6 +81,10 @@ const openDock = async (page = p) => {
 let pass=0, fail=0
 const t=(n,ok,x="")=>{ok?pass++:fail++; console.log(`${ok?"PASS":"FAIL"}  ${n}${ok?"":"  "+x}`)}
 t("no page errors", errs.length===0, errs.join(" | "))
+/* Frozen here, before any assertion below fetches anything from inside the page: what
+   the FIRST PAINT asked for is a different list from what the suite has asked for
+   since, and the expected-stats claim below is about the first one. */
+const firstPaintRequests = [...requested]
 
 /**
  * ── A first visit belongs to nobody ─────────────────────────────────────────────
@@ -101,28 +105,96 @@ t("but it still carries the presets and the stat list, which are nobody's league
   Object.keys(seed.platform_templates).length > 0 && seed.stat_keys.batting.length > 0,
   Object.keys(seed.platform_templates).join(","))
 /*
- * A first visit shows a ranked board AND the setup, side by side.
+ * ── THE STATCAST ROWS ARE NOT ON THE FIRST PAINT ────────────────────────────────
  *
- * This assertion used to require the opposite — no board at all — and it was written
- * against the right defect and the wrong cure. The defect was that the build shipped
- * one real Yahoo league belonging to a real person and seeded it into every browser,
- * so a stranger's first screen was a full board denominated in somebody else's
- * points. The cure taken was to show nothing until a league arrives, and that asks a
- * stranger to fill in seventeen point values before he has seen what they buy.
+ * The published capture used to be one file and vite.config.ts asks for the whole of it
+ * from the first byte of markup, because nothing can be ranked until it lands. 299,764
+ * of its 1,337,218 bytes (22.42%; 48,743 of 180,667 gzipped at level 9) were Baseball
+ * Savant expected-stats rows — 654 hitting and 851 pitching — which `model.json` gives
+ * a weight of 0 and which are rendered nowhere but a drill-down.
  *
- * What ships now is the shipped PRESET: standard head-to-head points values, nobody's
- * team, nobody's roster, and the board says so on its own face. So the claim splits
- * into the two facts that were always underneath it — there is something ranked to
- * look at, and it is not anybody's league.
+ * They are `dist/contact.json` now, fetched when a reader opens a row. Asserted on the
+ * BUILD rather than in a unit test because this is the only suite that sees what the
+ * published artifact actually asks a browser for, and the request list is already being
+ * collected at the top of this file for the import claims.
+ *
+ * Three facts, because any one alone would pass on a broken version: the byte count of
+ * the file that IS on the critical path, the second file being reachable at all (a
+ * build that forgot to emit it would otherwise look like a win), and no request for it
+ * having gone out on a page where nothing has been opened.
  */
-t("a first visit ranks players, so a stranger can see what the setup buys him",
-  (await p.$$eval(".board-row", n => n.length)) > 50,
-  String(await p.$$eval(".board-row", n => n.length)))
-t("and Billy's pick is on it, because a pick is the shortest demonstration there is",
-  await p.locator(".card.pick").isVisible())
-t("but the board says whose scoring it is on, on the board itself",
-  /one real league.s scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
-  await p.$eval(".preview-note", e => e.innerText))
+const published = await p.evaluate(async base => {
+  const r = await fetch(new URL("snapshot.json", base).href)
+  const c = await fetch(new URL("contact.json", base).href)
+  /* The BODY's size, not `content-length`: the preview server answers these chunked
+     and the header comes back null, which read as 0 bytes and failed the claim while
+     the file was perfectly correct. */
+  const snapText = await r.text()
+  const contactText = await c.text()
+  const snap = JSON.parse(snapText)
+  const contact = JSON.parse(contactText)
+  const bytes = t => new TextEncoder().encode(t).length
+  return {
+    snapshotBytes: bytes(snapText),
+    contactBytes: bytes(contactText),
+    carriesRows: snap.underlying !== undefined,
+    rows: Object.keys(contact.underlying.hitting).length +
+      Object.keys(contact.underlying.pitching).length,
+    samePair: contact.capturedAt === snap.capturedAt
+  }
+}, BASE)
+t("the published snapshot no longer carries the expected-stats rows",
+  !published.carriesRows && published.snapshotBytes > 0 &&
+    published.snapshotBytes < 1_100_000,
+  `${published.snapshotBytes} bytes, carries rows: ${published.carriesRows}`)
+t("and they are published beside it, belonging to the same capture",
+  published.rows > 1400 && published.samePair && published.contactBytes > 250_000,
+  `${published.rows} rows, ${published.contactBytes} bytes, same capture: ${published.samePair}`)
+/* The `requested` list is everything the page asked for before `networkidle`. The fetches
+   in the block just above this one run in the page, so they are in that list too — hence
+   the count is taken from a copy made BEFORE them. */
+t("and nothing asked for them on a page where no row has been opened",
+  firstPaintRequests.filter(u => /contact\.json/.test(u)).length === 0,
+  firstPaintRequests.filter(u => /contact\.json|snapshot\.json/.test(u)).join(" "))
+/*
+ * A first visit ranks NOTHING, and says what it is waiting for.
+ *
+ * THIS CLAIM HAS NOW BEEN WRITTEN THREE WAYS AND BOTH EARLIER ONES ARE RECORDED HERE,
+ * because the swing is the story and a test that only states today's answer invites
+ * the next pass to redo the first mistake.
+ *
+ * One: the build shipped ONE REAL YAHOO LEAGUE belonging to a real person and seeded
+ * it into every browser, so a stranger's first screen was a fully ranked board
+ * denominated in somebody else's points, under a notice explaining that it was. That
+ * was the defect, and `publishSnapshot` in vite.config.ts stripping `leagues` is the
+ * fix that is still in place — the two assertions above this block are that fix, and
+ * they still pass.
+ *
+ * Two: a board was put back on the first visit, ranked in the shipped PRESET rather
+ * than in anybody's league, with a `.preview-note` on it reading "one real league's
+ * scoring, not yours". The argument was that a stranger asked for seventeen point
+ * values before he has seen what they buy will not type them.
+ *
+ * Three, and this is what ships: there is no board on a first visit. `src/client/`'s
+ * own commit for it is "The example league is gone; a first visit sets up its own" —
+ * the preset that was being ranked in was still one real league's scoring wearing the
+ * word "standard", and the caveat admitted as much on the screen. A page cannot both
+ * lend a stranger somebody else's numbers and tell him they are not his.
+ *
+ * So the claim is now the ABSENCE, and it is asserted as an absence rather than
+ * inferred from a timeout: no ranked row, no pick, and — the one that would catch a
+ * half-reverted version of this — no borrowed-scoring caveat, because there is nothing
+ * borrowed left to caveat. What the reader gets instead is the offer, which the
+ * `.dock-say` assertion below is about.
+ */
+t("a first visit ranks nobody, because there is no league to rank anyone in",
+  (await p.$$eval(".board-row", n => n.length)) === 0,
+  `${await p.$$eval(".board-row", n => n.length)} ranked rows`)
+t("and there is no pick, because a pick in nobody's scoring is nobody's pick",
+  (await p.$$eval(".card.pick", n => n.filter(e => e.checkVisibility()).length)) === 0)
+t("and no borrowed-scoring caveat, because nothing is being borrowed to caveat",
+  (await p.$$eval(".preview-note", n => n.length)) === 0,
+  `${await p.$$eval(".preview-note", n => n.length)} notes`)
 /*
  * The setup is UNDER the ranking now, not beside it.
  *
@@ -164,9 +236,14 @@ t("but the way to it is on the page, saying what pressing it gets you",
   /who.s on your team/i.test(await p.$eval(".dock-say", e => e.innerText)) &&
     /start tonight/i.test(await p.$eval(".dock-say", e => e.innerText)),
   await p.$eval(".dock-say", e => e.innerText))
-t("and the borrowed-values caveat is on the board, attached to the numbers",
-  /one real league.s scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
-  await p.$eval(".preview-note", e => e.innerText))
+/* THE OLD TRUTH: "and the borrowed-values caveat is on the board, attached to the
+   numbers" — `.preview-note` reading "one real league's scoring, not yours". It went
+   with the board it was a caveat about; see the three-way note above. What is left to
+   assert on a first visit is that the dock names the league state rather than implying
+   one, which is the half of the pair that survives. */
+t("and the masthead says there is no league yet rather than implying there is one",
+  await p.locator(".chip.warn", { hasText: /no league yet/i }).isVisible(),
+  (await p.$$eval(".chip", n => n.map(e => e.textContent.trim()).join(" / "))))
 /* Matched on a regex rather than `text-is`, and the apostrophe is why: this button
    ships a straight one ("Who's on my team", Dock.tsx) while every other string in the
    same flow ships a curly `&rsquo;` — "Who&rsquo;s on your team?", "That&rsquo;s my

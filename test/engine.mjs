@@ -6,14 +6,47 @@ import { rateAll, withMarketEdge, withUndervaluation } from "../src/engine/bscor
 import { windowFrom } from "../src/engine/period.ts"
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
+/*
+ * THE CAPTURE IS TWO FILES NOW.
+ *
+ * `snap.underlying` was the Statcast expected-stats block and every assertion below
+ * that touches it used to read it off the snapshot. It is `data/contact.json`, because
+ * it was 299,764 of the capture's 1,337,218 bytes (22.42%; 48,743 of 180,667 gzipped at
+ * level 9) sitting on the cold critical path — vite.config.ts asks for the whole
+ * snapshot before the first ranked row can paint — to fill in a drill-down most readers
+ * never open.
+ *
+ * THE OLD TRUTH these lines asserted is unchanged: the rows are the same rows, stored
+ * per side, from the same rolling window. What changed is which file they are in, so
+ * every `snap.underlying` below became `contact.underlying` and nothing else moved.
+ *
+ * The split was proved inert before it was applied, and the two halves of that proof
+ * that can be re-derived from what is committed are asserted at the foot of this file:
+ * the pair recombines into the object `hydrate` used to be handed, and `rateAll` agrees
+ * with itself with the rows and without them. The third half — that the recombination
+ * is BYTE-identical to the pre-split file — needs the pre-split file, which is
+ * `git show 321453f:data/snapshot.json` (blob ed37f91) and is not a thing a test should
+ * shell out for.
+ */
+const contact = JSON.parse(readFileSync("data/contact.json", "utf8"))
 const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
 
+// 0. the two files are halves of ONE capture. Neither URL is content-hashed, so a
+// mismatched pair is a live failure mode in a browser and a silently wrong fixture here.
+t("the contact file belongs to the same capture as the snapshot",
+  contact.capturedAt === snap.capturedAt, `${contact.capturedAt} vs ${snap.capturedAt}`)
+t("the expected-stats rows are in the contact file and not in the snapshot",
+  snap.underlying === undefined && Object.keys(contact.underlying.hitting).length > 500 &&
+    Object.keys(contact.underlying.pitching).length > 500,
+  `snapshot carries ${snap.underlying === undefined ? "none" : "them"}; contact has ` +
+    `${Object.keys(contact.underlying.hitting).length} + ${Object.keys(contact.underlying.pitching).length}`)
+
 // 1. Savant rows must be kept per side — merging them fed 37 hitters a pitcher's xwOBA-against
-const bothSides = Object.keys(snap.underlying.hitting).filter(id => id in snap.underlying.pitching)
+const bothSides = Object.keys(contact.underlying.hitting).filter(id => id in contact.underlying.pitching)
 t("Savant expected stats are stored per side", bothSides.length > 0 &&
-  snap.underlying.hitting[bothSides[0]].xwoba !== snap.underlying.pitching[bothSides[0]].xwoba,
+  contact.underlying.hitting[bothSides[0]].xwoba !== contact.underlying.pitching[bothSides[0]].xwoba,
   `${bothSides.length} ids on both sides`)
 
 // 2. pools must not contain the other side's players
@@ -71,7 +104,7 @@ t("injury flags are only injuries", inj.length > 0 && inj.every(v => /injur/i.te
   [...new Set(inj)].join(","))
 
 // 4. team count must not be invented
-const hy = hydrate(snap)
+const hy = hydrate(snap, contact)
 const rate = teams => rateAll({ league, players: hy.players, underlying: hy.underlying,
   injuries: hy.injuries, teamGamesPlayed: hy.teamGamesPlayed, gamesByTeam: hy.gamesByTeam, teams })
 const r10 = rate(10), r20 = rate(20)
@@ -154,7 +187,7 @@ t("and the drill-down says so rather than implying it was used",
 
 
 
-const hyd = hydrate(snap)
+const hyd = hydrate(snap, contact)
 
 // --- market edge: the board's default ranking, so it gets its own regressions ---
 const ranked = withMarketEdge(
@@ -235,8 +268,8 @@ t("the stash horizon is longer than the fortnight",
     [...hyd.gamesByTeam.values()].reduce((a, c) => a + c, 0))
 
 // --- the rolling Statcast window, which is where the signal actually lives ---
-const rollingB = Object.values(snap.underlying.hitting).filter(u => u.window === "rolling")
-const rollingP = Object.values(snap.underlying.pitching).filter(u => u.window === "rolling")
+const rollingB = Object.values(contact.underlying.hitting).filter(u => u.window === "rolling")
+const rollingP = Object.values(contact.underlying.pitching).filter(u => u.window === "rolling")
 t("expected stats come from a rolling window, not the season",
   rollingB.length > 200 && rollingP.length > 200, `${rollingB.length} batters, ${rollingP.length} pitchers`)
 
@@ -1068,6 +1101,106 @@ for (const gone of ["recentWindow", "sources"])
       `&start_dt=2025-03-18&end_dt=2025-06-01&csv=true`,
     underlyingWindowUrl(2025, "batter", "2025-03-18", "2025-06-01"))
 }
+
+/*
+ * ── THE SPLIT IS INERT, AND THIS IS WHERE THAT STAYS TRUE ────────────────────────
+ *
+ * data/snapshot.json is committed evidence, and taking 22.42% of it out into
+ * data/contact.json was allowed only because the transform was PROVED inert before it
+ * was applied. A proof that cannot be re-run is a claim, so the two halves that can be
+ * re-derived from what is committed live here.
+ *
+ * ONE: the pair is still a capture. Merge the Statcast block back onto the snapshot and
+ * `hydrate` must produce exactly what it produces from the two handed in separately —
+ * every Map, by key type as well as by value, and every number by Object.is so a -0 or
+ * a NaN cannot pass as equal. At the moment of the split the same comparison was run
+ * against `hydrate` over the PRE-SPLIT file and agreed across 87,296 leaf values; that
+ * file is `git show 321453f:data/snapshot.json` (blob ed37f91) if it is ever needed
+ * again.
+ *
+ * TWO: the rows steer no ranking, which is the whole reason they were allowed to be
+ * late. `model.json`'s `statcast.weight` is 0 and `qualityWeight` in
+ * src/engine/project.ts defaults to it, so the quality multiplier is 1 + 0 × (full − 1)
+ * whether a row is present or absent. Asserted rather than trusted: rate the board with
+ * the rows and without them and every ranked number and the row ORDER must agree.
+ * Measured when written: 1,446 rated players, 156,808 leaf fields compared, and the
+ * only fields that move are the four that are ABOUT the rows (`underlying`,
+ * `regressionGap`, `confidence`, `undervaluation`) plus `projection.modelled` and
+ * `projection.missing`, which are the two provenance lists.
+ *
+ * This is what lets the board paint before the second file arrives, and it is what the
+ * drill-down's loading and failed states are allowed to be quiet about: nothing the
+ * reader is ranked by is waiting on them.
+ */
+const deepSame = (a, b, path = "", diffs = []) => {
+  if (a instanceof Map || b instanceof Map) {
+    if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size)
+      return diffs.push(`${path}: Map mismatch`), diffs
+    for (const [k, v] of a) {
+      // key TYPE, not just value: a Map<number,…> rehydrated with string keys dumps
+      // identically and answers get(605141) with undefined
+      if (!b.has(k)) diffs.push(`${path}: missing ${typeof k} key ${String(k)}`)
+      else deepSame(v, b.get(k), `${path}.get(${String(k)})`, diffs)
+    }
+    return diffs
+  }
+  if (typeof a === "number" || typeof b === "number") {
+    if (!Object.is(a, b)) diffs.push(`${path}: ${a} vs ${b}`)
+    return diffs
+  }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
+    if (a !== b) diffs.push(`${path}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`)
+    return diffs
+  }
+  const ka = Object.keys(a).sort(), kb = Object.keys(b).sort()
+  if (ka.join() !== kb.join()) return diffs.push(`${path}: keys differ`), diffs
+  for (const k of ka) deepSame(a[k], b[k], `${path}.${k}`, diffs)
+  return diffs
+}
+
+const merged = hydrate({ ...snap, underlying: contact.underlying })
+const split = hydrate(snap, contact)
+const recDiffs = deepSame(merged, split, "hydrate")
+t("recombining the two files hydrates to exactly what hydrate produced before the split",
+  recDiffs.length === 0, recDiffs.slice(0, 3).join(" | "))
+// The comparison has to be able to FAIL or it proves nothing.
+const firstBat = Object.keys(contact.underlying.hitting)[0]
+const poisoned = JSON.parse(JSON.stringify(contact))
+poisoned.underlying.hitting[firstBat].xwoba += 0.001
+t("and that comparison rejects a single altered xwOBA, so it can fail",
+  deepSame(merged, hydrate(snap, poisoned), "hydrate").length > 0)
+
+const without = hydrate(snap, undefined)
+t("a snapshot hydrated with no contact file has empty expected-stats maps, not a crash",
+  without.underlying.hitting.size === 0 && without.underlying.pitching.size === 0)
+
+const rateWith = h => withUndervaluation(rateAll({
+  league, players: h.players, underlying: h.underlying, injuries: h.injuries,
+  teamGamesPlayed: h.teamGamesPlayed, gamesByTeam: h.gamesByTeam,
+  opponentsByTeam: h.opponentsByTeam, recentVolumeByWindow: h.recentVolumeByWindow,
+  recentStats: h.recentStats, ownership: h.ownership, eligibility: h.eligibility,
+  injuryPolicy: "exclude", teams: league.meta.max_teams
+}))
+const ratedWith = rateWith(split)
+const ratedWithout = rateWith(without)
+t("the same players are rated with the expected-stats rows and without them",
+  ratedWith.length === ratedWithout.length, `${ratedWith.length} vs ${ratedWithout.length}`)
+t("and in the same ORDER, so no reader's ranking waits on the second file",
+  ratedWith.every((r, i) => r.player.id === ratedWithout[i].player.id &&
+    r.player.group === ratedWithout[i].player.group))
+const RANKED_NUMBERS = ["bscore", "points", "addValue", "replacement", "slot"]
+const moved = RANKED_NUMBERS.filter(k =>
+  ratedWith.some((r, i) => !Object.is(r[k], ratedWithout[i][k])))
+t("every ranked number is identical either way, because statcast.weight is 0",
+  moved.length === 0, `moved: ${moved.join(", ")}`)
+// And the four that SHOULD move do move — otherwise the assertion above would also
+// pass on a capture whose contact file was empty, which is the state it exists to
+// distinguish from.
+const aboutTheRows = ["underlying", "regressionGap", "confidence", "undervaluation"]
+  .filter(k => ratedWith.some((r, i) =>
+    JSON.stringify(r[k]) !== JSON.stringify(ratedWithout[i][k])))
+t("while the four fields that are about the rows all move, so the rows are really there",
+  aboutTheRows.length === 4, `moved: ${aboutTheRows.join(", ")}`)
 
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

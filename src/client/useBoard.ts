@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
-import type { Snapshot } from "../data/snapshot.ts"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { Contact, Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import {
 	likelyAvailable, ownershipCut, rateAll, withMarketEdge, withUndervaluation,
@@ -79,6 +79,76 @@ export const useSnapshot = () => {
 		}
 	}, [])
 	return { snapshot, error }
+}
+
+/**
+ * Which of the four things is true about the expected-stats rows RIGHT NOW.
+ *
+ * Four, not three, and the fourth is the one worth naming: "nobody has asked for
+ * them" is a different state from "they failed", and a panel that treated the two
+ * alike would say the load failed on a board nothing had tried to load. Failure is a
+ * state in this app and never an exception, so it is in this union rather than in a
+ * catch block somewhere.
+ */
+export type ContactStatus = "unasked" | "loading" | "ready" | "failed"
+
+/**
+ * The expected-stats rows, fetched when something actually needs them.
+ *
+ * They are `data/contact.json` — 299,805 bytes, 48,528 gzipped at level 9, 1,505 rows
+ * — and they used to be 22.42% of the snapshot, which vite.config.ts asks for in full
+ * from the first byte of markup because nothing can be ranked until it lands. So every
+ * reader paid for them on the cold path to render numbers that live behind a
+ * drill-down, and the measurement that settles whether that was worth it is in
+ * model.json: `statcast.weight` is 0, so the rows move no ranking. Proved on the
+ * committed capture rather than argued — `rateAll` with the rows and without them
+ * agrees on `bscore`, `points`, `addValue`, `replacement`, `slot` and the row ORDER for
+ * all 1,446 rated players, and differs only in the four fields that are about the rows
+ * themselves (`underlying`, `regressionGap`, `confidence`, `undervaluation`) plus the
+ * two provenance lists.
+ *
+ * Deliberately NOT prefetched: a second request issued beside the snapshot's would put
+ * the same bytes back on the same path under a different name. `ask` is called by the
+ * drill-down, which is the one surface that shows these numbers.
+ *
+ * THE PAIR IS CHECKED. Neither file's URL is content-hashed, so a browser can hold
+ * yesterday's rows beside today's board, and an xwOBA from another week is not a
+ * rougher version of this week's — it is a different measurement under the same player
+ * id. A `capturedAt` that does not match the snapshot's is treated exactly like a
+ * failed fetch, because for the reader it is one.
+ */
+export const useContact = (capturedAt: string | undefined) => {
+	const [contact, setContact] = useState<Contact | null>(null)
+	const [status, setStatus] = useState<ContactStatus>("unasked")
+	/* The capture's date, read at the moment the answer ARRIVES rather than captured in
+	   `ask`'s closure. `ask` is handed to a button and must be stable, and a stable
+	   callback holding the first `capturedAt` it ever saw would compare the wrong day
+	   after a snapshot reload. */
+	const at = useRef(capturedAt)
+	at.current = capturedAt
+	/* One request per page, not one per row opened: `asked` is a ref rather than state
+	   because two rows expanded in the same tick would both read `status === "unasked"`
+	   and fire. */
+	const asked = useRef(false)
+	const ask = useCallback(() => {
+		if (asked.current) return
+		asked.current = true
+		setStatus("loading")
+		fetch(`${import.meta.env.BASE_URL}contact.json`)
+			.then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+			.then((c: Contact) => {
+				if (at.current !== undefined && c.capturedAt !== at.current) {
+					/* Left ASKED: retrying fetches the same mismatched file. The way out of
+					   this state is a reload, which is what a stale cache needs anyway. */
+					setStatus("failed")
+					return
+				}
+				setContact(c)
+				setStatus("ready")
+			})
+			.catch(() => setStatus("failed"))
+	}, [])
+	return { contact, status, ask }
 }
 
 export interface Filters {
@@ -395,6 +465,14 @@ export const useBoard = (
 	 * absence, on every screen that depends on it.
 	 */
 	const { merged: liveInjuries, error: injuryError } = useInjuries(captured, snapshot?.capturedAt)
+	/**
+	 * The expected-stats rows, and the button that asks for them.
+	 *
+	 * Held here rather than in Board.tsx because `rated` below is what has to be
+	 * recomputed when they arrive — the drill-down reads them off the row it was given,
+	 * not out of a second copy.
+	 */
+	const { contact, status: contactStatus, ask: askForContact } = useContact(snapshot?.capturedAt)
 	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
 	// The reader's today, not the capture's. A snapshot is a set of games; which of
 	// them are still ahead of you is a question only the clock can answer.
@@ -557,7 +635,7 @@ export const useBoard = (
 		// Replacement depth is teams × slots. Without a real team count there is no
 		// honest bscore, so this refuses rather than assuming a league size.
 		if (league.meta.max_teams == null) return []
-		const h = hydrate(snapshot)
+		const h = hydrate(snapshot, contact ?? undefined)
 		// A period can legitimately resolve to nothing — a stale snapshot asked about a
 		// week that starts after its last captured game — and zero games would rank
 		// everyone at zero. Fall back to the fortnight rather than invent a number.
@@ -626,7 +704,17 @@ export const useBoard = (
 			),
 			h.ownership
 		)
-	}, [snapshot, league, filters.mode, week, longWindows, gettable, injuries])
+		/* `contact` is in here, so the board RE-RATES when the expected-stats rows land.
+		   Measured in node on the committed capture: the whole
+		   rateAll + withUndervaluation + withMarketEdge pass over 1,446 rated players is a
+		   median 45.8 ms (37.8–56.7 over seven runs), once, after a reader has deliberately
+		   opened a row. The alternative was to derive the four affected fields for the one
+		   open row inside Board.tsx, which is faster and is the wrong trade: it would give
+		   this app two places that compute `confidence`, and a row and a drill-down
+		   disagreeing about a number is the worst failure this page can produce. Nothing
+		   re-orders — the proof above is that the ranking is byte-identical either way — so
+		   what the reader sees change is only the numbers that were waiting on the file. */
+	}, [snapshot, league, filters.mode, week, longWindows, gettable, injuries, contact])
 
 	/**
 	 * Can the reader actually add this man — and how sure is the answer.
@@ -1051,7 +1139,11 @@ export const useBoard = (
 	return {
 		rated: board, rows, scored, slotsRanked, period, streaming,
 		mine: worstMineBySlot !== null,
-		teamNames, availability, sort, desc, injuryError
+		teamNames, availability, sort, desc, injuryError,
+		/* Both halves, because the drill-down needs to say which state it is in AND be
+		   able to leave it. `contactStatus` is the sentence; `askForContact` is what the
+		   open row calls on mount. */
+		contactStatus, askForContact
 	}
 }
 

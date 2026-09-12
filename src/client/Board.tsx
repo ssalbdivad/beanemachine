@@ -8,7 +8,7 @@ import { useStored } from "./stores.ts"
 import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import {
 	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
-	type BoardRow, type Filters, type Ranked
+	type BoardRow, type ContactStatus, type Filters, type Ranked
 } from "./useBoard.ts"
 import {
 	canReadPool, api, ApiError, getMode, poolIsPartial, type AvailablePool
@@ -710,8 +710,14 @@ export const Board = ({
 	 * beside a heading that sorts by nothing. One boolean, computed where the seats are
 	 * actually priced.
 	 */
-	const { rows, scored, slotsRanked, period, streaming, teamNames, availability, sort, desc, mine, injuryError } =
-		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
+	const {
+		rows, scored, slotsRanked, period, streaming, teamNames, availability, sort, desc, mine,
+		injuryError,
+		/* The expected-stats rows are a SECOND file now and the board does not wait for
+		   them — see `useContact` in useBoard.ts. Two things come back: which state that
+		   file is in, and the call that asks for it. Only the drill-down asks. */
+		contactStatus, askForContact
+	} = useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
 	/** What this league lets you spend in a week, where it says. Null is "it did not
@@ -1316,6 +1322,7 @@ export const Board = ({
 					horizon={span.phrase}
 					basis={basis}
 					streaming={filters.mode === "stream"}
+					contactKnown={contactStatus === "ready"}
 				/>
 			:	<NoPick />}
 
@@ -1761,6 +1768,8 @@ export const Board = ({
 							   looking at — his filters have already decided who is on it */
 							open={open === r.player.id}
 							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)}
+							contactStatus={contactStatus}
+							askForContact={askForContact}
 						/>
 					))}
 					{/* Named the confidence floor, which no longer exists — a dead end offered to
@@ -1889,7 +1898,8 @@ const BillysPick = ({
 	r,
 	horizon,
 	basis,
-	streaming
+	streaming,
+	contactKnown
 }: {
 	/** A BoardRow, not a Ranked, because the card now leads on the number the reader's
 	 *  own roster produced where there is one — see `theWorstManYouHold`. */
@@ -1901,6 +1911,11 @@ const BillysPick = ({
 	/** On the streaming view the card is a waiver-day answer, so it drops the two
 	 *  clauses that describe the projection rather than the decision. */
 	streaming: boolean
+	/**
+	 * Whether the expected-stats rows are in, which decides whether this card is
+	 * entitled to quote a confidence at all. See the `worry` clause below.
+	 */
+	contactKnown: boolean
 }) => {
 	const clauses: string[] = []
 	/**
@@ -2010,9 +2025,38 @@ const BillysPick = ({
 		r.deltaMine !== null && r.deltaMine <= 0 ?
 			`He clears the league's bar and not yours: ${theWorstManYouHold()} already projects ${Math.abs(r.deltaMine)} points more over ${horizon}.`
 		:	null
+	/**
+	 * The confidence clause is GATED on the contact file, and that gate is the one
+	 * user-visible cost of taking the Statcast rows off the first paint.
+	 *
+	 * `confidenceOf` in src/engine/project.ts multiplies by a flat 0.6 when a player has
+	 * no expected-stats row, and before this file is fetched NO player has one — so on
+	 * first paint this clause would fire quoting a number that is 0.6× the truth, for a
+	 * reason ("no Statcast expected stats") that is about the reader's connection rather
+	 * than about the player. Measured on the committed capture: all 1,446 rated players
+	 * have an xwOBA row, 518 of them clear this 0.7 threshold with the file, and NONE of
+	 * them clear it without it. So ungated, the card would carry a confidence worry about
+	 * every single one of those 518 men, and every one of those worries would be false.
+	 *
+	 * So the clause waits. An omitted clause is the house rule for a fact that is not
+	 * yet known — the same rule the schedule multiplier and the rostered share already
+	 * follow on this card — and nothing here says confidence is high, or says anything
+	 * about it, until the file that decides it is in. The injury clause is unaffected and
+	 * still wins outright, because it is the more urgent worry and needs no Statcast row
+	 * to be true.
+	 *
+	 * What the reader sees on a board where he never opens a row is therefore a card with
+	 * no confidence sentence on it; open one and the file arrives, the board re-rates, and
+	 * the sentence appears where it is warranted. It never appears WRONG, which is the
+	 * property being bought.
+	 */
 	const worry =
-		r.injury ? `He's listed ${r.injury.toLowerCase()}, so treat that number carefully.`
-		: r.confidence.value < 0.7 ?
+		/* "He's listed X" fitted "Injured 10-Day" and stopped fitting the moment this field
+		   could also hold "optioned to the minors" — see src/data/injuries.ts. "MLB lists
+		   him" takes both, which is the frame src/auto/plan.ts already uses for the same
+		   field. */
+		r.injury ? `MLB lists him ${r.injury.toLowerCase()}, so treat that number carefully.`
+		: contactKnown && r.confidence.value < 0.7 ?
 			`Confidence is only ${Math.round(r.confidence.value * 100)}% — ${r.confidence.reasons.join(", ")}.`
 		:	null
 	return (
@@ -2328,7 +2372,9 @@ const rowLabel = (
 		: r.projection.horizonGames ?
 			`${r.projection.horizonGames} team games scheduled`
 		:	"no scheduled games on record",
-		...(r.injury ? [`listed ${r.injury.toLowerCase()}`] : [])
+		/* Same reason as the `worry` string above: this clause joins a comma list, so it
+		   reads "14 team games scheduled, MLB lists him optioned to the minors". */
+		...(r.injury ? [`MLB lists him ${r.injury.toLowerCase()}`] : [])
 	].join(", ")
 
 /**
@@ -2389,7 +2435,9 @@ const Row = ({
 	starts,
 	mine,
 	open,
-	onToggle
+	onToggle,
+	contactStatus,
+	askForContact
 }: {
 	rank: number
 	r: BoardRow
@@ -2404,6 +2452,11 @@ const Row = ({
 	starts: Starts | null
 	open: boolean
 	onToggle: () => void
+	/** Which state the expected-stats file is in, passed down rather than read again,
+	 *  so the row and its drill-down cannot disagree about whether those rows exist. */
+	contactStatus: ContactStatus
+	/** Asked for by the drill-down when it opens — see `Detail`. */
+	askForContact: () => void
 }) => (
 	<>
 		<button
@@ -2487,7 +2540,7 @@ const Row = ({
 			)}
 			<Window r={r} />
 		</button>
-		{open && <Detail r={r} />}
+		{open && <Detail r={r} contactStatus={contactStatus} askForContact={askForContact} />}
 	</>
 )
 
@@ -2505,8 +2558,34 @@ const Row = ({
  * the per-category ledger last. Nothing is dropped — the ledger is the same eight
  * rows it always was, just no longer first.
  */
-const Detail = ({ r }: { r: Ranked }) => {
+const Detail = ({
+	r,
+	contactStatus,
+	askForContact
+}: {
+	r: Ranked
+	contactStatus: ContactStatus
+	askForContact: () => void
+}) => {
 	const top = Object.entries(r.projected.breakdown).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+	/**
+	 * OPENING A ROW IS WHAT ASKS FOR THE EXPECTED-STATS FILE.
+	 *
+	 * This panel is the only surface in the app that renders those rows, and they are
+	 * 299,805 bytes (48,528 gzipped) that used to ride inside the snapshot — which
+	 * vite.config.ts requests in full before the first ranked row can paint, because the
+	 * ranking cannot start without it. So every reader paid for them on the cold path to
+	 * fill in a panel most readers never open. They are `data/contact.json` now and this
+	 * effect is the request.
+	 *
+	 * Idempotent in `useContact`, not here: every open row mounts one of these, and a
+	 * guard in this component would still fire twice for two rows opened in one tick.
+	 *
+	 * There is no cleanup and deliberately so. Closing the row does not cancel the
+	 * fetch — the bytes are on their way, the board is better with them, and a reader who
+	 * opened one row will open another.
+	 */
+	useEffect(askForContact, [askForContact])
 	return (
 		<div className="detail" id={detailId(r)} role="region" aria-label={`Where ${r.player.name}'s numbers come from`}>
 			<div className="detail-col">
@@ -2521,9 +2600,28 @@ const Detail = ({ r }: { r: Ranked }) => {
 					<div className="pair"><dt>bscore</dt><dd>{r.bscore}</dd></div>
 					{/* Confidence is the first thing dropped from the row below 640px, so the
 					    drill-down has to carry it or a phone reader loses it entirely. */}
+					{/*
+					  WITHHELD until the expected-stats file is in, rather than printed at 0.6×.
+					  `confidenceOf` in src/engine/project.ts multiplies by a flat 0.6 when a
+					  player has no expected-stats row, and until `data/contact.json` lands no
+					  player has one. Measured on the committed capture: ALL 1,446 rated men have
+					  an xwOBA row, so this number would be 0.6× the truth on every row in the
+					  app, and wrong in a direction nobody could detect from the screen. A dash
+					  that says why beats that. The panel at the foot of the third column carries
+					  the state in a sentence.
+					*/}
 					<div className="pair">
 						<dt>confidence</dt>
-						<dd title={r.confidence.reasons.join("; ")}>{pct(r.confidence.value)}</dd>
+						{contactStatus === "ready" ?
+							<dd title={r.confidence.reasons.join("; ")}>{pct(r.confidence.value)}</dd>
+						: contactStatus === "failed" ?
+							<dd title="Part of this number is how much of him Statcast has measured, and those numbers didn't load.">
+								—
+							</dd>
+						:	<dd title="Part of this number is how much of him Statcast has measured, and those numbers are still loading.">
+								—
+							</dd>
+						}
 					</div>
 					<div className="pair">
 						<dt>rostered</dt>
@@ -2535,7 +2633,10 @@ const Detail = ({ r }: { r: Ranked }) => {
 						<dd>{r.marketEdge === null ? "—" : r.marketEdge > 0 ? `+${r.marketEdge}` : r.marketEdge}</dd>
 					</div>
 				</dl>
-				{r.confidence.reasons.length > 0 && (
+				{/* Gated with the number they explain. One of these reasons is "no Statcast
+				    expected stats", which before the file lands is a statement about the
+				    download and not about the player. */}
+				{contactStatus === "ready" && r.confidence.reasons.length > 0 && (
 					<ul className="notes">
 						{r.confidence.reasons.map(w => <li key={w}>{w}</li>)}
 					</ul>
@@ -2546,7 +2647,13 @@ const Detail = ({ r }: { r: Ranked }) => {
 				{r.projection.modelled.length ?
 					<ul className="notes">{r.projection.modelled.map(m => <li key={m}>{m}</li>)}</ul>
 				:	<p className="empty">Nothing modelled — no projection was possible.</p>}
-				{(r.projection.missing.length > 0 || r.projected.unscoreable.length > 0) && (
+				{/* Counted AFTER the same filter the list applies, or a player whose only
+				    missing input is the not-yet-fetched Statcast row gets a "Missing"
+				    heading over an empty list. */}
+				{(r.projection.missing.filter(
+					m => contactStatus === "ready" || m !== "underlying expected stats"
+				).length > 0 ||
+					r.projected.unscoreable.length > 0) && (
 					<>
 						{/* Promoted out of last place. What the model could not read is the
 						    product's own promise — absent is reported as absent — and it was
@@ -2554,7 +2661,18 @@ const Detail = ({ r }: { r: Ranked }) => {
 						    tables, where a reader who scrolled no further would never see it. */}
 						<h3>Missing</h3>
 						<ul className="notes warn">
-							{r.projection.missing.map(m => <li key={m}>{MISSING_LABEL[m] ?? m}</li>)}
+							{/*
+							  "underlying expected stats" is dropped from this list while the contact
+							  file is not in, because MISSING_LABEL turns it into "Statcast has no
+							  expected-stats row for him" — a claim about the player that would be
+							  false for 1,408 of the 1,446 rated men in the capture. Not hidden: the
+							  Statcast panel in the next column says, in the same breath, whether
+							  those numbers are loading or failed to load. Once they are in, the
+							  entry is back and means what it says.
+							*/}
+							{r.projection.missing
+								.filter(m => contactStatus === "ready" || m !== "underlying expected stats")
+								.map(m => <li key={m}>{MISSING_LABEL[m] ?? m}</li>)}
 							{r.projected.unscoreable.length > 0 && (
 								<li>league scores {r.projected.unscoreable.join(", ")} — not in any source we read</li>
 							)}
@@ -2587,11 +2705,33 @@ const Detail = ({ r }: { r: Ranked }) => {
 					)}
 				</dl>
 
+				{/*
+				  THE PANEL THAT OWNS THE SECOND FILE'S STATE.
+				  
+				  Everything below — and wOBA, barrel % and exit velo in the list above — comes
+				  out of `data/contact.json`, which is fetched when this row is opened and not
+				  before. Three states, all of them said out loud, because a panel that drew
+				  nothing would read as "Statcast has never measured him", which is a claim
+				  about the player rather than about a download.
+				  
+				  Failure is a state here, never an exception: the fetch's catch sets it, and
+				  what the reader gets is a sentence, not zeros and not an empty table.
+				*/}
 				<h3>Statcast model</h3>
 				<p className="tiny-note">
 					Expected stats are MLB&rsquo;s model of what this contact usually produces —
 					not something that happened.
 				</p>
+				{contactStatus === "failed" && (
+					<p className="empty warn">
+						Couldn&rsquo;t load the contact numbers. Everything else on this row is
+						unaffected &mdash; they steer no ranking &mdash; so the ordering you are
+						looking at is the same either way. Reloading the page tries again.
+					</p>
+				)}
+				{(contactStatus === "loading" || contactStatus === "unasked") && (
+					<p className="empty">Loading the contact numbers&hellip;</p>
+				)}
 				<dl>
 					{r.underlying?.xwoba != null ?
 						<>
@@ -2623,7 +2763,12 @@ const Detail = ({ r }: { r: Ranked }) => {
 								<div className="pair"><dt>sweet-spot % (season)</dt><dd>{r.underlying.sweetSpotRate}</dd></div>
 							)}
 						</>
-					:	<p className="empty">No Statcast row for this player.</p>}
+					: contactStatus === "ready" ?
+						<p className="empty">No Statcast row for this player.</p>
+						/* The state is printed above this <dl>, once, rather than repeated here:
+						   "still loading" and "Statcast never measured him" are different facts
+						   and only the second one is about the player. */
+					:	null}
 				</dl>
 				{r.regressionGap != null && Math.abs(r.regressionGap) > 0.03 && (
 					<p className="tiny-note">

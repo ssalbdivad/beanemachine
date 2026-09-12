@@ -50,7 +50,38 @@ export interface Snapshot {
 	capturedAt: string
 	horizon: { start: string; end: string }
 	players: PlayerSeason[]
-	underlying: { hitting: Record<string, Underlying>; pitching: Record<string, Underlying> }
+	/**
+	 * The Statcast expected-stats rows — IN THEIR OWN FILE, and optional here.
+	 *
+	 * It was 299,750 of the capture's 1,337,218 bytes (22.42%) and 48,743 of its
+	 * 180,667 gzipped (26.98%), measured by `zlib.gzipSync(buf, { level: 9 })` on the
+	 * exact committed bytes. Every one of those bytes was on the cold critical path,
+	 * because vite.config.ts's `prefetch-snapshot` asks for the whole snapshot from the
+	 * first byte of markup and nothing can be ranked until the JSON has parsed — so a
+	 * reader waited for 654 hitting and 851 pitching expected-stats rows before he
+	 * could see row one, to render numbers that live behind a drill-down he may never
+	 * open.
+	 *
+	 * It does not steer the ranking. `model.json`'s `statcast.weight` is 0 — set there
+	 * by a leak-free backtest over 111 paired weeks, see its own `why` — and
+	 * `qualityWeight` in src/engine/project.ts defaults to it, so the quality
+	 * multiplier is `1 + 0 * (full - 1)` = 1 whether a row is present or absent. Proved
+	 * rather than argued: `rateAll` over the capture with these rows and with them
+	 * removed agrees on `bscore` for all 1,446 rated players to the last digit.
+	 *
+	 * What it DOES steer is `confidence` (a missing row costs a flat ×0.6 in
+	 * `confidenceOf`), `regressionGap`, `undervaluation`, and two provenance lines —
+	 * and of those, everything the browser renders sits inside the drill-down except
+	 * one sentence on Billy's pick, which is suppressed until the file is in rather
+	 * than printed off a 0.6 the reader's connection caused. See `useContact` in
+	 * src/client/useBoard.ts.
+	 *
+	 * OPTIONAL rather than removed, and that is deliberate: `hydrate` takes it as the
+	 * default for its second argument, so every capture taken before the split — and
+	 * any caller that merges the two files back into one object before hydrating —
+	 * still reads exactly as it did. The committed capture no longer carries it.
+	 */
+	underlying?: { hitting: Record<string, Underlying>; pitching: Record<string, Underlying> }
 	injuries: Record<string, string>
 	teamGamesPlayed: Record<string, number>
 	/** Every regular-season game from the capture date to the end of the season, one
@@ -78,6 +109,27 @@ export interface Snapshot {
 	 * are the same numbers — see the transform note on `trimRecentLine`.
 	 */
 	recentStats: Record<string, StatLine>
+}
+
+/**
+ * The Statcast block, on its own, as `data/contact.json`.
+ *
+ * Fetched by the browser only when something actually needs it — which in practice
+ * means when a reader opens a drill-down. The board paints from the snapshot alone.
+ *
+ * `capturedAt` is carried so a STALE PAIR is detectable. Neither file's name is
+ * content-hashed — both are copied into the published asset directory by
+ * `publishSnapshot` in vite.config.ts — so a browser really can hold yesterday's
+ * contact rows beside today's board, and expected-stats rows from another day are
+ * not a smaller version of the truth, they are a different measurement wearing the
+ * same player ids. The client compares this field and treats a mismatch as a failed
+ * load, which says so on screen. It costs 55 bytes: data/contact.json is 299,805 bytes
+ * against the 299,750 the expected-stats rows occupy on their own, 48,528 gzipped at
+ * level 9 against 48,468.
+ */
+export interface Contact {
+	capturedAt: string
+	underlying: { hitting: Record<string, Underlying>; pitching: Record<string, Underlying> }
 }
 
 /** One upstream read, with how many rows it returned. Provenance for whoever runs
@@ -143,7 +195,7 @@ export const buildSnapshot = async (
 	/** Whose market prices to read. Ownership is league-platform-specific, so it is
 	 *  a parameter rather than a constant. */
 	leagueId = "228947"
-): Promise<{ snapshot: Snapshot; sources: SourceRead[] }> => {
+): Promise<{ snapshot: Snapshot; contact: Contact; sources: SourceRead[] }> => {
 	const start = iso(now)
 	const end = iso(new Date(now.getTime() + horizonDays * 86400_000))
 
@@ -255,10 +307,6 @@ export const buildSnapshot = async (
 		capturedAt: now.toISOString(),
 		horizon: { start, end },
 		players,
-		underlying: {
-			hitting: Object.fromEntries([...xBat].map(([k, v]) => [String(k), v])),
-			pitching: Object.fromEntries([...xPit].map(([k, v]) => [String(k), v]))
-		},
 		injuries: Object.fromEntries([...injuries].map(([k, v]) => [String(k), v])),
 		teamGamesPlayed: Object.fromEntries(
 			[...teamGamesPlayed].map(([k, v]) => [String(k), v])
@@ -292,8 +340,20 @@ export const buildSnapshot = async (
 	   promised and the shipped file did not keep. It would have cost about 55 bytes on
 	   the next capture. Removed for the discrepancy, not for the size. */
 
+	/* Written beside the snapshot rather than into it — see the `Contact` doc above
+	   and the note on `Snapshot.underlying`. `capturedAt` is the same string the
+	   snapshot carries, taken from the snapshot itself so the two cannot drift. */
+	const contact: Contact = {
+		capturedAt: snapshot.capturedAt,
+		underlying: {
+			hitting: Object.fromEntries([...xBat].map(([k, v]) => [String(k), v])),
+			pitching: Object.fromEntries([...xPit].map(([k, v]) => [String(k), v]))
+		}
+	}
+
 	return {
 		snapshot,
+		contact,
 		sources: [
 			{ name: "MLB StatsAPI · season hitting", url: "statsapi.mlb.com/api/v1/stats", rows: hitting.length },
 			{ name: "MLB StatsAPI · season pitching", url: "statsapi.mlb.com/api/v1/stats", rows: pitching.length },
@@ -320,7 +380,22 @@ export const buildSnapshot = async (
  * shown one. `src/client/useBoard.ts` resolves the league's own scoring period and
  * calls `windowFrom` with it.
  */
-export const hydrate = (s: Snapshot) => {
+export const hydrate = (
+	s: Snapshot,
+	/**
+	 * The contact file, where the reader has it.
+	 *
+	 * Defaults to whatever the snapshot itself carries, which is how a pre-split
+	 * capture and a re-merged pair both still hydrate unchanged. When neither is
+	 * present the two maps come back EMPTY rather than the call failing — an absent
+	 * expected-stats row is a case the engine already handles on every player Savant
+	 * has never measured, so "not fetched yet" reaches `rateAll` as the same shape as
+	 * "never existed". The difference between those two is not the engine's to tell
+	 * and is not hidden: `useContact` in src/client/useBoard.ts holds the state, and
+	 * the drill-down says which one it is looking at.
+	 */
+	contact: Pick<Contact, "underlying"> | undefined = s.underlying && { underlying: s.underlying }
+) => {
 	const slate = s.slate ?? []
 	const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), s.horizon.end)
 	const horizon = windowFrom(slate, s.horizon.start, s.horizon.end)
@@ -330,8 +405,12 @@ export const hydrate = (s: Snapshot) => {
 	seasonEnd,
 	players: s.players,
 	underlying: {
-		hitting: new Map(Object.entries(s.underlying.hitting).map(([k, v]) => [Number(k), v])),
-		pitching: new Map(Object.entries(s.underlying.pitching).map(([k, v]) => [Number(k), v]))
+		hitting: new Map(
+			Object.entries(contact?.underlying.hitting ?? {}).map(([k, v]) => [Number(k), v])
+		),
+		pitching: new Map(
+			Object.entries(contact?.underlying.pitching ?? {}).map(([k, v]) => [Number(k), v])
+		)
 	},
 	injuries: new Map(Object.entries(s.injuries).map(([k, v]) => [Number(k), v])),
 	teamGamesPlayed: new Map(

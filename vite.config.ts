@@ -69,16 +69,61 @@ const publishSnapshot = (): Plugin => ({
 			res.setHeader("content-type", "application/json")
 			res.end(readFileSync("scoring.json"))
 		})
+		/**
+		 * The contact file, served straight out of `data/` in dev.
+		 *
+		 * Same URL the build serves it at, so the client has one path for both modes —
+		 * see `emitFile` below for why it is not simply copied into `public/` next to
+		 * the snapshot.
+		 */
+		server.middlewares.use("/contact.json", (_req, res) => {
+			res.setHeader("content-type", "application/json")
+			res.end(readFileSync("data/contact.json"))
+		})
+	},
+	/**
+	 * EMITTED as a build asset rather than copied into `public/`, which is how the
+	 * snapshot gets there — and the difference is not taste.
+	 *
+	 * `public/snapshot.json` needs a line in .gitignore to stop a generated copy of
+	 * committed evidence being committed a second time, and it has one. The next
+	 * generated file written into `public/` did not get that line and is in the repo
+	 * now: `git ls-files public/` returns `public/scoring.json`, which `buildStart`
+	 * above writes on every build, and `git check-ignore -v public/scoring.json`
+	 * matches nothing. So the copy-into-public route has already leaked one build
+	 * artifact into git history, and .gitignore still opens with a comment about a
+	 * pattern that is no longer under it.
+	 *
+	 * Emitting skips `public/` entirely: the bytes go from `data/contact.json` into
+	 * `dist/contact.json` and nothing appears in the working tree for `git add -A` to
+	 * sweep up. Unhashed filename on purpose — the client asks for it by name at
+	 * runtime, and the pair is kept honest by `capturedAt` inside the file rather than
+	 * by the URL (see `Contact` in src/data/snapshot.ts).
+	 */
+	generateBundle() {
+		this.emitFile({
+			type: "asset",
+			fileName: "contact.json",
+			source: readFileSync("data/contact.json")
+		})
 	}
 })
 
 /**
  * Ask for the snapshot before the bundle has even downloaded.
  *
- * Nothing can be ranked until a 2.1 MB snapshot has arrived, and the request for
+ * Nothing can be ranked until the snapshot has arrived, and the request for
  * it used to be issued from a React effect — so it queued behind the bundle's
  * download, parse and first render. Measured on the production build, the fetch
  * did not start until 310 ms in, and the first ranked row painted at 696 ms.
+ *
+ * This is the request the Statcast split is about. It asks for the WHOLE file before
+ * a single row can paint, so every byte in the snapshot is on the cold critical path
+ * whether or not a ranking needs it — and 299,764 of the 1,337,218 committed bytes
+ * (22.42%, 48,743 of 180,667 gzipped at level 9) were expected-stats rows that steer
+ * no ranking at all. They are `data/contact.json` now, fetched by `useContact` only
+ * when a reader opens a drill-down, and deliberately NOT prefetched here: a second
+ * request issued from this script would put the same bytes back on the same path.
  *
  * This is a CLASSIC script, not a module one: a module is deferred until after
  * the document is parsed, which is exactly the wait being removed. Injected at

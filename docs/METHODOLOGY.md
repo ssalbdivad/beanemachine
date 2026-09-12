@@ -35,9 +35,26 @@ and this one no longer does — it is dated on the spot.
 ## 1. Data sources, and exactly what each provides
 
 Nine endpoints, all unauthenticated, all fetched server-side into a snapshot
-(`src/data/`). Browsers cannot call MLB or Savant directly — neither sends CORS
-headers — so a capture step is unavoidable, and having one lets the whole board
-state its own age.
+(`src/data/`).
+
+This section used to say a capture was *unavoidable* because "browsers cannot call MLB or
+Savant directly — neither sends CORS headers". **That was wrong, and it is retracted here
+rather than quietly edited.** Measured 2026-09-12 with `Origin: https://beanemachine.com`:
+MLB's `/stats?stats=byDateRange` and Savant's `expected_statistics` CSV each answer
+HTTP/2 200 with `access-control-allow-origin: *`. Two modules shipped in the app already
+rely on that — `src/data/today.ts` reads tonight's slate from the browser and
+`src/data/actuals.ts` reads a finished day's real points — so the premise was being
+contradicted by the code. It is named because it is the premise that makes a live
+after-the-fact screen look unbuildable, and it cost this project that screen for months.
+
+The capture is therefore a *choice*, and these are the reasons for it. Nine endpoints per
+board would be slow and rude to APIs nobody is paying for. Every screen must share one
+DATED view, or a board that recomputed from a moving source mid-session would disagree
+with the card above it. And a capture is an artifact every figure below can be re-derived
+from, which is what makes this document checkable rather than quoted.
+
+The rule that follows: a fact about a SEASON is captured, a fact about TODAY is read live,
+because a capture is necessarily wrong about tonight.
 
 | Source | Endpoint | What it provides | Rows in the reference capture |
 |---|---|---|---|
@@ -1084,8 +1101,55 @@ count against the configuration above rather than re-reported as an absolute ρ:
 
 The shipped constants today are therefore `RECENT_WINDOW_WEIGHTS`,
 `RECENT_BLEND_WEIGHT` and `RECENT_RATE_WEIGHT` in `src/engine/project.ts`, and the
-headline ρ figures belong to the single-window ancestor of that configuration.
+headline ρ figures above belong to the single-window ancestor of that configuration.
 Saying so is more useful than quoting a number against a config that has moved.
+
+**The shipped configuration's own ρ, re-measured 2026-09-11.** "Saying so" was the
+right instinct and an incomplete answer: a reader who wants the number for the model
+he is actually running should not have to infer it from a fold count against an
+ancestor. Re-scored on the shipped corpus, with `recentWeight 0` used as the control
+because it reproduces the naive baseline *exactly* — 0.5743 and 0.4697, the same two
+figures as the table above, which is what makes this run comparable to it rather than
+merely adjacent to it:
+
+| side | model | mean ρ | vs naive |
+|---|---|---|---|
+| hitting | naive baseline (`recentWeight 0`) | 0.5743 | — |
+| hitting | **shipped 3/7/21d blend** | **0.6762** | **+17.7%** |
+| pitching | naive baseline (`recentWeight 0`) | 0.4697 | — |
+| pitching | **shipped 5/21d blend + rate 0.15** | **0.5350** | **+13.9%** |
+
+`model.json`'s `recentForm.why` carries the same two pairs, which is the one place a
+reader of the weights file will look for them. **This is the only correlation table in
+this project, and the other two copies are gone.** README.md and docs/GUIDE.md each
+used to publish their own, agreeing with neither this section nor each other: both
+quoted the shipped rows as ρ 0.6819 / 0.5333, +18.7% / +13.5%, winning 49 of 50 and
+50 of 50 folds. Those six figures are supported by nothing — no run in `data/results/`
+holds ranking-fold output at all (every file there is a `compete.ts` season run, whose
+keys are `weeks`, `totals` and `byWeek`), and the corpus cache they would have come
+from is not in the repo. They were a shipped-configuration row written in the voice of
+a scored one. Both documents now link here and quote the re-measured pair instead.
+
+**And the fold counts in the table above cannot be reproduced today either** — not
+because they are wrong, but because nothing stored holds them. They are left standing
+as the record of a run that happened, in the document whose job is to record runs;
+they are not repeated anywhere a user reads, and the two absolute ρ figures that *are*
+repeated are the 2026-09-11 pair, which `recentWeight 0` reproducing the baseline
+exactly is the evidence for. Rebuilding the corpus (`node src/backtest/evaluate.ts`,
+about 15 minutes cold) is what would put the fold counts back on reproducible footing.
+
+**Window tuning is exhausted, and this is where that was measured.** A further sweep
+— a 4-window hitter blend, a 3-window pitcher blend, and exponential decay at three
+time constants — lands within **±0.001 ρ** of the shipped configuration. That is
+inside the noise this corpus can resolve, so nothing was changed on it, and the
+absence of a change is the result rather than a failure to find one. The remaining
+gains are not in retuning windows; they need *different information*, and three of
+the candidates have since landed without this harness being able to credit any of
+them: probable starters cannot be replayed leak-free at all (§3.5), opponent strength
+was judged by playing seasons instead (§9.1), and real multi-position eligibility
+plays no part in projected points, which is all this harness scores. What is left of
+that gap is every player Yahoo does not list, who carries StatsAPI's single primary
+position and nothing more.
 
 ### 6.6 Cost
 
@@ -1104,9 +1168,18 @@ node src/backtest/evaluate.ts --horizon=7 --folds=8  # a different question
 
 ## 7. The negative results
 
-Four of the model's more interesting ideas were measured and rejected. All four are
-still in the codebase, all four are off, and the ones a reader can see say so in
+**Five** of the model's more interesting ideas were measured and rejected. All five are
+still in the codebase, all five are off, and the ones a reader can see say so in
 the UI.
+
+This paragraph said "four" and counted four until §7.5 was written and nobody came back
+to the sentence above it — the ordinary way a count in prose goes stale. Counted on
+2026-09-12: §7.1 the Statcast multiplier, §7.2 rate shrinkage, §7.3 the recent-rate blend
+for hitters, §7.4 the reliever-specific rate weight, §7.5 the role×availability volume
+model. All five are reachable in one file, `src/engine/project.ts` — `qualityWeight`,
+`SHRINK_K`/`DEFAULT_K`, `RECENT_RATE_WEIGHT.hitting` (0), `reliefRateWeight` and
+`volumeModel` — which is what "still in the codebase" is asserting and is now checkable
+rather than claimed.
 
 ### 7.1 The Statcast multiplier — retracted, re-measured, still off
 
@@ -1420,6 +1493,28 @@ Read the paired counts against a stated configuration, not against "the model". 
 same weeks played with matchups off win *more* often against a season-to-date manager
 (81/111) while scoring 200 points fewer — which is the kind of disagreement between
 a win count and a total that only shows up when both are reported.
+
+**The three harder opponents, from the same run.** The table above is the easy half of
+the field. `anchor-off_2021-2022-2023-2024-2025_moves1.json` carries three strategies
+built to be hard to beat, and they are the ones worth quoting when somebody asks
+whether this works:
+
+| strategy | points | % of perfect | weeks bscore wins | z |
+|---|---|---|---|---|
+| **bscore (shipped)** | **79,208** | **51.0%** | — | — |
+| thoughtful-human | 77,706 | 50.1% | 60W-50L-1T | +0.95 |
+| hot-hand + scarcity | 75,261 | 48.5% | 69W-42L | +2.56 |
+| draft-and-hold | 63,949 | 41.2% | 98W-8L-5T | +8.74 |
+
+Every cell re-derived from that file on 2026-09-12 by pairing each strategy's
+`byWeek` series against bscore's week by week — 111 weeks, ties excluded from the sign
+test — and the points column read off its `totals`. The figures moved here from
+README.md, which was the only place they were published and had no business being the
+home of a measurement. Note what the spread between the three says: the ordering of
+the opponents is exactly the ordering of how much judgement they exercise, and the
+z column collapses as they get better. Against a manager who does nothing the edge is
+beyond argument; against one who blends season and recent form it is the p 0.17 the
+paragraphs below spend their time on.
 
 Two things this shows that a correlation cannot:
 
@@ -2022,11 +2117,20 @@ npm test                                              # every suite; the browser
 
 The browser suites drive a real page and every one of them defaults to
 **`http://127.0.0.1:5299`** (`test/static.mjs`, which runs against the build, uses
-`:4173`). `vite.config.ts` still sets `port: 5173`, so the dev server has to be started
-as `npx vite --port 5299 --strictPort`; :5173 on the author's machine belongs to a
-different application, which is why the suites do not default to it and why each of them
+`:4173`). That is `vite.config.ts`'s own port, set with `strictPort` so Vite cannot
+increment off it; Vite's 5173 default belongs to a different application on the author's
+machine, which is why the suites do not default to it and why each of them
 reads the wordmark before its first assertion and stops if `BASE` is serving somebody
 else. `BASE=` points them elsewhere.
+
+**One flag silently measures nothing, and it is the Statcast one.** `compete --quality`
+*without* `--statcast-real` makes every quality variant identical, because the simulator
+then returns no Statcast at all rather than the leaked leaderboard. That is the right
+default — refusing to hand a measurement leaked data is the whole lesson of §7.1 — but
+it means the sweep completes, writes a run file, and reports a dead heat that reads like
+a finding. Any quality sweep quoted anywhere in this document was run with both flags.
+This note moved here from README.md, where it sat next to a command block that no
+longer exists.
 
 Two of those are cheap and two are not. `verdict.ts` reads `data/results/` and prints
 in a second — but **its pooled numbers are currently wrong for any variant stored in

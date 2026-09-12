@@ -142,6 +142,14 @@ Exploration rounds that got here live in `logo/round*.mjs` with contact sheets i
   `src/client/App.tsx`) links here, and carries the one caveat a reader's decision
   actually turns on — a bscore is not a promise of points — rather than the four
   paragraphs of fold counts it used to render under every tab.
+- **[docs/FINDINGS.md](docs/FINDINGS.md)** — the open defects and rough edges found by
+  walking the published build, each with how it was found and what it costs, so the next
+  pass starts from evidence rather than from a fresh walk. Nothing in the app links to it
+  and nothing should: it is a working file for whoever picks this up next, it goes out of
+  date by being fixed, and its own rule is that a fixed entry is deleted while an entry a
+  later walk disproves says so in place rather than vanishing. It was linked from nowhere
+  in this repo until this line existed, which is most of why two of its entries stayed
+  open in the file for a while after the code had fixed them.
 
 ## The app
 
@@ -161,7 +169,10 @@ and the best gettable man who is actually on a card for each of them, plus at mo
 couple of add/drops with both sides named and the point gain. Nothing on it is a
 leaderboard. Where the schedule is knowable it is read live from MLB rather than from
 the shipped capture, so "no game today", "not in today's lineup" and "lineup not
-posted yet" are three different sentences instead of one guess (`src/data/today.ts`).
+posted" are three different sentences instead of one guess (`src/data/today.ts`). That
+third one read "lineup not posted yet" here for a while, carrying a "yet" the code has
+never printed — which is the cost of retyping a string the code owns, incurred in the
+very sentence that names the module it was retyped from.
 
 **Pickups** is everyone you can actually get, ranked. It opens on three horizons, which
 are three questions rather than three filters: **Streaming** ranks over whatever is
@@ -311,7 +322,7 @@ their own pages and hands the result straight back; it stores nothing.
 
 ```sh
 node src/server.ts                      # Hono API on :8000 — /api/* only, no UI
-npx vite --port 5299 --strictPort       # the client, proxying /api — this is the one to open
+npm run dev:web                         # the client on :5299, proxying /api — this is the one to open
 node src/refresh.ts                     # capture a fresh snapshot of MLB + Savant into data/snapshot.json
 npm run check                           # tsc --noEmit
 npm run build                           # static bundle into dist/
@@ -319,11 +330,12 @@ npm test                                # every suite
 npm run test:node                       # just the pure-Node ones — no browser, no server. This is what CI runs.
 ```
 
-**The port is 5299, and `vite.config.ts` still says 5173, so pass it.** :5173 is Vite's
-default and on the author's machine it belongs to a different application; every browser
-suite here defaults to `http://127.0.0.1:5299` for that reason (`test/ui.mjs`,
-`board.mjs`, `trade-ui.mjs`, `decide.mjs`, `journey.mjs`), and `test/static.mjs` runs
-against `npm run preview` on `:4173`.
+**The port is 5299, and it is the config's own, with `strictPort` so it cannot slide.**
+Vite's default is 5173, which on the author's machine belongs to a different application
+that answers 200 and serves a working site — so every browser suite here defaults to
+`http://127.0.0.1:5299` and reads the wordmark before its first assertion rather than
+trusting a status code (`test/ui.mjs`, `board.mjs`, `trade-ui.mjs`, `decide.mjs`,
+`journey.mjs`). `test/static.mjs` runs against `npm run preview` on `:4173`.
 
 Two notes a new reader will otherwise hit. The `dev`, `start` and `import` entries
 in `package.json` shell out to `nub`, a TypeScript runner this repo does not
@@ -438,9 +450,9 @@ They are not interchangeable:
   browser's storage, so the hosted static build behaves identically for everything
   except those two calls.
 - **`:5299` — the Vite client**, with HMR, proxying `/api` through to `:8000`.
-  **This is the one to open**, and the port has to be passed on the command line —
-  `npx vite --port 5299 --strictPort` — because `vite.config.ts` still carries Vite's
-  5173 default and that port belongs to another application here.
+  **This is the one to open.** It is `vite.config.ts`'s own port with `strictPort`, so
+  Vite cannot quietly increment onto a neighbour — Vite's 5173 default belongs to another
+  application on the author's machine.
 
 ### Where the numbers come from
 
@@ -485,568 +497,111 @@ Confidence comes from real sample size, whether Statcast data exists at all, and
 health. It is never a flat default. A league category that can't be sourced is
 reported as unscoreable rather than silently treated as zero.
 
-### Is bscore actually predictive? — 100 folds, ten seasons
+### Is any of it measured? — yes, and the evidence lives in one place
 
-`node src/backtest/evaluate.ts` builds a corpus from **2016–2026** — every season of the Statcast
-era — and scores projection variants against what actually happened. Every stat line
-it scores is pulled with a date range ending at the as-of date, so nothing from the
-evaluation window reaches the projection. (The one exception is the Savant column,
-which the corpus still reads from the leaderboard that ignores its own dates — no
-scored variant uses it, and the sweeps that did are retracted below. That is stated
-here rather than left for a reader to find.) 2020 is skipped automatically; its
-60-game season is too short to hold a 14-day horizon after a warm-up period.
+**[docs/METHODOLOGY.md](docs/METHODOLOGY.md) is the measurement document.** It is long
+on purpose and it is the only copy: every fold, every paired week count, every z, every
+retraction, and the three things that could not be measured at all are there and are
+not restated here.
 
-Every fetch goes through a disk cache, so the first build takes ~15 minutes and every
-sweep after that runs offline in seconds. That's what makes it practical to test ideas
-rather than guess.
+This section used to *be* a second methodology paper — 605 lines of it, running from the
+backtest design through the Savant retraction, matchups, scheduled starts and model
+tuning, while `docs/METHODOLOGY.md` covered the same ground in 2,055 lines of its own.
+They were not a copy and a paste. Measured as 8-word shingles over normalised text,
+**12.2% of that span appeared anywhere in METHODOLOGY** (761 of 6,262); at 20-word
+shingles it was 3.5%, and only **22 of 434** substantial lines matched a METHODOLOGY line
+exactly. Two documents written independently about the same measurements, in other words,
+which is the arrangement that guarantees they eventually disagree — and they did, on the
+headline correlation figures, in a way a reader had no way to adjudicate. A README is the
+wrong home for a number that gets re-measured: it is the first thing anybody reads and
+the last thing anybody re-derives.
 
-```sh
-node src/backtest/evaluate.ts                        # 2016–2026, 5 folds/season, 14-day horizon
-node src/backtest/evaluate.ts --from=2021 --to=2025  # narrower
-node src/backtest/evaluate.ts --horizon=7 --folds=8  # different question
-```
+What the span is now is a map. Each line is a question and the section that answers it:
 
-**Scored result — 50 folds per side, baseline is "he'll keep doing what he's been
-doing" (season-to-date rate scaled to games ahead):**
+| the question | where it is answered |
+|---|---|
+| How does a stat line become points, with real players worked through? | [§2](docs/METHODOLOGY.md#2-from-a-stat-line-to-points) |
+| How is playing time projected, and why do the windows differ by side? | [§3.3](docs/METHODOLOGY.md#33-the-blend-and-why-the-windows-differ-by-side) |
+| What happens when MLB has published only part of the window's starts? | [§3.5](docs/METHODOLOGY.md#35-scheduled-starts-override-the-team-games-estimate) |
+| What is replacement level, and why does it move catchers up? | [§4](docs/METHODOLOGY.md#4-replacement-level) |
+| Where does the confidence percentage come from? | [§5](docs/METHODOLOGY.md#5-confidence) |
+| How is the backtest built, and why is it leak-free? | [§6](docs/METHODOLOGY.md#6-the-backtest) |
+| **The ranking results — the one correlation table in this project** | [**§6.5**](docs/METHODOLOGY.md#65-results) |
+| The five ideas that were implemented, measured and switched off | [§7](docs/METHODOLOGY.md#7-the-negative-results) |
+| The Statcast retraction, and the clean re-measurement that replaced it | [§7.1](docs/METHODOLOGY.md#71-the-statcast-multiplier--retracted-re-measured-still-off) |
+| What it does not know, and what would improve it next | [§8](docs/METHODOLOGY.md#8-known-limitations-and-what-would-improve-it-next) |
+| **Does it beat a human? — five seasons played out, with the honest p-value** | [**§9**](docs/METHODOLOGY.md#9-does-it-actually-win--five-seasons-played-out) |
+| Why schedule strength ships at half weight | [§9.1](docs/METHODOLOGY.md#91-the-same-harness-sets-the-matchup-weight) |
+| Every idea, shipped or rejected, in one table | [§10](docs/METHODOLOGY.md#10-the-negative-results-ledger) |
+| What is built on top of a bscore — edge, luck, trades, autonomous mode | [§12](docs/METHODOLOGY.md#12-what-is-built-on-top-of-a-bscore) |
+| How the lineup is assigned, and the two wrong ways that were tried first | [§13](docs/METHODOLOGY.md#13-the-lineup-assignment-and-the-two-wrong-ways-to-fix-it) |
+| How fast it is, and how that was measured on this box | [§14](docs/METHODOLOGY.md#14-speed-and-how-it-was-measured) |
+| Every command that reproduces any of the above | [Reproducing any of this](docs/METHODOLOGY.md#reproducing-any-of-this) |
 
-| side | model | ρ | vs naive | folds won |
-|---|---|---|---|---|
-| hitting | naive baseline | 0.5743 | — | — |
-| hitting | single 7d window | 0.6759 | +17.7% | 48/50 |
-| hitting | **weighted 3/7/21d (shipped)** | **0.6819** | **+18.7%** | **49/50** |
-| pitching | naive baseline | 0.4697 | — | — |
-| pitching | single 21d window + rate blend | 0.5318 | +13.2% | 49/50 |
-| pitching | **weighted 5/21d (shipped)** | **0.5333** | **+13.5%** | **50/50** |
+**The four results worth knowing before you read any of that.** These are the headlines,
+each one stated with its strength, because a win count quoted without its significance
+reads as a stronger claim than it is:
 
-The shipped constants live in `src/engine/project.ts` and are asserted by
-`test/engine.mjs`, so they can't be retuned by accident:
+1. **Value over replacement is the whole metric, and that is the unambiguous result.**
+   Ranking waiver decisions by raw projected points instead — ignoring the thing the
+   metric exists for — loses **80 of 111 paired weeks (z −4.65)** and 4,996 points over
+   five seasons. Dropping a replaceable outfielder for a scarce catcher is right even
+   when the catcher scores fewer points, and nothing else in the model sees it.
+2. **Recent playing time is the next largest edge.** Re-measured on the shipped corpus
+   on **2026-09-11**: the shipped blend ranks hitters at **ρ 0.676** against a naive
+   baseline's 0.574 (**+17.7%**) and pitchers at **ρ 0.535** against 0.470 (**+13.9%**).
+   That pair, and only that pair, is what this file publishes about correlation — the
+   table it belongs to is [§6.5](docs/METHODOLOGY.md#65-results).
+3. **It beats an inactive or streak-chasing manager beyond argument, and a thoughtful
+   one only suggestively.** Draft-and-hold loses 98 of 111 weeks (z 8.74) and hot-hand
+   74 of 111 (z 3.51). A manager who blends season and recent form loses **63W-47L,
+   z 1.53, one-sided p 0.064** at two moves a week and 60W-50L, z 0.95, p 0.17 at one.
+   Directional, not significant, and [§9](docs/METHODOLOGY.md#9-does-it-actually-win--five-seasons-played-out)
+   spends several paragraphs on why — including a week-grid choice that moves the number
+   more than the p-value does.
+4. **Statcast contact quality is measured, real, and deliberately not used.** xwOBA
+   out-predicts actual wOBA for next-week production (ρ 0.102 against 0.058, incremental
+   partial ρ +0.094 at z 6.79, n 5,151) and three separate ways of acting on it — scale
+   the projection, reshape the adjustment, veto the player — all lose over 111 weeks. A
+   metric can be genuinely predictive and still be the wrong lever. The drill-down says
+   so on every player's card. [§7.1](docs/METHODOLOGY.md#71-the-statcast-multiplier--retracted-re-measured-still-off)
 
-```ts
-RECENT_WINDOW_WEIGHTS = { hitting: { 3: 2, 7: 1, 21: 1 }, pitching: { 5: 2, 21: 1 } }
-RECENT_BLEND_WEIGHT   = { hitting: 0.5,  pitching: 0.5 }
-RECENT_RATE_WEIGHT    = { hitting: 0,    pitching: 0.15 }
-```
+**Paired weekly win counts decide; ranking correlation is advisory.** They have
+disagreed once already — over the recency weight — and the played seasons were right.
 
-Five findings, three of them negative:
+### The weights, and re-measuring after you change one
 
-1. **Recent playing time is the whole game**, the right window **differs by side**, and
-   **the most recent series carries extra signal**. Hitters use 3/7/21-day windows with
-   the shortest weighted double; pitchers use 5/21. The reason the sides differ is
-   structural, not statistical: a hitter's role can change in a week, so a 3-day window
-   tracks it, while a starter works every fifth day, so three days of his data is
-   usually zero appearances and a week is one or two starts of noise.
-2. **The recency weight is set by seasons, not by correlation.** A 14-day ranking
-   preferred 0.75; five played seasons prefer **0.5**, and the run that settles it is
-   `churn-5s_…_moves1.json`: 0.75 loses **38W-73L, z 3.32 in 0.5's favour**, by 22.6
-   points a week and 2,504 points over five seasons. An earlier, narrower measurement
-   pointed the same way — ~1,500 points across 2023-2025, a weekly win rate going from
-   41/68 to 48/68 — and is superseded rather than quoted as reproducible: no 2023-2025
-   and no 68-week run survives in `data/results/`. The correlation cost of 0.5 is about
-   0.003 ρ, inside the noise band. Heavy
-   recency catches role changes, which a correlation rewards — and chases week-to-week
-   noise, which a season punishes. The season is closer to how the tool is used.
-3. **The Statcast blend does not earn its place** — though *this* study is not why.
-   Every fold sweep ranked `qualityWeight: 0` first, but the corpus reads its expected
-   stats from the leaderboard that ignores its own dates, so those sweeps are void and
-   are retracted below. No variant scored here passes a non-zero quality weight any
-   more, which is what keeps the ρ figures clean. The weight is 0 on the strength of
-   the 111-week season test instead. xwOBA and barrel rate are still displayed, because
-   they genuinely inform a human, but they do not silently move a recommendation — and
-   the drill-down says so.
-4. **A light recent-RATE blend helps pitchers and not hitters.** Blending 15% of the
-   21-day rate beat the previous configuration in **41 of 50** pitching folds. The same
-   idea for hitters won **29 of 50** — a coin flip — so it isn't applied there. The mean
-   difference for hitters was +0.0009, which is exactly the kind of number that looks
-   like an improvement and is actually noise; the paired fold count is what exposed it.
-5. **Rate shrinkage made things worse.** The naive line already carries the selection
-   effect that good players accumulate more plate appearances, so shrinking the rate on
-   top of a volume model double-penalises exactly the players it shouldn't.
-
-**Window tuning is now exhausted.** A further sweep — a 4-window hitter blend, a
-3-window pitcher blend, exponential decay at three time constants — lands within
-**±0.001 ρ** of the shipped configuration. That is inside the noise this corpus can
-resolve, so nothing was changed on it. The remaining gains are not in retuning windows;
-they need *different information*. Two of the three named here have since landed —
-probable pitchers, and opponent strength over the horizon — and neither could be
-credited by this harness: probables cannot be replayed leak-free at all, and matchups
-were judged by playing seasons instead. The third, your league's real multi-position
-eligibility, has since landed as well — Yahoo prints it beside every name and the
-ownership sweep reads it — and this harness could not credit that one either: it
-scores projected points, and slot eligibility plays no part in them. What is left of
-that gap is everyone Yahoo does not list, who still carries StatsAPI's single primary
-position and nothing more.
-
-Honest limits: ρ ≈ 0.68 is a real ranking signal, not clairvoyance — fourteen days of
-baseball is mostly variance, and the top-20 actual-points column barely separates the
-variants, meaning the gain is in ranking the broad pool (waiver decisions) rather than
-the very top (which is obvious anyway).
-
-### Does it actually win? — a season played out
-
-`node src/backtest/compete.ts` plays whole seasons. Each strategy drafts from the same
-pool, sets a legal roster every week, makes waiver moves on what it believed *at the
-time*, and is scored on what those players actually produced. Rosters may overlap, so
-what is being compared is judgement, not draft position.
-
-The opponents are the two strategies human managers actually run: **season-to-date**
-("he'll keep doing what he's been doing") and **hot-hand** (chase the last fortnight).
-
-**2021–2025, 111 weeks, at one waiver move per week:**
-
-Every row of this table is a stored run in `data/results/`. Read them from those
-files directly: `verdict.ts` cannot currently re-pool them, because it double-counts
-any variant that appears in more than one run — see [the verdict.ts
-caveat](#a-caveat-on-verdictts) below. The paired column is from bscore's side (it
-won that many of the 111 weeks); the `z` beside it is printed from the *opponent's*
-side, which is why a week count bscore wins carries a negative sign.
-
-| strategy | points | % of perfect | paired weeks bscore wins |
-|---|---|---|---|
-| **bscore (shipped)** | **79,208** | **51.0%** | — |
-| bscore, matchups off | 79,008 | 50.9% | — |
-| projected points only | 74,212 | 47.8% | **80/111** (+45.0/wk, z −4.65) |
-| hot-hand | 73,883 | 47.6% | **74/111** (+48.0/wk, z −3.51) |
-| season-to-date | 71,962 | 46.4% | **76/111** (+65.3/wk, z −3.89) |
-| perfect hindsight | 155,213 | 100% | ceiling |
-
-bscore wins outright on points — by **7.2%** over hot-hand and **10.1%** over
-season-to-date — **and** takes a clear majority of individual weeks against both:
-**76 of 111** against season-to-date and **74 of 111** against hot-hand. That second
-number is the one that matters, because this league is head-to-head and you win by
-winning weeks.
-
-Three harder opponents come out of the full-strategy run
-`anchor-off_2021-2022-2023-2024-2025_moves1.json`: **thoughtful-human** 77,706 (50.1%,
-bscore wins 60/111, z 0.95), **hot-hand + scarcity** 75,261 (48.5%, 69/111, z 2.56),
-**draft-and-hold** 63,949 (41.2%, 98/111, z 8.74). All three reproduce from that file's
-own weekly series.
-
-**The human row is the weakest claim in this file, and it is quoted with its
-strength from here on.** Every other comparison above carries a z; that one never
-did, and it is the only one where the omission flatters the result. Paired week by
-week with ties excluded it is **60W-50L at z 0.95, one-sided p 0.17** at one move a
-week, and **63W-47L at z 1.53, p 0.064** at two. Both are directional, neither
-clears the 5% bar this project applies to everything else, and the per-season split
-at one move a week shows why:
-
-| | 2021 | 2022 | 2023 | 2024 | 2025 |
-|---|---|---|---|---|---|
-| record | 11-10 | 12-9 | 12-10 | **10-13** | 15-8 |
-| pts/week | −1.2 | +27.1 | +17.0 | **−7.2** | +32.6 |
-
-Three seasons of five carry it and 2024 goes the other way. Against a manager who
-does nothing (draft-and-hold, 98/111) or chases streaks (74/111) the model's edge is
-established beyond argument; against a manager who blends season and recent form it
-is **suggestive**. `test/compete.mjs` now prints the sign test and the per-season
-records on every run, so the number cannot be quoted without them again.
-
-**Value over replacement is what makes the difference**, and this is the one place
-the effect is large enough to be unambiguous. Paired directly against the shipped
-model over the same 111 weeks, ranking waiver decisions by raw projected points —
-ignoring the thing the metric exists for — loses **80 of 111 weeks (z −4.65)** and
-gives up 4,996 points. Against a season-to-date manager it wins 66/111 where bscore
-wins 76/111. Dropping a replaceable outfielder for a scarce catcher is right even
-when the catcher scores fewer points, and only the replacement adjustment sees it.
-
-The same run pairs the recency weight directly too, and it is the only knob in the
-ledger whose result is significant on its own: **0.75 loses to the shipped 0.5 by
-38W-73L — z 3.32 in 0.5's favour — 22.6 points a week, 2,504 over five seasons.** The
-ranking correlation preferred 0.75 by 0.003 ρ. The season did not.
-
-**How much churn is right — and a retraction.** An earlier version of this file said
-the edge was in selectivity, that one move a week was optimal, and that autonomous mode
-had stumbled onto the right default. Re-measured across all five seasons against every
-opponent the simulator plays, that was wrong:
-
-| moves/week | vs thoughtful-human | vs hot-hand+scarcity | vs hot-hand | vs season-to-date |
-|---|---|---|---|---|
-| 0 | 30/111 | 53/111 | 49/111 | 39/111 |
-| 1 | 60/111 | 69/111 | 74/111 | 76/111 |
-| **2** | **63/111** | **73/111** | **75/111** | **80/111** |
-| 3 | 58/111 | 70/111 | 69/111 | 77/111 |
-
-Two moves beats one against **all four** opponents, and three is worse than two — so
-the curve does peak, just not where the earlier run said. The old table was 68 weeks of
-a different model; this is 111 weeks of the shipped one. Autonomous mode now defaults to
-two.
-
-At zero moves the model loses to every opponent. That is the same thing draft-and-hold
-shows from the other side: the in-season decisions are most of the value, not the draft.
-
-The caveat the simulator cannot see is that it charges nothing for churn, while a real
-league spends waiver priority or FAAB on every claim. `model.json` records that next to
-the number. If moves are expensive in your league, lower it.
-
-### The approach, end to end
-
-A bscore is built in four passes, and each pass is only allowed to add what a source
-actually says.
-
-**1. Observe.** Season lines; the last 3/7/21 days for batters and 5/21 for pitchers;
-real games and real opponents scheduled in the horizon; published probable starters;
-IL status; Yahoo's "% Ros"; and the Savant underlying record over a rolling three
-weeks. Nothing here is modelled, and anything a source doesn't cover stays absent
-rather than becoming a default.
-
-**2. Project volume.** Playing time is the largest edge available and the part most
-managers get wrong: a season rate understates a player who took over an everyday job
-last week. The recent windows are blended (the last series counts double), then
-blended again against the season line. This one pass is worth roughly 20% relative
-Spearman over a season-only estimate. A starter whose turns MLB has already published
-skips it entirely and is projected from his own starts instead.
-
-**3. Project rate.** Each stat's rate per unit of volume, scaled to the projected
-volume, with 15% of a pitcher's rate taken from his last 21 days and none of a
-hitter's — an asymmetry that exists only because the evidence was asymmetric. Then
-the context multipliers, each weighted and clamped: schedule strength at 0.5,
-Statcast contact quality at 0.
-
-Rate *shrinkage* is the notable absence. The mechanism and its stat-specific
-constants are here — 60 batters faced for strikeouts, 1,200 plate appearances for
-triples, following the published stabilisation work — but `rateAll` does not pass
-league rates, so **no shrinkage is applied in the shipped app**. It was measured and
-it lost: the naive line already carries the selection effect that good players
-accumulate more plate appearances, so shrinking on top of a volume model
-double-penalises exactly the players it shouldn't.
-
-**4. Value it.** Score the projection in *your* league's table, then subtract what a
-freely available player at the same slot would produce. That subtraction is the whole
-metric: it is why a scarce catcher outranks a better outfielder, and removing it
-collapses the model to a coin flip against a naive manager.
-
-### What the board opens on
-
-The default ranking is **bscore**. It opened on market edge for a long time, on the
-reasoning that a bare bscore ranking answers "who is best" when the best players are
-already rostered, while edge answers "who is the field wrong about" — comparing a
-player's bscore against the median bscore of players *priced the same way he is
-priced*, using Yahoo's "% Ros" as the price. An edge of +18 means eighteen points more
-than the typical player rostered in about as many leagues.
-
-The reasoning survived; the price did not, and then the price was fixed. What the
-"% Ros" sweep used to return was largely the per-game weather line out of Yahoo's
-forecast tooltip rather than anybody's roster share — on the capture of 2026-09-02,
-twenty of thirty clubs had 93–100% of their players on one identical percentage, paired
-exactly by that day's matchups. Since edge is bscore minus the median at the same
-ownership decile, that reordered the entire board by the precipitation forecast.
-
-The sweep now identifies ownership **positively** instead of ruling weather out: a stat
-cell wraps its value in a div (`<td …><div>98%</div>`) and every cell of the nested
-forecast table is a bare `<td>76%</td>`, which is a structural difference where the
-wording was not one — a blocklist of forecast phrasings missed "There is a 51% chance of
-precipitation", whose number comes *before* its label. `leakedByTeam` additionally
-discards at capture time any percentage most of a club shares to the point, and
-`test/ownership.mjs` pins the shape.
-
-The shipped capture is clean on its own terms: 880 players priced, 96 distinct values,
-the modal value 0%, and no club with more than 52% of its players on one figure. So the
-reason bscore is the default is no longer corruption, it is **coverage** — edge can price
-776 of the 1,248 rateable rows, 62%, and the board says so below 35% rather than quietly
-handing back a narrower ranking under an edge label. The complaint edge was the default
-to answer is now answered by **Only players I can add** being on by default. A player
-Yahoo does not list has **no** market edge and shows a dash: unknown is not the same as
-unowned.
-
-### Tuning it — `model.json`
-
-Every weight lives in [`model.json`](model.json), not in code:
+Every tunable weight lives in [`model.json`](model.json) rather than in code, so a
+change to the recommendation is a change to a file a human can read:
 
 ```jsonc
 "recentForm": { "blend": { "hitting": 0.5, "pitching": 0.5 },
                 "rate": { "hitting": 0, "pitching": 0.15 },
                 "windows": { "hitting": { "3": 2, "7": 1, "21": 1 }, "pitching": { "5": 2, "21": 1 } } }
-"statcast":   { "weight": 0, "windowDays": 21, "lambda": { "mode": "rising", "prior": 300, "cap": 0.7 }, ... }
+"statcast":   { "weight": 0, "windowDays": 21, ... }
 "probables":  { "use": true, ... }
 "matchup":    { "weight": 0.5, "clamp": { "min": 0.88, "max": 1.12 }, ... }
 "shrinkage":  { "default": 400, "perStat": { "homeRuns": 170, ... } }
 ```
 
-It is validated by ArkType at import (`src/engine/weights.ts`), so a typo fails loudly
-instead of silently producing a plausible recommendation built on a number nobody
-chose. Note what this block no longer carries: a `recentForm.volumeWeight: 0.75`, which
-sat here annotated as the weight that captured the largest edge in the model and steered
-nothing — every caller that supplies a recent volume supplies its weight too, so 0.75 was
-reachable only as a default no code path could take, and 0.75 is the value `blend`'s own
-note retracts. A weights file whose premise is that editing a number here changes the
-recommendation cannot carry a number that does not. Every block carries a `why` array recording the evidence that set it — a weight
-without provenance is a guess, and this project does not ship guesses.
-
-Change a number, then re-measure:
+ArkType validates it at import (`src/engine/weights.ts`), so a typo fails loudly instead
+of silently producing a plausible recommendation built on a number nobody chose. Every
+block carries a `why` array recording the evidence that set it, and those arrays are the
+shortest honest summary of the measurement record in this repo — read them before
+`docs/METHODOLOGY.md` if you only have five minutes.
 
 ```sh
 node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2  # the decisive test
-node src/backtest/compete.ts --quality --statcast-real --control=qw0.00    # the Statcast sweep
-node src/backtest/compete.ts --matchup --control=mu0.00                    # schedule strength
-node src/backtest/compete.ts --relief  --control=rel-off                   # reliever rate weight
-node src/backtest/run.ts                                                   # ranking correlation (advisory)
-node src/backtest/verdict.ts --statcast=point-in-time                      # pool every stored run
+node src/backtest/evaluate.ts                                             # ranking correlation (advisory)
 ```
 
-`--quality` without `--statcast-real` measures nothing: the simulator returns no
-Statcast at all rather than the leaked leaderboard, which is the honest default and
-makes every quality variant identical. Each `compete` run writes itself to
-`data/results/` — configuration, weekly points per strategy, the lot — because these
-measurements cost half an hour of pitch-level fetching each and the conclusions they
-support get revised as more seasons land. Keeping only console output would leave the
-evidence for a shipped weight in a terminal scrollback that no longer exists.
-`verdict.ts` pools them, matched on configuration so a leaked run can never be
-averaged into a clean one, and prints a sign test with ties excluded.
-
-#### A caveat on verdict.ts
-
-**Its pooled output is currently wrong for any variant that appears in more than one
-run, and every baseline does.** Pooling concatenates each variant's weekly series
-across runs and then pairs position-by-position against the control's, filling a
-missing control week with zero (`base[i] ?? 0` in `src/backtest/verdict.ts`). A
-baseline stored in N runs therefore gets N×111 week-entries paired against a control
-that has 111, and every unmatched one is scored as a win against a control of
-nothing. That is the one thing this project says it never does — substitute a
-plausible default for a value that isn't there — and it inverts the conclusion
-rather than blurring it. Measured against the thirteen runs pooled on 2 September,
-bare `node src/backtest/verdict.ts` ranked hot-hand *first* at 664,205 points and
-called it significant at z +26.86, where the same weeks paired honestly have it
-losing 37-74 to the shipped model. The exact figures move as runs are added; the
-direction of the error does not.
-
-Rows within a single sweep family are unaffected — the Statcast, matchup, reliever
-and recency tables below all reproduce exactly — because those variants live in one
-run each. Only the cross-run baselines are corrupted. Until the fallback is fixed,
-read `data/results/*.json` directly for anything involving hot-hand, season-to-date
-or `bscore` across families. This is an engine defect, not a documentation one.
-
-**Paired weekly win counts decide. Ranking correlation is advisory.** They have
-already disagreed once — the recent-form blend — and the season was right.
-
-### Savant: a retraction, and what replaced it
-
-This section has been wrong twice, so it records both errors and both corrections.
-
-**The bug.** Baseball Savant's `custom` leaderboard accepts `start_dt` and `end_dt`
-and ignores them. Three disjoint 2023 ranges return byte-identical responses — 656
-rows, 184,104 plate appearances, every time; `month=` is ignored the same way.
-Nothing errors and the numbers look reasonable. They are simply the finished season,
-including the games being predicted. Every Statcast measurement this project made
-before that was found ran on it, and the fold corpus still does — which is why the
-sweeps there are void rather than merely noisy.
-
-**The correction.** `src/data/statcast-window.ts` aggregates the pitch-level
-`statcast_search` endpoint, which does honour dates, a day at a time — the only
-route to a real point-in-time xwOBA, at about 16 MB of pitch data per day of history.
-Re-measured over 2024, 23 weeks, 5,151 player-weeks, 21-day prior windows
-(`node src/backtest/xwoba.ts --real --prior-days=21 --seasons=2024 --min=30`, which
-reproduces every number below from the warm cache):
-
-| predictor of the next 7 days | Spearman rho |
-|---|---|
-| **xwOBA** | **0.1019** |
-| blend, 0.7 toward xwOBA | 0.0903 |
-| blend, 0.5 | 0.0810 |
-| blend, 0.3 | 0.0716 |
-| wOBA (what a manager sees) | 0.0581 |
-
-**xwOBA is the better predictor, and the ordering is monotone in how much of it you
-use.** The incremental test agrees: partial rho of the gap against future production,
-controlling for wOBA, is **+0.0944 with z = 6.79** — not a marginal call.
-
-The earlier null was an artifact of the bug, and an especially treacherous one. With
-the full season leaked into the "prior" wOBA, that wOBA already contained the outcomes
-being predicted, so any residual signal was arithmetically forced toward zero. The
-bug did not add noise; it manufactured a confident wrong answer.
-
-Note what the leak also explains: gap~wOBA is **−0.61** on clean data versus −0.36 on
-leaked data. Contact quality and results diverge far more within a real three-week
-window than a full season lets them, which is exactly the room the signal lives in.
-
-**And then the season settled it the other way.** Re-run on real point-in-time data
-across 2021-2025 — 111 paired weeks, every strategy playing the same pool — and paired
-directly against weight 0. Every one of these runs is in `data/results/`;
-`node src/backtest/verdict.ts --statcast=point-in-time` prints these rows exactly as
-they stand here. It also prints a hot-hand and a season-to-date row above them that
-are wrong for the reason given in [the verdict.ts
-caveat](#a-caveat-on-verdictts) — ignore those two; the honest versions of that
-comparison are three paragraphs down.
-
-| formulation | record vs weight 0 | points/wk | ties | z |
-|---|---|---|---|---|
-| **no Statcast multiplier (shipped)** | — | **best total, 79,208** | — | — |
-| xwOBA ratio 0.25 | 31W-31L | −0.7 | 49 | +0.00 |
-| xwOBA ratio 0.5 | 38W-42L | −1.3 | 31 | −0.45 |
-| batted-ball only, 1.0 | 52W-50L | −1.7 | 9 | +0.20 |
-| batted-ball + falling λ | 52W-59L | −5.4 | 0 | −0.66 |
-| xwOBA ratio 1.0 | 43W-59L | −9.6 | 9 | −1.58 |
-| λ falling, 1.0 | 48W-63L | −17.9 | 0 | −1.42 |
-
-Every formulation loses on points. The least-bad one ties 49 of 111 weeks, which means
-it changed almost no roster at all. And the per-season winner wanders — four different
-configurations win the five seasons, and each of them is badly wrong in another one:
-
-| | 2021 | 2022 | 2023 | 2024 | 2025 |
-|---|---|---|---|---|---|
-| batted-ball only, 1.0 | **+13.3** | +0.2 | **+12.2** | −24.7 | −8.1 |
-| λ falling, 1.0 | −23.7 | **+7.2** | −24.5 | −31.4 | −15.4 |
-| batted-ball + falling λ | −10.2 | +2.8 | −27.8 | **+3.0** | **+4.9** |
-
-A winner that changes every season is noise wearing a result's clothes. And this is not
-a test too blunt to see anything: over the same 111 weeks the same paired count has the
-shipped model beating hot-hand by 48.0 points a week (z −3.51) and a season-to-date
-manager by 65.3 (z −3.89), both significant. It detects real effects. There isn't one here.
-
-**And a veto does not work either, which is the one that should have.** Every test
-above scales a projection, and a smooth few-percent scale provably cannot reorder a
-board settled by playing time and scarcity — so the fair objection is that the
-mechanism, not the signal, was wrong. A veto can reorder it: refuse the player outright
-when his results have outrun his contact by more than a threshold. That is also exactly
-the heuristic every fantasy analyst repeats — *his hot fortnight is a mirage, don't pick
-him up*. Over the same 111 weeks:
-
-| veto threshold (wOBA overperformance) | points/wk vs no veto |
-|---|---|
-| 0.150 (vetoes almost nobody) | −0.2 |
-| 0.100 | −31.3 |
-| 0.060 | −60.2 |
-| 0.035 | −95.0 |
-
-It gets monotonically worse the more it is used. The reason is plain once measured: a
-hitter outrunning his xwOBA is usually a hitter producing a lot, and production is what
-scores. Refusing him gives up the best available player for a correction that does not
-arrive inside a one- or two-week horizon.
-
-Three independent mechanisms — scale the projection, reshape the adjustment, veto the
-decision — all lose. That is a far stronger claim than any one of them failing.
-
-**Both things are true, and the tension is the interesting part.** On the same clean
-data, xwOBA out-predicts actual wOBA for next-week production and its gap carries
-significant incremental signal (z 6.79). The signal is real. It still does not improve a
-roster decision, because that decision is dominated by playing time and slot scarcity —
-a ±5-10% rate multiplier almost never changes which 27 players you hold. A metric can be
-genuinely predictive and still be the wrong lever.
-
-So the weight is 0, and this time that is a measured result rather than a stale one. What
-Savant earns instead is everything below.
-
-### How Savant is actually used
-
-Three places, and the window matters in all of them.
-
-**The rolling window is the product decision.** Expected stats are aggregated from
-the pitch-level endpoint over the last 21 days, not read off the season leaderboard.
-Across a season, contact quality and results converge — gap-to-wOBA correlation
-−0.36 — and the gap collapses toward nothing. Over three weeks they diverge, −0.61,
-and that divergence is the entire signal. A season-long xwOBA has already regressed
-most of the way to the wOBA it exists to disagree with. Barrel rate, exit velocity,
-xBA and xSLG have no point-in-time equivalent, so they stay season-long and are
-labelled as such on every card rather than passed off as recent.
-
-**Buy low** used to combine the two signals on a card of its own — a player hitting
-the ball better than his line says *and* still rostered in under 70% of leagues, a flat
-threshold since replaced everywhere else by a cut calibrated to the league's own size,
-scored as a product so a candidate had to clear both bars. The card is retired. It was
-a real analysis and nothing ever measured that acting on it wins anything; the only
-assertions it ever had pinned its own thresholds. What it cost was a full-width card
-between the reader and the ranking. The luck percentile survives as a sortable
-column, which is the same signal without the second screen.
-
-**Ranking and provenance.** "Best contact vs results" sorts the board on the raw
-21-day gap with the pitcher sign flipped, the luck column ranks it as a percentile
-within each side, a missing Statcast row explicitly lowers confidence, and the
-drill-down reads the gap back in a sentence so a human can overrule the model with
-the underlying record in front of them.
-
-### Matchups
-
-The engine knows who each team is actually booked against over the horizon, from the
-real schedule, and rates every team's offence and staff by linear-weights wOBA over
-the same leak-free prior window. A hitter facing generous staffs is scaled up; a
-pitcher facing strong lineups has his allowed hits and earned runs scaled up, which
-costs him points. Both directions come out of one multiplier because both mean the
-same thing — more events than a league-average week.
-
-**Shipped at weight 0.5, and the honest reading is "positive but unproven".** Paired
-directly against the same model with matchups off, over 111 weeks:
-
-| weight | direct record vs off | margin | five-season total | z |
-|---|---|---|---|---|
-| 0.25 | 25W-29L-57T | +1.1/wk | +125 | −0.54 |
-| **0.5 (shipped)** | **51W-44L-16T** | **+1.8/wk** | **+200** | **+0.72** |
-| 0.75 | 52W-49L-10T | +2.4/wk | +265 | +0.30 |
-| 1.0 | 59W-49L-3T | +4.9/wk | +549 | +0.96 |
-
-The effect is positive at every dose and monotone in the total, which is what a real
-mechanism looks like rather than a lucky draw — but 59W-49L on 108 decided weeks is
-z +0.96, not significant, and neither is anything below it. When a dose-response is
-monotone and no single dose clears the bar, the smallest dose that shows the effect
-risks the least, so 0.5 ships. `"matchup": { "weight": 1 }` in `model.json` buys the
-measured maximum for anyone who wants it. The run is
-`data/results/matchup-5s_2021-2022-2023-2024-2025_moves1.json`.
-
-Park factors are the same shape of idea and are left at 0 — largely subsumed by the
-opponent index, since who you play and where you play it are the same schedule — but
-the real reason is worse than that, and it is worth recording. `fetchParkFactors` asked
-Savant's park-factor leaderboard with `csv=true`; that endpoint returns HTML and ignores
-the parameter, so the parser produced 1,852 rows of nulls. Nothing ever noticed, because
-nothing consumed them. Same failure mode as the expected-stats leaderboard ignoring its
-own date range: HTTP 200, plausible shape, wrong content.
-
-No readable park-factor source has been found, so the fetcher, the park term in the
-projection and the `park` block in `model.json` have all been removed. The projection
-carries no park factor rather than a silently empty one. Computing park factors from the
-pitch-level data this repo already caches is the obvious route if it is ever wanted.
-
-### Scheduled starts
-
-MLB publishes probable pitchers, and `src/data/statsapi.ts` reads them from the
-schedule feed. When a starter's next turns are known, his volume comes from **his
-own starts** — `outs per start × starts scheduled` — instead of from his team's
-games. Averaging a two-start week and a one-start week into one number is the
-largest documented hole in the pitching projection, and in a points league those
-weeks are worth roughly double one another.
-
-**It cannot be backtested, and that is stated rather than hidden.** Probables are
-announced and then overwritten, and no archive of what was announced at the time
-exists, so there is no leak-free way to replay them. `"probables": { "use": true }`
-is set because it replaces an average with an observation, not because a fold count
-said so.
-
-Read the coverage honestly before trusting it. Probables reach only a few days out,
-so in the shipped capture **60 pitchers** carry a published start inside the next
-fortnight and every one of them carries exactly **one**. A partial count read as a
-complete one is how a confirmed two-start man gets projected like everybody else — and
-how, before the per-team coverage guard, a top-five starter fell about 350 places — so
-the count is **split** rather than gated: what MLB has published is used as an
-observation, and the games it has not yet named are credited at the pitcher's own rate
-of starting. On this capture 153 of 671 rateable pitchers end up on the starts basis over
-the fortnight, 50 of them with a turn MLB has actually named. That is what a
-starts-based number means: starts announced plus starts modelled, never starts he will
-make. **Only players with a start** on the Streaming tab is driven by the same count.
-
-### A reliever's recent rate — measured, rejected
-
-The hypothesis was a good one. A reliever's fantasy value is almost entirely a
-**role** — whether he is getting the ninth inning — and a role changes overnight,
-while saves shrink toward the league rate with a heavy constant (400). If that
-shrinkage mispriced newly installed closers, a heavier recent-rate weight for
-mostly-relieving pitchers only should have shown up. `reliefRateWeight` exists in
-`project.ts` for exactly this test.
-
-It loses at every dose, over the same 111 weeks:
-
-| relief rate weight | five-season total | vs off |
-|---|---|---|
-| **off (shipped)** | **79,208** | — |
-| 0.30 | 79,074 | −1.2/wk |
-| 0.50 | 78,964 | −2.2/wk |
-| 0.70 | 78,552 | −5.9/wk |
-
-So the heavy shrinkage is apparently correct: a reliever's recent save rate is mostly
-noise. The knob stays in the code, set to null, and `model.json` records why.
-
-Worth recording how this nearly went wrong. The first run of the sweep returned four
-*identical* totals — every weight scoring exactly the same as off — which is not a
-result, it is a no-op. The wiring was fixed and the sweep re-run, and both runs are in
-`data/results/`; the later one supersedes the earlier on the same configuration key.
-Four identical numbers should always be read as a broken measurement rather than as a
-knob that does nothing.
-
+Each `compete` run appends its configuration and its weekly points per strategy to
+`data/results/`, where twenty-three of them now sit. They are kept because each costs
+about half an hour of pitch-level fetching and because the conclusions they support get
+revised as seasons land — a shipped weight whose evidence lives only in a terminal
+scrollback has no evidence. Every other command, the flag that silently measures
+nothing, and the one known defect in the pooling tool are in
+[Reproducing any of this](docs/METHODOLOGY.md#reproducing-any-of-this).
 ### Architecture
 
 The engine (`src/engine/`) is pure, so ranking runs **in the browser** against a

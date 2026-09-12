@@ -3,16 +3,38 @@
 ## Start here — the board is the first thing on the page
 
 The first time you open beanemachine you get a **ranked board**, not a form. It runs
-the shipped preset — standard head-to-head points values, nobody's team — and it says
-so on its own face: *Standard scoring, not yours. Every number below is real and none
-of it is about your league yet.* You land on **Pickups**, which is the screen that
-ranks.
+the shipped preset — one real league's point values, nobody's team — and a line across
+the top of the board says exactly that, and that setting your own league up will move
+every number under it. You land on **Pickups**, which is the screen that ranks.
+
+Read "one real league's" literally: the preset is **not** Yahoo's own default points
+table, and the difference is large enough to matter on the first screen. A home run
+pays **10.4** in the preset against **4** in Yahoo's head-to-head-points default, so a
+reader who opens his own settings page to check the preset against it finds nothing
+that lines up. This guide used to describe the preset as "standard" scoring and quote
+that banner as saying so; the app has said the true thing for longer than this guide
+has, and the banner was rewritten to match while the sentence here was not.
+
+> **Why this guide stops quoting the screen.** From here on it paraphrases what the app
+> says rather than reproducing it word for word, and names only the things you have to
+> find to use it — buttons, tabs, column heads, filter labels. A sentence of prose on
+> screen belongs to the code, which revises it freely and without telling this file;
+> every verbatim copy of one is a second, unversioned original that goes stale the
+> first time somebody improves the wording. The banner above is the case in point: it
+> was copied here accurately, the code changed it, and for some number of commits this
+> guide was the only place the old sentence still existed — contradicting the app about
+> the one fact that decides whether any number on the board applies to the reader. A
+> paraphrase cannot drift, because it was never a copy. Short labels are quoted anyway,
+> because a guide that will not name the button cannot tell you which one to press, and
+> those are checked against `src/` — every one in this file was, on 2026-09-12.
 
 It used to ask first. Before that it did something worse: it shipped one real league
 — Mrs. Met's Harem, Yahoo head-to-head points 228947, which is the author's own — and
 seeded it into any browser with nothing stored, so your first screen was somebody
 else's team under a notice explaining that it was. Both are gone. The published build
-ships no league at all.
+stores no league and no team: what it ships is a table of point values with nobody's
+roster attached, which is why the board can rank before you have typed anything and why
+nothing on it is about you until you do.
 
 The setup is a bar across the foot of the page instead, and its button asks the
 question rather than naming the chore: **Who's on my team**. Press it and the sheet
@@ -732,12 +754,25 @@ the as-of date, so nothing from the evaluation window reaches the projection. 10
 total, 50 per side. The baseline is the honest naive one — "he'll keep doing what he's
 been doing," his season rate scaled to the games ahead.
 
-| side | model | Spearman ρ | vs naive | folds won |
-|---|---|---|---|---|
-| Hitting | naive baseline | 0.574 | — | — |
-| Hitting | shipped windows (3/7/21d) | **0.682** | +18.7% | 49 / 50 |
-| Pitching | naive baseline | 0.470 | — | — |
-| Pitching | shipped windows (5/21d) | **0.533** | +13.5% | 50 / 50 |
+Re-measured on the shipped corpus on **2026-09-11**, against the naive baseline that
+`recentWeight 0` reproduces exactly: the model ranks hitters at **ρ 0.676** against the
+baseline's 0.574, **+17.7%**, and pitchers at **ρ 0.535** against 0.470, **+13.9%**.
+That one pair is the whole of what this guide publishes about ranking correlation. The
+full table — every variant scored, the fold counts, the naive baseline's own definition
+and the reasons two of those fold counts carry a caveat — lives in
+**[Methodology §6.5](METHODOLOGY.md#65-results)**, and that is now the only copy of it
+in this project.
+
+This guide used to print its own table here, and README.md a third, and the three did
+not agree. The pair this one showed you — 0.682 and 0.533, +18.7% and +13.5%, winning
+49 of 50 and 50 of 50 folds — was the pair no stored run supported: `data/results/`
+holds twenty-three season-play runs and no ranking-fold output whatsoever, so there was
+nothing to check them against and nothing to re-derive them from. **The fold counts are
+dropped rather than restated** for that reason, here and in README: a "49 of 50" is the
+most persuasive number in a table like this one and the least defensible in this one, and
+softening it to "most folds" would keep the persuasion and lose only the precision. If
+you want fold counts, Methodology has them, in the document whose job is to carry a run
+that cannot currently be re-run and say so.
 
 What survived the sweeps:
 
@@ -748,11 +783,16 @@ What survived the sweeps:
   then carries **half** the weight against the season line. That 0.5 was chosen by
   playing whole seasons rather than by ranking correlation — a 14-day ranking mildly
   preferred heavier recency, but across five seasons of real weekly decisions 0.5 beats
-  0.75 in **73 of 111 decided weeks (z 3.32)** and by 2,504 points.
-- **A light recent-rate blend helps pitchers only** — 15% of the 21-day rate, which won
-  41 of 50 pitching folds. The identical idea for batters won 29 of 50, a coin flip, so
-  it is not applied. The mean difference there was +0.0009: exactly the kind of number
-  that looks like an improvement and is noise.
+  0.75 in **73 of 111 decided weeks (z 3.32)**, by 22.6 points a week and 2,504 points
+  over the five. That one is reproducible and was re-derived on 2026-09-12 from
+  `data/results/churn-5s_2021-2022-2023-2024-2025_moves1.json`, which is why it keeps
+  its counts where the fold counts above lost theirs.
+- **A light recent-rate blend helps pitchers only** — 15% of the 21-day rate. The
+  identical idea for batters was a coin flip, with a mean difference of +0.0009:
+  exactly the kind of number that looks like an improvement and is noise. Both came out
+  of the same ranking harness as the ρ figures above, so their fold counts are in
+  Methodology with the caveat they need (every variant in that grid was scored at a
+  recency weight the project has since retracted) rather than quoted bare here.
 - **Extra rate shrinkage made things worse.** The naive line already carries the fact
   that good players accumulate more plate appearances; shrinking on top of a volume
   model double-penalises the players it shouldn't. It is implemented and switched off.
@@ -793,8 +833,11 @@ predicting. It was void and has been retracted; the paragraph above replaces it.
 
 It means the ordering is real. Across ten seasons, ranking players this way lands
 substantially closer to the true 14-day order than assuming everyone keeps doing what
-they have been doing, and it did so in 49 of 50 folds — the consistency matters more
-than the size of the gap.
+they have been doing — 18% closer on hitters and 14% on pitchers, as a rank
+correlation. This paragraph used to add "and it did so in 49 of 50 folds", which is
+the same unsupported count the table above dropped and for the same reason: nothing
+stored holds it. The consistency across folds is the part that would matter most if
+it could be quoted, which is exactly why it is not quoted until it can be.
 
 It does not mean the numbers are predictions. A rank correlation of 0.68 leaves a great
 deal of disagreement between the projected order and the real one. Fourteen days of

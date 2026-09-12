@@ -17,9 +17,29 @@ import { windowFrom } from "../engine/period.ts"
 
 /**
  * A point-in-time capture of every source, so the app has one consistent view of
- * the world. It exists for three reasons: browsers cannot call MLB or Savant
- * directly (neither sends CORS headers), the static build has no backend at all,
- * and nothing should hammer these APIs on every page load.
+ * the world.
+ *
+ * The reason written here for four months was FALSE, and it mattered: it said
+ * "browsers cannot call MLB or Savant directly (neither sends CORS headers)". Both
+ * do. Measured 2026-09-12 with `Origin: https://beanemachine.com`, MLB's
+ * `/stats?stats=byDateRange` and Savant's `expected_statistics` CSV each answer
+ * HTTP/2 200 with `access-control-allow-origin: *`. Two files in this repo already
+ * depended on that being true — src/data/today.ts reads the slate live from the
+ * browser and src/data/actuals.ts reads a finished day — so the claim was being
+ * contradicted by the code beside it, and it is the claim that makes a whole class
+ * of live feature look impossible.
+ *
+ * The real reasons, and they are enough. NINE upstream endpoints feed a board, and
+ * asking for all nine on every page load would be both slow and rude to APIs nobody
+ * is paying for. Every screen has to share ONE dated view: a board that recomputed
+ * from a moving source mid-session would disagree with the card above it, and two
+ * surfaces on one page disagreeing about a number is the worst failure this app can
+ * produce. And a capture is an artifact a measurement can be re-derived from, which
+ * is what makes every figure in docs/METHODOLOGY.md checkable rather than quoted.
+ *
+ * What follows from the correction is the rule this app now actually uses: anything
+ * that is a fact about a season is captured, and anything that is a fact about TODAY
+ * is read live, because the capture is necessarily wrong about tonight.
  *
  * The snapshot stores only OBSERVED data. Projections and bscores are computed
  * from it at request time against whichever league config the user has, because

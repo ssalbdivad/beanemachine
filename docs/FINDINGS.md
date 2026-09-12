@@ -46,9 +46,17 @@ Remove / Download / Load file / IMPORT A LEAGUE FROM ITS URL" above anything abo
 
 ## Software talk that survives on user-facing surfaces
 
-- The "values to check" drawer, which a first visit cannot avoid, says "every BSCORE on the
-  board is wrong" and "Replacement level is teams x slots". The house rule is no coined
-  words outside the drill-down and Methodology.
+- NO LONGER TRUE, both halves of it. This said the "values to check" drawer, which a
+  first visit cannot avoid, read "every BSCORE on the board is wrong" and "Replacement
+  level is teams x slots" — the house rule being no coined words outside the drill-down
+  and Methodology. Neither string is in the app any more. `grep -rn BSCORE src/` returns
+  nothing and the built bundle in `dist/` contains the phrase zero times; the team-count
+  card in `src/client/App.tsx` now says the more teams the thinner the pool and that every
+  player is measured against whoever is left at his position, and carries a comment
+  recording that the old version "named the arithmetic ... and a screen that no longer
+  exists, to somebody filling in a number." Left here rather than deleted because the
+  other two bullets in this entry are still live and a half-deleted entry reads as a
+  half-measured one.
 - POSITION ELIGIBILITY says "as they were read from league 228947's own eligibility grid —
   see that league's provenance for when": the author's own league id shown to a stranger,
   pointing at a "provenance" that exists on no screen he can reach.
@@ -75,6 +83,16 @@ short lines of a TYPED list dropped from `unmatched` by a floor meant for a past
   so the decision is visible rather than accidental.
 - A man on the 60-day injured list gets two different explanations on one card: "Injured
   60-Day — no source states a return date" at the top, and "could not be priced" at the foot.
+- NEVER AN ENTRY HERE, and recorded so the next walk does not report them as new. Two
+  claims on the hero card — the largest number on the first screen — were found and fixed
+  in `83650dd` without ever being written down in this file: it said "more points than the
+  best {slot} you could add off waivers" where `bscore.ts` prices against the man AT
+  (teams × seats) depth rather than the best man still free, and the schedule clause
+  branched on any multiplier at all, so a 0.3% adjustment was reported as a schedule that
+  "is hard (×0.997)". Both are gone from the code. They are mentioned here rather than
+  entered because this file tracks what is OPEN, and an entry for a fixed defect is the
+  one thing its own rule forbids — but a walker who finds the hero card interesting should
+  know it has already been walked.
 - RETRACTED on inspection: "next lock 7:05pm" and "locks 7:10pm" were reported as carrying
   no timezone. `clock` in src/data/today.ts calls `toLocaleTimeString(undefined, …)`, so
   every one of those times is already in the READER's own zone, which is the zone he wants

@@ -4,13 +4,15 @@
 // asserting the planner does not do it, and once by handing railViolations a plan
 // that does it and asserting the audit catches it.
 import {
-	activeSlots, DEFAULTS, legalSlotsFor, plan, planLineup, planMoves, planSwaps, railViolations,
-	resolveRoster, seatedInnings
+	activeSlots, DEFAULTS, freezeShut, legalSlotsFor, plan, planLineup, planMoves, planSwaps,
+	railViolations, resolveRoster, seatedInnings
 } from "../src/auto/plan.ts"
 import { normalizeName } from "../src/data/yahoo-pool.ts"
 
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
+
+const near2 = (a, b) => typeof a === "number" && Math.abs(a - b) < 0.005
 
 let nextId = 1
 /** Only the fields the planner reads — a Rated carries far more, and none of it
@@ -938,6 +940,92 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
     legal("CF") === "", legal("CF"))
   t("and a man with no tokens at all is seated nowhere, rather than everywhere",
     legal() === "", legal())
+}
+
+// --- what the platform will still accept, once some games have started -------------
+//
+// A plan is made for an evening and read in the middle of one. The case that made this a
+// function rather than four lines inside the card is the SHIFT: a card cannot easily be
+// driven into producing one, and getting it wrong empties a seat silently. Three synthetic
+// plans, one per direction of the rule.
+
+/** A plan shaped like `planLineup`'s output, with only the parts the freeze reads. */
+const planOf = (swaps, shifts = []) => ({ swaps, shifts })
+const swap = (start, sit, startSlot, gain) => ({
+  start, sit, startSlot, gain, startPoints: gain, sitPoints: 0, reason: ""
+})
+
+// ONE. His own game has started, so he cannot be seated — and the man he was replacing
+// must not be benched into an empty seat either. Both halves go, or neither does.
+{
+  const f = freezeShut(
+    planOf([swap("Late Arrival", "Sitting Duck", "SS", 7.1)]),
+    ["Late Arrival", "Sitting Duck"],
+    n => n === "Late Arrival"
+  )
+  t("a man whose game has started is frozen", f.frozen.has(normalizeName("Late Arrival")))
+  t("and so is the man who was coming out for him, or the seat ends up empty",
+    f.frozen.has(normalizeName("Sitting Duck")), [...f.frozen].join(","))
+  t("the points that change was worth are no longer promised", near2(f.lostToLocks, 7.1), String(f.lostToLocks))
+}
+
+// TWO. The man going OUT is the one who has started. Same rule from the other side: his
+// seat cannot be emptied, so the man who was coming in cannot be seated there.
+{
+  const f = freezeShut(
+    planOf([swap("Eager Sub", "Already Playing", "SS", 4)]),
+    ["Eager Sub", "Already Playing"],
+    n => n === "Already Playing"
+  )
+  t("a seat whose man is already playing takes its incoming man with it",
+    f.frozen.has(normalizeName("Eager Sub")) && f.frozen.has(normalizeName("Already Playing")),
+    [...f.frozen].join(","))
+  t("and nothing is reported as stuck, because nobody was in the way", f.stuck.length === 0)
+}
+
+// THREE. THE SHIFT. A man already in the lineup was going to move out of SS to make room,
+// and his game has started, so he is staying in SS. The swap into SS is illegal now even
+// though the incoming man's own game has not started — and the reason is a different
+// sentence, so it comes back in a different list.
+{
+  const f = freezeShut(
+    planOf(
+      [swap("Blocked Man", null, "SS", 6.5), swap("Unrelated", "Spare", "OF", 2)],
+      [{ name: "Cannot Move", from: "SS", to: "2B" }]
+    ),
+    ["Blocked Man", "Unrelated", "Spare"],
+    n => n === "Cannot Move"
+  )
+  t("a swap into the seat a stuck man is sitting in is frozen",
+    f.frozen.has(normalizeName("Blocked Man")), [...f.frozen].join(","))
+  t("and it is reported as stuck, naming the man in the way",
+    f.stuck.length === 1 && f.stuck[0].in === "Blocked Man" && f.stuck[0].mover === "Cannot Move",
+    JSON.stringify(f.stuck))
+  t("the shift itself is not asked for", !f.shifts.some(s => s.name === "Cannot Move"), JSON.stringify(f.shifts))
+  t("a change with nothing to do with it is still offered",
+    !f.frozen.has(normalizeName("Unrelated")) && !f.frozen.has(normalizeName("Spare")), [...f.frozen].join(","))
+  t("and only the frozen change's points come off the promise", near2(f.lostToLocks, 6.5), String(f.lostToLocks))
+}
+
+// FOUR. A shift whose only purpose was to free a seat nobody is now taking is a move with
+// no effect, and a card that asks for one spends the reader's trust on nothing.
+{
+  const f = freezeShut(
+    planOf([swap("Locked Out", null, "SS", 9)], [{ name: "Free Mover", from: "SS", to: "2B" }]),
+    ["Locked Out"],
+    n => n === "Locked Out"
+  )
+  t("a shift freeing a seat nobody will take is dropped too",
+    f.shifts.length === 0, JSON.stringify(f.shifts))
+}
+
+// And with nothing started at all, a plan comes back exactly as it went in.
+{
+  const p = planOf([swap("A", "B", "SS", 3)], [{ name: "C", from: "OF", to: "Util" }])
+  const f = freezeShut(p, ["A", "B", "C"], () => false)
+  t("an evening nobody has started yet freezes nothing",
+    f.frozen.size === 0 && f.stuck.length === 0 && f.shifts.length === 1 && f.lostToLocks === 0,
+    JSON.stringify({ frozen: [...f.frozen], stuck: f.stuck, shifts: f.shifts, lost: f.lostToLocks }))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

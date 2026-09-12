@@ -5,7 +5,7 @@ import type { League } from "../schema.ts"
 import { isReserveSlot, ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
 import { resolvePeriod, windowFrom } from "../engine/period.ts"
 import {
-	activeSlots, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
+	activeSlots, freezeShut, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
 import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
 import { freshness, tab } from "./panels.tsx"
@@ -685,43 +685,27 @@ export const Decide = ({
 			const at = slate ? lockFor(byName.get(normalizeName(name))?.player.teamId, slate) : null
 			return at !== null && at <= now
 		}
-		const frozen = new Set<string>()
-		for (const st of startAll) if (shut(st.name)) frozen.add(normalizeName(st.name))
-		for (const sp of benchAll) if (shut(sp.name)) frozen.add(normalizeName(sp.name))
-		for (const sw of lineup.swaps) {
-			if (!frozen.has(normalizeName(sw.start)) && !(sw.sit && frozen.has(normalizeName(sw.sit))))
-				continue
-			frozen.add(normalizeName(sw.start))
-			if (sw.sit) frozen.add(normalizeName(sw.sit))
-		}
-		/*
-		   AND THE TOTAL HAS TO BE THE TOTAL OF WHAT IS ON OFFER.
-		   
-		   `pointsPlanned` is the whole plan, frozen seats included, and the header printed it
-		   as "or 128 once you make these changes" next to a list the frozen changes had just
-		   been taken out of. So the gain the card argued for included seats the platform had
-		   already closed, and a reader who did every single thing the card asked could not
-		   reach the number it promised — the one unreachable figure in the app, and it was the
-		   headline.
-		   
-		   Subtracted from the plan rather than added to the lineup: every swap carries its own
-		   `gain`, so taking the frozen ones back off `pointsPlanned` leaves exactly the plan
-		   that is still available, and with nothing frozen it is `pointsPlanned` to the digit
-		   rather than a sum that could drift from it by a rounding.
-		*/
-		const lostToLocks = lineup.swaps
-			.filter(sw => frozen.has(normalizeName(sw.start)))
-			.reduce((a, sw) => a + sw.gain, 0)
+		/* The arithmetic of all three, and the reasons, are in `freezeShut` in
+		   src/auto/plan.ts — it is about a plan rather than about a screen, and putting it
+		   there is what let test/auto.mjs reach the case a card cannot easily produce. */
+		const { frozen, stuck, shifts: offeredShifts, lostToLocks } = freezeShut(
+			lineup,
+			[...startAll.map(st => st.name), ...benchAll.map(sp => sp.name)],
+			shut
+		)
 		const bench = benchAll.filter(sp => !frozen.has(normalizeName(sp.name)))
 		const start = startAll.filter(st => !frozen.has(normalizeName(st.name)))
 		/** Men whose seats the platform has already closed, so the card can say the
 		 *  changes it is NOT offering rather than look like it found fewer. */
+		/* Only men whose OWN game has started: the sentence this feeds says exactly that, and
+		   a man held back because somebody else cannot move is in `stuck` instead, with the
+		   reason that is true of him. */
 		const locked = [...new Set([
-			...startAll.filter(st => frozen.has(normalizeName(st.name))).map(st => st.name),
-			...benchAll.filter(sp => frozen.has(normalizeName(sp.name))).map(sp => sp.name)
+			...startAll.filter(st => shut(st.name)).map(st => st.name),
+			...benchAll.filter(sp => shut(sp.name)).map(sp => sp.name)
 		])]
 		return {
-			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked,
+			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked, stuck,
 			/** What the lineup reaches if the reader does everything the card still offers.
 			 *  Equal to `lineup.pointsPlanned` when nothing is frozen. */
 			pointsReach: Number((lineup.pointsPlanned - lostToLocks).toFixed(2)),
@@ -734,7 +718,7 @@ export const Decide = ({
 			/** Seat changes within the lineup, minus any man whose game has started —
 			 *  see the note on `frozen` above; a shift is a change to HIS seat, so only
 			 *  his own lock can stop it. */
-			shifts: lineup.shifts.filter(sh => !frozen.has(normalizeName(sh.name))),
+			shifts: offeredShifts,
 			/** Nobody has said whether this league locks daily, so these changes are
 			 *  offered on the assumption that it does — which the heading states. */
 			assumedDaily: !league.scoring_period?.lineup_lock,
@@ -1635,6 +1619,22 @@ export const Decide = ({
 							}
 						</p>
 					)}
+					{/* A change given up for a different reason, said in different words. The
+					    sentence above is about a man whose own game has started; this is about a
+					    man who cannot be seated because somebody in the way can no longer move. */}
+					{today.stuck.length > 0 &&
+						(() => {
+							const movers = [...new Set(today.stuck.map(s => s.mover))]
+							return (
+								<p className="sub decide-stuck">
+									{andList(today.stuck.map(s => s.in))}{" "}
+									{today.stuck.length === 1 ? "would have needed" : "would each have needed"}{" "}
+									{andList(movers)} to change{" "}
+									{movers.length === 1 ? "seat, and his game has started" : "seats, and those games have started"} &mdash; so{" "}
+									{today.stuck.length === 1 ? "that seat is left as it is" : "those seats are left as they are"}.
+								</p>
+							)
+						})()}
 					{/*
 					  The seats that will score nothing, and the men who could stop that.
 					  

@@ -1289,3 +1289,84 @@ export const seatedInnings = (
 	}
 	return Number((outs / 3).toFixed(1))
 }
+
+/**
+ * WHAT THE PLATFORM WILL STILL ACCEPT, once some of tonight's games have started.
+ *
+ * A plan is made for a whole evening and read in the middle of one. Measured at 18:40 on a
+ * real roster: row 1 of 9 under "Make these changes" read "SS Start Kevin McGonigle 7.35
+ * projected today · locks 1:05pm" — his club had been In Progress since 13:05. The rows
+ * sort by lock time ascending, so the seats that had ALREADY GONE sorted first, and the
+ * list a reader works down from the top opened with the part of it he could no longer do.
+ *
+ * DROPPING A ROW IS NOT ENOUGH ON ITS OWN, and getting that wrong is worse than leaving the
+ * row in. The changes are a NET accounting — N men in, N out — so the bench instruction
+ * paired with a locked start is still live: drop "Start McGonigle", keep "Bench Gunnar
+ * Henderson", and obeying the card EMPTIES the shortstop seat. 7.09 projected points turned
+ * into nothing by following advice. So both halves of a swap go or neither does, and `swaps`
+ * is what knows which row pairs with which.
+ *
+ * A SHIFT THAT CANNOT HAPPEN TAKES ITS SWAP WITH IT, for the same reason from a third
+ * direction. A shift is a man already in the lineup moving seat, and the only reason the
+ * planner ever asks for one is to free the seat he is in for somebody coming off the bench.
+ * His lock therefore cancels more than his own row: the swap into the seat he is sitting in
+ * is illegal too. Matched on the SEAT, which is what the data supports — a shift carries
+ * where he is and where he was going, a swap carries the seat its incoming man is taking,
+ * and the seat he is leaving is the seat the swap needs.
+ *
+ * And a shift whose only purpose was to free a seat nobody is now taking is not asked for
+ * either. It is a move with no effect, and a card that asks for one spends the reader's
+ * trust on nothing.
+ *
+ * Lives here rather than in the card because it is arithmetic about a plan, it is the part
+ * of the freeze that can be got wrong silently, and `test/auto.mjs` can reach it.
+ */
+export const freezeShut = (
+	plan: Pick<LineupPlan, "swaps" | "shifts">,
+	/** Every man the card has a row for: men coming in and men going out. */
+	named: string[],
+	/** Whether that man's club is already playing. */
+	shut: (name: string) => boolean
+): {
+	/** Normalised names of every man no change may involve. */
+	frozen: Set<string>
+	/** Changes given up because a man in the way cannot move — not because their own
+	 *  man's game has started, which is a different sentence and a different list. */
+	stuck: { in: string; mover: string }[]
+	/** The shifts still worth asking for. */
+	shifts: LineupPlan["shifts"]
+	/** Projected points in the plan that the reader can no longer reach, so a card can
+	 *  promise a total he can. */
+	lostToLocks: number
+} => {
+	const frozen = new Set<string>()
+	for (const name of named) if (shut(name)) frozen.add(normalizeName(name))
+
+	const stuckSeats = new Map<string, string>()
+	for (const sh of plan.shifts) if (shut(sh.name)) stuckSeats.set(sh.from, sh.name)
+	const stuck: { in: string; mover: string }[] = []
+	for (const sw of plan.swaps) {
+		const mover = stuckSeats.get(sw.startSlot)
+		if (!mover || frozen.has(normalizeName(sw.start))) continue
+		stuck.push({ in: sw.start, mover })
+		frozen.add(normalizeName(sw.start))
+	}
+
+	for (const sw of plan.swaps) {
+		if (!frozen.has(normalizeName(sw.start)) && !(sw.sit && frozen.has(normalizeName(sw.sit))))
+			continue
+		frozen.add(normalizeName(sw.start))
+		if (sw.sit) frozen.add(normalizeName(sw.sit))
+	}
+
+	const dead = plan.swaps.filter(sw => frozen.has(normalizeName(sw.start)))
+	return {
+		frozen,
+		stuck,
+		shifts: plan.shifts.filter(
+			sh =>
+				!frozen.has(normalizeName(sh.name)) && !dead.some(sw => sw.startSlot === sh.from)
+		),
+		lostToLocks: dead.reduce((a, sw) => a + sw.gain, 0)
+	}
+}

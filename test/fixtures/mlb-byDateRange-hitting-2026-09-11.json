@@ -1,0 +1,363 @@
+{
+ "stats": [
+  {
+   "splits": [
+    {
+     "season": "2026",
+     "stat": {
+      "gamesPlayed": 1,
+      "groundOuts": 0,
+      "airOuts": 1,
+      "runs": 2,
+      "doubles": 0,
+      "triples": 1,
+      "homeRuns": 1,
+      "strikeOuts": 0,
+      "baseOnBalls": 0,
+      "intentionalWalks": 0,
+      "hits": 3,
+      "hitByPitch": 0,
+      "avg": "1.000",
+      "atBats": 3,
+      "obp": ".750",
+      "slg": "2.667",
+      "ops": "3.417",
+      "caughtStealing": 0,
+      "stolenBases": 0,
+      "stolenBasePercentage": ".---",
+      "caughtStealingPercentage": ".---",
+      "groundIntoDoublePlay": 0,
+      "groundIntoTriplePlay": 0,
+      "numberOfPitches": 8,
+      "plateAppearances": 4,
+      "totalBases": 8,
+      "rbi": 5,
+      "leftOnBase": 0,
+      "sacBunts": 0,
+      "sacFlies": 1,
+      "babip": ".667",
+      "groundOutsToAirouts": "0.00",
+      "catchersInterference": 0,
+      "atBatsPerHomeRun": "3.00"
+     },
+     "team": {
+      "id": 119,
+      "name": "Los Angeles Dodgers",
+      "link": "/api/v1/teams/119"
+     },
+     "player": {
+      "id": 663656,
+      "fullName": "Kyle Tucker",
+      "link": "/api/v1/people/663656",
+      "firstName": "Kyle",
+      "lastName": "Tucker"
+     },
+     "league": {
+      "id": 104,
+      "name": "National League",
+      "link": "/api/v1/league/104",
+      "abbreviation": "NL"
+     },
+     "sport": {
+      "id": 1,
+      "link": "/api/v1/sports/1",
+      "name": "Major League Baseball",
+      "abbreviation": "MLB"
+     },
+     "numTeams": 1,
+     "rank": 1,
+     "position": {
+      "code": "9",
+      "name": "Outfielder",
+      "type": "Outfielder",
+      "abbreviation": "RF"
+     }
+    },
+    {
+     "season": "2026",
+     "stat": {
+      "gamesPlayed": 1,
+      "groundOuts": 0,
+      "airOuts": 0,
+      "runs": 3,
+      "doubles": 1,
+      "triples": 0,
+      "homeRuns": 1,
+      "strikeOuts": 0,
+      "baseOnBalls": 1,
+      "intentionalWalks": 0,
+      "hits": 3,
+      "hitByPitch": 0,
+      "avg": "1.000",
+      "atBats": 3,
+      "obp": "1.000",
+      "slg": "2.333",
+      "ops": "3.333",
+      "caughtStealing": 0,
+      "stolenBases": 0,
+      "stolenBasePercentage": ".---",
+      "caughtStealingPercentage": ".---",
+      "groundIntoDoublePlay": 0,
+      "groundIntoTriplePlay": 0,
+      "numberOfPitches": 12,
+      "plateAppearances": 4,
+      "totalBases": 7,
+      "rbi": 4,
+      "leftOnBase": 0,
+      "sacBunts": 0,
+      "sacFlies": 0,
+      "babip": "1.000",
+      "groundOutsToAirouts": "-.--",
+      "catchersInterference": 0,
+      "atBatsPerHomeRun": "3.00"
+     },
+     "team": {
+      "id": 158,
+      "name": "Milwaukee Brewers",
+      "link": "/api/v1/teams/158"
+     },
+     "player": {
+      "id": 668930,
+      "fullName": "Brice Turang",
+      "link": "/api/v1/people/668930",
+      "firstName": "Brice",
+      "lastName": "Turang"
+     },
+     "league": {
+      "id": 104,
+      "name": "National League",
+      "link": "/api/v1/league/104",
+      "abbreviation": "NL"
+     },
+     "sport": {
+      "id": 1,
+      "link": "/api/v1/sports/1",
+      "name": "Major League Baseball",
+      "abbreviation": "MLB"
+     },
+     "numTeams": 1,
+     "rank": 1,
+     "position": {
+      "code": "4",
+      "name": "Second Base",
+      "type": "Infielder",
+      "abbreviation": "2B"
+     }
+    },
+    {
+     "season": "2026",
+     "stat": {
+      "gamesPlayed": 1,
+      "groundOuts": 0,
+      "airOuts": 1,
+      "runs": 2,
+      "doubles": 1,
+      "triples": 0,
+      "homeRuns": 1,
+      "strikeOuts": 0,
+      "baseOnBalls": 0,
+      "intentionalWalks": 0,
+      "hits": 3,
+      "hitByPitch": 0,
+      "avg": ".750",
+      "atBats": 4,
+      "obp": ".750",
+      "slg": "1.750",
+      "ops": "2.500",
+      "caughtStealing": 0,
+      "stolenBases": 0,
+      "stolenBasePercentage": ".---",
+      "caughtStealingPercentage": ".---",
+      "groundIntoDoublePlay": 0,
+      "groundIntoTriplePlay": 0,
+      "numberOfPitches": 12,
+      "plateAppearances": 4,
+      "totalBases": 7,
+      "rbi": 2,
+      "leftOnBase": 1,
+      "sacBunts": 0,
+      "sacFlies": 0,
+      "babip": ".667",
+      "groundOutsToAirouts": "0.00",
+      "catchersInterference": 0,
+      "atBatsPerHomeRun": "4.00"
+     },
+     "team": {
+      "id": 112,
+      "name": "Chicago Cubs",
+      "link": "/api/v1/teams/112"
+     },
+     "player": {
+      "id": 608324,
+      "fullName": "Alex Bregman",
+      "link": "/api/v1/people/608324",
+      "firstName": "Alexander",
+      "lastName": "Bregman"
+     },
+     "league": {
+      "id": 104,
+      "name": "National League",
+      "link": "/api/v1/league/104",
+      "abbreviation": "NL"
+     },
+     "sport": {
+      "id": 1,
+      "link": "/api/v1/sports/1",
+      "name": "Major League Baseball",
+      "abbreviation": "MLB"
+     },
+     "numTeams": 1,
+     "rank": 13,
+     "position": {
+      "code": "5",
+      "name": "Third Base",
+      "type": "Infielder",
+      "abbreviation": "3B"
+     }
+    },
+    {
+     "season": "2026",
+     "stat": {
+      "gamesPlayed": 1,
+      "groundOuts": 1,
+      "airOuts": 0,
+      "runs": 0,
+      "doubles": 0,
+      "triples": 0,
+      "homeRuns": 0,
+      "strikeOuts": 3,
+      "baseOnBalls": 0,
+      "intentionalWalks": 0,
+      "hits": 0,
+      "hitByPitch": 0,
+      "avg": ".000",
+      "atBats": 4,
+      "obp": ".000",
+      "slg": ".000",
+      "ops": ".000",
+      "caughtStealing": 0,
+      "stolenBases": 0,
+      "stolenBasePercentage": ".---",
+      "caughtStealingPercentage": ".---",
+      "groundIntoDoublePlay": 0,
+      "groundIntoTriplePlay": 0,
+      "numberOfPitches": 21,
+      "plateAppearances": 4,
+      "totalBases": 0,
+      "rbi": 0,
+      "leftOnBase": 3,
+      "sacBunts": 0,
+      "sacFlies": 0,
+      "babip": ".000",
+      "groundOutsToAirouts": "1.00",
+      "catchersInterference": 0,
+      "atBatsPerHomeRun": "-.--"
+     },
+     "team": {
+      "id": 114,
+      "name": "Cleveland Guardians",
+      "link": "/api/v1/teams/114"
+     },
+     "player": {
+      "id": 666176,
+      "fullName": "Jo Adell",
+      "link": "/api/v1/people/666176",
+      "firstName": "Jordon",
+      "lastName": "Adell"
+     },
+     "league": {
+      "id": 103,
+      "name": "American League",
+      "link": "/api/v1/league/103",
+      "abbreviation": "AL"
+     },
+     "sport": {
+      "id": 1,
+      "link": "/api/v1/sports/1",
+      "name": "Major League Baseball",
+      "abbreviation": "MLB"
+     },
+     "numTeams": 1,
+     "rank": 181,
+     "position": {
+      "code": "9",
+      "name": "Outfielder",
+      "type": "Outfielder",
+      "abbreviation": "RF"
+     }
+    },
+    {
+     "season": "2026",
+     "stat": {
+      "gamesPlayed": 1,
+      "groundOuts": 3,
+      "airOuts": 1,
+      "runs": 1,
+      "doubles": 0,
+      "triples": 0,
+      "homeRuns": 0,
+      "strikeOuts": 1,
+      "baseOnBalls": 0,
+      "intentionalWalks": 0,
+      "hits": 0,
+      "hitByPitch": 0,
+      "avg": ".000",
+      "atBats": 5,
+      "obp": ".000",
+      "slg": ".000",
+      "ops": ".000",
+      "caughtStealing": 0,
+      "stolenBases": 0,
+      "stolenBasePercentage": ".---",
+      "caughtStealingPercentage": ".---",
+      "groundIntoDoublePlay": 1,
+      "groundIntoTriplePlay": 0,
+      "numberOfPitches": 19,
+      "plateAppearances": 5,
+      "totalBases": 0,
+      "rbi": 0,
+      "leftOnBase": 2,
+      "sacBunts": 0,
+      "sacFlies": 0,
+      "babip": ".000",
+      "groundOutsToAirouts": "3.00",
+      "catchersInterference": 0,
+      "atBatsPerHomeRun": "-.--"
+     },
+     "team": {
+      "id": 144,
+      "name": "Atlanta Braves",
+      "link": "/api/v1/teams/144"
+     },
+     "player": {
+      "id": 645277,
+      "fullName": "Ozzie Albies",
+      "link": "/api/v1/people/645277",
+      "firstName": "Ozhaino",
+      "lastName": "Albies"
+     },
+     "league": {
+      "id": 104,
+      "name": "National League",
+      "link": "/api/v1/league/104",
+      "abbreviation": "NL"
+     },
+     "sport": {
+      "id": 1,
+      "link": "/api/v1/sports/1",
+      "name": "Major League Baseball",
+      "abbreviation": "MLB"
+     },
+     "numTeams": 1,
+     "rank": 181,
+     "position": {
+      "code": "4",
+      "name": "Second Base",
+      "type": "Infielder",
+      "abbreviation": "2B"
+     }
+    }
+   ]
+  }
+ ]
+}

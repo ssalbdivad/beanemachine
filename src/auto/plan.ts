@@ -271,7 +271,10 @@ export const resolveRoster = (input: PlanInput): Resolved[] => {
  *
  * Returns slot index → candidate index; candidates must arrive best-first.
  */
-const seatEveryone = (
+/* Exported for src/auto/recap.ts, which seats the SAME matroid with actual points
+   instead of projected ones. A hindsight lineup written out a second time would be a
+   second seating rule, and this file's whole history is two of those disagreeing. */
+export const seatEveryone = (
 	legalByCandidate: string[][],
 	seats: string[],
 	currentSeat: (string | null)[]

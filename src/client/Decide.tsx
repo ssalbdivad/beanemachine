@@ -901,7 +901,17 @@ export const Decide = ({
 	 * threw before he was yours, which is the one direction this can be wrong in, and it is
 	 * a direction the reader can see and correct for.
 	 */
-	const periodStart = rated?.period.start ?? null
+	/*
+	 * `periodStart`, NOT `start`, and reading the wrong one killed this feature outright.
+	 *
+	 * `resolvePeriod` sets `start = today > periodStart ? today : periodStart` for every period
+	 * kind, because `start` is where a forward-looking rating accrues FROM. So this read today's
+	 * date, asked for the window today..yesterday, got the inverted-range refusal, and fell
+	 * through to `banked = 0` on every day in every league — the card printed "your pitchers have
+	 * thrown 0 in it so far" for a staff that had thrown forty innings. `periodStart` was added to
+	 * `ResolvedPeriod` in the same commit FOR this question and then not used by it.
+	 */
+	const periodStart = rated?.period.periodStart ?? null
 	const thrown = usePeriodActuals(
 		typeof snapshot?.season === "number" ? snapshot.season : null,
 		periodStart,

@@ -841,8 +841,16 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
 		id: "board",
 		label: "Tonight",
 		season: 3,
+		/* "IN YOUR FANTASY LEAGUE" IS THREE WORDS AND THE ANSWER TO THE FIRST QUESTION ANYBODY
+		   HAS. Measured on the published build at 390x844 with an empty profile: the whole first
+		   screen — masthead at y9, tagline at y47, tab labels at y101, chips at y162, this
+		   sentence at y206 and then 509px of last night's best nights in baseball — contains
+		   neither the word "fantasy" nor the name of any platform. A manager arriving from a
+		   Yahoo league wants to know whether this reads HIS league, and every word on that
+		   screen was about baseball rather than about him. This sentence is the only one with
+		   room for it, and it is the one that appears under the tab he lands on. */
 		purpose:
-			"Who to start before first pitch, which of your seats scores nothing, and the one move worth making."
+			"Who to start in your fantasy league before first pitch, which of your seats scores nothing, and the one move worth making."
 	},
 	{
 		id: "wire",

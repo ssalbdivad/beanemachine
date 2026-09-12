@@ -978,9 +978,22 @@ t("the card the journey started blocked on now plans a lineup",
  * read happened and reached the render.
  */
 const todayHead = (await page.textContent(".decide-head")).replace(/\s+/g, " ")
+/* THE WITNESS CHANGED, because the game count is no longer always printed.
+
+   It used to be the cheapest proof that the live read reached the render — a two-day-old
+   capture cannot produce tonight's number — and it is now shown only on a light slate, which
+   is the night it was added to explain ("only five games are being played" reads as a
+   Wednesday; on a fifteen-game Saturday it explains nothing and costs a line of a header that
+   already wraps to four at 390px). The claim is unchanged and the other clauses carry it
+   equally well: a lock time, "every seat has started", and the count of his men in tonight's
+   cards are all derived from the schedule read and none of them can come from the capture.
+   Where the count IS printed, it is still checked to be a number. */
 const games = Number((todayHead.match(/(\d+) games today/) ?? [])[1])
-t("the card's own heading counts tonight's games, which only a live read knows",
-	Number.isFinite(games) && games >= 0 && /games today/.test(todayHead), todayHead)
+t("the card's own heading is derived from tonight's live read, not from the capture",
+	/next lock \d|every seat has started|in tonight|waiting on a lineup/.test(todayHead), todayHead)
+t("and where the slate is light enough for the count to explain something, it is counted",
+	!/games today/.test(todayHead) || (Number.isFinite(games) && games >= 0 && games <= 8),
+	todayHead)
 
 /**
  * Grouped by REASON, one row per reason — not one row per man.

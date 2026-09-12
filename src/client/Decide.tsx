@@ -1667,7 +1667,15 @@ export const Decide = ({
 									<b>next lock {clock(today.nextLock)}</b> ·{" "}
 								</>
 							:	<>every seat has started ·{" "}</>}
-							{today.games !== null && (
+							{/* ON A LIGHT NIGHT ONLY, which is the night it was added for. The note
+							    where it is computed says why it exists: thirteen empty seats read as a
+							    broken app, and "only five games are being played" reads as a Wednesday.
+							    On a fifteen-game Saturday it explains nothing — it is the ordinary
+							    number — and this header is the whole card for a man who reads one line
+							    and already wraps to four lines at 390px. Eight is half a full slate,
+							    which is where "there is not much on tonight" starts being the
+							    explanation for a lineup that cannot fill itself. */}
+							{today.games !== null && today.games <= 8 && (
 								<>
 									{today.games} {today.games === 1 ? "game" : "games"} today ·{" "}
 								</>

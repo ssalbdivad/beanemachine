@@ -17,7 +17,7 @@
 //
 // One live request is made at the end, to one public endpoint, once per run.
 import { readActuals, fetchActuals, ACTUALS_URL, dayIsFinal } from "../src/data/actuals.ts"
-import { recap, gradeRecord, bestNights } from "../src/auto/recap.ts"
+import { recap, gradeRecord, bestNights, weekShape } from "../src/auto/recap.ts"
 import { readFileSync } from "node:fs"
 
 let pass = 0, fail = 0
@@ -325,6 +325,50 @@ t("a man who did not play is never the swap you missed", ghostOverShelling.bigge
 // And the swap that IS real carries what each man actually did, because "scored 25.8
 // more than him" over a man with no box score is a comparison with nothing.
 t("a real swap carries both men's own numbers", near(r.biggest.inPoints, 25.8) && r.biggest.outPoints === 0, JSON.stringify(r.biggest))
+
+// --- the shape of the week, off a read the card already paid for ------------------
+
+// `byDateRange` accumulates inside a window, so one request per side of the ball prices a
+// whole scoring period — and the card was using that read for a single number. The same
+// read knows who made the number and who is eating it, which are the two parts of a week
+// a manager can act on today. A range read cannot be split by day, and nothing here
+// pretends it can.
+const wk = weekShape(team, lines, LEAGUE, 5)
+t("the week names the man who made it", wk.best && wk.best.name === "Dustin May" && near(wk.best.points, 40.1), JSON.stringify(wk.best))
+t("and names nobody as a drag when nobody is negative", wk.drag === null, JSON.stringify(wk.drag))
+// A 0-for-4 is not a drag. It cost him nothing; it simply did not help.
+t("a man worth zero is not a drag", !wk.drag || wk.drag.name !== "Jo Adell")
+
+// ONE MAN IS NOT A WEEK. Two men with lines and the sentence would be about one game.
+t("a window where almost nobody has played names no best man",
+  weekShape(team.slice(0, 2), lines, LEAGUE, 5).best === null)
+
+// The drag is the most actionable line on the card and it has to be a real negative, which
+// in practice means a pitcher who got hit. Same constructed shelling as above: three outs
+// and seven earned runs is -24.5 in this league.
+const wkShelled = weekShape(team, shelled, LEAGUE, 5)
+t("a genuinely negative man is named as the drag", wkShelled.drag && wkShelled.drag.name === "Taj Bradley" && near(wkShelled.drag.points, -24.5), JSON.stringify(wkShelled.drag))
+
+// ABSENCE, AND THE THREE THINGS IT REFUSES. A hitter with no box score in four days or
+// more is a fact worth saying; a pitcher is a rotation; a man in a reserve seat is parked
+// there precisely because he is not playing; and over a two-day window everybody looks
+// absent.
+const withAbsent = [
+  ...team,
+  { key: "999997:hitting", name: "Absent Hitter", slot: "BN", positions: ["OF"] },
+  { key: "999996:pitching", name: "Absent Arm", slot: "BN", positions: ["SP"] },
+  { key: "999995:hitting", name: "Parked Hitter", slot: "IL", positions: ["OF"] }
+]
+const wkAbsent = weekShape(withAbsent, lines, LEAGUE, 5)
+t("a hitter who has not been in a box score all week is named", wkAbsent.dead.includes("Absent Hitter"), JSON.stringify(wkAbsent.dead))
+t("a pitcher who has not pitched is not, because that is a rotation", !wkAbsent.dead.includes("Absent Arm"), JSON.stringify(wkAbsent.dead))
+t("and neither is a man in a reserve seat", !wkAbsent.dead.includes("Parked Hitter"), JSON.stringify(wkAbsent.dead))
+t("over a two-day window nobody is reported absent", weekShape(withAbsent, lines, LEAGUE, 2).dead.length === 0)
+t("and the list is capped, because three names is a list and five is a complaint",
+  weekShape([...withAbsent,
+    { key: "999994:hitting", name: "Another Absent", slot: "BN", positions: ["OF"] },
+    { key: "999993:hitting", name: "Third Absent", slot: "BN", positions: ["OF"] }
+  ], lines, LEAGUE, 7).dead.length === 2)
 
 // --- Billy, graded against the lineup you already had ---------------------------
 

@@ -4,7 +4,7 @@ import type { League } from "../schema.ts"
 import { slotsFor } from "../engine/bscore.ts"
 import { scoreStats, tableFor } from "../engine/points.ts"
 import { resolvePeriod } from "../engine/period.ts"
-import { bestNights, gradeRecord, recap, type RecapMan } from "../auto/recap.ts"
+import { bestNights, gradeRecord, recap, weekShape, type RecapMan } from "../auto/recap.ts"
 import { dayIsFinal } from "../data/actuals.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
@@ -268,6 +268,24 @@ export const Recap = ({
 		const his = new Set(rivalKeys)
 		return men.men.filter(m => his.has(m.key)).map(m => m.name)
 	}, [rivalKeys, men])
+
+	/** Who made that number and who is eating it, off the read it already paid for. */
+	const week = useMemo(
+		() =>
+			soFar.lines && league && men.men.length && period?.periodStart ?
+				weekShape(
+					men.men,
+					soFar.lines,
+					league,
+					Math.round(
+						(Date.parse(`${periodTo}T00:00:00Z`) -
+							Date.parse(`${period.periodStart}T00:00:00Z`)) /
+							86_400_000
+					) + 1
+				)
+			:	null,
+		[soFar.lines, league, men, period, periodTo]
+	)
 
 	const periodTotal = useMemo((): number | null => {
 		if (!soFar.lines || !league || !men.men.length) return null
@@ -625,6 +643,37 @@ export const Recap = ({
 					scored{" "}
 					<b>{periodTotal}</b> — counted for the men on your team now, whatever seat each
 					was in at the time, so it is the size of your week rather than the score.
+				</p>
+			)}
+
+			{/*
+			  WHO MADE IT AND WHO IS EATING IT, which is the part of a week total a manager can
+			  act on. One sentence, no fold, and nothing extra on the wire: it comes off the same
+			  period read that produced the number above it. See `weekShape` in src/auto/recap.ts
+			  for what it refuses to say and why — a best man needs three men to have played, a
+			  drag has to be genuinely negative, and an absence is only reported for a hitter
+			  over four days or more.
+			*/}
+			{periodTotal !== null && week && (week.best || week.drag || week.dead.length > 0) && (
+				<p className="sub recap-week">
+					{week.best && (
+						<>
+							<b>{week.best.name}</b> has made most of it with {week.best.points}.
+						</>
+					)}
+					{week.drag && (
+						<>
+							{" "}
+							<b>{week.drag.name}</b> has taken {Math.abs(week.drag.points)} back off it.
+						</>
+					)}
+					{week.dead.length > 0 && (
+						<>
+							{" "}
+							{andList(week.dead)} {week.dead.length === 1 ? "has" : "have"} not been in a
+							box score in it at all.
+						</>
+					)}
 				</p>
 			)}
 

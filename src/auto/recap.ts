@@ -613,3 +613,77 @@ export const bestNights = (
 		.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
 		.slice(0, take)
 }
+
+/**
+ * THE SHAPE OF THE WEEK, off a read the card has already paid for.
+ *
+ * `usePeriodActuals` fetches the whole scoring period in ONE request per side of the ball,
+ * because `byDateRange` accumulates inside a window — and the card was using that read for
+ * a single number, the size of the reader's week. The same read knows which of his men made
+ * that number and which one is eating it, and those are the two facts he can do something
+ * about today.
+ *
+ * A RANGE READ AGGREGATES and cannot be split by day, which is what keeps this honest and
+ * small: no day-by-day chart is available without one request per day, and nothing here
+ * pretends otherwise.
+ *
+ * WHAT IT REFUSES TO SAY. A best man needs at least three of his men to have a line in the
+ * window, because "Judge has carried your week" on the Monday of a Monday-to-Sunday period
+ * is a sentence about one game. A man who has not appeared is only reported for HITTERS and
+ * only over a window of four days or more — a starting pitcher who has not pitched since
+ * Tuesday is a rotation, not a problem — and never for a man in a reserve seat, who is
+ * parked there precisely because he is not playing. None of these are advice: each is a
+ * fact about a box score, and the reader knows his own roster better than this page does.
+ */
+export interface WeekShape {
+	/** The man who has made the week, by points in this league's own scoring. */
+	best: { name: string; points: number } | null
+	/** The man costing him points over the window, when one is actually negative. Nearly
+	 *  always a pitcher who got hit, and the most actionable line on the card. */
+	drag: { name: string; points: number } | null
+	/** Hitters with no box score at all in the window, at most two, reserve seats excluded. */
+	dead: string[]
+}
+
+export const weekShape = (
+	men: RecapMan[],
+	lines: Map<string, ActualLine>,
+	league: League,
+	/** How many days the window covers, inclusive. Gates the absence sentence. */
+	days: number
+): WeekShape => {
+	const priced = men.map(m => {
+		const line = lines.get(m.key)
+		const group = m.key.endsWith(":pitching") ? "pitching" : "hitting"
+		return {
+			man: m,
+			group,
+			points: line ? scoreStats(line.stats, tableFor(league, group), group).points : null
+		}
+	})
+	const played = priced.filter(p => p.points !== null) as (Omit<(typeof priced)[number], "points"> & {
+		points: number
+	})[]
+	const ranked = [...played].sort((a, b) => b.points - a.points || a.man.name.localeCompare(b.man.name))
+	const worst = ranked.at(-1)
+	return {
+		best:
+			played.length >= 3 && ranked[0] && ranked[0].points > 0 ?
+				{ name: ranked[0].man.name, points: r2(ranked[0].points) }
+			:	null,
+		drag: worst && worst.points < 0 ? { name: worst.man.name, points: r2(worst.points) } : null,
+		dead:
+			days >= 4 ?
+				priced
+					.filter(
+						p =>
+							p.points === null &&
+							p.group === "hitting" &&
+							!(p.man.slot && isReserve(p.man.slot))
+					)
+					.map(p => p.man.name)
+					.sort()
+					.slice(0, 2)
+			:	[]
+	}
+}

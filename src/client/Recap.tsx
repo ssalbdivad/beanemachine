@@ -10,6 +10,7 @@ import { normalizeName } from "../data/names.ts"
 import { andList } from "../data/names.ts"
 import { roster, rosterKey } from "./roster.ts"
 import { opponentStore } from "./opponent.ts"
+import { typingStore } from "./typing.ts"
 import { rosterFromPaste } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { ledgerStore } from "./ledger.ts"
@@ -262,6 +263,52 @@ export const Recap = ({
 		() => periodTotalFor(rivalKeys),
 		[soFar.lines, league, rivalKeys]
 	)
+
+	/**
+	 * LAST NIGHT'S HALF OF THE MATCHUP, off the read that is already on the page.
+	 *
+	 * The week total answers "am I ahead". It does not answer the question a manager actually
+	 * asks the morning after, which is DIRECTIONAL: did I gain ground or lose it? A lead of 40
+	 * means one thing if he outscored his rival by 30 last night and the opposite if he was
+	 * outscored by 30 — the week total hides every trend inside it, and that trend is what
+	 * decides whether tonight is a night to chase.
+	 *
+	 * Nothing extra on the wire. `actuals.lines` already holds every man in baseball for the
+	 * recap date, so pricing a second roster out of it costs one pass over twelve keys.
+	 */
+	const rivalLast = useMemo((): number | null => {
+		if (!actuals || !league || !rivalKeys.length) return null
+		let sum = 0
+		for (const key of rivalKeys) {
+			const line = actuals.lines.get(key)
+			if (!line) continue
+			const group = key.endsWith(":pitching") ? "pitching" : "hitting"
+			sum += scoreStats(line.stats, tableFor(league, group), group).points
+		}
+		return Number(sum.toFixed(1))
+	}, [actuals, league, rivalKeys])
+
+	/**
+	 * HOW MANY DAYS ARE LEFT IN IT, which is the other half of a margin.
+	 *
+	 * "Ahead by 40" is two completely different mornings. With four days left he protects the
+	 * lead and starts his safe arms; with one he needs variance and should be streaming. The
+	 * card was giving him the margin and never the clock, which is half an answer to the only
+	 * question the block exists for.
+	 *
+	 * Counted inclusive of today, because today is a day he can still act in, and only where
+	 * the league actually stated a period end — `periodEnd` is null for a rolling window,
+	 * which has no last day to count to.
+	 */
+	const daysLeft = useMemo((): number | null => {
+		if (!period?.periodEnd) return null
+		const left =
+			Math.round(
+				(Date.parse(`${period.periodEnd}T00:00:00Z`) - Date.parse(`${localDate()}T00:00:00Z`)) /
+					86_400_000
+			) + 1
+		return left > 0 ? left : null
+	}, [period])
 	/** Men the reader has entered on both sides, by name, so the card can say whose. */
 	const both = useMemo(() => {
 		if (!rivalKeys.length || !men.men.length) return []
@@ -307,6 +354,9 @@ export const Recap = ({
 			lines: actuals.lines,
 			league,
 			missing,
+			/* Whether that day's baseball is over. An empty read means "no baseball" on one
+			   side of this line and "not yet" on the other, and the two are opposite. */
+			finished: final,
 			shape: {
 				slots: league.roster.slots,
 				slot_order: league.roster.slot_order,
@@ -470,19 +520,21 @@ export const Recap = ({
 	  bold 0 over a sentence explaining that the 0 means nothing. The date is the subject
 	  here and the team is not mentioned, because the team had nothing to do with it.
 	*/
-	if (result.noGames)
-		return (
-			<section className="card full recap">
-				<header className="recap-head">
-					<h2>Last night</h2>
-					<span className="recap-day">{day}</span>
-				</header>
-				<p className="sub">
-					There was no baseball on {plainDay(date)} &mdash; MLB has no box scores for that
-					date at all, so there is nothing to report rather than nothing scored.
-				</p>
-			</section>
-		)
+	/*
+	  WHETHER THERE IS A NIGHT TO DESCRIBE AT ALL, and three ways there is not.
+	  
+	  This was an early RETURN for the no-baseball case, which threw away the whole rest of the
+	  card — the week total, the matchup, Billy's record and the per-man list are all built from
+	  other reads and were all still available. A day with no baseball in it is a reason to
+	  print no NIGHT, not a reason to print no card.
+	  
+	  The third way is the one the first version missed: every man coming back unread. With both
+	  sides of the ball failing, `ownedTotal` is the sum of nothing, and the card headlined a
+	  bold 0 over a sentence explaining that nothing had been read. A total of zero men is not a
+	  total.
+	*/
+	const blind = result.men.length > 0 && result.men.every(m => m.unread)
+	const night = !result.noGames && !result.tooEarly && !blind
 
 	/** The headline is whichever of the two totals the page is entitled to state. */
 	const headline = result.startedTotal ?? result.ownedTotal
@@ -510,6 +562,8 @@ export const Recap = ({
 				<span className="recap-day">{day}</span>
 			</header>
 
+			{night && (
+				<>
 			<p className="recap-score">
 				<b>{headline}</b>{" "}
 				<span>
@@ -533,17 +587,19 @@ export const Recap = ({
 				</p>
 			)}
 
-			{/* The stamp, where it lands after the games. Said once, under the figure it
-			    qualifies, because a reader who has just pasted a roster is the reader most
-			    likely to be looking at this card. */}
-			{seatsAfter && result.startedTotal !== null && (
-				<p className="sub">
-					Those are the seats you gave this page on{" "}
-					{plainDay(men.seatsAt!.slice(0, 10))}, which is after the games below &mdash; so
-					that is what the lineup you have NOW would have scored, not what yours did.
-				</p>
-			)}
-
+			{/* THE STAMP IS THE LABEL, and the paragraph that used to restate it is gone. It
+			    read "Those are the seats you gave this page on Sep 12, which is after the games
+			    below — so that is what the lineup you have NOW would have scored, not what yours
+			    did." Four lines, 34 words, under a figure whose own label already said "from the
+			    lineup you have now", and one of the four told him a date he had supplied himself.
+			    A caveat that keeps a number honest stays; a caveat said twice is the app
+			    reassuring itself.
+			
+			    AND IT WAS WRITTEN AS A BARE /* *\/ BLOCK, not as a JSX expression, so those 95
+			    words of source comment rendered as body text directly under the headline figure
+			    for the twenty minutes between one commit and the refute pass that caught it.
+			    There is no build error for this and no test looks at prose, which is exactly why
+			    it is worth a sentence here. */}
 			{/* The second number, and it is a different claim: everybody you hold, started or
 			    not. Only shown where it differs, because "your lineup scored 83.4 and your
 			    players scored 83.4" is one fact printed twice. */}
@@ -602,12 +658,18 @@ export const Recap = ({
 				</p>
 			)}
 
-			{result.played === 0 && !result.unread.length && (
+			{/* None of HIS men, on a day when baseball was played and is over — which is a
+			    Wednesday with four games on it, not a failure. Gated on the day being finished
+			    as well as on the read: before the last out, "none of your men played" is a
+			    sentence about the clock. */}
+			{result.played === 0 && !result.unread.length && final && (
 				<p className="sub">
 					None of your men played on {plainDay(date)} &mdash; every one of their clubs was
 					off or out of the day&rsquo;s record, so the {headline} above is an empty day
 					rather than a bad one.
 				</p>
+			)}
+				</>
 			)}
 
 			{/* Every refusal the arithmetic made, in the reader's words. These are the
@@ -689,19 +751,31 @@ export const Recap = ({
 			  days the app was opened: a record that did not say so would read as a record of
 			  the season.
 			*/}
+			{/* THREE SENTENCES BECAME ONE, and the one that was cut was the app defending its
+			    own arithmetic: "on 1 other day he left your lineup alone, which is worth nothing
+			    either way and is not counted" — 19 words explaining a denominator the sentence
+			    above it had already named. "Level on 0" went with it: a zero printed for a
+			    category nothing happened in.
+			
+			    WHAT WAS ADDED IS A HEDGE, because the number is the one thing in this app that
+			    can be wrong in public and four days is not a record. A reader deciding whether
+			    this is worth opening each morning is owed the strength of the claim next to the
+			    claim, and +0.8 over three days read as an endorsement. Ten is not a magic number
+			    — it is the point at which one lucky evening stops being most of the total. */}
 			{record && record.changed > 0 && (
 				<p className="recap-record">
 					<b>{record.net > 0 ? `+${record.net}` : record.net}</b> points is what following
 					Billy&rsquo;s lineup would have been worth, over the {record.changed}{" "}
 					{record.changed === 1 ? "day" : "days"} he asked you to change something
-					&mdash; better on {record.better}, worse on {record.worse}, level on{" "}
-					{record.even}.
-					{record.unchanged > 0 && (
+					&mdash; better on {record.better}, worse on {record.worse}
+					{record.even > 0 && <>, level on {record.even}</>}.
+					{record.changed < 10 && (
 						<>
 							{" "}
-							On {record.unchanged} other {record.unchanged === 1 ? "day" : "days"} he
-							left your lineup alone, which is worth nothing either way and is not
-							counted.
+							<span className="recap-thin">
+								{record.changed === 1 ? "One day" : `${record.changed} days`} is not a record
+								yet.
+							</span>
 						</>
 					)}
 				</p>
@@ -748,17 +822,55 @@ export const Recap = ({
 						</p>
 					)}
 					{rivalTotal !== null && both.length === 0 && (
-						<p className="recap-bench">
-							His men have scored <b>{rivalTotal}</b> to your {periodTotal} &mdash;{" "}
-							{periodTotal === rivalTotal ?
-								"level"
-							: periodTotal > rivalTotal ?
-								`you are ahead by ${Number((periodTotal - rivalTotal).toFixed(1))}`
-							:	`you are behind by ${Number((rivalTotal - periodTotal).toFixed(1))}`}
-							. Both sides count every man held, because this page can see neither
-							lineup &mdash; so it is the gap, measured the same way twice, and not the
-							score your league will pay.
-						</p>
+						<>
+							<p className="recap-bench">
+								His men have scored <b>{rivalTotal}</b> to your {periodTotal} &mdash;{" "}
+								{periodTotal === rivalTotal ?
+									"level"
+								: periodTotal > rivalTotal ?
+									`you are ahead by ${Number((periodTotal - rivalTotal).toFixed(1))}`
+								:	`you are behind by ${Number((rivalTotal - periodTotal).toFixed(1))}`}
+								{/* The clock beside the margin. See `daysLeft`. */}
+								{daysLeft !== null && (
+									<>
+										{" "}
+										with {daysLeft} {daysLeft === 1 ? "day" : "days"} left in it
+									</>
+								)}
+								. Both sides count every man held, because this page can see neither
+								lineup &mdash; so it is the gap, measured the same way twice, and not the
+								score your league will pay.
+							</p>
+							{/* WHICH WAY IT MOVED LAST NIGHT, which is the question the week total
+							    cannot answer. Only where both sides played: a night where one of them
+							    has no box scores at all is a comparison with nothing, not a shut-out. */}
+							{rivalLast !== null && result.played > 0 && rivalLast + result.ownedTotal > 0 && (
+								<p className="sub">
+									Last night he scored {rivalLast} to your {result.ownedTotal}, so you{" "}
+									{result.ownedTotal === rivalLast ?
+										"held the gap exactly where it was"
+									: result.ownedTotal > rivalLast ?
+										`took ${Number((result.ownedTotal - rivalLast).toFixed(1))} out of it`
+									:	`gave ${Number((rivalLast - result.ownedTotal).toFixed(1))} of it back`}
+									.
+								</p>
+							)}
+							{/* A GAP BETWEEN TWO LISTS OF DIFFERENT LENGTHS IS NOT A FAIR GAP, and the
+							    commonest way to get one is a paste where three names did not match. The
+							    guard above catches a reader who pasted his own roster; this catches the
+							    quieter version, where the rival's list is simply short. Three is the
+							    threshold because one or two is a roster difference real leagues have —
+							    an injured-list slot filled on one side and not the other. */}
+							{Math.abs(men.men.length - rivalKeys.length) >= 3 && (
+								<p className="sub">
+									You have {men.men.length} men on record and he has {rivalKeys.length}, so
+									part of that gap is a difference in how many men each side is counting.
+									The {Math.abs(men.men.length - rivalKeys.length)} missing from{" "}
+									{men.men.length > rivalKeys.length ? "his list" : "yours"} are probably
+									lines spelled in a way this page could not match to a player.
+								</p>
+							)}
+						</>
 					)}
 					<OpponentBox
 						leagueKey={leagueKey}
@@ -799,13 +911,29 @@ export const Recap = ({
 								</li>
 							))}
 					</ul>
-					{record.skipped.length > 0 && (
-						<p className="sub">
-							{record.skipped.length}{" "}
-							{record.skipped.length === 1 ? "other day is" : "other days are"} on record and
-							not counted &mdash; {record.skipped[0]!.why}.
-						</p>
-					)}
+					{/* EVERY REASON, NOT THE FIRST ONE REPEATED. This printed `skipped[0].why` for
+					    the whole count, so nine days of "this page wasn't open the morning after"
+					    plus one of "the results aren't in yet" came out as ten of whichever
+					    happened to sort first — and the sentence it is attached to is the one
+					    holding the record's denominator up. `gradeRecord` returns four genuinely
+					    different reasons now, so they are counted separately. */}
+					{record.skipped.length > 0 &&
+						(() => {
+							const why = new Map<string, number>()
+							for (const s of record.skipped) why.set(s.why, (why.get(s.why) ?? 0) + 1)
+							const groups = [...why].sort((a, b) => b[1] - a[1])
+							return (
+								<p className="sub">
+									{record.skipped.length}{" "}
+									{record.skipped.length === 1 ? "other day is" : "other days are"} on record
+									and not counted &mdash;{" "}
+									{groups.length === 1 ?
+										groups[0]![0]
+									:	andList(groups.map(([w, n]) => `${n} because ${w}`))}
+									.
+								</p>
+							)
+						})()}
 				</details>
 			)}
 
@@ -859,12 +987,21 @@ export const Recap = ({
 								)}
 							</span>
 							<span className="recap-pts">
-								{/* A man with no line DID NOT PLAY, and that is not a zero. Jo Adell
-								    went 0-for-4 on this day and is worth exactly 0.0; a man who was
-								    never in the park is worth nothing at all, and printing the second
-								    as the first tells a reader his shortstop had a bad night when he
-								    was resting. */}
-								{m.points === null ? <em>didn&rsquo;t play</em> : m.points}
+								{/* THREE STATES, AND THE ROWS PRINT THREE THINGS.
+								
+								    A man with no line DID NOT PLAY, and that is not a zero: Jo Adell
+								    went 0-for-4 on this day and is worth exactly 0.0, while a man who
+								    was never in the park is worth nothing at all, and printing the
+								    second as the first tells a reader his shortstop had a bad night
+								    when he was resting.
+								
+								    And a man whose side of the ball never answered is neither. The
+								    engine has distinguished him since the partial-read fix; this list
+								    was still printing him as "didn't play", which is the app stating
+								    as fact the one thing it does not know about him. */}
+								{m.unread ? <em>not checked</em>
+								: m.points === null ? <em>didn&rsquo;t play</em>
+								: m.points}
 							</span>
 							<span className="recap-top">
 								{m.top.map(c => `${c.code} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")}
@@ -898,7 +1035,11 @@ const OpponentBox = ({
 	snapshot: Snapshot | null
 	count: number
 }) => {
-	const [text, setText] = useState("")
+	/* KEPT AS IT IS TYPED, for the same reason the setup boxes are (src/client/typing.ts).
+	   This card lives on the Tonight screen, so a tab press unmounts it and took a pasted
+	   roster with it — and `typing.ts` had declared an "opponent" box from the start and then
+	   never been wired to one, with two comments in that file claiming otherwise. */
+	const [text, setText] = useState(() => typingStore.of(leagueKey, "opponent"))
 	const [note, setNote] = useState<string | null>(null)
 	if (!leagueKey || !snapshot) return null
 	return (
@@ -910,7 +1051,10 @@ const OpponentBox = ({
 			</p>
 			<textarea
 				value={text}
-				onChange={e => setText(e.currentTarget.value)}
+				onChange={e => {
+					setText(e.currentTarget.value)
+					typingStore.set(leagueKey, "opponent", e.currentTarget.value)
+				}}
 				rows={4}
 				aria-label="Your opponent's team"
 				placeholder={"Aaron Judge\nJuan Soto\nSkubal"}
@@ -945,6 +1089,8 @@ const OpponentBox = ({
 						try {
 							opponentStore.set(leagueKey, got.keys)
 							setText("")
+							/* Read into a roster, so the draft goes with it. */
+							typingStore.clear(leagueKey, "opponent")
 							setNote(
 								`${got.players.length} of his men are on record${missed ? "." + missed : "."}`
 							)

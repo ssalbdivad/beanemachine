@@ -1459,9 +1459,18 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	   would have scored is exactly the question he is asking. */
 	t("a lineup read after the games is labelled as the one he has now",
 		/from the lineup you have now/.test(card), card.slice(0, 200))
-	t("and the stamp says which day those seats came from",
-		/Those are the seats you gave this page on \w+ \d+/.test(card) &&
-			/not what yours did/.test(card), card)
+	/* THE CAVEAT IS THE LABEL NOW, and that is the whole of it.
+	
+	   This used to require a second paragraph — "Those are the seats you gave this page on Sep
+	   12, which is after the games below — so that is what the lineup you have NOW would have
+	   scored, not what yours did" — four lines and 34 words under a figure whose own label had
+	   just said "from the lineup you have now", one of which told the reader a date he supplied
+	   himself. The claim it protected is that the number is not presented as his lineup that
+	   night, and the assertion above is what protects it: the label must read "from the lineup
+	   you have now" and fails loudly if it ever reads "from your lineup" on seats stamped after
+	   the games. What is asserted here is that the restatement stayed cut. */
+	t("and the caveat is made once, on the figure, not twice",
+		!/Those are the seats you gave this page/.test(card), card)
 
 	t("the week so far is named as well as the night",
 		/In this (matchup|scoring period) so far \(\w+ \d+ to \w+ \d+\)/.test(card), card)
@@ -1521,10 +1530,23 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("the record sums the days it graded", /\+12\.1 points/.test(rec), rec)
 	t("over the days he asked for a change, and says how many", /over the 2 days/.test(rec), rec)
 	t("with both sides of it", /better on 1, worse on 1/.test(rec), rec)
-	// The day he left the lineup alone is worth nothing either way, and a win rate over
-	// every recorded day would flatter itself with days on which nothing was claimed.
-	t("and the day he left it alone is named and not counted",
-		/On 1 other day he left your lineup alone/.test(rec), rec)
+	/* THE EXCLUSION IS STILL ASSERTED; THE SENTENCE ABOUT IT IS GONE.
+	
+	   This used to require "On 1 other day he left your lineup alone, which is worth nothing
+	   either way and is not counted" — 19 words explaining a denominator the clause above it
+	   had already named, which is the app defending its own arithmetic to a reader who has not
+	   questioned it. What the assertion was really protecting is the ARITHMETIC: three days
+	   are on the ledger, one of them asked for no change, and the record must speak about two.
+	   The "over the 2 days" assertion above is what protects that, and it fails just as loudly
+	   if the unchanged day is ever counted.
+	
+	   Two things are asserted here instead: the cut sentence is really gone, so nobody
+	   reinstates it by accident, and a record this short says so — four days of evidence read
+	   as an endorsement while it was printed bare. */
+	t("and the sentence explaining the denominator is not printed as well",
+		!/left your lineup alone/.test(rec), rec)
+	t("and a record too short to be one says so next to itself",
+		/2 days is not a record yet/.test(rec), rec)
 	await withRecord.close()
 
 	/* The card writes what it recommended BEFORE the games, because the comparison is
@@ -1900,13 +1922,69 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			`open ${open_.reach} (${open_.movers.join(", ")}) → one club shut ${shut.reach}`)
 		t("and the card says whose change it is no longer offering",
 			shut.locked.includes(mover), `${mover} — locked said: ${shut.locked || "(nothing)"}`)
-		/* The lineup as it STANDS is untouched by a lock: a seat closing does not change what
-		   the men in it project, and a header that moved both numbers would be describing a
-		   different team. */
+		/* THE DROP BELONGS TO THE PLAN, NOT TO THE LINEUP, and the tolerance here is measured
+		   rather than chosen: 111.98 against 111.57, a difference of 0.41 on a 112-point lineup.
+		
+		   It is not zero, and the first version of this assertion wanted it to be. A club whose
+		   game has already started has one fewer game left in the window every man on it is
+		   rated over, so what his men project over the rest of the period really does move a
+		   little — the lineup is the same lineup, priced against a slightly shorter future.
+		   What must NOT happen is the lineup figure absorbing the frozen swap's own gain, which
+		   is points rather than tenths. */
 		const now = h => Number((h.match(/projects ([\d.]+)/) ?? [])[1])
-		t("and the lineup he already has is worth the same either way",
-			now(open_.head) === now(shut.head), `${now(open_.head)} vs ${now(shut.head)}`)
+		t("and the lineup he already has is worth what it was, give or take the shorter window",
+			Math.abs(now(open_.head) - now(shut.head)) < 1.5,
+			`${now(open_.head)} vs ${now(shut.head)}`)
 	}
+}
+
+/**
+ * WHEN MLB DOES NOT ANSWER, THE CARD MAY NOT PRINT A NUMBER.
+ *
+ * `fetchActuals` keeps a partial day on purpose, and the cost of that is paid on this screen:
+ * a side of the ball that failed looks exactly like a roster of men who did not play. With
+ * BOTH sides failing, every total is the sum of nothing — and the card headlined a bold 0 over
+ * a sentence explaining that nothing had been read, which is the most confident form a wrong
+ * number can take.
+ *
+ * The read is aborted rather than stubbed empty, because an empty 200 is a different state
+ * (an off day) and is asserted separately in test/actuals.mjs.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>
+		r.fulfill({ status: 200, contentType: "application/json", body: '{"dates":[]}' }))
+	await page.route("**stats?stats=byDateRange**", r => r.abort())
+	await page.addInitScript(([l, c]) => {
+		localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+		localStorage.setItem("beanemachine:config", JSON.stringify(c))
+	}, [{ [KEY]: { at: new Date().toISOString(), spots } }, cfg])
+	await page.goto(BASE, { waitUntil: "domcontentloaded" })
+	await page.waitForSelector(".recap", { timeout: 30000 })
+	await page.waitForTimeout(2500)
+	const card = await page.$eval(".recap", e => e.innerText)
+	t("a read that failed prints no headline figure at all",
+		(await page.$$(".recap-score")).length === 0, card.slice(0, 300))
+	t("and says how many men it could not check",
+		/could not be checked at all/.test(card), card.slice(0, 400))
+	t("and never says they did not play",
+		!/didn.t play/.test(card), card.slice(0, 600))
+	/* The per-man fold is the place this was still wrong after the engine had been fixed: it
+	   printed "didn't play" off `points === null` without reading the `unread` flag beside it,
+	   which is the app stating as fact the one thing it does not know about the man. */
+	const fold = await page.$(".recap-men")
+	if (fold) {
+		await fold.evaluate(e => e.setAttribute("open", ""))
+		await page.waitForTimeout(200)
+		const rows = await page.$$eval(".recap-each li", ls => ls.map(l => l.innerText))
+		t("and every row says it was not checked, not that he sat out",
+			rows.length > 0 && rows.every(r => /not checked/.test(r)) && !rows.some(r => /didn.t play/.test(r)),
+			rows.slice(0, 3).join(" | "))
+	} else {
+		t("the per-man fold is still on the card when the read failed", false, card.slice(0, 300))
+	}
+	await page.close()
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

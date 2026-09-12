@@ -168,6 +168,10 @@
 	font-variant-numeric: tabular-nums;
 }
 
+/* The hedge on a record too short to be one. Quieter than the claim it qualifies, and in the
+   same sentence rather than under it, because a caveat on its own line reads as a second fact. */
+.recap-thin { color: var(--faint) }
+
 /* The days behind the record. Same three tracks as the men list, so one reader's eye does
    not have to learn a second layout — the gutter holds the date instead of a seat, and the
    right-hand number is a difference rather than a total, which is why it may be negative. */

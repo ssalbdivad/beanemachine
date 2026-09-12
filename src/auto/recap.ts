@@ -93,9 +93,14 @@ export interface Recap {
 	 *  Non-empty means every total below except `ownedTotal` is refused, and `ownedTotal`
 	 *  covers only the side that answered — `blocked` says so in the reader's words. */
 	unread: ("hitting" | "pitching")[]
-	/** True when MLB has no box scores AT ALL for the date. An off day, a rained-out
-	 *  Monday, the All-Star break — not a night on which your team scored nothing. */
+	/** True when MLB has no box scores AT ALL for the date and the day is over. An off day,
+	 *  a rained-out Monday, the All-Star break — not a night on which your team scored
+	 *  nothing. */
 	noGames: boolean
+	/** True when there are no box scores and the day is NOT over: the same empty read, on
+	 *  the other side of `dayIsFinal`, meaning not yet rather than not at all. A reader up
+	 *  at twenty past midnight in a timezone ahead of the ballparks is in this state. */
+	tooEarly: boolean
 	/** League categories MLB's day read cannot source, surfaced rather than zeroed. */
 	unscoreable: string[]
 }
@@ -121,6 +126,11 @@ export const recap = (input: {
 	 *  this function refuses when it is non-empty is refused for one reason: a man nobody
 	 *  could ask about is indistinguishable, in a sum, from a man who went 0-for-4. */
 	missing?: ("hitting" | "pitching")[]
+	/** Whether that day's games are all over — `dayIsFinal` in src/data/actuals.ts. An
+	 *  empty read means two opposite things either side of that line: no baseball was
+	 *  played, or it has not been played YET. Defaults to true, which is the state every
+	 *  caller but a reader up past midnight is in. */
+	finished?: boolean
 }): Recap => {
 	const { date, men, lines, shape } = input
 	const blocked: string[] = []
@@ -172,13 +182,22 @@ export const recap = (input: {
 	   your team, and "your lineup scored 0" is then a statement about the calendar dressed
 	   up as a statement about your team.
 	*/
-	const noGames = lines.size === 0 && !unread.length
+	const finished = input.finished ?? true
+	const empty = lines.size === 0 && !unread.length
+	const noGames = empty && finished
+	/** The same empty read before the day is over, which is a clock and not a result. */
+	const tooEarly = empty && !finished
 	const unreadMen = scored.filter(s => s.unread).length
-	const complete = !unreadMen && !noGames
+	const complete = !unreadMen && !noGames && !tooEarly
 	if (noGames)
 		blocked.push(
 			"MLB has no box scores at all for that date — nobody in baseball played, so there " +
 				"is nothing to report rather than nothing scored."
+		)
+	else if (tooEarly)
+		blocked.push(
+			"Those games have not been played yet, so there is nothing on record for them — " +
+				"this is a clock, not a result."
 		)
 	else if (unreadMen)
 		blocked.push(
@@ -221,7 +240,18 @@ export const recap = (input: {
 	else if (!seats.length)
 		blocked.push("This league lists no startable seats, so there was no lineup to set.")
 	else {
+		/* A MAN WHO DID NOT PLAY IS NOT IN IT, and leaving him in built a gap out of a ghost.
+		
+		   He entered at zero, which is arithmetically the same as an empty seat and was the
+		   reasoning — he is seatable, he is simply never worth seating. It is not the same
+		   thing to a reader. A started pitcher who got shelled prices BELOW zero, so seating
+		   a man who never took the field over him raised the hindsight total, and the card
+		   then said "9.4 points sat on your bench" about a bench that contained nobody who
+		   played. The seat is better left empty, and an empty seat is what the solver now
+		   produces, because a lineup a reader could actually have set is made of men who
+		   turned up. */
 		const pool = scored
+			.filter(s => s.points !== null)
 			.filter(s => !(seatsKnown && s.man.slot !== null && isReserve(s.man.slot)))
 			.map(s => ({ ...s, legal: legalSlotsFor(s.man.positions, accepts) }))
 			.filter(s => s.legal.length > 0)
@@ -343,6 +373,7 @@ export const recap = (input: {
 		played,
 		unread,
 		noGames,
+		tooEarly,
 		unscoreable: [...unscoreable].sort()
 	}
 }
@@ -487,6 +518,12 @@ export const gradeRecord = (input: {
 			   be 120 requests and about 2.3 MB on every render — so a recommendation recorded
 			   on a morning the reader did not come back the next day can never be graded, and
 			   saying so is the only honest option available. */
+			/* TODAY IS NOT A DAY THIS RECORD HAS MISSED. The Tonight card writes its
+			   recommendation before the games, so the newest entry in the ledger is almost
+			   always for a day that has not been played — and calling that "this page wasn't
+			   open the morning after" is both false and an accusation. It is not skipped WITH
+			   A REASON, it is not counted at all: there is nothing to say about it yet. */
+			if (input.readable && e.date > input.readable) continue
 			skipped.push({
 				date: e.date,
 				why:

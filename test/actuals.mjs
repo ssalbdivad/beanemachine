@@ -344,6 +344,36 @@ t("a man who did not play is never the swap you missed", ghostOverShelling.bigge
 // more than him" over a man with no box score is a comparison with nothing.
 t("a real swap carries both men's own numbers", near(r.biggest.inPoints, 25.8) && r.biggest.outPoints === 0, JSON.stringify(r.biggest))
 
+// AN EMPTY READ MEANS TWO OPPOSITE THINGS EITHER SIDE OF THE LAST OUT. After it: there was
+// no baseball. Before it: there has not been any YET. A reader up at twenty past midnight —
+// or anywhere east of the ballparks, where his "yesterday" is the ballparks' today — is in
+// the second state, and printing the first at him is a statement about the calendar.
+const early = recap({
+  date: "2026-09-11", men: team, lines: new Map(), league: LEAGUE, shape: SHAPE, finished: false
+})
+t("an empty read before the day is over is a clock, not a result", early.tooEarly === true && early.noGames === false)
+t("and says so in the reader's words", early.blocked.some(b => /not been played yet/.test(b)), early.blocked.join(" | "))
+t("and claims nothing about the lineup either way", early.startedTotal === null && early.leftOnBench === null)
+t("the same empty read after the day is over is an off day", offDay.noGames === true && offDay.tooEarly === false)
+
+// A MAN WHO DID NOT PLAY IS NOT IN THE HINDSIGHT LINEUP, and leaving him in built a gap out
+// of a ghost: a started pitcher who got shelled prices below zero, so seating a man who never
+// took the field over him RAISED the hindsight total, and the card then reported points left
+// on a bench that contained nobody who played. An empty seat is the honest answer.
+const ghostBench = recap({
+  date: "2026-09-11",
+  men: [
+    seated(MAN.bradley, "SP"),
+    seated(MAN.tucker, "OF"),
+    { key: "999998:pitching", name: "Never Pitched", slot: "BN", positions: ["SP"] }
+  ],
+  lines: shelled, league: LEAGUE, shape: SHAPE
+})
+t("a man who did not play is not in the best lineup you could have set",
+  !ghostBench.best.seated.some(s => s.name === "Never Pitched"), JSON.stringify(ghostBench.best.seated))
+t("so no points are reported as having sat on a bench nobody played on",
+  ghostBench.leftOnBench === null || ghostBench.leftOnBench === 0, String(ghostBench.leftOnBench))
+
 // --- the shape of the week, off a read the card already paid for ------------------
 
 // `byDateRange` accumulates inside a window, so one request per side of the ball prices a
@@ -496,6 +526,23 @@ t("a read that failed says it failed, rather than scoring the day level",
 t("and a day with no baseball in it is not a day anybody lost",
   threeStates.skipped.some(s => s.date === "2026-09-09" && /no results came back/.test(s.why)), JSON.stringify(threeStates.skipped))
 t("none of the three is graded", threeStates.days.length === 0 && threeStates.changed === 0, JSON.stringify(threeStates.days))
+
+// TODAY IS NOT A DAY THE RECORD HAS MISSED. The Tonight card writes its recommendation
+// BEFORE the games, so the newest entry in the ledger is nearly always for a day that has
+// not been played — and "this page wasn't open the morning after" is both false about it and
+// an accusation. It is not skipped with a reason; it is not counted at all.
+const withToday = gradeRecord({
+  entries: [
+    { date: "2026-09-12", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.adell, 3)] },
+    { date: "2026-09-11", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.adell, 3)] }
+  ],
+  byDate: new Map([["2026-09-11", lines]]),
+  readable: "2026-09-11",
+  league: LEAGUE
+})
+t("a day that has not been played yet is not reported as a day nobody was here for",
+  !withToday.skipped.some(s => s.date === "2026-09-12"), JSON.stringify(withToday.skipped))
+t("and the day that HAS been played is still graded", withToday.days.some(d => d.date === "2026-09-11"))
 t("a day with no recommendation is not graded", !ungradeable.days.some(d => d.date === "2026-09-10"), JSON.stringify(ungradeable.days.map(d => d.date)))
 t("no ungradeable day reaches the record", ungradeable.changed === 0 && ungradeable.net === 0)
 

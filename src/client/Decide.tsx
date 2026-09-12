@@ -694,6 +694,24 @@ export const Decide = ({
 			frozen.add(normalizeName(sw.start))
 			if (sw.sit) frozen.add(normalizeName(sw.sit))
 		}
+		/*
+		   AND THE TOTAL HAS TO BE THE TOTAL OF WHAT IS ON OFFER.
+		   
+		   `pointsPlanned` is the whole plan, frozen seats included, and the header printed it
+		   as "or 128 once you make these changes" next to a list the frozen changes had just
+		   been taken out of. So the gain the card argued for included seats the platform had
+		   already closed, and a reader who did every single thing the card asked could not
+		   reach the number it promised — the one unreachable figure in the app, and it was the
+		   headline.
+		   
+		   Subtracted from the plan rather than added to the lineup: every swap carries its own
+		   `gain`, so taking the frozen ones back off `pointsPlanned` leaves exactly the plan
+		   that is still available, and with nothing frozen it is `pointsPlanned` to the digit
+		   rather than a sum that could drift from it by a rounding.
+		*/
+		const lostToLocks = lineup.swaps
+			.filter(sw => frozen.has(normalizeName(sw.start)))
+			.reduce((a, sw) => a + sw.gain, 0)
 		const bench = benchAll.filter(sp => !frozen.has(normalizeName(sp.name)))
 		const start = startAll.filter(st => !frozen.has(normalizeName(st.name)))
 		/** Men whose seats the platform has already closed, so the card can say the
@@ -704,6 +722,9 @@ export const Decide = ({
 		])]
 		return {
 			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked,
+			/** What the lineup reaches if the reader does everything the card still offers.
+			 *  Equal to `lineup.pointsPlanned` when nothing is frozen. */
+			pointsReach: Number((lineup.pointsPlanned - lostToLocks).toFixed(2)),
 			placed: placed.size,
 			scratched,
 			waiting: waiting.size,
@@ -1451,10 +1472,10 @@ export const Decide = ({
 							  the argument; where it is not, he sees the lineup he actually has and the
 							  header makes no claim about the plan at all.
 							*/}
-							{today.lineup.pointsPlanned > today.lineup.pointsNow ?
+							{today.pointsReach > today.lineup.pointsNow ?
 								<>
 									your lineup projects {today.lineup.pointsNow}, or{" "}
-									{today.lineup.pointsPlanned} once you make these changes
+									{today.pointsReach} once you make these changes
 								</>
 							:	<>your lineup projects {today.lineup.pointsNow}</>
 							}

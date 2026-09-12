@@ -1826,6 +1826,89 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	await page.close()
 }
 
+/**
+ * THE NUMBER THE HEADER PROMISES HAS TO BE A NUMBER HE CAN REACH.
+ *
+ * The header reads "your lineup projects 112, or 128 once you make these changes", and the
+ * changes it means are the ones printed below it — which have had every seat the platform
+ * already closed TAKEN OUT of them, for the reason written at `frozen` in
+ * src/client/Decide.tsx. The total did not have them taken out: it was `pointsPlanned`, the
+ * whole plan, locked seats included. So a reader who did every single thing the card asked
+ * could not reach the figure it promised him, and it was the headline figure.
+ *
+ * ASSERTED BY DIFFERENCE, because the plan depends on a real capture and hand-computing it
+ * here would be asserting the planner rather than the header. Two pages, identical but for
+ * ONE club's game having already started: the first tells us which men the plan wants to
+ * move, the second freezes the first of them. The promised total must fall, and the card must
+ * say whose change it is no longer offering. Before the fix both pages printed the same
+ * number, which is the defect stated as a test.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const teams = [...new Set(snap.players.map(p => p.teamId).filter(Boolean))]
+	/** Every club on tonight's card, as one game apiece, so nobody is frozen by accident
+	 *  and nobody is left out of the plan for having no game. `started` names the one club
+	 *  whose game is already in progress. */
+	const slateWith = started => ({
+		dates: [{
+			games: teams.map((id, i) => ({
+				gamePk: 1000 + i,
+				gameDate: new Date(Date.now() + (id === started ? -2 : 3) * 3_600_000).toISOString(),
+				status: { detailedState: id === started ? "In Progress" : "Pre-Game" },
+				teams: { home: { team: { id, abbreviation: "HOM" } }, away: { team: { id: 999, abbreviation: "AWY" } } },
+				lineups: {}
+			}))
+		}]
+	})
+	const promised = async started => {
+		const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+		await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(slateWith(started)) }))
+		await page.route("**statsapi.mlb.com/api/v1/transactions**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: '{"transactions":[]}' }))
+		await page.route("**stats?stats=byDateRange**", r =>
+			r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(DAY_HITTING) }))
+		await page.addInitScript(([l, c, pool]) => {
+			localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+			localStorage.setItem("beanemachine:config", JSON.stringify(c))
+			localStorage.setItem("beanemachine:pool", JSON.stringify(pool))
+		}, [{ [KEY]: { at: new Date().toISOString(), spots } }, cfg, seedPool])
+		await page.goto(BASE, { waitUntil: "domcontentloaded" })
+		await page.waitForSelector(".decide", { timeout: 30000 })
+		await page.waitForTimeout(2200)
+		const head = await page.$eval(".decide-gain", e => e.innerText)
+		const movers = await page.$$eval(".decide-changes b", bs => bs.map(b => b.textContent.trim()))
+		const locked = await page.$$eval(".decide-locked", ls => ls.map(l => l.innerText).join(" "))
+		await page.close()
+		const m = head.match(/or ([\d.]+) once you make these changes/)
+		return { reach: m ? Number(m[1]) : null, head, movers, locked }
+	}
+	const open_ = await promised(null)
+	if (open_.reach === null) {
+		t("a plan worth more than the lineup is what this block needs", false, open_.head)
+	} else {
+		const mover = open_.movers.find(n => snap.players.some(p => p.name === n && p.teamId))
+		const club = mover && snap.players.find(p => p.name === mover).teamId
+		const shut = await promised(club)
+		/* Either the promise is smaller or it is gone: freezing the only gainful swap can take
+		   the reachable plan down to the lineup the reader already has, and the header then
+		   correctly prints one number instead of two. What cannot happen is the SAME promise
+		   with the change that paid for it removed from the list — which is what it printed
+		   before, because `pointsPlanned` is bigger than `pointsNow` whatever is frozen. */
+		t("a change the platform has already closed is not counted in the total it promises",
+			shut.reach === null || shut.reach < open_.reach,
+			`open ${open_.reach} (${open_.movers.join(", ")}) → one club shut ${shut.reach}`)
+		t("and the card says whose change it is no longer offering",
+			shut.locked.includes(mover), `${mover} — locked said: ${shut.locked || "(nothing)"}`)
+		/* The lineup as it STANDS is untouched by a lock: a seat closing does not change what
+		   the men in it project, and a header that moved both numbers would be describing a
+		   different team. */
+		const now = h => Number((h.match(/projects ([\d.]+)/) ?? [])[1])
+		t("and the lineup he already has is worth the same either way",
+			now(open_.head) === now(shut.head), `${now(open_.head)} vs ${now(shut.head)}`)
+	}
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

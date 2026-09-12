@@ -652,31 +652,33 @@ const search = page.locator(".board-controls .filters input[type=text]")
 const settle = () => page.waitForTimeout(400)
 
 /**
- * THE GESTURE, because two of the controls below are no longer on screen.
+ * THE ORDERING IS A COLUMN HEAD NOW, not a select behind a fold.
  *
- * "Rank by" joined the confidence floor inside `<details class="more">`, which ships
- * SHUT — four of its six orderings are already sortable column heads, so standing
- * permanently above the ranking it was a second way to do a thing one tap away on the
- * thing itself. A `selectOption` against a control inside a shut `<details>` does not
- * fail fast: it waits thirty seconds and then reports a selector, which is how this
- * suite broke on the restructure and why the gesture is a named helper rather than an
- * inline click at each of the four sites that need it.
+ * This was `openMoreFilters()` plus `selectOption("[data-ctl=sort]", value)`, and both are
+ * gone: the "Rank by" select was retired because two of its four orderings WERE the two
+ * sortable heads, and the `<details className="more">` it lived in held nothing afterwards.
+ * The old helper had to be idempotent because the fold opened itself whenever a filter inside
+ * it narrowed, so a blind click on the summary was a toggle; pressing a head has the same
+ * problem for a different reason, which is why this presses until the head is both active and
+ * descending rather than once.
  *
- * IDEMPOTENT on purpose. The fold opens itself whenever one of the filters inside it
- * is narrowed (`open={narrowed.length > 0}` in Board.tsx), so a blind click on the
- * summary is a TOGGLE and would shut it again at the second call site — and it really
- * does reopen and reclose during this section: raising the confidence floor opens it,
- * and dropping the floor back to 0 closes it again underneath the sort that follows.
+ * Three presses at most: a head that is not active takes one to claim the ordering, and a
+ * second to turn it from ascending to descending. A fourth would mean the head is not
+ * responding, and timing out on a bounded loop reads better than hanging on `waitForSelector`.
  */
-const openMoreFilters = async () => {
-	const more = page.locator(".board-controls details.more")
-	if (!(await more.evaluate(d => d.open))) await more.locator("> summary").click()
-	await page.waitForSelector("[data-ctl=sort]", { state: "visible" })
+const SORT_COL = { bscore: "bscore", points: "pts", deltaMine: "mine", name: "who" }
+const rankBy = async value => {
+	const sel = `.board-head .sort-head[data-col=${SORT_COL[value] ?? value}]`
+	for (let i = 0; i < 3; i++) {
+		const st = await page.$eval(sel, e => ({
+			active: e.classList.contains("active"),
+			desc: /\u25be/.test(e.textContent)
+		}))
+		if (st.active && st.desc) return
+		await page.click(sel)
+		await page.waitForTimeout(350)
+	}
 }
-/** The ordering lives behind that fold, so every use of it is the gesture plus the
- *  select — never the select alone. `confidenceFloor` sat here too and went with the
- *  control; see the note further down for the measurement that retired it. */
-const rankBy = value => openMoreFilters().then(() => page.selectOption("[data-ctl=sort]", value))
 
 await page.click('.board-controls .chip-btn:text-is("C")')
 await settle()
@@ -703,7 +705,7 @@ t("and the position filter survives the search",
 // Named as a stage because the sort is behind a fold now: when this timed out it was
 // reported under "the link on Today opens the ranking", the last `at` six claims
 // earlier, which pointed at a screen that was fine.
-at("the ranking can be re-ordered from behind More filters")
+at("the ranking can be re-ordered from its column heads")
 const searched = new Set(await rows())
 await rankBy("bscore")
 await settle()
@@ -1106,7 +1108,18 @@ const fines = await page.$$eval(".decide .decide-fine", ds => ds.map(d => ({
 	open: d.open,
 	words: d.textContent.trim().split(/\s+/).length
 })))
-const FINE_TITLES = ["what these numbers are", "why not the whole week"]
+/* Three now, because the innings caveat has two shapes. It used to say only "why not the
+   whole week" — true while the page could count innings still to come and not innings already
+   thrown. It can now read the whole period in one request, so when that read lands the fold
+   explains the pair of numbers instead ("what these two numbers are") and when it does not,
+   the old title and the old sentence are both correct again. Both are listed rather than the
+   assertion being loosened to any string, because the claim being protected is that a
+   disclosure on this card is one of a known set and not a paragraph that has grown a triangle. */
+const FINE_TITLES = [
+	"what these numbers are",
+	"what these two numbers are",
+	"why not the whole week"
+]
 t("the card's fine print is in disclosures, all of them shut",
 	fines.length > 0 && fines.every(f => FINE_TITLES.includes(f.title) && !f.open),
 	fines.map(f => `${f.title}${f.open ? " (OPEN)" : ""}`).join(" | ") || "no disclosure rendered at all")
@@ -1203,16 +1216,34 @@ await tab(PICKUPS)
 await onWire()
 const onWireFooter = await colophon()
 /**
- * Nothing was edited, so Wire must be the board it was. It is a stronger claim than
- * it looks: Board unmounts when another screen is on, so this is the ranking being
- * REBUILT from the league and the capture and landing on the same 1,200-odd players
- * in the same order — after a paste wrote two stores and a league editor was on
- * screen. A roster that leaked into the ranking's availability basis, or a mode left
- * behind in `beanemachine:view`, would both show up right here.
+ * Nothing was edited, so Wire must be ranking the same POOL it was. It is a stronger claim
+ * than it looks: Board unmounts when another screen is on, so this is the ranking being
+ * REBUILT from the league and the capture and landing on the same 1,200-odd players — after a
+ * paste wrote two stores and a league editor was on screen. A roster that leaked into the
+ * ranking's availability basis, or a mode left behind in `beanemachine:view`, would both show
+ * up right here.
+ *
+ * THE FIRST TEN ROWS ARE NOT THE SAME ANY MORE, and that is the point of the detour rather
+ * than a regression. This used to assert `rows().slice(0, 10).join() === fortnight.join()` —
+ * the same players in the same order — and the order legitimately changed on the day the board
+ * started defaulting to the reader's OWN number once his roster can price a row. Before the
+ * paste nothing could; after it everything can. Asserting the old order would be asserting that
+ * entering a team changes nothing, which was the defect that change fixed: measured before it,
+ * the recommended pick was beaten on the reader's own number by seven of the eight rows printed
+ * under him.
+ *
+ * So the claim splits. The POOL must be identical, which is what catches a leak. And the
+ * ordering must now be the for-you one, which is what proves the roster reached the board at
+ * all — and it is checked on the head rather than on the numbers, because the head is the thing
+ * a reader uses to know what he is looking at.
  */
-t("the ranking is the ranking it was before the team was entered",
-	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
-	`${await ranked()} vs ${fortnightCount}`)
+t("the same pool is ranked after the detour, so nothing leaked into who is gettable",
+	(await ranked()) === fortnightCount, `${await ranked()} vs ${fortnightCount}`)
+const sortedHead = await page.$$eval(".board-head .sort-head", hs =>
+	hs.filter(h => h.classList.contains("active")).map(h => h.getAttribute("data-col")))
+t("and it is ordered by the reader's own number, which is what entering a team buys",
+	sortedHead.join() === "mine",
+	`${sortedHead.join() || "nothing active"} — first ten were ${fortnight.slice(0, 3).join(", ")}…`)
 t("and the same footer is under Pickups, rather than a second wording of it",
 	onWireFooter.note === onTodayFooter.note, `${onWireFooter.note}\n  vs\n  ${onTodayFooter.note}`)
 

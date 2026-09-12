@@ -1282,6 +1282,34 @@ kbd{
 .onboard-missed{
   margin:var(--sp-2) 0 0;font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--flag);
 }
+/*
+  A PHONE HELD SIDEWAYS, which is the one viewport this sheet could not fit.
+
+  Measured at 844x390 with the sheet open: the box is 288px tall holding 557px of content, so
+  the team-count question sat 19px below the visible bottom while the finish button sat above
+  it — and a reader's natural gesture is the big button he can see, which means the question he
+  answered was the one he never saw. Portrait is fine at the same content (590 holding 676,
+  everything reachable), so the content is not the problem: 844px of unused WIDTH is.
+
+  So the two halves become columns here and nowhere else — the typing on the left, the one
+  remaining question and the way out on the right. Guarded on height AND width together,
+  because a short viewport that is also narrow (a small phone with the keyboard up) has no
+  width to spend and wants the single column it already gets.
+
+  `align-items:start` so the right column does not stretch to the textarea's height, and the
+  sheet gets a little more of the viewport at the same time, because 74vh of 390px is 288 and
+  there is no reason to leave 100px of a landscape screen unused.
+*/
+@media (max-height:520px) and (min-width:720px){
+  .dock-sheet{max-height:min(90vh,760px)}
+  .onboard{
+    display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:var(--sp-5);align-items:start;
+  }
+  /* The first block's own top margin would push the second column down past it. */
+  .onboard-rest>*:first-child{margin-top:0}
+}
+
 .onboard-teams{margin:var(--sp-4) 0 0}
 .onboard-teams h3{margin:0 0 var(--sp-2);font-size:var(--fs-4);font-weight:600;letter-spacing:-.01em}
 .onboard-teams .chips{margin:0 0 var(--sp-2)}

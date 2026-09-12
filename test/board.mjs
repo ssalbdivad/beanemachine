@@ -2582,9 +2582,43 @@ await phone.close()
   t("Tonight carries the decision and not the ranking",
     (await page.$(".board-row")) === null && (await page.$(".board-controls")) === null,
     "the ranked board is back under the decision card")
+  /*
+   * WHOSE FIRST SCREEN, and this had to split in two the day last night's results arrived.
+   *
+   * `src/client/Recap.tsx` now renders above the decision card when this browser holds NO
+   * team, because for a stranger the decision card is a pitch and the most interesting thing
+   * the page can show him is what the best nights in baseball were actually worth yesterday —
+   * real names, real points, nothing asked of him. That pushed `.decide` to y=864 here, and
+   * the bar below is what caught it.
+   *
+   * The protection it was giving is real and is kept: once there IS a team, the decision card
+   * is the product, it has a deadline on it, and nothing may push it off the first screen —
+   * `App` places the recap below it in that case for exactly this reason. So the bar now
+   * applies to the state it was always about, and the stranger's screen gets its own
+   * assertion about what is actually on it rather than being measured by a rule written for
+   * somebody else.
+   */
   const deskDecide = await top(page, ".decide")
-  t("the answer is on the first screen on a desktop, without scrolling",
-    deskDecide < 500, `decision card at y=${deskDecide}`)
+  const deskTeam = await page.evaluate(() => {
+    try {
+      return Object.values(JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}"))
+        .some(v => Array.isArray(v) && v.length > 0)
+    } catch {
+      return false
+    }
+  })
+  if (deskTeam)
+    t("the answer is on the first screen on a desktop, without scrolling",
+      deskDecide < 500, `decision card at y=${deskDecide}`)
+  else {
+    t("with no team yet, the first screen carries last night's real points instead",
+      (await top(page, ".recap")) < 500 && /best nights in baseball/.test(await page.$eval(".recap", e => e.innerText)),
+      `recap at y=${await top(page, ".recap")}`)
+    /* Still bounded, and the bound is one card rather than five hundred pixels: the pitch has
+       to be the next thing, not something a stranger has to hunt for. */
+    t("and the pitch is the card directly under it",
+      deskDecide < 1100, `decision card at y=${deskDecide}`)
+  }
   /*
    * The way to the board is a link on this screen, and it has to actually land on the
    * board. The suite reaches Pickups by its tab everywhere else, so nothing else here
@@ -2608,8 +2642,17 @@ await phone.close()
   await phone.waitForSelector(".decide", { timeout: 30000 })
   await phone.waitForTimeout(1200)
   const phoneDecide = await top(phone, ".decide")
-  t("the answer is within one screen on a phone", phoneDecide < 650,
-    `decision card at y=${phoneDecide}`)
+  /* Same split as the desktop pair above, for the same reason. */
+  if (deskTeam)
+    t("the answer is within one screen on a phone", phoneDecide < 650,
+      `decision card at y=${phoneDecide}`)
+  else {
+    t("with no team yet, a phone's first screen carries last night's real points",
+      (await top(phone, ".recap")) < 650,
+      `recap at y=${await top(phone, ".recap")}`)
+    t("and the pitch is within two screens of it on a phone", phoneDecide < 1700,
+      `decision card at y=${phoneDecide}`)
+  }
   await screen(phone, "Pickups")
   await phone.waitForSelector(".board-row", { timeout: 30000 })
   await phone.click(".modes .mode:has-text('Streaming')")

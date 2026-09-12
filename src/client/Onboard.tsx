@@ -88,7 +88,6 @@ export const Onboard = ({
 	onCreateLeague,
 	onAdoptPreset,
 	onTeamCount,
-	onLineupLock,
 	onAddSuggested,
 	onImportUrl,
 	onLoadFile,
@@ -110,7 +109,6 @@ export const Onboard = ({
 	onAdoptPreset: () => string | null
 	/** Whether this league's lineup can be changed daily. Only the reader knows — no
 	 *  platform preset can say, because one platform hosts both kinds. */
-	onLineupLock: (lock: "daily" | "period") => void
 	/** Accept one "did you mean" — the reader has read the name and tapped it, which is
 	 *  the only way a suggestion is ever allowed to become a roster entry. */
 	/** Resolves true only when the man actually landed in a league's roster. The chip
@@ -228,6 +226,22 @@ export const Onboard = ({
 	return (
 		<div className="grid">
 			<section className="card full onboard">
+				{/*
+				  TWO WRAPPERS, and they exist for ONE viewport: a phone held sideways.
+				  
+				  Measured at 844x390 with the sheet open: the box is 288px tall holding 557px of
+				  content, so the team-count question sat 19px below the visible bottom while the
+				  finish button sat above it — a reader's natural gesture is the big button he can
+				  see, so the question he answered was the one he never saw. Portrait is fine (590
+				  holding 676, everything reachable), and the content is not the problem: 844px of
+				  WIDTH is.
+				  
+				  So in a short, wide viewport these two become columns — the typing on the left,
+				  the one remaining question and the way out on the right — and everywhere else
+				  they are two plain blocks in a column, which is what they were. See
+				  `.onboard-cols` in src/client/app.css.
+				*/}
+				<div className="onboard-main">
 				{/*
 				  ONE question, and it is about baseball.
 				  
@@ -384,7 +398,9 @@ export const Onboard = ({
 				{/* And the same note when there is no `read` to hang it on — a throw before the
 				    parser returned anything. */}
 				{teamNote && !read && <p className="onboard-missed">{teamNote}</p>}
+				</div>
 
+				<div className="onboard-rest">
 				{/*
 				  The second question, and the only other one. It changes who counts as a
 				  good pickup more than anything else does: the bar every player is measured
@@ -416,49 +432,29 @@ export const Onboard = ({
 				)}
 
 				{/*
-				  THE THIRD QUESTION, AND IT IS THE ONE THE BAR OUTSIDE PROMISES.
-
-				  The dock says "Tell it who's on your team and it will tell you who to start
-				  tonight", and the button below says "Show me tonight" — and on the route a
-				  first visit actually takes, neither was true. `Decide`'s Today section
-				  renders only where `scoring_period.lineup_lock === "daily"`, and the shipped
-				  preset carries no `scoring_period` at all (verified: undefined), so the card
-				  came up with a scoring-period plan and no tonight in it. Repro on the
-				  published build with a fresh profile: paste 18 men, press through, and the
-				  Today section is simply absent.
-
-				  There is no honest way to read this off a preset, because it is not a fact
-				  about a platform — Yahoo hosts both kinds. It is a fact only the reader has,
-				  it takes one tap, and it is the difference between an app that answers
-				  "who do I start tonight" and one that cannot. So it is asked, in the words
-				  somebody who has never read a rules page would use, and what he answers is
-				  stored with `source` saying he is the one who said it.
+				  THE THIRD QUESTION IS GONE, and the argument that put it here is why.
+				  
+				  It asked "Can you change your lineup every day?" and the case for it was real
+				  at the time: `Decide`'s Today section rendered only where
+				  `scoring_period.lineup_lock === "daily"`, and the shipped preset carries no
+				  scoring period at all — so a reader who pressed through without answering got
+				  a scoring-period plan and no tonight in it, on a screen the bar outside had
+				  promised would tell him who to start tonight.
+				  
+				  That gate changed. Today now renders unless the league is KNOWN to lock for the
+				  period, and `assumedDaily` prints the assumption on the heading it qualifies —
+				  "if your league lets you change the lineup every day — most do, and My league
+				  takes the answer". So the absence is stated where it matters instead of being
+				  asked for up front, which is this project's own rule, and the question is one
+				  select away on My league rather than one tap away here.
+				  
+				  And it cost more than a tap. Measured at 390x844 with the sheet open: the box
+				  is 590px tall holding 998px of content, this question sat at y874 — 101px below
+				  the visible bottom — and the finish button at y1113. A reader's natural gesture
+				  is to press the big button he can see, which means the question most readers
+				  answered was the one they never saw, and the two they did see were pushed
+				  further down by the one they did not.
 				*/}
-				{league && (
-					<div className="onboard-teams">
-						<h3>Can you change your lineup every day?</h3>
-						<div className="chips">
-							{([
-								["daily", "Yes, every day"],
-								["period", "No, it locks for the week"]
-							] as const).map(([lock, label]) => (
-								<button
-									key={lock}
-									type="button"
-									className={`chip-btn${league.scoring_period?.lineup_lock === lock ? " on" : ""}`}
-									aria-pressed={league.scoring_period?.lineup_lock === lock}
-									onClick={() => onLineupLock(lock)}
-								>
-									{label}
-								</button>
-							))}
-						</div>
-						<p className="sub">
-							Most Yahoo and ESPN points leagues let you change it every day. If yours
-							does, tonight&rsquo;s lineup is a decision you get to make.
-						</p>
-					</div>
-				)}
 
 				{/*
 				  Everything about platforms, scoring tables and pasted pages lives here, off
@@ -626,6 +622,7 @@ export const Onboard = ({
 						</span>
 					)}
 				</p>
+				</div>
 			</section>
 		</div>
 	)

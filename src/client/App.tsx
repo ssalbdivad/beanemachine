@@ -81,6 +81,23 @@ const templateOptions = (config: Config | null): TemplateOption[] =>
  *  unreadable store and an empty one call for opposite advice. */
 type StoreState = "reading" | "read" | "unreadable"
 
+/*
+  League management, under the answer rather than over it.
+
+  A rule above it and a quiet label, because these six controls — New, Remove, Download, Load
+  file, a template picker and a URL field — are a once-a-season act that used to sit above the
+  reader's own team on the one screen he opens to fix his scoring. The rule is what says "the
+  screen ends here"; the label is set like the page's other section labels rather than like a
+  heading, because it is a signpost and not a part of the argument.
+*/
+const ADMIN_CSS = `
+.bar-admin{margin:var(--sp-5,24px) 0 0;border-top:1px solid var(--line);padding-top:var(--sp-3)}
+.bar-admin-head{
+  margin:0 0 var(--sp-2);font-family:var(--mono);font-size:var(--fs-2);font-weight:500;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+}
+`
+
 /** The league picker is one control doing four jobs, so it says which one. */
 const LEAGUE_LABEL: Record<View, string> = {
 	board: "Deciding for",
@@ -117,6 +134,112 @@ export const App = () => {
 	 * from the toolbar opens the sheet immediately, because that reader asked for it.
 	 */
 	const [setupOpen, setSetupOpen] = useState(false)
+	/**
+	 * BACK GOES BACK, and this is the shape that works.
+	 *
+	 * The defect was measured and is the oldest entry in docs/FINDINGS.md: nothing in this
+	 * app pushed a history entry, so Back left the site from anywhere. With the setup sheet
+	 * open and eighteen lines typed, it went to about:blank; after Tonight → Pickups it did
+	 * not return to Tonight, it exited. On a phone Back is how people dismiss a keyboard and
+	 * undo a tap — the most-pressed control on the device — and every press of it was a
+	 * reader leaving.
+	 *
+	 * THE SHAPE THAT DOES NOT WORK is recorded in src/client/Dock.tsx and was tried first: an
+	 * effect keyed on `open` that pushes on open and pops in its cleanup. It passes against
+	 * the production build and fails against the dev server, because StrictMode
+	 * double-invokes effects — setup, cleanup, setup — and a cleanup that calls
+	 * `history.back()` fires `popstate` and closes the sheet the moment it opens. An effect
+	 * whose teardown navigates cannot be idempotent, and idempotent is what React requires.
+	 *
+	 * So the push happens in the GESTURE, which React does not double-invoke, and the
+	 * listener is permanently mounted and only ever RESTORES. Nothing in the listener
+	 * navigates, so there is no path by which it can feed itself.
+	 *
+	 * Two things share the mechanism because they are the same question to a reader — "undo
+	 * the last thing I did": which screen he is on, and whether the setup sheet is up. Both
+	 * live in one entry, so Back from Pickups-with-the-sheet-open takes the sheet down first
+	 * and the tab second, in the order he did them.
+	 *
+	 * The FIRST entry gets `replaceState` rather than a push, so every entry in the stack has
+	 * our state on it and the listener never has to guess what the initial screen was.
+	 * `replaceState` twice is the same as once, which is what makes that effect safe under
+	 * StrictMode where `back()` was not.
+	 */
+	const go = useCallback(
+		(next: { view?: View; sheet?: boolean }) => {
+			const toView = next.view ?? view
+			const toSheet = next.sheet ?? setupOpen
+			/* No entry for a step that changes nothing, or Back would need N presses to
+			   undo one visible thing — which is the failure a reader reads as a broken
+			   button rather than as a tidy stack. */
+			if (toView === view && toSheet === setupOpen) return
+			/*
+			 * CLOSING THE SHEET POPS RATHER THAN PUSHING, and the alternative was measured
+			 * wrong on the dev server: pressing Escape pushed a second entry whose only
+			 * difference was the sheet being down, so Back REOPENED the sheet. Closing a thing
+			 * is the undo of opening it, and Back after it should land where the reader was
+			 * before he opened it, not back inside it.
+			 *
+			 * `depth` is what makes this safe. The entry written on mount carries 0 and every
+			 * push carries one more, so "are we standing on an entry this app pushed" is a
+			 * question with an answer — and the one case where `history.back()` would leave the
+			 * site, a sheet that was open on the very first entry, is the case this refuses.
+			 * Without the counter the guard would have been `state.bm.sheet === true`, which
+			 * cannot tell a pushed entry from the initial one.
+			 */
+			const at = (history.state as { bm?: { depth?: number } } | null)?.bm
+			const depth = at?.depth ?? 0
+			if (next.sheet === false && setupOpen && next.view === undefined && depth > 0) {
+				/* `back()` called from a GESTURE, never from an effect's cleanup. That is the
+				   whole difference from the shape documented as broken in src/client/Dock.tsx:
+				   React does not double-invoke an event handler, so this cannot fire twice. The
+				   state change comes back through `popstate`, which is the one place it is set. */
+				try {
+					history.back()
+					return
+				} catch {
+					/* fall through to the push below */
+				}
+			}
+			if (next.view !== undefined) setView(next.view)
+			if (next.sheet !== undefined) setSetupOpen(next.sheet)
+			try {
+				history.pushState({ bm: { view: toView, sheet: toSheet, depth: depth + 1 } }, "")
+			} catch {
+				// A browser that refuses pushState still gets a working app; it just gets the
+				// old Back behaviour, which is the one this is improving and not relying on.
+			}
+		},
+		[view, setupOpen]
+	)
+
+	useEffect(() => {
+		try {
+			if (!(history.state as { bm?: unknown } | null)?.bm)
+				history.replaceState(
+					{ ...(history.state as object | null), bm: { view, sheet: setupOpen, depth: 0 } },
+					""
+				)
+		} catch {
+			/* see `go` */
+		}
+		const onPop = (e: PopStateEvent) => {
+			const at = (e.state as { bm?: { view: View; sheet: boolean; depth?: number } } | null)?.bm
+			/* An entry that is not ours is somebody else's page in this tab's history, and
+			   restoring nothing is the correct response: the browser is already navigating
+			   away and touching state here would fight it. */
+			if (!at) return
+			setView(at.view)
+			setSetupOpen(at.sheet)
+		}
+		window.addEventListener("popstate", onPop)
+		return () => window.removeEventListener("popstate", onPop)
+		/* Mounted once and never re-bound. The handler reads only the event, so it needs no
+		   dependency on `view` or `setupOpen` — and a listener re-bound on every state change
+		   is a listener that can be mid-swap when a gesture fires. */
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [])
+
 	/** True while a file is over the window. A drop target nobody can see is a
 	 *  feature nobody uses, so the page says it will take the file. */
 	const [dragging, setDragging] = useState(false)
@@ -472,6 +595,22 @@ export const App = () => {
 	 *  has one, the preset preview where he has not, and null where neither exists. */
 	const shown = league ?? preview
 	/**
+	 * Whether this browser holds a team for the active league.
+	 *
+	 * Asked HERE rather than inside `Recap`, because it decides where that card goes and a
+	 * component cannot place itself. Cheap — the roster store is a list of ids — and it
+	 * swallows its own failure: an unreadable roster means "no team to answer about", which
+	 * is the same placement as no team, and My league owns the explaining either way.
+	 */
+	const hasTeam = useMemo(() => {
+		if (!key) return false
+		try {
+			return roster.of(key).length > 0
+		} catch {
+			return false
+		}
+	}, [key, rev])
+	/**
 	 * League MANAGEMENT — create, remove, import, download, load a file — is chrome
 	 * for a thing you do once, and it was sitting above the recommendations on every
 	 * view. Measured in the browser: it pushed the first ranked row to y=1187, so on
@@ -598,7 +737,9 @@ export const App = () => {
 							// Choosing a tab is choosing to leave the setup. It reopens by
 							// itself if the last league is ever removed.
 							setOnboarding(false)
-							setView(v.id)
+							/* Through `go`, so Back returns to the tab he came from. See the note
+							   on `go` — a tab press is a forward step and is the commonest one. */
+							go({ view: v.id })
 						}}
 					>
 						{v.label}
@@ -636,7 +777,7 @@ export const App = () => {
 				}
 				onOnboard={() => {
 					setOnboarding(true)
-					setSetupOpen(true)
+					go({ sheet: true })
 				}}
 				onDownload={() => {
 					if (!config) return
@@ -652,6 +793,7 @@ export const App = () => {
 				onLoadFile={loadFile}
 				onPicker={registerPicker}
 				onReject={m => show(m, true)}
+				part="selector"
 			/>
 
 			<Status
@@ -666,8 +808,7 @@ export const App = () => {
 				   that holds it rather than on a dialog he has nothing to put in. */
 				onFixWire={() => {
 					setOnboarding(false)
-					setSetupOpen(false)
-					setView("trade")
+					go({ view: "trade", sheet: false })
 				}}
 			/>
 
@@ -699,7 +840,7 @@ export const App = () => {
 					preset={preset?.label ?? null}
 					onUsePreset={preset ? () => void create(preset.key) : undefined}
 					onLoadFile={() => openPicker.current?.()}
-					onOpenSetup={view === "trade" ? undefined : () => setView("trade")}
+					onOpenSetup={view === "trade" ? undefined : () => go({ view: "trade" })}
 				/>
 			)}
 
@@ -709,7 +850,7 @@ export const App = () => {
 			{league && isPreset(league) && key && (
 				<PresetNote
 					league={league}
-					onOpenSetup={view === "trade" ? undefined : () => setView("trade")}
+					onOpenSetup={view === "trade" ? undefined : () => go({ view: "trade" })}
 					onChecked={() =>
 						void run(async () => {
 							if (
@@ -722,7 +863,7 @@ export const App = () => {
 								!confirm(
 									`Confirm that these values match your own league's settings page? ` +
 										`Nothing was read from your league, so this records that you ` +
-										`checked them by hand — it does not make them verified.`
+										`checked them by hand — it does not make them read from your league.`
 								)
 							)
 								return
@@ -800,16 +941,31 @@ export const App = () => {
 					  at all until there is a team to say something about, so it costs a first
 					  visit neither a pixel nor a request.
 					*/}
-					<Recap snapshot={snapshot} league={shown} leagueKey={key} />
+					{/*
+					  WHERE LAST NIGHT SITS DEPENDS ON WHETHER THERE IS A TONIGHT TO ANSWER.
+					  
+					  With no team, the decision card is a pitch and last night's real numbers are
+					  the most interesting thing the page can show a stranger, so they lead.
+					  
+					  With a team, the decision card IS the product and it has a deadline on it.
+					  Putting the recap above it pushed the answer to y826 on a desktop and y901
+					  on a phone — off the first screen — and test/board.mjs and test/journey.mjs
+					  both assert that the answer is on the first screen, which is a constraint
+					  this repo chose on purpose and which a reward for yesterday does not get to
+					  overrule. A manager opening the app at 6:40pm is working against a lock;
+					  the morning reader scrolls one card.
+					*/}
+					{!hasTeam && <Recap snapshot={snapshot} league={shown} leagueKey={key} />}
 					<Decide
 						snapshot={snapshot}
 						league={shown}
 						leagueKey={key}
 						error={snapshotError}
-						onOpenTeam={() => setView("trade")}
+						onOpenTeam={() => go({ view: "trade" })}
 					/>
+					{hasTeam && <Recap snapshot={snapshot} league={shown} leagueKey={key} />}
 					<p className="next-screen">
-						<button type="button" className="chip-btn" onClick={() => setView("wire")}>
+						<button type="button" className="chip-btn" onClick={() => go({ view: "wire" })}>
 							Everyone you can get →
 						</button>
 					</p>
@@ -879,6 +1035,71 @@ export const App = () => {
 			:	null}
 			</main>
 
+			{/* app.css is being rewritten by another pass as this lands, so the rules this
+			    change needs ride with the component that renders them — the same arrangement
+			    `ASSUMED_CSS` uses in src/client/Decide.tsx. They belong beside the other
+			    `.bar` rules in app.css and can move there whenever the two are not being
+			    edited at once. */}
+			<style href="bar-admin" precedence="default">{ADMIN_CSS}</style>
+			{/*
+			  LEAGUE MANAGEMENT, UNDER THE ANSWER RATHER THAN OVER IT.
+			  
+			  This was above `main` on every screen it appeared on, which meant My league —
+			  the screen a reader reaches when he wants to fix his scoring — opened with
+			  "Start a league from / a blank league (nothing filled in) / New / Remove /
+			  Download / Load file / Import a league from its URL" before anything about his
+			  own team. Six controls for things a person does once a season from a laptop,
+			  between him and the reason he came.
+			  
+			  Under `main` rather than inside the Setup view, so the Load-file escape from an
+			  unreadable store is still reachable from whatever screen he is standing on —
+			  `manage` is true for that case on every view, and moving it into one view would
+			  have taken the only way out with it.
+			*/}
+				<Toolbar
+					config={config}
+					store={store}
+					view={view}
+					manage={manage}
+					activeKey={key}
+					templates={templates}
+					onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
+					onImport={url =>
+						void run(async () => {
+							// reading the league needs a server; storing what it read never does
+							const { key: k, league } = await api.import(url)
+							adopt(leagues.save(k, league), k)
+							show(`Imported ${league.meta.league_name ?? k}`)
+						})
+					}
+					onCreate={template => void create(template)}
+					onRemove={k =>
+						void run(async () => {
+							adopt(leagues.remove(k))
+							show("Removed")
+						})
+					}
+					onOnboard={() => {
+						setOnboarding(true)
+						go({ sheet: true })
+					}}
+					onDownload={() => {
+						if (!config) return
+						const file = leagues.download(config)
+						const carried = [
+							`${Object.keys(file.leagues).length} league${Object.keys(file.leagues).length === 1 ? "" : "s"}`,
+							file.rosters ? `${Object.keys(file.rosters).length} roster` : null,
+							file.lineups ? `${Object.keys(file.lineups).length} lineup` : null,
+							file.pools ? `${Object.keys(file.pools).length} free-agent list` : null
+						].filter(Boolean)
+						show(`Saved a file with ${carried.join(", ")} in it. Drop it on this page to load it back.`)
+					}}
+					onLoadFile={loadFile}
+					onPicker={registerPicker}
+					onReject={m => show(m, true)}
+					part="manage"
+				/>
+
 			{/*
 			  The setup hovers at the foot of the page rather than sitting above the
 			  board, and the reason is the whole first-visit problem in one line: the
@@ -900,7 +1121,7 @@ export const App = () => {
 					 * league there is nothing to go back to, so the dock stays.
 					 */
 					onToggle={next => {
-						setSetupOpen(next)
+						go({ sheet: next })
 						if (!next && league) setOnboarding(false)
 					}}
 					summary={
@@ -957,34 +1178,17 @@ export const App = () => {
 					 * there is nothing to derive and nothing to check it against.
 					 */
 					/*
-					 * The one fact about a league that no preset can carry, because one platform
-					 * hosts both kinds — and the fact the dock's whole promise rests on. See the
-					 * note beside the question in Onboard.tsx.
+					 * The lineup-lock handler is gone with the question that fed it.
 					 *
-					 * Everything else in `scoring_period` stays null rather than being filled in
-					 * around it: he was asked one thing and answered one thing, and `source` says
-					 * so in his words so a later read off his settings page can overwrite it
-					 * without anyone having to guess where it came from.
+					 * src/client/Onboard.tsx no longer asks "can you change your lineup every day?"
+					 * during setup: the gate that made it necessary changed, so Today now renders
+					 * unless the league is KNOWN to lock for the period and states the assumption on
+					 * its own heading, and the question is a select on My league. The saving code
+					 * that lived here — writing `lineup_lock` with `source: "you said so during
+					 * setup"` so a later read off the settings page could overwrite it without
+					 * anyone guessing where it came from — is not lost: `patch` in the league editor
+					 * below writes the same field through the same store.
 					 */
-					onLineupLock={lock =>
-						void run(async () => {
-							if (!league || !key) return
-							adopt(
-								leagues.save(key, {
-									...league,
-									scoring_period: {
-										kind: league.scoring_period?.kind ?? null,
-										days: league.scoring_period?.days ?? null,
-										starts_on: league.scoring_period?.starts_on ?? null,
-										anchor: league.scoring_period?.anchor ?? null,
-										lineup_lock: lock,
-										source: "you said so during setup"
-									}
-								}),
-								key
-							)
-						})
-					}
 					/*
 					 * One accepted suggestion, and it goes into BOTH stores.
 					 *
@@ -1089,13 +1293,11 @@ export const App = () => {
 							}
 						}
 						setOnboarding(false)
-						setSetupOpen(false)
-						setView("trade")
+						go({ view: "trade", sheet: false })
 					}}
 					onDone={() => {
 						setOnboarding(false)
-						setSetupOpen(false)
-						setView("board")
+						go({ view: "board", sheet: false })
 					}}
 				/>
 				</Dock>
@@ -1238,7 +1440,8 @@ const Toolbar = ({
 	onOnboard,
 	onLoadFile,
 	onPicker,
-	onReject
+	onReject,
+	part
 }: {
 	config: Config | null
 	store: StoreState
@@ -1261,6 +1464,23 @@ const Toolbar = ({
 	 *  route without a second `<input type=file>` to keep in step. */
 	onPicker: (open: () => void) => void
 	onReject: (message: string) => void
+	/**
+	 * Which half of this to draw, and the split is the whole point of it.
+	 *
+	 * The `selector` is the one line that says which league everything below is
+	 * denominated in. That is orientation and belongs at the top of the page.
+	 *
+	 * `manage` is New, Remove, Download, Load file, a template picker and a URL field —
+	 * six controls for things a person does once a season from a laptop. They were ALSO at
+	 * the top, so My league opened with "Start a league from / a blank league / New /
+	 * Remove / Download / Load file / Import a league from its URL" above anything about
+	 * the reader's own team, on the one screen he reaches when he wants to fix his
+	 * scoring. They now sit under the content, behind a summary that says what they are
+	 * for, on the same screens as before — nothing became unreachable, including the
+	 * Load-file escape from an unreadable store, which is why this renders under `main`
+	 * for every view rather than only inside Setup.
+	 */
+	part: "selector" | "manage"
 }) => {
 	const [url, setUrl] = useState("")
 	/**
@@ -1282,9 +1502,6 @@ const Toolbar = ({
 	const keys = Object.keys(config?.leagues ?? {})
 	// the same control means different things per view, so it says which
 	const label = LEAGUE_LABEL[view]
-	// One league is the normal case, and a select with one option is a control that
-	// cannot do anything — the chips below already name the league it would name.
-	if (!manage && keys.length < 2) return null
 	const selector = (
 				<label className="ctl">
 					<span>{label}</span>
@@ -1312,29 +1529,66 @@ const Toolbar = ({
 					</select>
 				</label>
 	)
-	// Nothing to manage from here — just say which league the page is denominated in.
-	if (!manage) return <div className="bar">{selector}</div>
+	/* The way back to the first-run setup.
+	   A reader who already has a league had no route to it at all — it opens by itself on a
+	   first visit and never again — and "I set up the wrong league" and "I want to add my
+	   second one" are both ordinary. Deliberately not `.primary`: Import owns that below, and
+	   the two are different promises — Import reads a league now, this walks a person through
+	   getting one in.
+
+	   IT STAYS ABOVE THE FOLD, and it is the one control from that row that does. The rest of
+	   them are database operations on this browser's store; this is the guided route, and a
+	   first pass at moving the row put it inside the disclosure with them — which hid the only
+	   signposted way back into setup behind a summary nobody would read looking for it, and
+	   was caught by test/ui.mjs failing to find it rather than by reasoning. */
+	const guided = (
+		<button
+			data-ctl="onboard"
+			title="Read a league off its own settings page, or start from a preset — the guided setup"
+			onClick={onOnboard}
+		>
+			Set up a league
+		</button>
+	)
+
+	if (part === "selector") {
+		/* One league is the normal case, and a select with one option is a control that
+		   cannot do anything — the chips below already name the league it would name. So it
+		   appears when there is a choice to make, or when the store itself has something to
+		   report, because the select is where that gets reported. "read" is the state where
+		   the store answered; "reading" and "unreadable" both have something to say. */
+		/* `|| manage` keeps the old rule exactly where it was load-bearing: on the screen
+		   where a league is being set up, naming which one is being edited is worth a
+		   one-option select, and test/ui.mjs asserts it. The "a control that cannot do
+		   anything" argument applies to the screens where there is nothing to manage. */
+		const choose = keys.length >= 2 || store !== "read" || manage
+		return choose || manage ?
+				<div className="bar">
+					{choose ? selector : null}
+					{manage ? guided : null}
+				</div>
+			:	null
+	}
+	if (!manage) return null
 	return (
-		<>
+		<section className="bar-admin">
+			{/*
+			  A HEADING, NOT A DISCLOSURE, and the first attempt was the disclosure.
+			  
+			  Folding these six controls away read well and broke two things a fold cannot
+			  help: Playwright cannot click into a closed `<details>`, so test/ui.mjs and
+			  test/static.mjs lost the Download round-trip, the New-league path and the
+			  template picker — and a reader looking for "how do I load the file I saved in
+			  March" has no reason to open a summary before he has read one. Position was
+			  the whole complaint: they were ABOVE the reader's own team on the screen he
+			  opens to fix his scoring. Under the content with a heading that says what they
+			  are for answers it, and costs nobody a tap.
+			  
+			  Named for what a person wants rather than for what the controls are: a second
+			  league, a file to load, a copy to keep.
+			*/}
+			<h2 className="bar-admin-head">Other leagues, files and backups</h2>
 			<div className="bar">
-				{selector}
-				{/* The way back to the first-run setup.
-				    A reader who already has a league had no route to it at all — it opens
-				    by itself on a first visit and never again — and "I set up the wrong
-				    league" and "I want to add my second one" are both ordinary. It leads
-				    the row because it is the guided route; New and the rest are the
-				    unguided ones. */}
-				{/* Deliberately not `.primary`: Import owns that in this row, and the two
-				    are different promises — Import reads a league now, this one walks a
-				    person through getting one in. Leading the row is the emphasis it
-				    needs. */}
-				<button
-					data-ctl="onboard"
-					title="Read a league off its own settings page, or start from a preset — the guided setup"
-					onClick={onOnboard}
-				>
-					Set up a league
-				</button>
 				<label className="ctl">
 					<span>Start a league from</span>
 					<select
@@ -1439,7 +1693,7 @@ const Toolbar = ({
 					Import
 				</button>
 			</form>
-		</>
+		</section>
 	)
 }
 
@@ -1485,8 +1739,23 @@ const Status = ({
 			: store === "unreadable" ?
 				<span className="chip warn">leagues unreadable</span>
 			:	<span className="chip warn">no league yet</span>}
-			<span className={data.className} title="Age of the MLB and Statcast capture the ranking is computed from">
+			{/*
+			  NO TOOLTIP, and the stale case says so in words.
+			  
+			  The hover read "Age of the MLB and Statcast capture the ranking is computed from",
+			  which a phone cannot open and which uses three words about the software to restate
+			  the label beside it. What a reader needs from this chip is not what it is the age
+			  OF — "player data" already says that — but whether the age matters, and that was
+			  carried by the warn colour alone. Colour is not a sentence, and a reader who
+			  cannot see the difference got nothing at all.
+			  
+			  So the qualification is text, on the only case where there is one: `freshness`
+			  calls anything past thirty-six hours stale, which is the point at which a day's
+			  games have happened since the numbers were taken.
+			*/}
+			<span className={data.className}>
 				player data <b>{data.value}</b>
+				{age.stale && !snapshotError && snapshot ? " — a day of games has happened since" : ""}
 			</span>
 			<WireChip league={league} wire={wire} onFix={onFixWire} />
 		</div>
@@ -1574,7 +1843,14 @@ const WireChip = ({
 			  not gone anywhere; it is in the toolbar on that same screen, where somebody who
 			  has a file will look for it.
 			*/
-			title="Who is free is an estimate from how widely each player is rostered across all of Yahoo, not your league's own list. Your league's own list makes it exact."
+			/* The tooltip this replaced held the whole explanation — "Who is free is an
+			   estimate from how widely each player is rostered across all of Yahoo, not your
+			   league's own list. Your league's own list makes it exact." — on a control whose
+			   visible text already says "estimated" and "make it exact", which is the fact and
+			   the action. A phone cannot open it, so for most readers the sentence did not
+			   exist; for the rest it restated the button. The WHY belongs on the screen the
+			   button leads to, and My league now prints where the taken/free line falls and in
+			   which league, in text, under the lineup it applies to. */
 		>
 			free agents <b>estimated</b> &mdash; make it exact
 		</button>
@@ -1596,16 +1872,33 @@ const Chips = ({ league, detail }: { league: League; detail: boolean }) => {
 				</span>
 			)}
 			{detail && meta.scoring_type && <span className="chip">{meta.scoring_type}</span>}
-			{/* "unverified" means the values were typed rather than read off the platform,
-			    and that changes how much to trust every number below — so it shows
-			    everywhere. Its opposite is the uninteresting case and rides with the
-			    rest of the provenance. */}
+			{/*
+			  THE SAME FACT, IN WORDS ABOUT BASEBALL.
+			  
+			  These chips read "read from source", "unverified" and "fetched 2026-09-08". Each
+			  one is a true statement and none of them is about a fantasy league: "source" is
+			  the word for where a program got something, "unverified" is what a form says when
+			  it distrusts you, and "fetched" is what a program does. The house rule is that
+			  nothing user-facing talks about the software, and a chip is the shortest possible
+			  place to break it — a reader has no sentence around it to work out what it meant.
+			  
+			  What the flag actually means is whether every value was read off the reader's own
+			  league pages or typed in from somewhere else, which is the difference between a
+			  board priced in HIS points and one priced in a borrowed table. That is worth
+			  saying, and it says itself in five words.
+			  
+			  The untrue case still shows everywhere, because it changes how much to trust
+			  every number below; the true case rides with the detail, because it is the
+			  uninteresting one.
+			*/}
 			{(detail || !provenance.verified) && (
 				<span className={`chip ${provenance.verified ? "ok" : "warn"}`}>
-					{provenance.verified ? "read from source" : "unverified"}
+					{provenance.verified ? "from your league" : "not from your league"}
 				</span>
 			)}
-			{detail && provenance.fetched_at && <span className="chip">fetched {provenance.fetched_at}</span>}
+			{detail && provenance.fetched_at && (
+				<span className="chip">read {provenance.fetched_at}</span>
+			)}
 		</>
 	)
 }

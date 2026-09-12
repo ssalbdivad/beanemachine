@@ -142,3 +142,51 @@ The Tonight card is said to state both halves of the innings floor. It cannot on
 path: `grep -n "innings\|floor" public/scoring.json` returns nothing, so the borrowed league
 states no innings requirement and `Decide.tsx:1884` never renders. Whether the sentence is
 right is untested by any walk that starts from an empty profile.
+
+---
+
+## The refute pass of 2026-09-12, and what is still open after it
+
+A six-lens adversarial swarm was run against the night's own work and reproduced 72 findings,
+which triaged into six root causes. Five are fixed — `36ab94b` through `a256b86` — and each
+commit message carries the measurement. Named here so the next walk knows they were looked at:
+
+- The banked-innings sentence was hard-wired to zero in every league, because the read used
+  `period.start` (today, on any day after the period opened) where `periodStart` exists for
+  exactly that question. It prints 37.7 against the same roster now.
+- A null read as a zero, in four places. A side of the ball that failed to answer looked like a
+  roster of men who did not play; a date with no baseball on it printed "your lineup scored 0";
+  a bench man who never took the field was named as the swap that would have beaten a starter
+  who priced below zero; and an empty day graded Billy "level" and froze the verdict.
+- A name used as an identity: two men called Max Muncy, and a man held on both sides of the
+  ball, collapsed into one React key.
+- Escape destroyed eighteen typed lines, because the sheet is `{docked && <Dock>}` and a close
+  ends the onboarding state once a league exists. The TEXT is kept now, not the component.
+- The Tonight header promised a total that included seats the card had already stopped offering.
+- Every deep link on the PUBLISHED build landed on Tonight while the address bar said
+  `#pickups` — a first-visit branch that forces the board, unreachable on the dev server
+  because a dev read supplies a league.
+
+### Still open, measured, and small
+
+- **A two-way player is two rows with one name.** `rosterKey` is `id:group`, so Ohtani the
+  hitter and Ohtani the pitcher are two correct roster entries with two correct totals — and
+  the men fold on the recap card prints his name twice with two different numbers beside it and
+  nothing saying which is which. The keys are right (he is no longer one React row); the
+  LABEL is what is missing. Not fixed because the shape of the fix is a product question:
+  either the side of the ball goes on the row, or the two rows are summed into one man.
+- **A pasted roster line the app cannot match to a player is silently absent from the recap.**
+  `unmatchedLines` exists and the setup sheet quotes them back, but a man who was matched when
+  the roster was saved and is now missing from the capture simply does not appear in the
+  card's count of "N of M of your men played". The M is the count it knows about.
+- **A shift's dependent swap is matched on the seat, not on a stored dependency.** `freezeShut`
+  infers which swap a shift was making room for by comparing `shift.from` with `swap.startSlot`,
+  which is what the data supports today. If `planLineup` ever produced two shifts out of the
+  same seat, or a shift made for a reason other than freeing its seat, the inference would be
+  wrong in the safe direction — it would freeze a change the reader could in fact have made.
+  Recorded rather than fixed because the fix is in the planner's output shape, not in the card.
+- **Billy's record can only speak about mornings the reader showed up.** The card reads ONE
+  day, so a recommendation recorded on a day nobody came back to is ungradeable for ever, and
+  `KEEP_DAYS` eventually drops it. The reason printed is now true of that day, which is the
+  honest floor; what would actually fix it is grading the missed days on demand, at two
+  requests and about 38 KB each.

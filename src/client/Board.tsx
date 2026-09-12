@@ -15,7 +15,7 @@ import {
 } from "./api.ts"
 import { useEffect } from "react"
 import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
-import { tab } from "./panels.tsx"
+import { purpose, tab } from "./panels.tsx"
 import { andList } from "../data/names.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -29,6 +29,46 @@ const MISSING_LABEL: Record<string, string> = {
 
 /** Rows rendered per step as the reader scrolls. */
 const PAGE = 60
+
+/**
+ * The row the history entry we are standing on was opened for, or null.
+ *
+ * `bm` is App.tsx's own state object — `view`, `sheet`, `depth` — and `row` is one more
+ * field on it rather than a second object, so that every entry in the stack still carries
+ * everything App's popstate listener reads off it. See the long note on `open` in `Board`.
+ */
+const rowAt = (): number | null =>
+	typeof history === "undefined" ?
+		null
+	:	((history.state as { bm?: { row?: number | null } } | null)?.bm?.row ?? null)
+
+/**
+ * Record which row is open on the history stack: a new entry for the first one opened,
+ * and an amendment to it for the next.
+ *
+ * It REFUSES on an entry that has no `bm` of App's on it. App's listener reads `at.view`
+ * the moment `bm` exists, so an entry carrying only our `row` would hand it
+ * `setView(undefined)` the next time Back landed there — and an entry App wrote is the only
+ * kind that exists by the time a reader can tap a row, because App writes one on mount.
+ */
+const markRow = (id: number, push: boolean) => {
+	const prev = history.state as { bm?: { depth?: number } } | null
+	if (!prev?.bm) return
+	const bm = { ...prev.bm, row: id }
+	try {
+		/* `location.href`, so the hash App put there is preserved exactly. The drill-down is
+		   not in the URL on purpose: it is a thing the reader opened over the screen he is on,
+		   not a place, and the same argument App makes about the setup sheet applies — nobody
+		   sends somebody "row 4 of the wire", and a reload deciding to open one would be the
+		   page deciding what he is reading. */
+		if (push)
+			history.pushState({ ...prev, bm: { ...bm, depth: (prev.bm.depth ?? 0) + 1 } }, "", location.href)
+		else history.replaceState({ ...prev, bm }, "", location.href)
+	} catch {
+		/* A browser that refuses pushState keeps the behaviour every browser had until now:
+		   the row opens and Back leaves the screen. Nothing else depends on the entry. */
+	}
+}
 
 /**
  * WHERE THE LIST STOPS, and it used not to stop at all.
@@ -457,17 +497,42 @@ const day = (iso: string): string => {
  * range and the phrase names the period rather than a number of days. The rest of the
  * season has no stated end date in the snapshot, so it is named rather than given the
  * fortnight's.
+ *
+ * AND THE DATES ARE NOW THE RATING'S OWN, which was the last lie in this function.
+ * Two of the three branches read `snapshot.horizon`, a range baked in when the data is
+ * captured, while `useBoard` has rebuilt both long windows from TODAY ever since it found
+ * the fortnight board projecting across games that had already been played — its own
+ * measurement, on `longWindows`, not restated here. Measured
+ * 2026-09-12 on the dev server, empty profile: the header read "974 players · Sep 8 →
+ * Sep 22" over rows rated across Sep 12 → Sep 26 — a window whose first four days were
+ * in the past and which no number on the screen came out of. The rows prove which one
+ * they used: fourteen of the thirty clubs have a different game count in the two windows,
+ * and all four of them that reached the visible top twelve printed TODAY's — 13 not 12 for
+ * Heriberto Hernández of Miami, 14 not 13 for JJ Bleday of Cincinnati, and the same for
+ * Arizona and San Diego.
+ *
+ * So `useBoard` decides the window once and hands over its dates, and this function
+ * only words them. It cannot name a window the board was not rated over, because it no
+ * longer knows any dates of its own — which also fixes the streaming fallback: a
+ * period that resolves to no games is rated over the fortnight, and the header used to
+ * go on printing the period's dates anyway.
+ *
+ * The fortnight is no longer given a day count. `longWindows` builds it as today
+ * through today+14 and `windowFrom` counts both edges, so it is fifteen dates of games
+ * under a tab that calls itself "This fortnight" — and a phrase reading "the next 14
+ * days" beside a range reading "Sep 12 → Sep 26" invites exactly the subtraction that
+ * finds the extra day. Naming the shape rather than the arithmetic is true either way,
+ * and moving the window's edge to make the number right would move every bscore on the
+ * board.
  */
 const horizonSpan = (
-	snapshot: Snapshot,
-	mode: Filters["mode"],
+	over: { kind: "period" | "rest" | "fortnight"; start: string; end: string },
 	period: ResolvedPeriod | null
 ) => {
-	const { start, end } = snapshot.horizon
-	if (mode === "stream" && period) {
-		const days = datesBetween(period.start, period.end)
+	if (over.kind === "period" && period) {
+		const days = datesBetween(over.start, over.end)
 		return {
-			range: `${day(period.start)} → ${day(period.end)}`,
+			range: `${day(over.start)} → ${day(over.end)}`,
 			phrase:
 				// A window the reader chose by length is named by that length, not by the
 				// period it was cut out of: "the rest of this scoring period" under a
@@ -479,13 +544,12 @@ const horizonSpan = (
 				: "the rest of this scoring period"
 		}
 	}
-	if (mode === "stash")
+	if (over.kind === "rest")
 		return {
-			range: `${day(start)} → the end of the season`,
+			range: `${day(over.start)} → the end of the season`,
 			phrase: "the rest of the regular season"
 		}
-	const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000)
-	return { range: `${day(start)} → ${day(end)}`, phrase: `the next ${days} days` }
+	return { range: `${day(over.start)} → ${day(over.end)}`, phrase: "the fortnight ahead" }
 }
 
 /**
@@ -607,7 +671,85 @@ export const Board = ({
 	 * deliberately are not.
 	 */
 	const [filters, setFilters] = useState<Filters>(() => ({ ...DEFAULT_FILTERS, ...readView() }))
-	const [open, setOpen] = useState<number | null>(null)
+	/**
+	 * WHICH ROW'S DRILL-DOWN IS OPEN — and BACK NOW CLOSES IT WITHOUT ALSO COSTING THE TAB.
+	 *
+	 * Measured on the dev server under StrictMode with an empty profile, 2026-09-12:
+	 * Tonight → Pickups took `history.length` from 2 to 3, and then opening a row's
+	 * drill-down left it at 3. The gesture pushed nothing. So the one Back a reader presses
+	 * to shut a row he opened by mistake closed the row AND undid the tab — measured
+	 * landing: Tonight, hash back to `#tonight`, Pickups deselected. One press undoing two
+	 * actions, and on a phone Back is the gesture people use most.
+	 *
+	 * THE MECHANISM IS App.tsx's, deliberately. The push happens in the GESTURE, and the
+	 * listener is mounted once and only ever CLOSES. src/client/Dock.tsx records the shape
+	 * that does not work — an effect keyed on the open thing that pushes on setup and pops
+	 * in its cleanup — which passes against a production build and fails against the dev
+	 * server, because StrictMode double-invokes effects and a cleanup that calls
+	 * `history.back()` is not idempotent. Nothing in the listener below navigates, so there
+	 * is no path by which it can feed itself. It was driven on the DEV server for exactly
+	 * that reason: this is the one configuration the broken shape fails under.
+	 *
+	 * IT EXTENDS App's ENTRY rather than writing one of its own — `bm.row` alongside
+	 * `bm.view`, `bm.sheet` and `bm.depth`, with `depth` incremented the way `go` does it.
+	 * So Back onto a row entry restores the screen the row belongs to and closes the row, in
+	 * the order the reader did them, and `go`'s own "am I standing on an entry this app
+	 * pushed" test still has an answer. See `markRow` for why an entry with no `bm` on it is
+	 * left alone.
+	 *
+	 * OPENING A SECOND ROW REPLACES rather than pushes: two rows cannot be open at once, so
+	 * a push per row would make Back walk backwards through every row the reader glanced at.
+	 * One entry means one Back closes whatever is open.
+	 *
+	 * THE INITIAL STATE IS READ OFF THE ENTRY, which is not the listener opening rows. App
+	 * renders this file only for the `wire` view, so leaving Pickups and coming back
+	 * REMOUNTS it: without the read, Back onto a row entry would restore the screen, find
+	 * nothing open, and the next Back would be a press that changed nothing visible. It is
+	 * one pure read at mount of the entry the browser is already standing on — the same
+	 * thing App does with the hash.
+	 *
+	 * One rough edge left, and it is a no-op rather than a wrong answer: a filter that
+	 * removes the open row from the board leaves the entry behind it, so the next Back
+	 * closes something already invisible before the one after it moves the screen.
+	 */
+	const [open, setOpen] = useState<number | null>(() => rowAt())
+	useEffect(() => {
+		/* ONLY EVER CLOSES. `setOpen` is given a function so the listener needs no dependency
+		   on `open` and can stay mounted for the life of the screen — a listener re-bound on
+		   every state change is one that can be mid-swap when a gesture fires. */
+		const onPop = (e: PopStateEvent) => {
+			const row = (e.state as { bm?: { row?: number | null } } | null)?.bm?.row ?? null
+			setOpen(cur => (cur !== null && row !== cur ? null : cur))
+		}
+		window.addEventListener("popstate", onPop)
+		return () => window.removeEventListener("popstate", onPop)
+	}, [])
+	/**
+	 * Open a row, or close the open one, and move the history stack with it.
+	 *
+	 * Closing goes BACK rather than pushing an entry whose only difference is the row being
+	 * shut: closing a thing is the undo of opening it, and App.tsx measured the alternative
+	 * on the setup sheet, where the extra entry made Back REOPEN what had just been closed.
+	 * `back()` is called from a gesture, never from an effect's cleanup, and the state change
+	 * arrives back through the listener above, which is the one place `open` is cleared.
+	 */
+	const toggleRow = (id: number) => {
+		const standing = rowAt()
+		if (open === id) {
+			if (standing === id) {
+				try {
+					history.back()
+					return
+				} catch {
+					/* fall through and close without the stack */
+				}
+			}
+			setOpen(null)
+			return
+		}
+		setOpen(id)
+		markRow(id, standing === null)
+	}
 	/**
 	 * How many rows are rendered. The board used to stop dead at 120 with a line
 	 * telling you to narrow the filters, which is the page asking the reader to work
@@ -713,6 +855,10 @@ export const Board = ({
 	const {
 		rows, scored, slotsRanked, period, streaming, teamNames, availability, sort, desc, mine,
 		injuryError,
+		/* The window the rows were actually rated over. Read rather than derived here: this
+		   file used to derive it from `snapshot.horizon` and printed a window four days
+		   older than the one the numbers came out of — see `horizonSpan`. */
+		ratedOver,
 		/* The expected-stats rows are a SECOND file now and the board does not wait for
 		   them — see `useContact` in useBoard.ts. Two things come back: which state that
 		   file is in, and the call that asks for it. Only the drill-down asks. */
@@ -830,7 +976,7 @@ export const Board = ({
 
 	// Not a hook, so it belongs after the refusals above rather than among them —
 	// and it needs the snapshot they have just established exists.
-	const span = horizonSpan(snapshot, filters.mode, period)
+	const span = horizonSpan(ratedOver, period)
 
 	/**
 	 * A row's start schedule, or null where there is nothing honest to say: off the
@@ -1031,12 +1177,80 @@ export const Board = ({
 	   changed under him; the note has to agree with the chips it is describing, or it says
 	   "SP is not offered" with SP on screen and pressed. */
 	const hiddenSlots = SLOTS.filter(s => s && !slotsRanked.has(s) && filters.slot !== s)
+	/**
+	 * How widely rostered the top of the board actually is, for the sentence that explains
+	 * why the top of the board is men nobody recognises.
+	 *
+	 * Null unless all ten of the first ten carry a published share — see the note on the
+	 * intro paragraph below. `rosteredPct` is Yahoo's own "% Ros" off the capture, the same
+	 * figure Billy's card already quotes for the one man it picks ("rostered in 35% of
+	 * leagues"), so the board and the card cannot disagree about it.
+	 */
+	const topOwned = (() => {
+		const ten = rows.slice(0, 10)
+		if (ten.length < 10) return null
+		const shares = ten.map(r => r.rosteredPct)
+		if (shares.some(v => v == null)) return null
+		const pcts = shares as number[]
+		return { low: Math.round(Math.min(...pcts)), high: Math.round(Math.max(...pcts)) }
+	})()
 	return (
 		<>
-			{/* Moved here from App so it can see the mode: it describes bscore, and the
-			    streaming list is ordered by projected points, so above that list it was
-			    pointing at the wrong column. `.full` because `.grid` is two columns. */}
+			{/*
+			  WHAT THIS SCREEN IS, AND WHY ITS TOP FIVE ARE MEN NOBODY HAS HEARD OF.
+
+			  A bscore legend stood here and was deleted for pointing at the wrong column on
+			  the streaming tab, leaving an empty `.full` div at the top of the board. Two
+			  separate sentences now have to be said on this screen and they belong in one
+			  place, because they are one thought.
+
+			  THE FIRST is the tab's own sentence, which until now existed only as the `title`
+			  attribute on the nav button — a hover, on an app that is opened on a phone. 70
+			  `title` attributes are live on this screen at 390x844 and 68 of them run longer
+			  than six words; the three tab sentences are the best orientation copy in the app
+			  and a thumb cannot reach one of them. It is read from `VIEWS` through `purpose`
+			  rather than typed out, for the same reason `tab()` is: the tabs have been renamed
+			  three times and every rename left a sentence describing a screen that no longer
+			  had that name.
+
+			  THE SECOND is the one two separate walkers read as a broken app. With no team
+			  entered this board opens on Grant Taylor, Sam Antonacci and Tristan Peters — three
+			  White Sox — then two men from Miami and Cincinnati, and Billy picks the White Sox
+			  reliever. That is CORRECT: a board of men you can actually add, ranked by what
+			  they beat the man left at their slot by, is a board of men almost nobody has
+			  taken, and being untaken is the same fact as being available. Measured 2026-09-12
+			  on the dev server with an empty profile: every one of the top ten carries a
+			  rostered share and they run from 14% (Cole Carrigg) to 35% (Grant Taylor), mean
+			  25%, against a cut of 35% — the 270th most widely rostered man in this capture,
+			  which is what a 10-team league with 27 seats holds. So two leagues in three have
+			  the best name on this board sitting free.
+
+			  The range is COMPUTED from the rows on screen rather than written down, because
+			  the reader can widen the board: unticking "Only players I can add" fills it with
+			  men rostered everywhere, at which point a sentence about unfamiliar names would
+			  be false. So the explanation is scoped to the filter that makes it true, and the
+			  numbers move with the board. Where fewer than ten rows are ranked, or any of the
+			  ten has no published rostered share, the clause is left off entirely rather than
+			  quoting a range over a subset — an absence is stated as an absence, and here the
+			  honest absence is silence.
+			*/}
 			<div className="full">
+				<p className="sub board-intro">
+					{purpose("wire")}{" "}
+					{availableOnly && (
+						<>
+							The top names are unfamiliar because hardly anybody has taken them, which is
+							what leaves them free for you
+							{topOwned ?
+								<>
+									{" "}
+									— the first ten are rostered in {topOwned.low}% to {topOwned.high}% of
+									leagues.
+								</>
+							:	"."}
+						</>
+					)}
+				</p>
 			</div>
 			{/*
 			  A toolbar, not a card.
@@ -1767,7 +1981,7 @@ export const Board = ({
 							/* the reader's budget, counted down the ranking he is actually
 							   looking at — his filters have already decided who is on it */
 							open={open === r.player.id}
-							onToggle={() => setOpen(open === r.player.id ? null : r.player.id)}
+							onToggle={() => toggleRow(r.player.id)}
 							contactStatus={contactStatus}
 							askForContact={askForContact}
 						/>

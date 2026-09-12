@@ -770,6 +770,25 @@ export const tradesClosed = (
 export const tab = (id: View): string => VIEWS.find(v => v.id === id)?.label ?? id
 
 /**
+ * THE SAME SENTENCE THE TAB CARRIES, for a screen that wants to say it out loud.
+ *
+ * `VIEWS[].purpose` is the best orientation copy in the app and for most of its life it
+ * reached exactly one surface: the `title` attribute on each nav button, which is a hover.
+ * Measured 2026-09-12 at 390x844 on Pickups, with no team entered — 70 `title` attributes
+ * live on that screen alone, 68 of them longer than six words, the three tab sentences
+ * among those, and not one reachable by a thumb. A phone reader has never seen any of the
+ * three. (58 was the count on My league; the board is worse, because every row carries a
+ * sentence about its own game count.)
+ *
+ * So the sentence is exported the way the LABEL is, for the same reason the label is
+ * (see `tab`): a screen that wants to introduce itself should read the one copy of its
+ * own sentence rather than grow a second one that drifts. One caller so far, the board,
+ * because the board is the screen whose first impression is five names nobody recognises.
+ * The other two screens are Decide.tsx and Trade.tsx and they can call this unchanged.
+ */
+export const purpose = (id: View): string => VIEWS.find(v => v.id === id)?.purpose ?? ""
+
+/**
  * The word in the address bar for each screen.
  *
  * Separate from the id on purpose, and for the same reason the ids are not the labels: an id

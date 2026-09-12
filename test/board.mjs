@@ -2951,6 +2951,85 @@ await phone.close()
   await sp.close()
 }
 
+/**
+ * WHAT A FIRST VISIT TO PICKUPS SAYS, AND WHAT ITS BACK BUTTON DOES.
+ *
+ * A fresh context, because all three of these are about the reader who has entered
+ * nothing: docs/FINDINGS.md measured each of them on an empty profile, and two of the
+ * three are only wrong there in the way a first-time reader meets them.
+ *
+ * 1. THE HEADER DATED ITSELF FROM THE CAPTURE. It read "974 players · Sep 8 → Sep 22"
+ *    over rows rated across Sep 12 → Sep 26 — `horizonSpan` printed `snapshot.horizon`,
+ *    which is baked in when the data is taken, while `useBoard` has rebuilt the fortnight
+ *    from TODAY since the day it found the board projecting across 57 games already
+ *    played. The window a reader was shown opened four days in the past and no number
+ *    under it came out of it. The assertion below cannot read the capture's dates without
+ *    fetching the file, so it asserts the two things that are true of the rating and false
+ *    of the capture: the window starts TODAY, and it runs fourteen days forward from
+ *    there. A regression to `snapshot.horizon` fails the first clause the day after a
+ *    capture is taken, which is every day one is read.
+ *
+ * 2. OPENING A DRILL-DOWN PUSHED NOTHING, so the one Back that closes a row a reader
+ *    opened by mistake also undid the tab he was on and returned him to Tonight — one
+ *    gesture undoing two actions, and the gesture a phone reader uses most. Driven here
+ *    rather than against the published build on purpose: the shape that does NOT work
+ *    (src/client/Dock.tsx) passes everywhere except under StrictMode, which is the dev
+ *    server, which is what `BASE` is.
+ *
+ * 3. THE SCREEN NEVER SAID WHAT IT WAS. `VIEWS[].purpose` in src/client/panels.tsx is the
+ *    best orientation copy in the app and reached exactly one surface: a `title` on the nav
+ *    button, a hover, on an app opened on a phone. And the board's own top five — three
+ *    White Sox and two men from two of the worst teams in baseball — read as a broken app
+ *    to two separate walkers, when it is the correct output of ranking men you can actually
+ *    add. Both sentences are now text on the screen, and the second carries the rostered
+ *    range off the rows themselves, so it cannot claim a share the board is not showing.
+ */
+{
+  const first = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  await first.goto(BASE, { waitUntil: "domcontentloaded" })
+  await screen(first, "Pickups")
+  await first.waitForSelector(".board-row", { timeout: 30000 })
+
+  const head = await first.$eval(".card-head-count", e => e.textContent.replace(/\s+/g, " "))
+  const range = head.match(/([A-Z][a-z]{2} \d+) → ([A-Z][a-z]{2} \d+)/)
+  const label = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  const now = new Date()
+  const fortnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 14)
+  t("the board's window opens today, not on the day the player data was captured",
+    !!range && range[1] === label(now), `${head} — today is ${label(now)}`)
+  t("and it runs the fortnight the rows are actually rated over",
+    !!range && range[2] === label(fortnight), `${head} — fourteen days on is ${label(fortnight)}`)
+
+  const entries = () => first.evaluate(() => history.length)
+  const opened = () => first.$$eval(".board-row.open", r => r.length)
+  const onTab = () => first.$eval(".views button.on", e => e.textContent.trim())
+  const before = await entries()
+  await first.click(".board-row >> nth=0")
+  await first.waitForTimeout(300)
+  t("opening a drill-down is a step Back can undo on its own",
+    (await entries()) === before + 1 && (await opened()) === 1,
+    `history.length ${before} → ${await entries()}, ${await opened()} row open`)
+  const oneRow = await entries()
+  await first.click(".board-row >> nth=2")
+  await first.waitForTimeout(300)
+  t("and opening a second row is the same one step, not a second one",
+    (await entries()) === oneRow && (await opened()) === 1,
+    `history.length ${oneRow} → ${await entries()}`)
+  await first.goBack()
+  await first.waitForTimeout(500)
+  t("so Back closes the row and leaves the reader on the tab he was reading",
+    (await opened()) === 0 && (await onTab()) === "Pickups",
+    `${await opened()} rows open, on ${await onTab()}`)
+
+  const intro = await first.$eval(".board-intro", e => e.textContent.replace(/\s+/g, " ").trim())
+  const hover = await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))
+  t("the tab's own sentence is on the screen as text and not only as a hover",
+    !!hover && intro.startsWith(hover.trim()), `${intro.slice(0, 80)}… / title: ${hover}`)
+  t("and the board says why the men at the top of it are names nobody knows",
+    /taken them/.test(intro) && /rostered in \d+% to \d+% of leagues/.test(intro), intro)
+  await first.close()
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -554,9 +554,73 @@ export const useBoard = (
 			new Date(Date.parse(d) + n * 86400_000).toISOString().slice(0, 10)
 		return {
 			fortnight: windowFrom(slate, today, days(today, 14)),
-			rest: windowFrom(slate, today, seasonEnd)
+			rest: windowFrom(slate, today, seasonEnd),
+			/**
+			 * The dates those two were built from, RETURNED rather than recomputed by
+			 * whoever wants to name them.
+			 *
+			 * They were thrown away here, so the one line on the board that names the window
+			 * had nothing to read and printed `snapshot.horizon` instead — the fortnight that
+			 * began the day the capture was taken. Measured 2026-09-12 on the dev server with
+			 * no team entered: the header read "974 players · Sep 8 → Sep 22" while the rows
+			 * were rated over Sep 12 → Sep 26, which is provable off the rows themselves.
+			 * Fourteen of the thirty clubs have a different game count in the two windows, and
+			 * every one of the four that reached the visible top twelve printed TODAY's:
+			 * Miami 12 games in the capture's window and 13 in today's, and
+			 * Heriberto Hernández's row reads 13; Cincinnati 13 against 14, and JJ Bleday's
+			 * reads 14; likewise Arizona (Arenado, 13) and San Diego (Ty France, 14). So the
+			 * header named a window that opened four days in the past and that none of the
+			 * numbers under it came out of.
+			 */
+			span: {
+				fortnight: { start: today, end: days(today, 14) },
+				rest: { start: today, end: seasonEnd }
+			}
 		}
 	}, [snapshot])
+
+	/**
+	 * WHICH of the three windows the rows are rated over — ONE decision, two consumers.
+	 *
+	 * This lived inside `rated` as two local booleans, which was fine while the rating was
+	 * the only thing that cared. It is not: the board prints the window's dates above the
+	 * table and in Billy's sentence, and those were derived somewhere else entirely (see
+	 * `span` above for the four-day gap that produced). A second copy of this expression
+	 * beside the header would be the same defect waiting to happen again, so the choice is
+	 * made here and both the rating and the sentence read the answer.
+	 *
+	 * "period" is the streaming window, which falls back to the fortnight when the league's
+	 * own period resolves to no games at all — a capture asked about a week that starts
+	 * after its last captured game. That fallback was already in the rating and was NOT in
+	 * the header, so a streaming board rated over the fortnight could print the period's
+	 * dates. Naming the fallback fixes that too.
+	 */
+	const using = useMemo((): "period" | "rest" | "fortnight" => {
+		if (filters.mode === "stream" && week && week.games.size > 0) return "period"
+		if (filters.mode === "stash" && longWindows && longWindows.rest.games.size > 0) return "rest"
+		return "fortnight"
+	}, [filters.mode, week, longWindows])
+
+	/**
+	 * The window the rows are rated over, in dates, for the line that names it.
+	 *
+	 * The fortnight's dates come out of `longWindows.span` rather than being recomputed from
+	 * `localDate()` here, so the range printed and the games counted cannot be one day
+	 * apart. The last branch is the no-player-data case, where `rated` is empty and every
+	 * caller has already refused to draw a board; it uses the same definition from the same
+	 * helper so that even then it cannot name a window nothing was rated over.
+	 */
+	const ratedOver = useMemo((): { kind: "period" | "rest" | "fortnight"; start: string; end: string } => {
+		const span =
+			using === "period" && period ? { start: period.start, end: period.end }
+			: using === "rest" && longWindows ? longWindows.span.rest
+			: longWindows ? longWindows.span.fortnight
+			: {
+					start: localDate(),
+					end: new Date(Date.parse(localDate()) + 14 * 86400_000).toISOString().slice(0, 10)
+				}
+		return { kind: using, ...span }
+	}, [using, period, longWindows])
 
 	const availability = useMemo(() => {
 		if (availableNames && availableNames.size > 0)
@@ -639,8 +703,12 @@ export const useBoard = (
 		// A period can legitimately resolve to nothing — a stale snapshot asked about a
 		// week that starts after its last captured game — and zero games would rank
 		// everyone at zero. Fall back to the fortnight rather than invent a number.
-		const usingWeek = filters.mode === "stream" && !!week && week.games.size > 0
-		const usingRest = filters.mode === "stash" && !!longWindows && longWindows.rest.games.size > 0
+		/* The three-way choice is `using`, made in one place above — see the note there.
+		   It was made here, and the dates the board printed were derived from
+		   `snapshot.horizon` in Board.tsx, which is how a board rated over Sep 12 → Sep 26
+		   came to be headed "Sep 8 → Sep 22". Same booleans, one source. */
+		const usingWeek = using === "period"
+		const usingRest = using === "rest"
 		const long = longWindows?.fortnight
 		const horizon =
 			usingWeek ? { games: week!.games, opponents: week!.opponents }
@@ -714,7 +782,7 @@ export const useBoard = (
 		   disagreeing about a number is the worst failure this page can produce. Nothing
 		   re-orders — the proof above is that the ranking is byte-identical either way — so
 		   what the reader sees change is only the numbers that were waiting on the file. */
-	}, [snapshot, league, filters.mode, week, longWindows, gettable, injuries, contact])
+	}, [snapshot, league, filters.mode, using, week, longWindows, gettable, injuries, contact])
 
 	/**
 	 * Can the reader actually add this man — and how sure is the answer.
@@ -1138,6 +1206,9 @@ export const useBoard = (
 	 */
 	return {
 		rated: board, rows, scored, slotsRanked, period, streaming,
+		/* The window the rows above were rated over, so the line that names it on screen
+		   reads the rating's own answer instead of the capture's. See `ratedOver`. */
+		ratedOver,
 		mine: worstMineBySlot !== null,
 		teamNames, availability, sort, desc, injuryError,
 		/* Both halves, because the drill-down needs to say which state it is in AND be

@@ -1577,3 +1577,22 @@ button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
 main#main:focus{outline:none}
 
 
+
+/* ---------- the board's one orientation line ---------- */
+/* What this screen is, and why its top five are men nobody recognises. The argument
+   for the sentences is the long note at the top of Board.tsx's render; this rule is
+   only about what they cost. No bottom margin, because `.board-controls` directly
+   below already carries `--sp-5` and a rule of its own, and `.sub`'s own `--sp-4`
+   under it would have been 16px of nothing.
+
+   WHAT IT COSTS, measured on the dev server with no team entered. At 390x844 the
+   paragraph is 113px — six lines of 13px at the `.sub` size — and it pushes the first
+   ranked row from y=900 to y=1013. That row was already 56px below an 844px fold, so
+   nothing that was on screen has gone off it: Billy's pick, which is this screen's
+   answer, moved from 487–663 to 600–776 and is still whole above the fold with 68px to
+   spare, and `document.elementFromPoint` at 195x600 through 195x776 returns the pick
+   card the whole way down (there is no dock on this screen to take those pixels). At
+   1280x1000 it is 75px and four lines. The cost is real and it is paid once, on
+   arrival, by the reader who would otherwise have read three White Sox and a 35.27 as
+   a broken app — which is what two separate walkers did. */
+.board-intro{margin:0}

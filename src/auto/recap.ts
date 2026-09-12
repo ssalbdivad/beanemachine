@@ -185,6 +185,46 @@ export const recap = (input: {
 		}
 	}
 
+	/*
+	   WHEN THE HINDSIGHT LINEUP COMES OUT BELOW THE REAL ONE, THE COMPARISON IS REFUSED.
+	   
+	   `best` can only seat a man the league's own `slot_accepts` table proves legal for a
+	   seat, and a reader's actual lineup is not bound by what this app can prove: where the
+	   platform's eligibility grid does not cover him — the committed capture covers 328 of
+	   1,446 players — `legalSlotsFor` returns nothing and he is seatable nowhere. Measured
+	   on a 19-man test team whose men carried only their primary position: the reader's
+	   lineup scored 128.6 and the "best" lineup it could assemble scored less, because it
+	   could not legally seat several men who were in fact started.
+	   
+	   A negative "points left on your bench" is nonsense, and silently hiding it is worse —
+	   that is an absence presented as a zero. So the gap is withheld and the reason is
+	   stated, which is the same rule the rest of this file follows. `best` itself is still
+	   returned, because a caller may want to show the lineup; what is refused is the
+	   SUBTRACTION, which is the only part that claims something.
+	*/
+	/* Counted directly rather than inferred from how many seats got filled, which was the
+	   first attempt and was wrong: a bench man who IS placeable takes the seat the
+	   unplaceable starter had, so the seat COUNT comes out equal while the lineup is worth
+	   far less. The question is not how many seats were filled, it is how many men the
+	   reader actually started that this app cannot legally place anywhere. */
+	const unseatable =
+		startedTotal !== null && accepts ?
+			started.filter(s => legalSlotsFor(s.man.positions, accepts).length === 0).length
+		:	0
+	const comparable = startedTotal === null ? false : best.total >= startedTotal && !unseatable
+	if (startedTotal !== null && !comparable) {
+		biggest = null
+		blocked.push(
+			unseatable ?
+				`Your league's own list of which players may fill which seats does not cover ` +
+					`${unseatable} of the men you started, so the best lineup you could have set ` +
+					`cannot be worked out and nothing is claimed about what sat on your bench.`
+			:	"The best lineup this page could assemble scored less than the one you actually " +
+				"had, which means it could not legally seat men you did seat — so nothing is " +
+				"claimed about what sat on your bench."
+		)
+	}
+
 	return {
 		date,
 		men: scored
@@ -206,7 +246,7 @@ export const recap = (input: {
 		ownedTotal,
 		startedTotal,
 		best,
-		leftOnBench: startedTotal === null ? null : r2(best.total - startedTotal),
+		leftOnBench: comparable ? r2(best.total - startedTotal!) : null,
 		biggest,
 		blocked,
 		unscoreable: [...unscoreable].sort()

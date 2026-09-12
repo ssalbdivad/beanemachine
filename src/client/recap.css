@@ -1,0 +1,148 @@
+/*
+  Last night, on the screen the reader opens every day.
+
+  The design problem here is the opposite of the board's. The board has a thousand rows and
+  one number per row, so its job is to make a list scannable. This card has ONE number that
+  matters and several that qualify it, so its job is to make the hierarchy unmistakable at a
+  glance: the points, then what they cost, then the refusals, then — behind a tap — the
+  twenty-odd men the total is made of.
+
+  Everything below uses the tokens in app.css rather than its own values, for the reason
+  stated there: the type scale drifted to fourteen sizes once, and a component with its own
+  palette is how a page ends up with two greys.
+*/
+
+.recap-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--sp-2);
+	flex-wrap: wrap;
+}
+.recap-head h2 { margin: 0 }
+
+/* The date is a fact about the card, not a heading — so it is set like the column labels
+   rather than like a subtitle, and it sits on the heading's baseline. */
+.recap-day {
+	font-family: var(--mono);
+	font-size: var(--fs-2);
+	letter-spacing: .06em;
+	text-transform: uppercase;
+	color: var(--faint);
+}
+
+/*
+  THE ANSWER, at the same weight the board gives its own answer (--fs-8).
+
+  The unit is set small and in the body face beside it rather than above or below it,
+  because "83.4 from your lineup" is one sentence and breaking it into a figure with a
+  caption makes the reader assemble it. `tabular-nums` so the number does not reflow its own
+  width as it counts — this card re-renders when the read lands.
+*/
+.recap-score {
+	margin: var(--sp-3) 0 0;
+	display: flex;
+	align-items: baseline;
+	gap: var(--sp-2);
+	flex-wrap: wrap;
+}
+.recap-score b {
+	font-family: var(--mono);
+	font-size: var(--fs-8);
+	font-weight: 700;
+	line-height: var(--lh-tight);
+	letter-spacing: -.02em;
+	color: var(--accent);
+	font-variant-numeric: tabular-nums;
+}
+.recap-score span { font-size: var(--fs-4); color: var(--muted) }
+
+/*
+  The cost, in the negative colour, because it is the one line on this card a reader is
+  meant to feel. Not red-on-a-panel — the figure alone carries it, and the sentence around
+  it stays body text, because the sentence is doing the honest work of saying the number is
+  hindsight.
+*/
+.recap-bench {
+	margin: var(--sp-3) 0 0;
+	max-width: 62ch;
+}
+.recap-bench b {
+	font-family: var(--mono);
+	font-weight: 700;
+	color: var(--neg);
+	font-variant-numeric: tabular-nums;
+}
+/* A perfect lineup is the one case where the same slot is good news, so it stops being the
+   negative colour. The card must not scold a reader who got it right. */
+.recap-perfect { color: var(--muted) }
+.recap-perfect b { color: var(--accent) }
+
+.recap-wait .sub { margin: var(--sp-2) 0 0 }
+
+.recap-all { margin: var(--sp-4) 0 0; font-size: var(--fs-3) }
+.recap-all summary {
+	cursor: pointer;
+	font-family: var(--mono);
+	font-size: var(--fs-2);
+	letter-spacing: .06em;
+	text-transform: uppercase;
+	color: var(--muted);
+}
+
+/*
+  One man per row, four columns, named rather than positional.
+
+  The board learned this the hard way — index-based grid placement drifted four separate
+  times — so the gutter, the name, the number and the categories each get a track and the
+  number's track is fixed, which is what keeps the column of points aligned whatever the
+  names do.
+*/
+.recap-list {
+	list-style: none;
+	margin: var(--sp-2) 0 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: 4.5ch minmax(0, 1fr) 6ch;
+	gap: 2px var(--sp-2);
+	align-items: baseline;
+}
+.recap-list li {
+	display: grid;
+	grid-template-columns: subgrid;
+	grid-column: 1 / -1;
+	padding: 3px 0;
+}
+.recap-slot {
+	font-family: var(--mono);
+	font-size: var(--fs-1);
+	color: var(--faint);
+	text-align: right;
+}
+.recap-name { min-width: 0; overflow-wrap: break-word }
+.recap-pts {
+	font-family: var(--mono);
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: var(--muted);
+}
+.recap-pts em { font-style: normal; font-size: var(--fs-1); color: var(--faint) }
+
+/* The categories that carried a night sit under the name rather than in a fourth column,
+   because at 390px a fourth column would be 6ch wide and "HR +10.4  RBI +9.5" does not fit
+   in it. Spanning from the name's track keeps it out of the gutter. */
+.recap-top {
+	grid-column: 2 / -1;
+	font-family: var(--mono);
+	font-size: var(--fs-1);
+	color: var(--faint);
+	white-space: pre-wrap;
+}
+.recap-top:empty { display: none }
+
+/* A man who was in the lineup is the subject of the headline figure, so he is the one
+   marked — the bench is the default state of a 23-man roster and marking it would mark
+   most of the list. */
+.recap-in .recap-name { font-weight: 600 }
+.recap-in .recap-slot { color: var(--accent) }
+.recap-in .recap-pts { color: var(--ink) }

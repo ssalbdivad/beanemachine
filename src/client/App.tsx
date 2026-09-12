@@ -10,6 +10,7 @@ import { Billy } from "./Billy.tsx"
 import { Board } from "./Board.tsx"
 import { Trade } from "./Trade.tsx"
 import { Decide } from "./Decide.tsx"
+import { Recap } from "./Recap.tsx"
 import { Onboard } from "./Onboard.tsx"
 import { Dock } from "./Dock.tsx"
 import { leagues } from "./leagues.ts"
@@ -403,6 +404,29 @@ export const App = () => {
 	 *  Both read from the data: a preset that stops shipping stops being offered. */
 	const templates = useMemo(() => templateOptions(config), [config])
 	const preset = templates.find(t => t.filled) ?? null
+
+	/**
+	 * Turn the borrowed preset into a league of this reader's own.
+	 *
+	 * Hoisted out of the Onboard prop it used to be written inline in, because a SECOND
+	 * caller appeared: a tapped "Did you mean" suggestion is the same act of commitment as
+	 * a successful paste, and until it could reach this it silently did nothing — see the
+	 * note on `onAddSuggested` below. Returns the key it created, or null, so both callers
+	 * can tell a visitor the truth about whether anything was saved.
+	 */
+	const adoptPreset = useCallback((): string | null => {
+		if (!config || !preset) return null
+		try {
+			const k = leagues.suggestKey(config, preset.key)
+			const next = leagues.create(k, preset.key)
+			adopt(next, k)
+			return k
+		} catch (e) {
+			show(e instanceof ApiError ? e.message : String(e), true)
+			return null
+		}
+	}, [config, preset, adopt, show])
+
 	/**
 	 * A ranked board before anybody has committed a league.
 	 *
@@ -743,6 +767,23 @@ export const App = () => {
 				  it is one tap away with a link at the foot of this one.
 				*/
 				<div className="grid">
+					{/*
+					  LAST NIGHT SITS ABOVE TONIGHT, and the order is the argument.
+					  
+					  It was going to be a fourth tab. Measured at 390px: the tab strip is 344px
+					  wide and the three tabs in it take 277px with their gaps, so a fourth
+					  reading "LAST NIGHT" — about 108px at the bar's 11px type with 1.1px of
+					  tracking — does not fit, and four tabs were removed once already for
+					  exactly that reason (see the note below on Setup).
+					  
+					  Above rather than below, because it is the only surface in this app that
+					  states a FACT. Everything under it is an estimate that says so. A reader
+					  arriving in the morning is answered before he is advised, and a reader
+					  arriving at 6pm scrolls past one card to reach tonight. It renders nothing
+					  at all until there is a team to say something about, so it costs a first
+					  visit neither a pixel nor a request.
+					*/}
+					<Recap snapshot={snapshot} league={shown} leagueKey={key} />
 					<Decide
 						snapshot={snapshot}
 						league={shown}
@@ -940,15 +981,37 @@ export const App = () => {
 					 * stored seats where it has them, so a man in the roster and absent from the
 					 * lineup is a man the card silently never considers.
 					 */
-					onAddSuggested={(id, group, name) =>
-						void run(async () => {
-							if (!key || !snapshot) return
-							roster.add(key, `${id}:${group}`)
+					/*
+					 * IT ADOPTS A LEAGUE IF THERE IS NOT ONE YET, and it reports whether it
+					 * worked.
+					 *
+					 * This opened `if (!key || !snapshot) return`, which silently did nothing —
+					 * and the one path that reaches these chips without a league is the path
+					 * where nothing else has adopted one. `readTeam` in Onboard.tsx returns
+					 * early, before adopting the preset, when the paste matched NOBODY, which is
+					 * exactly when the "Did you mean" suggestions are the whole screen. Meanwhile
+					 * the chip's own handler marked the name added unconditionally, so the chip
+					 * vanished and the sheet printed "Got them. 5 players" with an empty league
+					 * list and a null roster in storage — and the team-count question and the
+					 * finish button never appeared, because both are gated on a league existing.
+					 *
+					 * So the documented highest-attrition step in the product was a dead end
+					 * that told the visitor he had succeeded. A tapped suggestion is the same act
+					 * of commitment as a successful paste and earns the same preset adoption.
+					 * Returning a boolean is what lets the chip stop lying: see the call site.
+					 */
+					onAddSuggested={async (id, group, name) => {
+						let ok = false
+						await run(async () => {
+							if (!snapshot) return
+							const k = key ?? adoptPreset()
+							if (!k) return
+							roster.add(k, `${id}:${group}`)
 							const p = snapshot.players.find(x => x.id === id && x.group === group)
-							const seats = lineupStore.of(key)
+							const seats = lineupStore.of(k)
 							if (p)
 								lineupStore.set(
-									key,
+									k,
 									[
 										...(seats?.spots ?? []),
 										{
@@ -961,8 +1024,10 @@ export const App = () => {
 									seats?.at ?? new Date().toISOString()
 								)
 							show(`Added ${name}`)
+							ok = true
 						})
-					}
+						return ok
+					}}
 					onTeamCount={teams =>
 						void run(async () => {
 							if (!league || !key) return
@@ -972,18 +1037,7 @@ export const App = () => {
 							)
 						})
 					}
-					onAdoptPreset={() => {
-						if (!config || !preset) return null
-						try {
-							const k = leagues.suggestKey(config, preset.key)
-							const next = leagues.create(k, preset.key)
-							adopt(next, k)
-							return k
-						} catch (e) {
-							show(e instanceof ApiError ? e.message : String(e), true)
-							return null
-						}
-					}}
+					onAdoptPreset={adoptPreset}
 					onImportUrl={url =>
 						void run(async () => {
 							const { key: k, league: got } = await api.import(url)
@@ -1030,7 +1084,22 @@ export const App = () => {
 				</Dock>
 			)}
 
-			<Colophon own={!!league} />
+			{/*
+			  `provenance.verified`, not merely "a league exists".
+			  
+			  This was `own={!!league}`, and adopting the preset makes `league` truthy — so
+			  the moment a first visit took the one-tap route, the footer asserted "Every
+			  number is in your league's own points" on the same screen as the card saying
+			  "These values are copied from one real Yahoo league, not read from yours." The
+			  comment on Colophon below records fixing this exact contradiction for the
+			  NO-league case; adopting a preset walked straight back into it.
+			  
+			  `verified` is the schema's own flag for "every stored value was read from the
+			  league's own pages", which is precisely the condition under which the first
+			  sentence is true. A preset is a real league's table borrowed, and the second
+			  sentence is the honest one about it until the reader confirms or imports.
+			*/}
+			<Colophon own={!!league && league.provenance.verified} />
 
 			{toast && <div className={`toast on${toast.bad ? " bad" : ""}`} role="status">{toast.message}</div>}
 		</div>

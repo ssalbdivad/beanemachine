@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
@@ -11,6 +11,7 @@ import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
 import { freshness, tab } from "./panels.tsx"
 import { canReadPool, api, poolIsPartial, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
+import { ledgerStore } from "./ledger.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
@@ -969,6 +970,68 @@ export const Decide = ({
 	}, [today, candidates, league, slate])
 
 	/**
+	 * WHAT WAS RECOMMENDED, WRITTEN DOWN BEFORE THE GAMES ARE PLAYED.
+	 *
+	 * This is the only write this card makes, and the only reason it exists is that the
+	 * comparison it enables is impossible afterwards. `src/auto/recap.ts` can already say
+	 * what a reader's men scored and what the best lineup would have been worth, both from
+	 * public data with no history at all — but to say whether BILLY beat the lineup the
+	 * reader already had, it needs the recommendation as it stood while the outcome was
+	 * still unknown. Recomputed tomorrow from tomorrow's capture it would be a backtest;
+	 * recorded now it is a claim. See src/client/ledger.ts.
+	 *
+	 * THE SIGNATURE GUARD IS LOAD-BEARING, not an optimisation. `ledgerStore.record` writes
+	 * to this browser and then calls `stored()`, which bumps the revision every screen
+	 * subscribes to — including the `owned` memo above, which returns a fresh array each
+	 * time, which gives `seats` a new identity, which recomputes `today`, which re-runs this
+	 * effect. Without the guard that is an unbounded write loop. With it, the second pass
+	 * computes the same signature and stops.
+	 *
+	 * `at` is deliberately NOT in the signature, which makes it the moment this advice first
+	 * appeared rather than the last moment it was re-rendered. That is the more useful of
+	 * the two: a reader looking at a graded day wants to know when Billy started saying
+	 * this, and a re-render at 11pm did not make the 6:40pm recommendation newer.
+	 *
+	 * Failure is swallowed on purpose, and it is the one place in this file that swallows
+	 * anything. A damaged record is My league's problem to explain and the reader's to
+	 * clear; a card whose job is to tell him what to do tonight must not refuse to do it
+	 * because a history it has not shown him yet cannot be appended to.
+	 */
+	const recorded = useRef<string | null>(null)
+	useEffect(() => {
+		if (!leagueKey || !today || !seats) return
+		const byName = new Map(today.ratedToday.map(r => [normalizeName(r.player.name), r]))
+		const side = (name: string, slot: string | null, projected: number | null) => {
+			const r = byName.get(normalizeName(name))
+			return r ?
+					[{ key: `${r.player.id}:${r.player.group}`, name, slot, projected }]
+				:	[]
+		}
+		/* The WHOLE recommended lineup, not only the changes to it. "The lineup Billy asked
+		   for" is every seat he asked for, and a grade that scored only the changes would be
+		   comparing two different-sized teams. */
+		const start = today.lineup.starters.flatMap(st => side(st.name, st.slot, st.points))
+		const sit = today.bench.flatMap(b => side(b.name, b.slot, null))
+		/* The lineup already in place, from the seats as they were READ. A hand-typed team
+		   has every man on the bench, so `!isReserveSlot` empties this by itself and the day
+		   is recorded as ungradeable rather than as a tie — which is what `gradeRecord` then
+		   says in words. No special case needed. */
+		const had = seats.spots
+			.filter(sp => !isReserveSlot(sp.slot))
+			.flatMap(sp => side(sp.name, sp.slot, byName.get(normalizeName(sp.name))?.points ?? null))
+		const moves = (plan?.swaps.moves ?? []).map(m => ({ add: m.add, drop: m.drop ?? null }))
+		const entry = { date: today.day, at: new Date().toISOString(), start, sit, had, moves }
+		const sig = JSON.stringify([entry.date, start, sit, had, moves])
+		if (recorded.current === sig) return
+		recorded.current = sig
+		try {
+			ledgerStore.record(leagueKey, entry)
+		} catch {
+			// see the note above: this card does not refuse its own job over the history
+		}
+	}, [leagueKey, today, seats, plan])
+
+	/**
 	 * The men the plan could not price, grouped by WHY — one row per reason, never one
 	 * per man, which is the same rule the bench rows follow for the same reason: sixteen
 	 * rows of one sentence is not sixteen decisions.
@@ -1535,15 +1598,19 @@ export const Decide = ({
 						    what measured best — beating one and beating three over 111 weeks and
 						    five seasons.
 
-						    "is what measured best" was too strong even so, and the fold below
-						    says why: that sweep was run against the OLD scoring, before swaps
-						    were priced on the lineup that follows them. The cap is inherited
-						    from a measurement of a different planner, which is a real thing to
-						    know and not a thing to bury. */}
+						    "is what measured best" was too strong even so, the comment above
+						    conceded exactly that, and then the string shipped it anyway. The fold
+						    below says why it is too strong: that sweep was run against the OLD
+						    scoring, before swaps were priced on the lineup that follows them, and
+						    src/auto/plan.ts says in so many words that the cap is NOT YET
+						    RE-MEASURED. A summary must not outrun the drawer it summarises — the
+						    reader who never opens the fold is the one the claim reaches. So the
+						    cap now says where it came from, which is the honest version of the
+						    same six words. */}
 						{plan.swaps.moves.length === 0 ? "none clear the bar"
 						: plan.swaps.moves.length < DEFAULTS.maxMoves ?
 							`${plan.swaps.moves.length} clear${plan.swaps.moves.length === 1 ? "s" : ""} the bar`
-						:	`stopping at ${plan.swaps.moves.length}, the cap that measured best`}
+						:	`stopping at ${plan.swaps.moves.length}, a cap carried over from an earlier version and not re-measured since`}
 						{rules.cap !== null && ` · your league allows ${rules.cap}`}
 					</span>
 				)}
@@ -1560,9 +1627,23 @@ export const Decide = ({
 					either, so there is no honest way to say who you could get.
 				</p>
 			: !plan?.swaps.moves.length ?
-				<p className="sub">
-					None worth making. {plan?.swaps.notes[0] ?? ""}
-				</p>
+				/*
+				  "None worth making." is the whole answer.
+				  
+				  It used to be followed by `plan.swaps.notes[0]`, which on a real 24-man roster
+				  was a 470-character sentence naming 21 of those 24 players back at the reader,
+				  printing the planner's own term for a threshold on the primary surface, and
+				  asserting both halves of a contradiction about the same men — below the bar
+				  that makes them droppable AND worth too much over the rest of the season to
+				  give away. A manager scanning at 6:40 cannot tell which number governs.
+				  
+				  The note is not deleted; it is already in the fold below, which is where a
+				  reader who wants the reasoning goes. What is removed is its appearance on the
+				  line that answers the question. The "rest of the season" half of it is also the
+				  clause that is inverted in an elimination week — the model knows nothing about
+				  the playoffs, so the screen must stop making a claim that depends on them.
+				*/
+				<p className="sub">None worth making.</p>
 			:	<>
 					<ul className="decide-list">
 						{plan.swaps.moves.map(m => (

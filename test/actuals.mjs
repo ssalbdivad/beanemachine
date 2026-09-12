@@ -175,6 +175,31 @@ const mayBenched = recap({
 })
 t("the same man on the bench IS in it", near(mayBenched.best.total, 100.0), String(mayBenched.best.total))
 
+// --- a best lineup that is worse than the real one is not a bench gap -----------
+
+// `best` can only seat a man the league's own slot_accepts table proves legal for a seat,
+// and a reader's real lineup is not bound by what this app can prove: the committed
+// capture's eligibility grid covers 328 of 1,446 players, so a man started at 3B whose
+// stored eligibility says only "DH" is seatable nowhere here. A negative "points left on
+// your bench" is nonsense and silently hiding it would be an absence dressed as a zero.
+const unprovable = recap({
+  date: "2026-09-11",
+  men: [
+    // started, and legal for nothing this league's table lists
+    { ...MAN.tucker, positions: ["DH"], slot: "OF" },
+    seated(MAN.bradley, "SP"),
+    seated(MAN.adell, "BN")
+  ],
+  lines, league: LEAGUE, shape: SHAPE
+})
+t("a starter the eligibility cannot place is not in the best lineup", !unprovable.best.seated.some(s => s.name === "Kyle Tucker"), JSON.stringify(unprovable.best.seated))
+t("what he actually scored still counts towards your lineup", near(unprovable.startedTotal, 63.6), String(unprovable.startedTotal))
+t("and the bench gap is refused rather than reported negative", unprovable.leftOnBench === null, String(unprovable.leftOnBench))
+t("with the reason said in the reader's words", unprovable.blocked.some(b => /does not cover 1 of the men you started/.test(b)), unprovable.blocked.join(" | "))
+t("and no regret is invented from an incomplete lineup", unprovable.biggest === null)
+// The ordinary case is untouched: where every starter can be placed, the gap is reported.
+t("a comparable day still reports its gap", near(r.leftOnBench, 25.8), String(r.leftOnBench))
+
 // --- a team nobody read the seats of -------------------------------------------
 
 // The hand-typed route produces a full roster with no seats at all, which is the common

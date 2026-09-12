@@ -113,7 +113,9 @@ export const Onboard = ({
 	onLineupLock: (lock: "daily" | "period") => void
 	/** Accept one "did you mean" — the reader has read the name and tapped it, which is
 	 *  the only way a suggestion is ever allowed to become a roster entry. */
-	onAddSuggested: (id: number, group: "hitting" | "pitching", name: string) => void
+	/** Resolves true only when the man actually landed in a league's roster. The chip
+	 *  below must not cross itself off on a failure — see the note at the call site. */
+	onAddSuggested: (id: number, group: "hitting" | "pitching", name: string) => Promise<boolean>
 	/** How many teams this league has. It is the second and last question, because the
 	 *  bar every player is measured against is the (teams x seats)-th best man — so the
 	 *  count moves every row on the board. */
@@ -340,9 +342,15 @@ export const Onboard = ({
 											key={`${g.id}:${g.group}`}
 											type="button"
 											className="chip-btn"
+											/* Crossed off only if it LANDED. This called `setAdded`
+											   unconditionally, and the one path that reaches these chips
+											   with no league is the path where `readTeam` returned before
+											   adopting one — so every chip a visitor tapped disappeared,
+											   the sheet said "Got them", and storage held nothing. */
 											onClick={() => {
-												onAddSuggested(g.id, g.group, g.name)
-												setAdded(a => [...a, g.id])
+												void onAddSuggested(g.id, g.group, g.name).then(
+													ok => ok && setAdded(a => [...a, g.id])
+												)
 											}}
 										>
 											{g.name}

@@ -2329,6 +2329,36 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   await p.close()
 }
 
+/**
+ * A SHARED LINK LANDS ON THE SCREEN IT NAMES, and on this build it did not.
+ *
+ * Three screens, three hashes, and on an empty profile every one of them landed on
+ * Tonight with the address bar still reading the hash it had been given. It passed on the
+ * dev server and failed here, which is why it survived: a dev read supplies a league, so
+ * the first-visit branch in App that forces the board — `if (!keys.length)` — never fires
+ * there, and on the published build, where a first visit really does hold no league, it
+ * fires every time and is the one thing in the app that can overrule the address bar.
+ *
+ * Asserted on THIS build for that reason, and with an empty profile, because a seeded one
+ * cannot reach the branch. A link that names a screen and opens another is worse than no
+ * routing at all — the bar says the link worked.
+ */
+{
+  for (const [hash, label] of [["#pickups", "Pickups"], ["#my-league", "My league"], ["#tonight", "Tonight"]]) {
+    const page = await b.newPage({ viewport: { width: 390, height: 844 } })
+    await page.route("**/api/**", r => r.abort())
+    await page.goto(`${BASE}${hash}`, { waitUntil: "domcontentloaded" })
+    await page.waitForSelector("nav button", { timeout: 30000 })
+    await page.waitForTimeout(1200)
+    const on = await page.$$eval("nav button", bs =>
+      bs.filter(x => x.className.split(/\s+/).includes("on")).map(x => x.textContent.trim()))
+    t(`a first visit to ${hash} opens ${label}`,
+      on.length === 1 && on[0] === label,
+      `selected ${JSON.stringify(on)} at ${await page.url()}`)
+    await page.close()
+  }
+}
+
 await b.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -386,7 +386,22 @@ export const App = () => {
 		 */
 		if (!keys.length) {
 			setOnboarding(true)
-			setView("board")
+			/*
+			 * UNLESS HE ASKED FOR A SCREEN, in which case he gets the one he asked for.
+			 *
+			 * This line was unconditional, and it is the only thing in the app that can
+			 * overrule the address bar. It does not bite on the dev server — a dev read
+			 * supplies a league, so `keys.length` is not zero there — and on the PUBLISHED
+			 * build, where a first visit really does hold no league, every deep link landed on
+			 * Tonight with the bar still reading `#pickups`. Measured on the 4173 preview
+			 * against an empty profile: `#pickups`, `#my-league` and `#tonight` all selected
+			 * Tonight, which makes a shared link a lie three times out of three and is exactly
+			 * the state hash routing was added to end.
+			 *
+			 * `view` was already initialised from the hash above, so a link that names a screen
+			 * needs nothing done to it — what it needs is for this not to happen.
+			 */
+			if (!viewFromHash(window.location.hash)) setView("board")
 		}
 	}, [])
 

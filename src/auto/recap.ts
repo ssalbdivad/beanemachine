@@ -45,6 +45,9 @@ export interface RecapMan {
 	slot: string | null
 	/** Eligibility as the platform prints it — the same list `legalSlotsFor` takes. */
 	positions: string[]
+	/** His club, where the caller knows it. Only used to tell a man whose club had no game
+	 *  from a man whose club played without him. */
+	teamId?: number | null
 }
 
 export interface RecapPlayer {
@@ -62,6 +65,9 @@ export interface RecapPlayer {
 	top: { code: string; points: number }[]
 	/** True when he was in a startable seat as the seats were last read. */
 	started: boolean
+	/** True when his club had no game at all that day — the schedule says so, rather than
+	 *  the absence of a line saying it. Null where no schedule was read. */
+	clubOff: boolean | null
 	/** True when MLB's record for HIS side of the ball did not answer. `points` is null
 	 *  either way, and the two nulls mean opposite things: this one is "nobody could say",
 	 *  the other is "he did not play". A screen that prints them the same way is lying. */
@@ -122,6 +128,10 @@ export const recap = (input: {
 	lines: Map<string, ActualLine>
 	league: League
 	shape: RosterShape
+	/** Clubs that played that day, from the schedule for that date. Absent when it was not
+	 *  read — the card asks for it only when enough men have no line for the distinction to
+	 *  be worth a request. */
+	played?: Set<number> | null
 	/** Sides of the ball the read did not get, straight from `fetchActuals`. Everything
 	 *  this function refuses when it is non-empty is refused for one reason: a man nobody
 	 *  could ask about is indistinguishable, in a sum, from a man who went 0-for-4. */
@@ -371,6 +381,20 @@ export const recap = (input: {
 				points: s.points,
 				top: s.top,
 				started: seatsKnown && s.man.slot !== null && !isBench(s.man.slot) && !isReserve(s.man.slot),
+				/* A HITTER WITH NO LINE IS TWO DIFFERENT MORNINGS. His club was off, which is a
+				   Thursday and nothing to do; or his club played and he was not in it, which is
+				   this morning's news and possibly a drop. Both printed "didn't play", so eight
+				   of them in a row told a reader nothing at all. Null where no schedule was read
+				   or the man's club is unknown, and the card then says the old, weaker thing —
+				   an absence stated as an absence rather than guessed at. */
+				/* HITTERS ONLY. A pitcher whose club played and who did not pitch is a rotation,
+				   not a benching — "sat out" is true of him and tells a reader nothing he can
+				   act on, and it would be printed against four or five men on any given card.
+				   The same rule `weekShape` uses for absences, for the same reason. */
+				clubOff:
+					input.played && typeof s.man.teamId === "number" && !s.man.key.endsWith(":pitching") ?
+						!input.played.has(s.man.teamId)
+					:	null,
 				unread: s.unread
 			})),
 		ownedTotal,

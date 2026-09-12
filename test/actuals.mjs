@@ -389,6 +389,45 @@ t("a man who did not play is not in the best lineup you could have set",
 t("so no points are reported as having sat on a bench nobody played on",
   ghostBench.leftOnBench === null || ghostBench.leftOnBench === 0, String(ghostBench.leftOnBench))
 
+// --- his club was off, or his club played without him -----------------------------
+
+// A man with no line has not played, and for a pitcher that is the whole answer — a starter
+// on normal rest did not pitch, and neither did eight relievers. For a HITTER it is two
+// completely different mornings: his club was off, which is a Thursday and nothing to do, or
+// his club played and he was not in it, which is this morning's news and possibly a drop.
+// Both used to print "didn't play".
+const ghostMan = { key: "999999:hitting", name: "Nobody Played", slot: "BN", positions: ["OF"], teamId: 111 }
+const withSchedule = recap({
+  date: "2026-09-11",
+  men: [...team.map(m => ({ ...m, teamId: 222 })), ghostMan],
+  lines, league: LEAGUE, shape: SHAPE,
+  played: new Set([111, 222])
+})
+t("a man whose club played and who has no line sat out",
+  withSchedule.men.find(m => m.name === "Nobody Played").clubOff === false)
+const clubOff = recap({
+  date: "2026-09-11",
+  men: [...team.map(m => ({ ...m, teamId: 222 })), ghostMan],
+  lines, league: LEAGUE, shape: SHAPE,
+  played: new Set([222])
+})
+t("a man whose club had no game is not reported as having sat out",
+  clubOff.men.find(m => m.name === "Nobody Played").clubOff === true)
+// AND WITHOUT A SCHEDULE IT SAYS THE WEAKER, TRUE THING. The read is paid for only where
+// enough men have no line to be worth a request, so the null case is the common one.
+t("with no schedule read the question is left open rather than guessed",
+  withGhost.men.find(m => m.name === "Nobody Played").clubOff === null)
+t("and a man who played is never described by his club's day either way",
+  withSchedule.men.find(m => m.name === "Kyle Tucker").points > 0)
+// A PITCHER IS A ROTATION, NOT A BENCHING. His club played and he did not pitch on four
+// nights out of five, and "sat out" about him is true, useless, and printed against half a
+// staff. Same rule `weekShape` uses for absences.
+const arm = { key: "999998:pitching", name: "Never Pitched", slot: "BN", positions: ["SP"], teamId: 222 }
+t("a pitcher whose club played is not reported as having sat out",
+  recap({ date: "2026-09-11", men: [...team.map(m => ({ ...m, teamId: 222 })), arm], lines,
+    league: LEAGUE, shape: SHAPE, played: new Set([222]) })
+    .men.find(m => m.name === "Never Pitched").clubOff === null)
+
 // --- the shape of the week, off a read the card already paid for ------------------
 
 // `byDateRange` accumulates inside a window, so one request per side of the ball prices a

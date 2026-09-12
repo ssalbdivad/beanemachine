@@ -16,7 +16,7 @@ import { lineupStore } from "./lineup.ts"
 import { ledgerStore } from "./ledger.ts"
 import { useStored } from "./stores.ts"
 import { useActuals, usePeriodActuals, lastNight } from "./useActuals.ts"
-import { localDate } from "../data/today.ts"
+import { fetchSlate, localDate } from "../data/today.ts"
 import "./recap.css"
 
 /** "Sep 12" from an ISO date, at noon so a zone west of Greenwich cannot print yesterday.
@@ -118,7 +118,8 @@ export const Recap = ({
 					key: rosterKey(p),
 					name: p.name,
 					slot: sp.slot,
-					positions: sp.positions.length ? sp.positions : slotsFor(p, elig[String(p.id)])
+					positions: sp.positions.length ? sp.positions : slotsFor(p, elig[String(p.id)]),
+					teamId: p.teamId ?? null
 				})
 			}
 			if (out.length) return { men: out, error: null, seatsAt: seats.at }
@@ -133,6 +134,7 @@ export const Recap = ({
 			return p ?
 					[{
 						key: rosterKey(p),
+						teamId: p.teamId ?? null,
 						name: p.name,
 						slot: null,
 						/* SLOTS, not MLB's positions — `legalSlotsFor` asks whether a token appears
@@ -353,6 +355,39 @@ export const Recap = ({
 		return Number(sum.toFixed(1))
 	}, [soFar.lines, league, men])
 
+	/**
+	 * WHICH CLUBS PLAYED THAT DAY, and why this is worth one more request.
+	 *
+	 * A man with no line has not played, and the card has always said exactly that. For a
+	 * pitcher it is the whole answer — a starter on normal rest did not pitch, and neither did
+	 * eight relievers. For a HITTER it is two completely different mornings: his club was off,
+	 * which is a Thursday and nothing to do, or his club played and he was not in it, which is
+	 * this morning's news and possibly a drop. Eight rows reading "didn't play" told a reader
+	 * neither.
+	 *
+	 * ASKED FOR ONLY WHEN IT WOULD SAY SOMETHING. The schedule for a past date is about 15 KB
+	 * against the 38 KB this card already spends, so it is not free — and on a day when one or
+	 * two men sat out there is nothing to disambiguate. Three is where a fold full of "didn't
+	 * play" starts being the thing a reader is looking at.
+	 */
+	const [played, setPlayed] = useState<Set<number> | null>(null)
+	const blanks = useMemo(() => {
+		if (!actuals || !men.men.length) return 0
+		return men.men.filter(m => !actuals.lines.has(m.key)).length
+	}, [actuals, men])
+	useEffect(() => {
+		if (blanks < 3 || !date) return
+		const ctl = new AbortController()
+		let live = true
+		void fetchSlate(date, ctl.signal).then(({ slate }) => {
+			if (live && slate.playing.size) setPlayed(new Set(slate.playing))
+		})
+		return () => {
+			live = false
+			ctl.abort()
+		}
+	}, [blanks, date])
+
 	const result = useMemo(() => {
 		if (!actuals || !league || !men.men.length) return null
 		return recap({
@@ -361,6 +396,7 @@ export const Recap = ({
 			lines: actuals.lines,
 			league,
 			missing,
+			played,
 			/* Whether that day's baseball is over. An empty read means "no baseball" on one
 			   side of this line and "not yet" on the other, and the two are opposite. */
 			finished: final,
@@ -370,7 +406,7 @@ export const Recap = ({
 				slot_accepts: league.roster.slot_accepts
 			}
 		})
-	}, [actuals, league, men, date, missing])
+	}, [actuals, league, men, date, missing, final, played])
 
 	/**
 	 * BILLY'S RECORD, and it is the only number in this app that can be wrong in public.
@@ -560,7 +596,7 @@ export const Recap = ({
 	 * guess.
 	 */
 	const seatsAfter = !!men.seatsAt && men.seatsAt.slice(0, 10) > date
-	const played = result.men.filter(m => m.points !== null).length
+	const playedCount = result.men.filter(m => m.points !== null).length
 
 	return (
 		<section className="card full recap">
@@ -612,7 +648,7 @@ export const Recap = ({
 			    players scored 83.4" is one fact printed twice. */}
 			{result.startedTotal !== null && result.ownedTotal !== result.startedTotal && (
 				<p className="sub">
-					Everyone you hold, bench included, scored {result.ownedTotal}. {played} of{" "}
+					Everyone you hold, bench included, scored {result.ownedTotal}. {playedCount} of{" "}
 					{result.men.length} of your men played.
 				</p>
 			)}
@@ -1006,8 +1042,10 @@ export const Recap = ({
 								    was still printing him as "didn't play", which is the app stating
 								    as fact the one thing it does not know about him. */}
 								{m.unread ? <em>not checked</em>
-								: m.points === null ? <em>didn&rsquo;t play</em>
-								: m.points}
+								: m.points !== null ? m.points
+								: m.clubOff === true ? <em>club was off</em>
+								: m.clubOff === false ? <em>sat out</em>
+								: <em>didn&rsquo;t play</em>}
 							</span>
 							<span className="recap-top">
 								{m.top.map(c => `${statLabel(c.code)} ${c.points > 0 ? "+" : ""}${c.points}`).join("  ")}

@@ -1676,8 +1676,7 @@ export const Board = ({
 									  shipped preset and none of it is about his league yet. Two sentences
 									  on one screen disagreeing about whose scoring this is.
 									*/}
-									<b>Ahead by</b> &mdash; points more than the man left at his spot once
-									every team has filled it
+									<b>Ahead by</b> &mdash; points more than {theManLeftAt(null)}
 									{preview ?
 										", in the standard scoring this board is running."
 									:	", in your league\u2019s points."}
@@ -1861,7 +1860,7 @@ const BillysPick = ({
 }) => {
 	const clauses: string[] = []
 	clauses.push(
-		`Projected for ${r.bscore} more points than the best ${r.slot} you could add off waivers, over ${horizon}`
+		`Projected for ${r.bscore} more points than ${theManLeftAt(r.slot)}, over ${horizon}`
 	)
 	// The "rostered in N% of leagues" clause used to live here. It came off the
 	// "% Ros" sweep, most of which is the per-game weather line rather than a
@@ -1886,11 +1885,39 @@ const BillysPick = ({
 					`${r.projection.volumePerTeamGame.toFixed(1)} plate appearances per team game`
 				:	`${r.projection.volumePerTeamGame.toFixed(1)} outs recorded per team game`
 			)
-		if (r.projection.matchupMultiplier !== 1)
+		/**
+		 * "Hard" and "soft" are claims about size, so they are gated on size.
+		 *
+		 * This branched on `!== 1` alone, which meant any multiplier at all earned one of
+		 * two strong words. Measured live on the committed capture at 390px, the first
+		 * drill-down a reader opens said "the schedule ahead of him is hard (×0.997)" —
+		 * three tenths of one percent, described in the same words a fifteen percent
+		 * effect would get, with the strength of the claim hidden in a parenthesis the
+		 * reader has to do arithmetic on.
+		 *
+		 * Three percent is the floor, and the measurement that sets it also says how little
+		 * this clause was ever carrying. On the committed capture, rating all 1,248
+		 * rateable men: the median gap between neighbouring bscores in the top hundred is
+		 * 1.32% of the bscore (p25 0.54%, p75 2.71%), and the schedule multiplier itself
+		 * never reaches 3.2% — the largest |1 - x| in the whole pool is 3.1%, the 90th
+		 * percentile is 1.8%, and 1,226 of 1,248 rows (98.2%) sit inside 3%. So the floor
+		 * keeps the clause on 22 rows, the only ones where the adjustment is more than
+		 * twice the gap to the next man, and drops it everywhere it would be describing
+		 * something smaller than the noise between adjacent ranks.
+		 *
+		 * Dropping the clause outright would also be defensible on those numbers, and the
+		 * only reason it is not done is that this is the one place in the app the schedule
+		 * adjustment is ever shown — `grep -n matchupMultiplier src/client/` returns this
+		 * line and nothing else. Below the floor it is dropped rather than softened: the
+		 * comment on the block above argues that an omitted clause beats one that has to
+		 * be discounted, and this is that rule applied to magnitude instead of relevance.
+		 */
+		const schedule = r.projection.matchupMultiplier
+		if (Math.abs(1 - schedule) >= 0.03)
 			clauses.push(
-				r.projection.matchupMultiplier > 1 ?
-					`the schedule ahead of him is soft (×${r.projection.matchupMultiplier.toFixed(3)})`
-				:	`the schedule ahead of him is hard (×${r.projection.matchupMultiplier.toFixed(3)})`
+				schedule > 1 ?
+					`the schedule ahead of him is soft (×${schedule.toFixed(3)})`
+				:	`the schedule ahead of him is hard (×${schedule.toFixed(3)})`
 			)
 	}
 	// The same per-side choice the games column makes, in prose. "his team plays 14
@@ -1975,6 +2002,24 @@ const BillysPick = ({
 		</section>
 	)
 }
+
+/**
+ * WHO THE BAR IS, in one place, because two screens of this app disagreed about it.
+ *
+ * The head of the sorted column already said it correctly — "the man left at his spot
+ * once every team has filled it" — with a comment above it recording that the old
+ * wording had been wrong and that src/engine/trade.ts had written down the correction
+ * years before the sentence was changed. The HERO CARD was missed, and went on saying
+ * "more points than the best {slot} you could add off waivers", which is a different and
+ * much larger claim: the best man still free is not the (teams x seats)-th man at the
+ * slot, and on a measured board he usually sits far above him.
+ *
+ * So the phrase is a function now and there is nowhere left for a second version of it
+ * to live. `bscore.ts` computes `depth = teams x seats` and takes the man AT that depth;
+ * this sentence says exactly that and nothing stronger.
+ */
+const theManLeftAt = (slot: string | null): string =>
+	`the man left at ${slot ?? "his spot"} once every team has filled it`
 
 const COLUMN_HELP: Record<NonNullable<Filters["sort"]>, string> = {
 	name: "Sort by player name.",

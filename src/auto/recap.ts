@@ -212,3 +212,160 @@ export const recap = (input: {
 		unscoreable: [...unscoreable].sort()
 	}
 }
+
+/**
+ * BILLY, GRADED AGAINST THE LINEUP YOU ALREADY HAD.
+ *
+ * The recap above needs no history: it works on a first visit, from public data, and its
+ * hindsight lineup is explicitly not a claim that you should have known. This is the
+ * other kind of number, and it is the only one in the app that can be WRONG in public.
+ *
+ * The comparison is narrow on purpose. For each day the app recorded a recommendation it
+ * takes two lineups — the one it asked for and the one that was already in place — scores
+ * both against what those men actually did, and reports the difference. That is all. It
+ * does not know whether you took the advice, so it never says you did or didn't; it does
+ * not grade the days you never opened the app, so it says how many days it is speaking
+ * about; and it does not grade a day it only half-knows.
+ *
+ * THE DENOMINATOR IS THE HONEST PART. Most days a lineup is already the best one and the
+ * recommendation is "leave it alone", which is worth exactly nothing and would flatter a
+ * win-rate computed over every day. So the days where Billy asked for a CHANGE are
+ * counted separately, and those are the only ones a record should be read off.
+ *
+ * AN ABSENCE IS A ZERO HERE, AND ONLY HERE. In the recap a man with no split shows as
+ * "did not play" rather than as nothing, because the reader is looking at his night. In a
+ * lineup TOTAL he contributed nothing, which is a real cost of having started him, and
+ * both lineups are treated the same way — so a recommendation to start a man who never
+ * took the field is scored as the mistake it was.
+ */
+export interface GradedDay {
+	date: string
+	/** When the recommendation was written, so a screen can say how late it was asked. */
+	at: string
+	/** What the lineup Billy asked for actually scored. */
+	asked: number
+	/** What the lineup already in place actually scored. Null when the seats were never
+	 *  read that day, which makes the day ungradeable rather than a tie. */
+	had: number | null
+	/** `asked - had`. Null whenever `had` is. */
+	worth: number | null
+	/** True when the recommendation was to leave the lineup exactly as it was. */
+	unchanged: boolean
+	/** The men it asked in and the men it asked out, with what they actually did. */
+	calls: {
+		name: string
+		side: "in" | "out"
+		projected: number | null
+		/** Null when he never took the field. The totals above count that as nothing. */
+		actual: number | null
+	}[]
+}
+
+export interface Record_ {
+	/** Every day with a recommendation recorded AND results available, oldest first. */
+	days: GradedDay[]
+	/** Days where Billy asked for a change — the only ones a record can be read off. */
+	changed: number
+	/** Of those: where following it scored more, less, and exactly the same. */
+	better: number
+	worse: number
+	even: number
+	/** Summed `worth` over the changed days. The headline number, and it is allowed to
+	 *  be negative — a record that can only flatter is not a record. */
+	net: number
+	/** Days recorded where the recommendation was to leave the lineup alone. */
+	unchanged: number
+	/** Days recorded that could not be graded, and why, in the reader's words. */
+	skipped: { date: string; why: string }[]
+}
+
+/** One side of a recorded entry, scored against what those men actually did. */
+const sideTotal = (
+	side: { key: string; name: string; projected: number | null }[],
+	lines: Map<string, ActualLine>,
+	league: League
+): { total: number; each: { name: string; projected: number | null; actual: number | null }[] } => {
+	const each = side.map(s => {
+		const line = lines.get(s.key)
+		if (!line) return { name: s.name, projected: s.projected, actual: null }
+		const group = s.key.endsWith(":pitching") ? "pitching" : "hitting"
+		return {
+			name: s.name,
+			projected: s.projected,
+			actual: scoreStats(line.stats, tableFor(league, group), group).points
+		}
+	})
+	return { total: r2(each.reduce((a, e) => a + (e.actual ?? 0), 0)), each }
+}
+
+export const gradeRecord = (input: {
+	/** Recorded recommendations, any order. Shaped like `LedgerEntry` in
+	 *  src/client/ledger.ts, restated structurally so the engine does not import the
+	 *  browser store. */
+	entries: {
+		date: string
+		at: string
+		start: { key: string; name: string; slot: string | null; projected: number | null }[]
+		sit: { key: string; name: string; slot: string | null; projected: number | null }[]
+		had: { key: string; name: string; slot: string | null; projected: number | null }[]
+	}[]
+	/** Actual lines per date. A date with no entry here has no results yet and is
+	 *  skipped rather than scored as a scoreless day. */
+	byDate: Map<string, Map<string, ActualLine>>
+	league: League
+}): Record_ => {
+	const days: GradedDay[] = []
+	const skipped: { date: string; why: string }[] = []
+
+	for (const e of [...input.entries].sort((a, b) => a.date.localeCompare(b.date))) {
+		const lines = input.byDate.get(e.date)
+		if (!lines) {
+			skipped.push({ date: e.date, why: "last night's results aren't in yet" })
+			continue
+		}
+		if (!e.start.length) {
+			skipped.push({ date: e.date, why: "no lineup was recommended that day" })
+			continue
+		}
+		const asked = sideTotal(e.start, lines, input.league)
+		/* The seats already in place. Absent for a hand-typed team, and then the day has
+		   nothing to compare against — which is not a tie, and must not be reported as
+		   one. The asked-for lineup is still scored, because a reader looking at the day
+		   is owed what it was worth even when the comparison is unavailable. */
+		const had = e.had.length ? sideTotal(e.had, lines, input.league) : null
+		const sameSet =
+			had !== null &&
+			e.start.length === e.had.length &&
+			new Set(e.start.map(s => s.key)).size === new Set([...e.start, ...e.had].map(s => s.key)).size
+		const sat = sideTotal(e.sit, lines, input.league)
+		days.push({
+			date: e.date,
+			at: e.at,
+			asked: asked.total,
+			had: had?.total ?? null,
+			worth: had === null ? null : r2(asked.total - had.total),
+			unchanged: sameSet,
+			calls: [
+				...asked.each.map(x => ({ ...x, side: "in" as const })),
+				...sat.each.map(x => ({ ...x, side: "out" as const }))
+			]
+		})
+		if (had === null)
+			skipped.push({
+				date: e.date,
+				why: "nobody had told this page which of your men were in your lineup that day"
+			})
+	}
+
+	const changed = days.filter(d => d.worth !== null && !d.unchanged)
+	return {
+		days,
+		changed: changed.length,
+		better: changed.filter(d => d.worth! > 0).length,
+		worse: changed.filter(d => d.worth! < 0).length,
+		even: changed.filter(d => d.worth! === 0).length,
+		net: r2(changed.reduce((a, d) => a + d.worth!, 0)),
+		unchanged: days.filter(d => d.unchanged).length,
+		skipped
+	}
+}

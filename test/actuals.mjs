@@ -17,7 +17,7 @@
 //
 // One live request is made at the end, to one public endpoint, once per run.
 import { readActuals, fetchActuals, ACTUALS_URL } from "../src/data/actuals.ts"
-import { recap } from "../src/auto/recap.ts"
+import { recap, gradeRecord } from "../src/auto/recap.ts"
 import { readFileSync } from "node:fs"
 
 let pass = 0, fail = 0
@@ -209,6 +209,101 @@ const noAccepts = recap({
 })
 t("a league that never said what its seats accept gets no best lineup", noAccepts.best.total === 0 && noAccepts.blocked.some(b => /which players its seats accept/.test(b)), noAccepts.blocked.join(" | "))
 t("but still gets what his men scored", near(noAccepts.ownedTotal, 131.4))
+
+// --- Billy, graded against the lineup you already had ---------------------------
+
+// The comparison the whole record rests on: two lineups, one that was recommended and
+// one that was already in place, both scored against what those men actually did.
+const byDate = new Map([["2026-09-11", lines]])
+const side = (man, projected) => ({ key: man.key, name: man.name, slot: null, projected })
+
+// A day Billy got right: he asked for Tucker (34.1) where Adell (0.0) was starting.
+const won = {
+  date: "2026-09-11", at: "2026-09-11T18:41:00.000Z",
+  start: [side(MAN.tucker, 12), side(MAN.bradley, 20)],
+  sit: [side(MAN.adell, 3)],
+  had: [side(MAN.adell, 3), side(MAN.bradley, 20)]
+}
+const g1 = gradeRecord({ entries: [won], byDate, league: LEAGUE })
+t("a graded day scores the lineup that was asked for", near(g1.days[0].asked, 63.6), String(g1.days[0].asked))
+t("and the lineup that was already there", near(g1.days[0].had, 29.5), String(g1.days[0].had))
+t("what following it was worth is the difference", near(g1.days[0].worth, 34.1), String(g1.days[0].worth))
+t("a day he asked for a change counts towards the record", g1.changed === 1 && g1.better === 1 && g1.worse === 0)
+t("and both numbers are kept per man, projected beside actual", g1.days[0].calls.some(c => c.name === "Kyle Tucker" && c.projected === 12 && near(c.actual, 34.1)), JSON.stringify(g1.days[0].calls))
+t("the man asked to sit is on the other side of the entry", g1.days[0].calls.some(c => c.name === "Jo Adell" && c.side === "out"))
+
+// A day he got it wrong. A record that can only flatter is not a record.
+const lost = {
+  date: "2026-09-11", at: "2026-09-11T18:41:00.000Z",
+  start: [side(MAN.albies, 14)], sit: [side(MAN.bregman, 9)], had: [side(MAN.bregman, 9)]
+}
+const g2 = gradeRecord({ entries: [lost], byDate, league: LEAGUE })
+t("a day he got wrong is negative", near(g2.days[0].worth, -23.9), String(g2.days[0].worth))
+t("and is counted as wrong", g2.worse === 1 && g2.better === 0)
+t("the net is allowed to be negative", near(g2.net, -23.9), String(g2.net))
+
+// Two days, one each way, so the net is arithmetic rather than a sign.
+const both = gradeRecord({
+  entries: [won, { ...lost, date: "2026-09-10" }],
+  byDate: new Map([["2026-09-11", lines], ["2026-09-10", lines]]),
+  league: LEAGUE
+})
+t("the net sums the days it graded", near(both.net, 10.2), String(both.net))
+t("the days come back oldest first", both.days.map(d => d.date).join(",") === "2026-09-10,2026-09-11", both.days.map(d => d.date).join(","))
+
+// THE DENOMINATOR. Most days a lineup is already the best one and the advice is "leave it
+// alone", which is worth nothing and would flatter a win rate computed over every day.
+const same = {
+  date: "2026-09-11", at: "2026-09-11T18:41:00.000Z",
+  start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.tucker, 12)]
+}
+const g3 = gradeRecord({ entries: [same], byDate, league: LEAGUE })
+t("a day he left the lineup alone is not counted as a win", g3.changed === 0 && g3.better === 0, JSON.stringify({ changed: g3.changed, better: g3.better }))
+t("it is counted as what it was", g3.unchanged === 1)
+t("and is worth nothing either way", near(g3.days[0].worth, 0))
+
+// A real change that happened to be worth exactly nothing: Turang and Tucker both went
+// 3-for-3 with a homer on 2026-09-11 and both price at 34.1 in this league.
+const tie = {
+  date: "2026-09-11", at: "2026-09-11T18:41:00.000Z",
+  start: [{ key: "668930:hitting", name: "Brice Turang", slot: null, projected: 11 }],
+  sit: [side(MAN.tucker, 12)], had: [side(MAN.tucker, 12)]
+}
+const g4 = gradeRecord({ entries: [tie], byDate, league: LEAGUE })
+t("a change worth exactly nothing is counted as even, not as a win", g4.changed === 1 && g4.even === 1 && g4.better === 0, JSON.stringify({ changed: g4.changed, even: g4.even, better: g4.better }))
+
+// Days it will not grade, each for a stated reason rather than silently.
+const ungradeable = gradeRecord({
+  entries: [
+    // results in, seats never read: the day is scored but not compared
+    { date: "2026-09-11", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [] },
+    // results not in yet: nothing can be said about it at all
+    { date: "2026-09-08", at: "x", start: [side(MAN.tucker, 12)], sit: [], had: [side(MAN.adell, 3)] },
+    // the app was opened and had nothing to suggest
+    { date: "2026-09-10", at: "x", start: [], sit: [], had: [side(MAN.adell, 3)] }
+  ],
+  byDate: new Map([["2026-09-11", lines], ["2026-09-10", lines]]),
+  league: LEAGUE
+})
+t("a day with no seats on record is not a tie", ungradeable.days.find(d => d.date === "2026-09-11").worth === null, JSON.stringify(ungradeable.days))
+t("but what was asked for is still scored", near(ungradeable.days.find(d => d.date === "2026-09-11").asked, 34.1))
+t("and says why it stops there", ungradeable.skipped.some(s => s.date === "2026-09-11" && /which of your men were in your lineup/.test(s.why)), JSON.stringify(ungradeable.skipped))
+t("a day whose results are not in yet is skipped", ungradeable.skipped.some(s => s.date === "2026-09-08" && /results aren't in yet/.test(s.why)), JSON.stringify(ungradeable.skipped))
+t("a day with no recommendation is not graded", !ungradeable.days.some(d => d.date === "2026-09-10"), JSON.stringify(ungradeable.days.map(d => d.date)))
+t("no ungradeable day reaches the record", ungradeable.changed === 0 && ungradeable.net === 0)
+
+// A recommended starter who never took the field cost you the seat, and is scored that
+// way — which is the one place an absence is a zero rather than a null.
+const ghostStart = gradeRecord({
+  entries: [{
+    date: "2026-09-11", at: "x",
+    start: [{ key: "999999:hitting", name: "Nobody Played", slot: null, projected: 15 }],
+    sit: [], had: [side(MAN.albies, 2)]
+  }],
+  byDate, league: LEAGUE
+})
+t("starting a man who never played is scored as nothing, not skipped", near(ghostStart.days[0].asked, 0) && near(ghostStart.days[0].worth, -1.9), JSON.stringify(ghostStart.days[0]))
+t("and his own line still reads as did-not-play", ghostStart.days[0].calls.find(c => c.name === "Nobody Played").actual === null)
 
 // --- one live request ----------------------------------------------------------
 

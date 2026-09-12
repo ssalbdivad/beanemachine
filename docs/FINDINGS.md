@@ -184,3 +184,46 @@ commit message carries the measurement. Named here so the next walk knows they w
   `KEEP_DAYS` eventually drops it. The reason printed is now true of that day, which is the
   honest floor; what would actually fix it is grading the missed days on demand, at two
   requests and about 38 KB each.
+
+---
+
+## What the 2026-09-12 swarm surfaced and this pass did NOT do
+
+Five lenses proposed 43 changes, each verified against the running builds by an adversarial
+checker; 33 survived verification and most were implemented the same morning (see the commits
+from `36ab94b` to `a256b86` and after). What is left is recorded with the measurement that
+found it, so the next pass starts from evidence.
+
+- **Let him type the real Yahoo score in.** The score is the one number he can read with his
+  own eyes, and the app has never asked for it, while it does ask him to paste his opponent's
+  whole roster. Verified buildable and honest, with three constraints from the checker: key it
+  by league AND the period's start date, so Monday does not print Sunday's final as current;
+  stamp when it was typed and say so, the way the seats stamp does; and it must not reach the
+  engine — there is no per-player variance anywhere in `src/engine`, so a margin cannot steer a
+  recommendation, only the reader's own decision. Adding it also makes the Tonight card's "it
+  does not know your league's scoreboard" false as written.
+- **"His club was off" and "his club played and he sat" print identically.** Eight pitchers on
+  one card all read "didn't play", which covers a Tuesday starter on normal rest and a
+  shortstop who was scratched — the second is this morning's news and possibly a drop. The
+  discriminator is one extra schedule read for the recap date (`fetchSlate` already has that
+  shape), which is why it was not done in a pass that was already spending requests.
+- **Two of the four status chips start off-screen on a phone, including the only one that is a
+  button.** Measured on the dev build at 390px on a first visit: the strip is 917px wide in a
+  346px window — "Mrs. Met's Harem" 0–155, "10 teams" 161–253, "player data 4d ago" 259–602,
+  and the button "free agents estimated — make it exact" 608–917. It scrolls, with no fade and
+  no scrollbar, so nothing on screen says there is more. The chip a reader can act on is the
+  one he cannot see.
+- **The first screen never says "fantasy" or "Yahoo".** Measured on the published build at
+  390x844 with an empty profile: the masthead at y9, the tagline at y47, tab labels at y101,
+  chips at y162, the one explaining sentence at y206, and then 509px — 60% of the screen — of
+  last night's best nights in baseball, five men belonging to nobody. Every measurement was
+  confirmed by the checker. What a Yahoo manager wants to know in five seconds is whether this
+  will read HIS league, and nothing on that screen says so.
+- **In-game state is one query parameter away.** Adding `,linescore` to the schedule hydrate
+  costs a measured 4,703 extra wire bytes (14,839 → 19,542) and carries `currentInning`,
+  `inningState`, `outs` and the score. Nothing in `src/` reads it. The card can now say what a
+  lineup has SCORED tonight, but not how much of the night is left in an individual game.
+- **One pitching read is fetched twice.** Decide's innings floor and the recap's period total
+  ask for the identical `byDateRange` URL — same window, same group — separately, despite the
+  hook being shared for exactly that reason. Hoisting it to the page would pay for most of
+  another live read.

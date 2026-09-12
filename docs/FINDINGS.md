@@ -169,12 +169,6 @@ commit message carries the measurement. Named here so the next walk knows they w
 
 ### Still open, measured, and small
 
-- **A two-way player is two rows with one name.** `rosterKey` is `id:group`, so Ohtani the
-  hitter and Ohtani the pitcher are two correct roster entries with two correct totals — and
-  the men fold on the recap card prints his name twice with two different numbers beside it and
-  nothing saying which is which. The keys are right (he is no longer one React row); the
-  LABEL is what is missing. Not fixed because the shape of the fix is a product question:
-  either the side of the ball goes on the row, or the two rows are summed into one man.
 - **A pasted roster line the app cannot match to a player is silently absent from the recap.**
   `unmatchedLines` exists and the setup sheet quotes them back, but a man who was matched when
   the roster was saved and is now missing from the capture simply does not appear in the

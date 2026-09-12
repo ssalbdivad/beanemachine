@@ -346,11 +346,23 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	   seat nobody is eligible for and false of a seat whose best answer has already locked,
 	   the commonest kind after the first pitch. "One" and "one other" are spelled out in both
 	   sentences, so the word counts as 1. */
+	/* NOBODY IS OFFERED TWICE ON ONE CARD. A walk found Dominic Canzone as "Util · Add Dominic
+	   Canzone · 7.11 projected tonight" under Empty seats AND as "+14.36 · Add Dominic Canzone
+	   for your Util seat" under Make these moves — one man, one seat, two rows, and no way to
+	   tell whether that is one add or two. The moves row is the one that survives, because it
+	   prices the add against the rest of the roster. */
+	const moveNames = await page.$$eval(".decide-moves b", bs => bs.map(b => b.textContent.trim()))
+	t("a man the moves already offer is not offered again under Empty seats",
+		fills.every(f => !moveNames.includes(f.name)),
+		`fills: ${fills.map(f => f.name).join(", ") || "(none)"} | moves: ${moveNames.join(", ") || "(none)"}`)
+
 	const said = t =>
 		/^(One|one)\b/.test(t) ? 1 : Number((/(\d+)/.exec(t) ?? [])[1] ?? (t ? NaN : 0))
-	t("every seat the heading counts is offered a man, or explained by one of the two reasons",
-		Number.isNaN(openSeats) || fills.length + said(rest) + said(shutOut) === openSeats,
-		`${openSeats} open, ${fills.length} offered, nobody-eligible: ${rest || "(none)"}, already-locked: ${shutOut || "(none)"}`)
+	const moved = (await page.$$eval(".decide-fill-moved", n => n.map(e => e.textContent.trim())))[0] ?? ""
+	t("every seat the heading counts is offered a man, or explained by one of the three reasons",
+		Number.isNaN(openSeats) ||
+			fills.length + said(rest) + said(shutOut) + said(moved) === openSeats,
+		`${openSeats} open, ${fills.length} offered, nobody-eligible: ${rest || "(none)"}, already-locked: ${shutOut || "(none)"}, filled-by-a-move: ${moved || "(none)"}`)
 	/*
 	 * The seat phrase has to come off the name before the name is compared.
 	 *

@@ -1100,7 +1100,11 @@ export const Decide = ({
 	 * sides, which is the only way the card can stop contradicting itself.
 	 */
 	const fillTonight = useMemo(() => {
-		const nothing = { fills: [] as { slot: string; name: string; points: number; team: string | null }[], lockedOut: 0 }
+		const nothing = {
+			fills: [] as { slot: string; name: string; points: number; team: string | null }[],
+			lockedOut: 0,
+			movedIn: 0
+		}
 		if (!league || !today?.unfilled.length || !today.ratedToday.length) return nothing
 		if (!candidates.length) return nothing
 		const free = new Set(candidates.map(p => normalizeName(p.name)))
@@ -1109,6 +1113,25 @@ export const Decide = ({
 		 *  Util in this league, so without this he was offered for four of them at once
 		 *  — four adds that are really one, and three seats still empty afterwards. */
 		const taken = new Set<string>()
+		/*
+		   A MAN THE MOVES ABOVE ALREADY OFFER IS NOT OFFERED AGAIN HERE.
+		
+		   Measured by a walk: Dominic Canzone appeared twice on one card, as "Util · Add
+		   Dominic Canzone · 7.11 projected tonight" under Empty seats and again as "+14.36 ·
+		   Add Dominic Canzone for your Util seat — you have a free seat, so nobody comes out"
+		   under Make these moves. One man, one seat, two rows, and no way for a reader to tell
+		   whether that is one add or two.
+		
+		   The MOVES row is the one that survives, because it prices the add against the rest of
+		   the roster and states what it costs; this block's row is the same recommendation with
+		   less of the argument. The seat is still accounted for — it gets its own sentence
+		   below, pointing at the block that fills it, rather than falling into "nobody is
+		   eligible", which would be false of it.
+		*/
+		const offeredAbove = new Set((plan?.swaps.moves ?? []).map(m => normalizeName(m.add)))
+		/** Seats the moves block already fills, so this one neither repeats them nor calls
+		 *  them empty. */
+		const movedIn = new Set<string>()
 		/** Seats whose best answer exists and has already locked. A different sentence from a
 		 *  seat nobody is eligible for, and at 9pm it is the common one. */
 		const shut_out = new Set<string>()
@@ -1148,6 +1171,10 @@ export const Decide = ({
 			   The scheduled first pitch rather than the game's state, for the reason in `locked`:
 			   a delayed game is closed on the platform while MLB still calls it Pre-Game.
 			*/
+			if (best && offeredAbove.has(normalizeName(best.player.name))) {
+				movedIn.add(slot)
+				continue
+			}
 			if (best && slate) {
 				const at = lockFor(best.player.teamId, slate)
 				if (at !== null && at <= Date.now()) {
@@ -1165,8 +1192,8 @@ export const Decide = ({
 				})
 			}
 		}
-		return { fills: out.slice(0, 4), lockedOut: shut_out.size }
-	}, [today, candidates, league, slate, crossed])
+		return { fills: out.slice(0, 4), lockedOut: shut_out.size, movedIn: movedIn.size }
+	}, [today, candidates, league, slate, crossed, plan])
 
 	/**
 	 * WHAT WAS RECOMMENDED, WRITTEN DOWN BEFORE THE GAMES ARE PLAYED.
@@ -1812,11 +1839,18 @@ export const Decide = ({
 							  all: nothing can be done about it now, which is a different thing to be
 							  told and the thing that stops a reader going to look.
 							*/}
-							{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut > 0 && (
+							{fillTonight.movedIn > 0 && (
+								<p className="sub decide-fill-moved">
+									{fillTonight.movedIn === 1 ? "One of them is the seat" : `${fillTonight.movedIn} of them are the seats`}{" "}
+									the {fillTonight.movedIn === 1 ? "move" : "moves"} above{" "}
+									{fillTonight.movedIn === 1 ? "fills" : "fill"}.
+								</p>
+							)}
+							{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut - fillTonight.movedIn > 0 && (
 								<p className="sub decide-fill-rest">
-									{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut === 1 ?
+									{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut - fillTonight.movedIn === 1 ?
 										"One other seat has"
-									:	`${today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut} others have`}{" "}
+									:	`${today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut - fillTonight.movedIn} others have`}{" "}
 									nobody: no free man eligible there is on a card tonight.
 								</p>
 							)}
@@ -2067,7 +2101,10 @@ export const Decide = ({
 				*/
 				<p className="sub">None worth making.</p>
 			:	<>
-					<ul className="decide-list">
+					{/* Named so a suite can tell this list from the four others on the card — the
+					    one assertion that catches the same man being offered twice needs to read
+					    the two lists separately. */}
+					<ul className="decide-list decide-moves">
 						{plan.swaps.moves.map(m => (
 							<li key={`${m.add}-${m.drop}`}>
 								<span className="decide-delta">+{m.gain}</span>

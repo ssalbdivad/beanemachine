@@ -186,15 +186,39 @@ t("and nothing asked for them on a page where no row has been opened",
  * half-reverted version of this — no borrowed-scoring caveat, because there is nothing
  * borrowed left to caveat. What the reader gets instead is the offer, which the
  * `.dock-say` assertion below is about.
+ *
+ * FOUR, AND IT IS WHY THESE THREE ARE NOW SCOPED TO THE LANDING SCREEN. Each of the
+ * three passed, and all three passed for a reason none of them stated: `a763f12` moved
+ * the screen a first visit opens on from the board to Tonight, and Tonight has no table,
+ * no pick and no caveat on it whatever the league state is. Measured on this build from
+ * an empty profile: the landing screen is Tonight (`#tonight`, 0 `.board-row`), and ONE
+ * TAP away on Pickups there are 60 ranked rows, a visible `.card.pick` and a
+ * `.preview-note` reading "One real league's scoring, not yours." So "a first visit
+ * ranks nobody" was being read as a claim about the app and was only ever true of one
+ * screen of it, and an assertion that would go on passing if the borrowed board came
+ * back is the seed defect's own blind spot.
+ *
+ * Named for the landing screen, then, and the board one tap in is asserted as what it
+ * is — present, borrowed, and saying so — down at `go("Pickups")` below the colophon
+ * block. `docs/FINDINGS.md` carries the open question of whether that board should be
+ * reachable at all; this file's job is to say truthfully what ships.
  */
-t("a first visit ranks nobody, because there is no league to rank anyone in",
+t("the screen a first visit lands on ranks nobody, because no league has been named yet",
   (await p.$$eval(".board-row", n => n.length)) === 0,
   `${await p.$$eval(".board-row", n => n.length)} ranked rows`)
-t("and there is no pick, because a pick in nobody's scoring is nobody's pick",
+t("and there is no pick on it, because a pick in nobody's scoring is nobody's pick",
   (await p.$$eval(".card.pick", n => n.filter(e => e.checkVisibility()).length)) === 0)
-t("and no borrowed-scoring caveat, because nothing is being borrowed to caveat",
+t("and no borrowed-scoring caveat on it, because it is borrowing nothing to caveat",
   (await p.$$eval(".preview-note", n => n.length)) === 0,
   `${await p.$$eval(".preview-note", n => n.length)} notes`)
+/* Frozen for the same reason `firstPaintRequests` is: which screen a first visit opens
+   on, and what the address bar says it is, are facts about the LANDING and this suite
+   navigates away from it a hundred lines below. Asserted where the old
+   "and the visit lands on the screen that ranks" assertion was, so the change of answer
+   is recorded next to the claim it changed. */
+const landingTab =
+  (await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim())))[0]
+const landingHash = await p.evaluate(() => location.hash)
 /*
  * The setup is UNDER the ranking now, not beside it.
  *
@@ -260,25 +284,44 @@ t("and the button asks the question it is about to ask, not for a chore",
  * renders, the setup renders — so all of them would have gone on passing if the setup
  * went back above the board tomorrow.
  *
+ * THE OLD TRUTH, and this was the one red assertion in this file for days: it asked for
+ * a `.board-row` on the screen a first visit lands on and compared that row's position
+ * to the dock's. There is no ranked row there any more and there is not meant to be.
+ * Two commits took it away and neither is a regression: `d973020` stripped the seeded
+ * league, so nothing can be ranked until a reader says whose points to rank in, and
+ * `a763f12` made the landing screen Tonight rather than the board. Measured on this
+ * build: 0 `.board-row` on the landing screen, 60 of them one tap away on Pickups.
+ *
+ * So the claim is now made against the CONTENT REGION rather than against one row of it,
+ * which is what that row was always standing in for: whatever a screen is showing, the
+ * three renders below meet it BEFORE they meet the sheet that asks for a league. `main`
+ * holds every screen, and the dock is the element after it — so this keeps holding when
+ * the landing screen changes again, which it has now done twice.
+ *
+ * Corrected in the same pass, because it was never true: the old note said "the dock is
+ * the last thing in `.wrap`". Measured, `.wrap`'s children are
+ * `A.skip / HEADER / NAV.views / DIV.chips / MAIN / ASIDE.dock / FOOTER.colophon` — the
+ * colophon follows the dock. Being last was not the property worth holding anyway; being
+ * after the content is, and the footer is not content a reader is looking for.
+ *
  * Pinned twice, because the two ways it can be wrong are different failures:
  *
  *  · In the DOCUMENT. A screen reader, a keyboard tab order and a no-CSS render all
- *    meet this page in source order, so the board has to come before the setup there.
- *    The dock is the last thing in `.wrap` (src/client/App.tsx) and that is what this
- *    holds in place.
+ *    meet this page in source order, so the screen has to come before the setup there.
  *  · On the SCREEN. `.dock` is `position:fixed`, so source order alone would also be
- *    satisfied by a bar painted straight over the top of the board. The bar has to be
+ *    satisfied by a bar painted straight over the top of the content. The bar has to be
  *    at the FOOT of the viewport, and — the thing fixed bars get wrong — the page has
  *    to reserve its height instead of letting it cover the end of the page, which is
  *    what `--dock-h` in app.css is for.
  */
-t("the ranking comes before the setup in the document, which is the entire point of the dock",
+t("the screen comes before the setup in the document, which is the entire point of the dock",
   await p.evaluate(() => {
-    const row = document.querySelector(".board-row")
+    const content = document.querySelector("main")
     const dock = document.querySelector(".dock")
-    return !!row && !!dock &&
-      !!(row.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING)
-  }))
+    return !!content && !!dock &&
+      !!(content.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }),
+  (await p.$$eval(".wrap > *", n => n.map(e => `${e.tagName}.${e.className}`).join(" "))))
 t("and the bar sits at the foot of the viewport rather than over the rows",
   await p.evaluate(() => {
     const bar = document.querySelector(".dock-bar").getBoundingClientRect()
@@ -455,14 +498,116 @@ t("and with no league it does not claim the numbers are in the reader's own poin
   /borrowed from one real league/i.test(colophon) && !/your league.s own points/i.test(colophon),
   colophon.slice(0, 200))
 /*
+ * ── THE BOARD A FIRST VISIT CAN STILL REACH, AND THE TAP THAT REACHES IT ─────────
+ *
+ * THIS NAVIGATION IS WHERE THIS FILE DIED, and it died at the line below rather than
+ * here: 20 assertions in, `p.$eval(".board-legend summary")` threw, and because an
+ * uncaught throw ends the process, the 118 assertions after it had not been run for
+ * days. Everything from the onboarding sheet to the ESPN import to the 44x44 touch
+ * targets was unmeasured, not passing.
+ *
+ * What changed under it: a first visit lands on Tonight (`a763f12`), and Tonight has no
+ * table, so no legend, so no summary. The board itself did NOT go away — `d973020` took
+ * the seeded league out of the published asset, and the preset board a stranger can look
+ * at stayed. Measured on this build from an empty profile: Tonight has 0 `.board-row`
+ * and Pickups has 60, in the borrowed values, with Billy's pick and the caveat on them.
+ *
+ * So the board is asserted where a reader now finds it, and the two facts that tap is
+ * worth are asserted with it. The absence on the landing screen is still asserted, up in
+ * the first-visit block — those are two different claims and this file now makes both
+ * instead of confusing one for the other.
+ *
+ * NAVIGATED BY THE ADDRESS BAR, NOT BY THE TAB, and that is not a convenience: pressing
+ * a tab sets `onboarding` false (App.tsx:780, "Choosing a tab is choosing to leave the
+ * setup"), and with that switch off the dock is on the page only for as long as there is
+ * no league — so the first league this file builds would take the whole setup off the
+ * screen mid-sentence and every assertion about the sheet below would have nothing to
+ * read. That is a DEFECT IN THE APP and not a fact about the suite; it is pinned as its
+ * own assertion immediately below, on a page of its own, and reported rather than
+ * worked around silently. A hash is also a real reader's gesture now and the one this
+ * file is otherwise not exercising: `onHash` in App.tsx sets the screen and nothing else,
+ * which is what a link somebody sent him does.
+ */
+await p.evaluate(() => {
+  window.location.hash = "#pickups"
+})
+await p.waitForSelector(".board-row", { timeout: 25000 })
+t("the borrowed board is still there, one screen in, ranking men in values that are not yours",
+  (await p.$$eval(".board-row", n => n.length)) > 50 &&
+    (await p.$$eval(".card.pick", n => n.filter(e => e.checkVisibility()).length)) === 1,
+  `${await p.$$eval(".board-row", n => n.length)} rows, ${await p.$$eval(".card.pick", n => n.filter(e => e.checkVisibility()).length)} pick`)
+t("and the caveat is on it, on the screen with the numbers rather than on the one without",
+  /one real league.s scoring, not yours/i.test(await p.$eval(".preview-note", e => e.innerText)),
+  (await p.$eval(".preview-note", e => e.innerText)).replace(/\s+/g, " ").slice(0, 140))
+/*
+ * ── THE SETUP MUST SURVIVE THE LEAGUE IT JUST MADE ──────────────────────────────
+ *
+ * THIS ONE IS RED ON PURPOSE. It is a defect, measured on this build, and bending it to
+ * pass would hide the worst thing a first visit can do.
+ *
+ * The gesture is the ordinary one: land on Tonight, press the PICKUPS tab to see what
+ * the app is talking about, press "Who's on my team", type the four names the box itself
+ * teaches, press "That's my team". Measured at 390x844 from an empty profile — 0 `.dock`
+ * and 0 `.onboard` on the screen afterwards. The whole setup is gone. What the reader
+ * therefore never sees:
+ *
+ *   · "Got them. 4 players: Cal Raleigh, Ben Rice, Aaron Judge, Tarik Skubal" — the
+ *     confirmation this file argues for twenty lines at a time, because a name that
+ *     silently matched nobody is missing from every recommendation for the rest of the
+ *     season and a count cannot be checked.
+ *   · "How many teams are in your league?", whose own sub-line says it "changes who
+ *     counts as a good pickup more than anything else does".
+ *   · "Show me tonight", the way out, so he is left standing on the board he was looking
+ *     at with no sign that anything happened.
+ *
+ * He also has no way back in from there: the management toolbar renders only on My
+ * league, and the dock is gone. His team IS stored — `beanemachine:roster` holds the
+ * four men against `yahoo:my-league` — so this costs confirmation and two answers rather
+ * than data.
+ *
+ * WHY: `docked = onboarding || !league` (App.tsx:665). The tab press turned `onboarding`
+ * off, the league the button just created made `!league` false, and the sheet the reader
+ * was reading was unmounted by the success of his own gesture. Without the tab press, or
+ * arriving at `#pickups` from a link, the same paste leaves the sheet up and asks both
+ * questions — measured on all three paths.
+ *
+ * Run on its own page so the walk below is not standing in the wreckage.
+ */
+{
+  const tapped = await b.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  await tapped.route("**/api/**", r => r.abort())
+  await tapped.goto(BASE, { waitUntil: "networkidle" })
+  await tapped.waitForSelector(".dock-bar", { timeout: 25000 })
+  await tapped.click('.views button:text-is("Pickups")')
+  await tapped.waitForSelector(".board-row", { timeout: 25000 })
+  await tapped.click(".dock-bar button")
+  await tapped.waitForSelector("[data-ctl=onboard-team]", { timeout: 15000 })
+  const example = await tapped.getAttribute("[data-ctl=onboard-team]", "placeholder")
+  await tapped.fill("[data-ctl=onboard-team]", example ?? "")
+  await tapped.locator(".onboard button", { hasText: /^That.s my team$/ }).click()
+  await tapped.waitForTimeout(1800)
+  const after = await tapped.evaluate(() => ({
+    docks: document.querySelectorAll(".dock").length,
+    sheets: document.querySelectorAll(".onboard").length,
+    named: document.querySelector(".onboard-got")?.innerText ?? null,
+    asked: [...document.querySelectorAll(".onboard-teams h3")].map(e => e.textContent.trim()),
+    wayIn: document.querySelectorAll('.bar [data-ctl="onboard"]').length,
+    stored: Object.keys(JSON.parse(localStorage.getItem("beanemachine:roster") ?? "{}")).length
+  }))
+  t("a reader who looked at the board first still gets his team read back to him",
+    after.sheets === 1 && !!after.named && after.asked.length > 0,
+    `${after.docks} docks, ${after.sheets} sheets, named back: ${after.named ?? "(nothing)"}, still asking: ${after.asked.join(" / ") || "(nothing)"}, ways back in: ${after.wayIn}, rosters stored: ${after.stored}`)
+  await tapped.close()
+}
+/*
  * The claim the footer used to carry, asserted where it now lives.
  *
  * Generated from `sort`, so there is one legend per ordering and each one describes
- * the column the rows are actually in. On this screen — a first visit, the fortnight
- * board, sorted on bscore — it has to name the man the number is measured against AND
- * refuse to be read as a points forecast, which is the whole of what the deleted
- * sentence was protecting. Read off the rendered page rather than the source so a
- * legend that stopped rendering is a failure rather than an absence nobody notices.
+ * the column the rows are actually in. On this screen — Pickups on a first visit, the
+ * fortnight board, sorted on bscore — it has to name the man the number is measured
+ * against AND refuse to be read as a points forecast, which is the whole of what the
+ * deleted sentence was protecting. Read off the rendered page rather than the source so
+ * a legend that stopped rendering is a failure rather than an absence nobody notices.
  */
 /*
  * Read as SUMMARY and BODY, because the legend is a disclosure.
@@ -640,13 +785,34 @@ t("and the card and the board agree that the scoring is borrowed, not the reader
 t("the tabs work on a first visit, because there is something behind each of them",
   await p.$$eval(".views button", n => n.every(e => !e.disabled)),
   await p.$$eval(".views button", n => n.map(e => `${e.textContent}:${e.disabled}`).join(" ")))
-// "Pickups", not "Wire" — the tab was renamed in the plain-language pass and the
-// view id behind it ("wire") was deliberately not, because it is the key this browser
-// stores the last screen under. Read off the label, because the label is what a reader
-// can see and the id is what nothing must change.
-t("and the visit lands on the screen that ranks",
-  (await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim())))[0] === "Pickups",
-  (await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim()))).join(","))
+/*
+ * WHICH SCREEN A FIRST VISIT OPENS ON, and the answer has changed.
+ *
+ * THE OLD TRUTH: "and the visit lands on the screen that ranks" — Pickups, because the
+ * argument then was that the numbers are what make a stranger spend two minutes on a
+ * form, so he should meet them first. `a763f12` ("A first visit is shown real baseball")
+ * moved it to Tonight, and the reason is better than the old one: Tonight reads last
+ * night's box scores and tonight's posted lineups LIVE off MLB, so it is the one screen
+ * that is about today's baseball whether or not anybody has named a league. The board
+ * behind the old answer was ranking men in somebody else's points.
+ *
+ * Read off the label for the same reason it always was — the label is what a reader can
+ * see, and the view id behind it ("board") is what nothing must change, because it is
+ * the key this browser stores the last-used screen under.
+ *
+ * And the address bar now says which screen it is, which it did not when this assertion
+ * was last true: `VIEW_HASH` in panels.tsx, added in `7ca4947`, so Tonight is `#tonight`
+ * and Pickups `#pickups`. That is asserted here rather than in its own block because it
+ * is the same fact — where a reader is — and a hash that disagrees with the highlighted
+ * tab is the failure worth catching. Both frozen at the landing, before this file's
+ * first `go`.
+ */
+t("and the visit lands on the screen that reads tonight's baseball, not the ranked board",
+  landingTab === "Tonight", String(landingTab))
+t("and the address bar says which screen that is, so it can be sent to somebody",
+  landingHash === "#tonight" &&
+    (await p.evaluate(() => location.hash)) === "#pickups",
+  `landed on ${landingHash}, now on ${await p.evaluate(() => location.hash)}`)
 
 /**
  * The route that cannot be revoked, on the build where it is the only one.
@@ -843,12 +1009,27 @@ t("and every column that is a number still defines itself, on the header itself"
  * correct, and undefined.
  */
 const firstRow = p.locator(".board-row").first()
+/* Counted before the tap, because the other half of the split capture is asserted here.
+   The top of this file proves `contact.json` is NOT on the critical path; what nothing
+   proved is that it is ever fetched at all — a build that split the file and forgot to
+   ask for it would pass that assertion and lose 1,505 rows of Baseball Savant, silently,
+   on the only screen that prints them. `0bc6095` is the commit that split it. */
+const contactBefore = requested.filter(u => /contact\.json/.test(u)).length
 await firstRow.click()
 await p.waitForSelector(".detail", { timeout: 10000 })
+await p.waitForTimeout(1200)
 const detailTerms = await p.$$eval(".detail dt", n => n.map(e => e.textContent.trim()))
 t("and the numbers that left the row are still printed in the drill-down, per player",
   detailTerms.includes("confidence") && detailTerms.includes("uscore"),
   detailTerms.join(" | "))
+/* ONE request, not "at least one": the file is 299.8 KB and a drill-down re-fetching it
+   per row would cost more than shipping it on the first paint did. Measured on this build:
+   0 before the tap, 1 after. The rows themselves are asserted too — the request landing and
+   nothing being drawn from it is the other way this could go wrong. */
+t("and opening a row is what asks for the second file, once, and then draws it",
+  requested.filter(u => /contact\.json/.test(u)).length === contactBefore + 1 &&
+    detailTerms.includes("barrel %") && detailTerms.includes("xwOBA (21d)"),
+  `${contactBefore} requests before the tap, ${requested.filter(u => /contact\.json/.test(u)).length} after; ${detailTerms.filter(d => /wOBA|barrel|exit velo/.test(d)).join(", ") || "no contact rows on the card"}`)
 await firstRow.click()
 await p.waitForSelector(".detail", { state: "detached", timeout: 10000 })
 // The one definition a reader cannot do without, and the one the old primer got
@@ -1251,9 +1432,25 @@ await p.evaluate(k => {
   c.active_league = "espn:81134470"
   localStorage.setItem("beanemachine:config", JSON.stringify(c))
 }, KEY)
+/* The screen the address bar names is the screen a reload comes back to, and this is
+   where that gets proved.
+
+   THE OLD TRUTH was one line: "A reload opens on Today, which has no `.board-row` on it
+   any more" — and it stopped being true in `7ca4947`, which put the screen in the hash.
+   This walk is standing on My league when it reloads, so the wait for `.decide` waited
+   25 seconds for a card that is on a different screen and then took the rest of the file
+   down with it. That is 118 assertions lost to a one-line assumption, which is why the
+   assumption is now an assertion: a reload that forgets what the reader was reading is
+   the defect the hash was added to fix, and `docs/FINDINGS.md` had it recorded as "a
+   reload always returns to Tonight whatever the reader was reading". */
+const beforeReload = await p.evaluate(() => location.hash)
 await p.reload({ waitUntil:"networkidle" })
-// A reload opens on Today, which has no `.board-row` on it any more.
-await p.waitForSelector(".decide", { timeout: 25000 })
+await p.waitForSelector(MARKER["My league"], { timeout: 25000 })
+t("a reload comes back to the screen the address bar names, not to the default one",
+  beforeReload === "#my-league" &&
+    (await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim())))[0] ===
+      "My league",
+  `${beforeReload} before, ${await p.evaluate(() => location.hash)} after, on ${(await p.$$eval(".views button[aria-current=page]", n => n.map(e => e.textContent.trim()))).join(",")}`)
 // This searched the tab labels for /my team/ — "My team & trades" — and that tab is
 // gone: the team panel is the TOP half of Setup, above the league editor. Named
 // rather than matched, because `go` already holds the one place a label lives.
@@ -1426,6 +1623,39 @@ await p.waitForTimeout(600)
 t("but a line that says too little is refused with no guess attached",
   (await p.locator(".onboard-meant").count()) === 0,
   await p.$$eval(".onboard-answer > *", n => n.map(e => e.innerText.slice(0, 70)).join(" | ")))
+/*
+ * A SURNAME EXACTLY ONE MAN CARRIES IS A MATCH, and an ambiguous one is still refused.
+ *
+ * New here, and it is the fix for the worst thing a first visit could do — `7ca4947`,
+ * "Typing six surnames adds five men instead of refusing all six". Six bare surnames used
+ * to add nobody and then print five of the six men's names as tappable offers directly
+ * under the sentence "Nothing in them is counted anywhere", which was false about five of
+ * the lines it covered. `uniqueSurname` was already computing the distinction and the
+ * result was thrown away: 984 of the capture's 1,445 surnames belong to exactly one man,
+ * so two thirds of the pool is reachable this way and none of it can resolve to the wrong
+ * man.
+ *
+ * Both halves are asserted, because the fix is the DISTINCTION and either half alone is a
+ * different bug: «Judge» is one man and is added without being asked about, «Soto» is two
+ * and is still quoted back as uncounted. And the ambiguous one must not be GUESSED — the
+ * typo path above offers a chip, and a surname two men share has no chip to offer, which
+ * is what separates "one typo from a name" from "could be either of them".
+ *
+ * Measured on this build: "Judge / Soto" gives "Got them. 1 player: Aaron Judge" and "I
+ * couldn't find a player in this line: «Soto»", with no offer chips at all.
+ */
+await p.fill("[data-ctl=onboard-team]", "Judge\nSoto")
+await p.click(".onboard-go button")
+await p.waitForSelector(".onboard-got", { timeout: 15000 })
+const surnames = await p.evaluate(() => ({
+  got: document.querySelector(".onboard-got")?.innerText ?? "",
+  missed: document.querySelector(".onboard-missed")?.innerText ?? "",
+  offers: document.querySelectorAll(".onboard-meant .chip-btn").length
+}))
+t("a one-word line is taken where one man carries that name, and refused where two do",
+  /Aaron Judge/.test(surnames.got) && !/Soto/.test(surnames.got) &&
+    /«Soto»/.test(surnames.missed) && surnames.offers === 0,
+  `${surnames.got.replace(/\s+/g, " ")} // ${surnames.missed.replace(/\s+/g, " ")} // ${surnames.offers} offers`)
 // put the four typed names back, which is the state the rest of this walk assumes
 await p.fill("[data-ctl=onboard-team]", PLACEHOLDER)
 await p.click(".onboard-go button")
@@ -1459,32 +1689,59 @@ t("and answering it is written to the league, not only to the chip",
     return c.leagues[c.active_league].meta.max_teams
   })))
 /**
- * THE THIRD QUESTION, AND THE ONE THE DOCK'S PROMISE RESTS ON.
+ * THE THIRD QUESTION IS GONE, AND ITS CLAIM IS ASSERTED AGAINST WHAT REPLACED IT.
  *
- * The bar reads "Tell it who's on your team and it will tell you who to start tonight"
- * and the button below reads "Show me tonight". Neither was true on this route.
- * `Decide`'s Today section renders only where `scoring_period.lineup_lock === "daily"`,
- * and the shipped preset carries no `scoring_period` at all — verified `undefined` in
- * public/scoring.json — so a first visit walked the whole sheet, landed on the card, and
- * got a scoring-period plan with no tonight in it. The app's one conversion sentence,
- * structurally unanswerable by the only route a stranger has.
+ * THE OLD TRUTH, in full, because the argument for asking it was good: the bar reads
+ * "Tell it who's on your team and it will tell you who to start tonight" and the button
+ * below reads "Show me tonight", and neither was true on this route. `Decide`'s Today
+ * section rendered only where `scoring_period.lineup_lock === "daily"`, the shipped preset
+ * carries no `scoring_period` at all, and Yahoo hosts both kinds of league — so a stranger
+ * walked the whole sheet, landed on the card, and got a scoring-period plan with no
+ * tonight in it. The sheet therefore asked "Can you change your lineup every day?", and
+ * this block asserted the whole chain: the question on the sheet, the answer reaching the
+ * league with a `source` naming who said it, and a Today section on the card after it.
  *
- * It cannot be read off a preset, because it is not a fact about a platform: Yahoo hosts
- * both kinds. It is one tap and only the reader has it, so it is asked. What is asserted
- * here is the whole chain, because any link alone would pass on a screen that still
- * cannot answer: the question is on the sheet, the answer reaches the league with a
- * source naming who said it, and the card that follows HAS a Today section.
+ * `2e9963e` removed the question and moved the claim, and the note in Onboard.tsx:455
+ * makes the case: the GATE changed. Today now renders unless the league is KNOWN to lock
+ * for the period (`Decide.tsx:481`), and where nothing is known it states the assumption
+ * on the heading it qualifies rather than asking up front — `assumedDaily`, printed as
+ * "if your league lets you change the lineup every day — most do, and My league takes the
+ * answer". That is this project's own rule about absences, and the question cost more
+ * than a tap: measured at 390x844 it sat at y=874 in a 590px-tall box, 101px below the
+ * visible bottom, pushing the two questions above it further down.
+ *
+ * So the chain is asserted in the shape it now takes, and all three links are still
+ * checked because any one alone would pass on a sheet that had lost the point:
+ *
+ *   · the sheet does not ask it — stated as an ABSENCE, not left unchecked, because a
+ *     question creeping back onto the required path is the thing that was measured as
+ *     expensive;
+ *   · the card the reader lands on STATES the assumption it is working from, which is
+ *     asserted a few lines below on `.decide-assumed`, on the screen that does it;
+ *   · and the answer is still reachable, which is asserted on My league further down,
+ *     where the select lives.
+ *
+ * WHAT IS NO LONGER PROTECTED ANYWHERE, recorded rather than dropped: the `source` on a
+ * lock the reader himself answered. The old handler wrote `source: "you said so during
+ * setup"` so a later read off the settings page could overwrite it without anybody
+ * guessing where the value came from; `patch` in the league editor (App.tsx:2110) writes
+ * `lineup_lock` with no source at all. Nothing on any screen now says who said it.
  */
 /*
  * AND IT IS REACHABLE. The button that ends setup is `position:sticky;bottom:0` once a
- * league exists, and it used to pin from that moment — on top of the two chip questions
- * that come AFTER it in the document. Measured on this build at 390x844: the button at
- * y=701, "How many teams" at 757, "Can you change your lineup every day?" at 894, fifty
- * pixels past the bottom of the screen. The natural gesture is to press the big button
- * you can see, and it skipped the question.
+ * league exists, and it used to pin from that moment — on top of the chip questions that
+ * come AFTER it in the document. Measured on the build of the day: the button at y=701,
+ * "How many teams" at 757, "Can you change your lineup every day?" at 894, fifty pixels
+ * past the bottom of the screen. The natural gesture is to press the big button you can
+ * see, and it skipped the question.
  *
  * It pins only once the questions are answered now, so this asserts the ORDER rather than
  * any particular pixel: everything the sheet still wants sits above the way out of it.
+ *
+ * ONE question rather than two, and the count is part of the claim: with the lineup lock
+ * gone there is exactly one chip question left, and this file would rather fail than let
+ * a second one arrive unnoticed. Measured on this build at 1280x1000: the exit at y=860
+ * and "How many teams are in your league?" at y=702.
  */
 const layout = await p.evaluate(() => ({
   exit: Math.round(document.querySelector(".onboard-done").getBoundingClientRect().top),
@@ -1493,20 +1750,22 @@ const layout = await p.evaluate(() => ({
     Math.round(e.getBoundingClientRect().top)
   ])
 }))
-t("and every question it still wants sits above the button that ends it",
-  layout.questions.length === 2 && layout.questions.every(([, y]) => y < layout.exit),
+t("and the one question it still wants sits above the button that ends it",
+  layout.questions.length === 1 && layout.questions.every(([, y]) => y < layout.exit),
   `exit at ${layout.exit}, ${layout.questions.map(([t2, y]) => `${t2} at ${y}`).join(", ")}`)
-
-t("the sheet asks the one thing a preset cannot know about tonight",
-  /change your lineup every day/i.test(await p.$eval(".onboard", e => e.innerText)),
+t("and the sheet no longer asks about tonight's lock, which is now stated rather than asked",
+  !/lineup every day/i.test(await p.$eval(".onboard", e => e.innerText)) &&
+    (await p.locator('.onboard-teams .chip-btn:text-is("Yes, every day")').count()) === 0,
   (await p.$$eval(".onboard-teams h3", n => n.map(e => e.textContent.trim()))).join(" | "))
-await p.click('.onboard-teams .chip-btn:text-is("Yes, every day")')
-await p.waitForTimeout(500)
-t("and the answer is stored as his, with the source saying so",
+/* And the league is left honestly silent about it rather than carrying a lock nobody
+   stated. This is the half the old assertion got for free by asking: an unanswered
+   question that wrote a default would make `assumedDaily` false and the assumption
+   disappear from the card, which is the one way this change could have gone wrong
+   without anything else here noticing. */
+t("and nothing invents an answer to it, so the card below knows it is assuming",
   await p.evaluate(() => {
     const c = JSON.parse(localStorage.getItem("beanemachine:config"))
-    const sp = c.leagues[c.active_league].scoring_period
-    return sp?.lineup_lock === "daily" && /you said/i.test(sp?.source ?? "")
+    return (c.leagues[c.active_league].scoring_period?.lineup_lock ?? null) === null
   }),
   await p.evaluate(() => {
     const c = JSON.parse(localStorage.getItem("beanemachine:config"))
@@ -1537,6 +1796,22 @@ t("and the screen it lands on is about his own team rather than asking for one",
 const card = await p.$eval(".decide", e => e.innerText.replace(/\s+/g, " "))
 t("and it really does tell him who to start tonight, which is what the bar promised",
   /\bToday\b/.test(card) && /of your men can score/i.test(card), card.slice(0, 220))
+/* The second link of the chain the sheet stopped asking about — see the long note above
+   the layout block. Nobody has said whether this league locks daily, so the card is
+   offering tonight's changes on the commoner of the two kinds and has to say so in the
+   same breath, ON the heading it qualifies rather than in a footnote. Asserted as the
+   rendered element and its sentence, because `assumedDaily` going false would take the
+   admission off the screen while leaving every other assertion here passing. */
+/* Matched on "change the lineup every day" — the card's own wording, which is not the
+   removed question's. The question asked "Can you change YOUR lineup every day?"; the
+   card says "if your league lets you change THE lineup every day", and an assertion
+   written from memory of the question fails on the sentence that replaced it. */
+t("and it says out loud that it is assuming a league whose lineup it can change tonight",
+  (await p.$$eval(".decide-assumed", n => n.length)) === 1 &&
+    /change the lineup every day/i.test(await p.$eval(".decide-assumed", e => e.innerText)) &&
+    /My league/i.test(await p.$eval(".decide-assumed", e => e.innerText)),
+  (await p.$$eval(".decide-assumed", n => n.map(e => e.innerText.replace(/\s+/g, " ")).join(" | "))) ||
+    "(nothing on the card admits the assumption)")
 // `#tpl` — "Start a league from" — lives in the management toolbar, which used to be
 // on the League setup tab and is now on SETUP, the third screen. This was
 // `nth-child(2)`, which is Wire, where no toolbar renders at all.
@@ -1545,6 +1820,65 @@ await p.waitForSelector("#tpl", { timeout: 15000 })
 t("the picker offers no Sleeper league type on the hosted build either",
   !(await p.$$eval("#tpl option", n => n.map(e => `${e.value}${e.textContent}`).join(" "))).match(/sleeper/i),
   await p.$$eval("#tpl option", n => n.map(e => e.textContent).join(" | ")))
+/*
+ * The third link of the chain the sheet stopped asking about: the answer is still
+ * ANSWERABLE, on the screen the card sends him to.
+ *
+ * "My league takes the answer" is a sentence the Tonight card prints, so it has to be
+ * true of this screen, and it is a select rather than a chip row now — App.tsx:2209,
+ * "Lineups lock", with "every day" and "for the whole period" the two things a league
+ * can do. Exercised rather than merely counted: the value is chosen and the store is read
+ * back, because an option that writes nothing is exactly the dead end the removed
+ * question would have left behind.
+ *
+ * The source it writes is NOT asserted, because there is not one — see the note above the
+ * layout block. That is recorded as unprotected rather than asserted as acceptable.
+ */
+const lock = p.locator('select[aria-label="When this league locks the lineup"]')
+/* Behind a disclosure, and the disclosure is part of the claim rather than an obstacle to
+   work around: `details.period-fold`, whose summary reads "Scoring period — not stated — a
+   rolling week…". So the screen the card points at both ADMITS that nothing has been said
+   and holds the place to say it, which is the absence-stated rule two surfaces running.
+   Measured shut on arrival, which is why this opens it: the select is at y=2054 inside it
+   and Playwright refuses to touch an element in a closed `<details>` — the same trap
+   `openAlts` exists for at the top of this file. */
+const periodFold = p.locator("details.period-fold")
+const periodSummary = (await periodFold.locator("summary").first().innerText()).replace(/\s+/g, " ")
+if (!(await p.$("details.period-fold[open]"))) await periodFold.locator("summary").first().click()
+await p.waitForSelector("details.period-fold[open]", { timeout: 10000 })
+t("and the answer the sheet stopped asking for can be given where the card says it can",
+  (await lock.count()) === 1 && /not stated/i.test(periodSummary) &&
+    JSON.stringify(await lock.locator("option").allTextContents()) ===
+      JSON.stringify(["not stated", "every day", "for the whole period"]),
+  `${periodSummary.slice(0, 80)} → ${(await lock.locator("option").allTextContents()).join(" | ") || "(no lock control on My league)"}`)
+await lock.selectOption("daily")
+await p.waitForTimeout(400)
+/* SAVED, not merely chosen, and that is the difference between a control and an answer.
+   Choosing the option lights the editor's own save bar ("UNSAVED CHANGES — Revert · Save")
+   and writes NOTHING to this browser until it is pressed — measured: `scoring_period` is
+   still null after the select and holds `lineup_lock: "daily"` after the save. An
+   assertion that stopped at the select would have reported this answer as given while the
+   card went on assuming, which is the chain this block exists to close. */
+t("and the save bar lights for it, because an unsaved answer is not an answer",
+  await p.locator(".savebar").evaluate(e => e.classList.contains("on")),
+  (await p.$eval(".savebar", e => e.innerText.replace(/\s+/g, " "))).slice(0, 80))
+await p.click(".savebar button.primary")
+await p.waitForSelector(".toast", { timeout: 10000 })
+await p.waitForTimeout(300)
+/* The evidence prints the whole period on purpose: `source` comes back null, which is the
+   gap recorded in the long note above — the league now holds an answer with nothing saying
+   who gave it. The assertion is about the answer arriving, because that is the link in the
+   chain; the missing source is reported rather than asserted, so it cannot be mistaken for
+   something this file is protecting. */
+t("and giving it reaches the league, so the card stops assuming",
+  await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    return c.leagues[c.active_league].scoring_period?.lineup_lock === "daily"
+  }),
+  await p.evaluate(() => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config"))
+    return JSON.stringify(c.leagues[c.active_league].scoring_period ?? null)
+  }))
 // and the board, which is what a preset is FOR, is on Wire — `nth-child(1)` was the
 // tab that used to carry it and is now the Decide card alone.
 await go("Pickups")
@@ -1885,7 +2219,13 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   })
   const page = await ctx.newPage()
   await page.goto(BASE, { waitUntil: "domcontentloaded" })
-  await page.waitForSelector(".board-row", { timeout: 30000 })
+  /* Waited on the DOCK BAR, and every screen below is asked for by name.
+     THE OLD TRUTH: a first visit landed on the board, so `.board-row` was both "the app is
+     up" and "we are on Pickups", and the loop skipped the click for Pickups on that
+     basis. `a763f12` lands a first visit on Tonight, which has no table on it, so this
+     waited 30s for a row on a screen that has none and took the last five assertions in
+     this file down with it. The bar is what every first visit renders whatever the screen. */
+  await page.waitForSelector(".dock-bar", { timeout: 30000 })
   /* `checkVisibility` rather than a bounding box alone: an earlier pass counted the
      contents of shut <details> as visible, which made the number meaningless in the
      flattering direction. Deduped by tag+class+label so one list of 120 rows does not
@@ -1903,11 +2243,13 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
       return [...seen.values()]
     })
   for (const label of ["Pickups", "Tonight", "My league"]) {
-    if (label !== "Pickups") {
-      await page.evaluate(() => window.scrollTo(0, 0))
-      await page.click(`.views button:text-is("${label}")`)
-      await page.waitForTimeout(900)
-    }
+    /* Navigated for all three now, Pickups included: it is no longer the screen a visit
+       arrives on, and counting its controls while standing on Tonight measured Tonight
+       twice. Tonight's own row in this census is the one that changed most — it is the
+       landing screen, so it is the first thing a thumb meets. */
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.click(`.views button:text-is("${label}")`)
+    await page.waitForTimeout(900)
     const all = await targets()
     const under = all.filter(c => c.w < 44 || c.h < 44)
     t(`every control on ${label} is at least 44x44 under one thumb`,
@@ -1965,7 +2307,10 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
 {
   const p = await b.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   await p.goto(BASE, { waitUntil: "domcontentloaded" })
-  await p.waitForSelector(".board-row", { timeout: 30000 })
+  /* The bar, not a ranked row: a first visit lands on Tonight and ranks nobody — see the
+     note in the touch-target block above. Nothing here needs a board at all; what it needs
+     is the sheet, and the bar is what opens it. */
+  await p.waitForSelector(".dock-bar", { timeout: 30000 })
   await p.click(".dock-bar button")
   await p.waitForSelector("[data-ctl=onboard-team]")
   const typed = "OF Aaron Judge\nSP Tarik Skubal\nC Cal Raleigh"

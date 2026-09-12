@@ -5,13 +5,38 @@ import { cachedFetch } from "./cache.ts"
 import { addDays, seasonRange } from "./seasons.ts"
 
 /**
- * Is xwOBA predictive at all? — `nub run xwoba`
+ * Is xwOBA predictive at all?
+ *
+ *     node src/backtest/xwoba.ts --real --prior-days=21 --seasons=2024 --min=30
  *
  * A separate question from "does an xwOBA multiplier improve a roster decision",
  * and the two have different answers. This asks the direct one: standing at the
  * start of a week, which of a hitter's prior numbers best ranks what he is about
  * to do — his actual wOBA, his expected wOBA, or a blend? Spearman throughout,
  * because a recommendation is an ordering.
+ *
+ * THE COMMAND ABOVE IS THE ONE THAT RUNS. This header said `nub run xwoba`, which
+ * is not a thing: there is no `xwoba` script in package.json — grepped, zero hits —
+ * and `nub` is not installed on this machine in any case. A probe whose only
+ * documented invocation does not exist reads as abandoned, which is the opposite of
+ * true here and is very nearly what got this file deleted.
+ *
+ * IT IS NOT DEAD CODE, despite having no importer: it is the sole producer of a
+ * recorded result. The predictor table in docs/METHODOLOGY.md §7.1 — xwOBA 0.1019,
+ * blends at 0.0903 / 0.0810 / 0.0716, wOBA 0.0581, and the incremental partial
+ * Spearman of +0.0944 at z 6.79 — is this script's stdout, and both README.md and
+ * METHODOLOGY's "Reproducing any of this" section name this exact file and these
+ * exact flags as the way to re-derive it. §7.1 is also the retraction of the FIRST
+ * answer, which was computed through Savant's `custom` leaderboard and was void
+ * because the leaderboard ignores its own dates; `savantLeaderboard` below is kept
+ * deliberately so the broken measurement can still be reproduced beside the fixed
+ * one, and `--real` is what selects the honest path. Delete this and a published
+ * number with a retraction attached to it becomes unreproducible, which is the one
+ * thing a negative-results ledger cannot afford.
+ *
+ * It replays pitch-level data through the disk cache in data/backtest-cache/
+ * (14 GB on this machine, measured with `du -sh`), so with the cache warm it runs
+ * offline; cold, it fetches roughly 16 MB per day of history.
  */
 const SAPI = "https://statsapi.mlb.com/api/v1"
 const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"

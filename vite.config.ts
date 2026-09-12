@@ -126,7 +126,31 @@ export default defineConfig(({ command }) => {
 		base,
 		plugins: [react(), publishSnapshot(), prefetchSnapshot(base)],
 		server: {
-			port: 5173,
+			/**
+			 * 5299, pinned, because 5173 on the author's machine is a DIFFERENT LIVE APP.
+			 *
+			 * This said `port: 5173` — Vite's default, and the one port here that must not
+			 * be used. Another application of the author's listens on it and answers 200
+			 * with a working site that is not this one, so the failure mode is not a
+			 * connection refused anybody would notice: Vite finds 5173 taken, silently
+			 * steps to 5174, and every test, script and instruction aimed at "the dev
+			 * server" reaches the neighbour and reads its markup instead. That is why
+			 * every browser suite in test/ hardcodes `http://127.0.0.1:5299` and why each
+			 * one reads the wordmark before its first assertion — they were written around
+			 * this config rather than with it, and README.md told a reader to pass
+			 * `--port 5299 --strictPort` by hand for the same reason. A workaround repeated
+			 * in three places is a default in the wrong place.
+			 *
+			 * `strictPort` is the other half and is the point. Without it Vite's fallback
+			 * is exactly the behaviour being prevented — a server that comes up on some
+			 * other port and lets the suites talk to whatever is on 5299. With it, a port
+			 * already in use is a startup failure, which is the honest outcome: either
+			 * this app owns 5299 or nothing is served. A hardcoded port is usually a smell;
+			 * it is correct here because the tests address the dev server by number and an
+			 * unpredictable one would make them address a stranger.
+			 */
+			port: 5299,
+			strictPort: true,
 			// the Hono app owns /api; Vite serves the client and proxies through
 			proxy: { "/api": { target: API, changeOrigin: true } }
 		},

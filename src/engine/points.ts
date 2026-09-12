@@ -119,14 +119,30 @@ const scoredKeys = (): Set<string> => {
 	return seen
 }
 
-/** Every field worth carrying on a captured stat line: what a league can score, plus
- *  what the engine reads directly. See `ENGINE_READS` above for why this exists. */
+/**
+ * Every field worth carrying on a captured stat line: what a league can score, plus
+ * what the engine reads directly. See `ENGINE_READS` above for why this exists.
+ *
+ * THE FILTER IS APPLIED AT CAPTURE, so the file on disk is the small one and no
+ * browser is ever sent the rest. That sentence used to live on a `keepScorable`
+ * helper below this line — `Object.fromEntries` of the entries this set admits —
+ * which has been deleted: it had exactly one reference repo-wide, its own
+ * declaration, so the true statement was attached to the one thing in the file that
+ * was not doing it. The capture filters by consulting this set directly, in the two
+ * places that parse a StatsAPI response into a stat line: `fetchSeasonStats` and
+ * `fetchWindowStats` in src/data/statsapi.ts, and again in src/data/actuals.ts
+ * where a settled week is read back. A helper that wrapped those three loops would
+ * be a fine thing to have; one that wrapped none of them was a claim about code
+ * that did not run.
+ *
+ * Measured on the committed capture rather than asserted: every stat field present
+ * on every player in data/snapshot.json is in this set — 40 distinct fields on file
+ * against 41 in the set, 0 unread, 0 bytes of 1,337,218. (The spare set member is a
+ * field MLB names differently in the season feed, not a field that was dropped.)
+ * test/engine.mjs asserts the same thing, in both directions, against the file that
+ * actually ships.
+ */
 export const KEPT_STATS = new Set<string>([...scoredKeys(), ...ENGINE_READS])
-
-/** A captured stat line with the fields nothing reads removed. Applied at CAPTURE, so
- *  the file on disk is the small one and no browser is ever sent the rest. */
-export const keepScorable = (stats: StatLine): StatLine =>
-	Object.fromEntries(Object.entries(stats).filter(([k]) => KEPT_STATS.has(k)))
 
 /**
  * `Object.entries` of a league's scoring table, memoised on the table itself.

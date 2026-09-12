@@ -32,14 +32,22 @@ export type Mode = "server" | "static"
 let mode: Mode = "server"
 export const getMode = (): Mode => mode
 
-/** Whether the page can read this platform for itself, which is the only question
- *  the UI needs to answer before offering to import or to read a roster. In
- *  `server` mode everything is readable because the server reads it. */
-export const canRead = (platform: string): boolean =>
-	mode === "server" || readableInBrowser(platform)
-
-/** The same question for a URL the user has pasted but not yet submitted. An
- *  unrecognized URL is not readable here either; `importLeague` names why. */
+/**
+ * Whether a URL the user has pasted can be read from here, which is the only
+ * question the UI asks before offering to import. An unrecognized URL is not
+ * importable in `static` mode either; `importLeague` names why.
+ *
+ * `canRead(platform)` used to sit above this and asked the same thing of a platform
+ * name rather than a URL: `mode === "server" || readableInBrowser(platform)`. It was
+ * deleted because nothing called it — one hit repo-wide, its own declaration, and
+ * the twelve hits that look like callers are all `canReadPool`, a different function
+ * with a different answer for a platform whose pool cannot be fetched. An exported
+ * predicate nobody consults is worse than no predicate: it reads as the canonical
+ * answer to "can we read this?" while the three screens that actually ask go through
+ * `canReadPool`, so a future change made here would look applied and do nothing.
+ * `readableInBrowser` in src/import.ts is still the underlying fact and still
+ * exported, so nothing about what this app can read has changed.
+ */
 export const canImport = (url: string): boolean =>
 	mode === "server" || importableInBrowser(url)
 

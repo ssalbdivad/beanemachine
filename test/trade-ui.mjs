@@ -543,18 +543,35 @@ t("a player with no projection is called unknown rather than free",
  * whose heading and whose tooltips disagree is two different claims about one man.
  */
 const unratedSeen = await page.$$eval(".deal-side .give-unrated", n => n.length)
-t("an unpriced man's group heading says the same thing his chip does",
+/*
+ * REWRITTEN 2026-09-12, because the thing it read no longer exists and the claim it was
+ * protecting is now stronger.
+ *
+ * The old truth: every chip on the give-up side carried a `title` repeating its group's
+ * reason, and this asserted that the two agreed — "a group whose heading and whose
+ * tooltips disagree is two different claims about one man". That title is gone. It was a
+ * hover, and a phone has none, so on a phone the reason was only ever in the heading
+ * anyway; the chip's own copy of it could disagree and could not be read. Every word of
+ * it is reachable without hovering now (the sentence in the heading directly above, the
+ * bscore in the team fold on the card above, which is visible at 390px), so the
+ * duplicate was deleted rather than moved.
+ *
+ * What is asserted instead is the invariant that made the old check worth having, from
+ * the side that cannot go vacuous: the heading carries the engine's own reason, and
+ * nothing inside the group makes a SECOND claim about the same man in a `title` — which
+ * is the only way the two could have disagreed, and also the only way a reason could
+ * hide from a thumb.
+ */
+t("an unpriced man's group states its reason once, where a thumb can read it",
   await page.$$eval(".deal-side .give-unrated", n =>
     n.length > 0 && n.every(g => {
       const label = g.querySelector(".tiny-note").textContent
       // the reason is everything between the count and the closing "unknown, not zero"
       const why = label.split(": ").slice(1).join(": ").split(" What giving one up")[0].trim()
-      return why.length > 0 &&
-        [...g.querySelectorAll(".chip-btn")].every(b =>
-          b.title.toLowerCase().includes(why.toLowerCase()))
+      return why.length > 0 && !g.querySelector("[title]")
     })
   ) || unratedSeen === 0,
-  `${unratedSeen} unpriced groups on screen — a heading and its chips gave different reasons`)
+  `${unratedSeen} unpriced groups on screen — a reason is missing, or a chip under it carries a second one in a hover`)
 // ...and say out loud when this team had nobody to check, rather than reporting a
 // vacuous pass as protection. The block at the foot of this file builds a team that
 // is GUARANTEED to have some.
@@ -1310,6 +1327,124 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		}
 	}
 	await page.close()
+}
+
+/**
+ * THE PHONE, which is the device this screen was failing on.
+ *
+ * Measured 2026-09-12 on the dev server at 390x844, with a team of the eleven most widely
+ * rostered men at C/1B/2B/3B/SS/OF x3/SP x2/RP: nine of the eighteen lineup rows were
+ * covered off the replacement estimate, four of them named somebody, and all four were
+ * men the league's own ownership cut calls taken — Jonathan Aranda 84%, CJ Abrams 98%,
+ * Logan Gilbert 98%, Aaron Nola 73%. The rows read "replacement Util · CJ Abrams" and the
+ * only thing qualifying them was a `title`. A title is a hover; a phone has no hover. So
+ * the screen was naming four other people's players as though they were the reader's to
+ * take, and the hedge was unreachable.
+ *
+ * The team is SEEDED by id rather than pasted, because the point is to guarantee seats
+ * this roster cannot fill — a paste that happened to match differently would quietly turn
+ * the whole block into a vacuous pass, and the ids are the one thing about a player that
+ * the capture and this browser agree on.
+ *
+ * Its own context, like the block above: `browser.newPage` gives one, so nothing here
+ * touches the state the rest of the file built.
+ */
+{
+  const ELEVEN = [
+    "700250:hitting", "518692:hitting", "665487:hitting", "691406:hitting", "677951:hitting",
+    "547180:hitting", "656941:hitting", "676475:hitting", "695505:pitching", "677952:pitching",
+    "801139:pitching"
+  ]
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  const oops = []
+  phone.on("pageerror", e => oops.push(String(e)))
+  await phone.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+  await phone.waitForSelector(".views button", { timeout: 30000 })
+  const seeded = await phone.evaluate(team => {
+    const c = JSON.parse(localStorage.getItem("beanemachine:config") ?? "{}")
+    const key = Object.keys(c.leagues ?? {})[0]
+    if (!key) return null
+    localStorage.setItem("beanemachine:roster", JSON.stringify({ [key]: team }))
+    return key
+  }, ELEVEN)
+  t("there is a league to seed a team into at all", !!seeded, "no league in this browser")
+  if (seeded) {
+    await phone.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+    await phone.waitForSelector(".views button", { timeout: 30000 })
+    await toScreen(phone, SCREEN.setup)
+    await phone.waitForSelector(".trade-lineup", { timeout: 30000 })
+    await phone.$eval("details.lineup-fold", d => { d.open = true })
+    await phone.waitForSelector(".lineup-row", { timeout: 15000 })
+
+    const rows = await phone.$$eval(".lineup-row", n =>
+      n.map(e => ({
+        wire: e.className.includes("wire"),
+        who: (e.querySelector(".lineup-who")?.innerText ?? "").trim(),
+        titled: !!e.querySelector("[title]")
+      }))
+    )
+    const wireRows = rows.filter(r => r.wire)
+    t("this team really does leave seats it cannot fill, or this block proves nothing",
+      wireRows.length > 0, `${wireRows.length} of ${rows.length} rows off the wire`)
+    /* The defect itself. Every such row has to say, in text a thumb can read, how likely
+       it is that the man it names is actually available — either because the league's own
+       free-agent list was read, or with his rostered share and what that means. */
+    t("every seat the reader cannot fill says in VISIBLE text how likely that body is to be free",
+      wireRows.every(r =>
+        /rostered in \d+% of leagues/.test(r.who) ||
+        /free in your league/.test(r.who) ||
+        /nobody named for the seat/.test(r.who) ||
+        /names nobody else free/.test(r.who) ||
+        /how widely he is rostered was not captured/.test(r.who)
+      ),
+      JSON.stringify(wireRows.map(r => r.who)))
+    /* ...and the hedge may not be a hover. This is the assertion the old screen would
+       have failed: it had the whole sentence, in a `title`, on every one of these rows. */
+    t("and no row on the lineup hides anything in a hover",
+      rows.every(r => !r.titled), JSON.stringify(rows.filter(r => r.titled).map(r => r.who)))
+    /* "Replacement" is a word about the model, not about baseball, and the slot it was
+       glued to is already printed in the column to its left. */
+    t("the word replacement is nowhere on the screen a reader sees",
+      !/replacement/i.test(await phone.innerText(".trade-lineup")),
+      await phone.innerText(".trade-lineup"))
+    /* The strength of the claim sits next to the claim: a man rostered in 98% of leagues
+       and a man rostered in 4% may not get the same sentence. On the estimate this team
+       is priced against, the named men are all far above the league's own cut, so at
+       least one row has to say so. */
+    const named = wireRows.filter(r => /rostered in \d+% of leagues/.test(r.who))
+    t("a widely-rostered body is called probably taken rather than offered as free",
+      named.length === 0 ||
+        named.every(r => /probably already on somebody's team|probably still free/.test(r.who)),
+      JSON.stringify(named.map(r => r.who)))
+    /* And what "probably" is measured against, once, under the rows it is about — the
+       league's own cut rather than a threshold somebody picked. */
+    t("the screen says where the line between taken and free falls, and in which league",
+      /treated as taken|cannot say where the line|really were free/.test(
+        await phone.innerText(".trade-lineup")
+      ),
+      (await phone.innerText(".trade-lineup")).slice(0, 400))
+    /*
+     * The whole card, not just the rows: every `title` in this component carried something
+     * a phone reader could not reach, and they were swept together. This is the assertion
+     * that keeps the next one from being added — it is scoped to the three cards this
+     * file's component owns, so the league editor rendered as its sibling is not its
+     * problem.
+     */
+    const hovers = await phone.$$eval(".trade-team [title], .trade-lineup [title], .trade-deal [title]",
+      n => n.map(e => `${e.tagName.toLowerCase()}.${e.className}: ${e.getAttribute("title")}`))
+    t("nothing on the team, lineup or deal cards says anything only a hover can read",
+      hovers.length === 0, hovers.join(" | "))
+    /* The numbers on a player row were three of those titles, so the explanation has to
+       be somewhere a thumb can reach instead. */
+    await phone.$eval("details.trade-owned-fold", d => { d.open = true })
+    t("the unlabelled number beside each man is explained in text instead",
+      /adds over whoever would be left at his spot/.test(
+        await phone.innerText(".trade-owned")
+      ),
+      await phone.innerText(".trade-owned"))
+    t("no page errors on a phone", oops.length === 0, oops.join(" | "))
+  }
+  await phone.close()
 }
 
 await browser.close()

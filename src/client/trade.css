@@ -27,6 +27,13 @@
    page, and a hard 330px minimum pushes the card off a phone */
 .trade-owned{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(330px,100%),1fr));gap:0 var(--sp-5)}
 
+/* What the numbers on a player row mean, said once per list instead of in three
+   `title` attributes per row — see `LineLegend` in Trade.tsx for the argument. The
+   projected-points clause is hidden at exactly the width the column is hidden at, just
+   below, so the legend can never describe a column that is not on screen. */
+.line-legend{margin:var(--sp-1) 0 var(--sp-2);max-width:70ch}
+.trade-results .line-legend{margin-top:var(--sp-2)}
+
 /* one player: who, what he is worth, and the single thing you can do with him */
 .trade-line{
   display:grid;grid-template-columns:minmax(0,1fr) 54px 60px auto;
@@ -44,6 +51,8 @@
   .trade-line{grid-template-columns:minmax(0,1fr) 48px auto;gap:var(--sp-2)}
   .trade-line .proj{display:none}
   .trade-line .none{grid-column:2/3}
+  /* the column is gone at this width, so the sentence describing it goes with it */
+  .legend-proj{display:none}
 }
 
 /* ---------- the lineup ---------- */
@@ -62,13 +71,50 @@
   padding:6px 0;border-bottom:1px solid var(--rule);font-size:var(--fs-4);
 }
 .lineup-row .lineup-who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ---------- a seat you do not fill yourself ----------
+   MEASURED 2026-09-12 on the dev server at 390x844, eleven men on the team: nine of the
+   eighteen rows were covered this way and four of them named somebody — Jonathan Aranda
+   (rostered in 84% of leagues), CJ Abrams (98%), Logan Gilbert (98%), Aaron Nola (73%) —
+   with the only qualification in a `title`, i.e. nowhere a thumb can reach. The hedge is
+   a second LINE now, which is why these rows alone stop eliding: this column measures
+   166px at 390px, and "CJ Abrams / rostered in 98% of leagues — probably already on
+   somebody's team" is four lines there. A clause that ellipses away is the hover again
+   with extra steps. The name keeps the muted tone the old italic had (he is not one of
+   yours) and the hedge sits below it at the note size, so the row still scans as one
+   thing.
+
+   WHAT IT COSTS, measured the same way on the same team: a seat covered this way went
+   from 43px to 88px, the hedge being 48 of the 88, so nine of them add 405px. The two
+   sentences that replaced the other hovers on this card add 112 (.lineup-basis) and 80
+   (.bench-legend), for 597px on an open lineup that now runs 1,808px. All of it is paid
+   by a reader who asked for it: the fold is shut until pressed and its summary is
+   unchanged, so a reader who never opens it sees the same screen he saw before. What it
+   buys is the difference between naming a 98%-rostered man as your replacement and
+   saying out loud that he is almost certainly somebody else's.
+   ------------------------------------------------------------------------- */
+.lineup-row.wire .lineup-who{white-space:normal;overflow:visible;text-overflow:clip}
+.lineup-row.wire{align-items:start;padding:8px 0}
+.lineup-row.wire .code,.lineup-row.wire .lineup-pts{margin-top:1px}
+.wire-fill{display:block;min-width:0}
+.lineup-row.wire .wire-who{display:block;color:var(--muted)}
+.lineup-row.wire .wire-hedge{
+  display:block;font-size:var(--fs-2);line-height:var(--lh-snug);color:var(--faint);
+}
+/* The one sentence that is the same for every such row — where the prices come from and
+   what "probably taken" is measured against. Kept under the rows it is about rather than
+   repeated on each of them. */
+.lineup-basis{margin:var(--sp-3) 0 0;max-width:70ch}
 .lineup-row .lineup-pts{
   text-align:right;font-family:var(--mono);font-size:var(--fs-3);
   font-variant-numeric:tabular-nums;color:var(--muted);
 }
 /* a spot you cannot fill yourself is dimmed, and one nothing can fill is flagged —
    the difference between "off the wire" and "worth nothing" is the whole point */
-.lineup-row.wire .lineup-who em{font-style:italic;color:var(--faint)}
+/* The wire row's `em` is gone with the faint italic it carried. It held "replacement 1B
+   · Jonathan Aranda" as one emphasised phrase, and the row is two pieces now: a real
+   man's name, and the hedge about him. A person's name set in faint italic reads as an
+   aside, which is exactly the wrong note for the line that was overstating him. The
+   hole row below keeps its `em` — "nothing can fill this" is not a name. */
 .lineup-row.hole .code{color:var(--flag);border-color:var(--flag)}
 .lineup-row.hole .lineup-who em{font-style:italic;color:var(--flag)}
 .lineup-holes{margin-top:var(--sp-3)}
@@ -80,6 +126,10 @@
    so only the second is marked — the rest of the chips stay quiet. */
 .bench .chip-under{border-color:var(--flag);color:var(--ink)}
 .bench .chip-mark{color:var(--flag);font-size:var(--fs-2);letter-spacing:.02em}
+/* ...and what the mark MEANS, in text. It used to be in a title on every chip, so at
+   390px "· under the wire" was two unexplained words. One line above the chips, because
+   the explanation is the same for all of them. */
+.bench-legend{margin:0 0 var(--sp-2);max-width:70ch}
 .bench h3,.slot-changes h3,.deal-side h3,.trade-verdict h3{
   margin:0 0 9px;font-size:var(--fs-2);font-weight:500;color:var(--muted);
 }

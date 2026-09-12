@@ -10,7 +10,7 @@ import { pool as poolStore } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
-import { slotsFor } from "../engine/bscore.ts"
+import { slotsFor, type OwnershipCut } from "../engine/bscore.ts"
 import { localDate } from "../data/today.ts"
 import "./trade.css"
 import { tab, tradesClosed } from "./panels.tsx"
@@ -38,6 +38,41 @@ const pts = (v: number) => v.toFixed(1)
 const total = (v: number) => v.toFixed(2)
 const signed = (v: number) => `${v > 0 ? "+" : ""}${total(v)}`
 
+/**
+ * How likely it is that a man this screen names as a replacement is actually free —
+ * IN VISIBLE TEXT, generated from the number rather than asserted as a caveat.
+ *
+ * This exists because of what the lineup card used to do. Without the league's own
+ * free-agent list every uncovered seat read "replacement Util · CJ Abrams", and the
+ * only thing qualifying it was a `title` attribute — a hover, and a phone has no
+ * hover. Measured 2026-09-12 on the dev server at 390x844, with a team of the eleven
+ * most widely rostered men at C/1B/2B/3B/SS/OF×3/SP×2/RP, nine of the eighteen rows
+ * were covered that way and four of them named a man: Jonathan Aranda (rostered in
+ * 84% of leagues), CJ Abrams (98%), Logan Gilbert (98%) and Aaron Nola (73%). The
+ * screen named four men who are almost certainly on somebody else's roster as though
+ * they were the reader's to take, and said so nowhere a thumb could reach.
+ *
+ * The hedge is GENERATED rather than generic, because the app's own rule is that the
+ * strength of a claim sits next to the claim: a man rostered in 98% of leagues and a
+ * man rostered in 4% deserve different sentences. The boundary is not a number
+ * invented here either — it is `ownershipCut`, the same per-league cut the board
+ * filters on, which counts down the capture's ownership column to the (teams × seats)-th
+ * name. Re-derived on the committed capture 2026-09-12: 880 players priced, depth 270
+ * for a 10-team league with 27 seats, cut 35%, 4 tied at it.
+ *
+ * `pct` is `undefined` rather than `null` only because the engine hands these rows
+ * back as `Rated`, which has no ownership field, while the rows really are `Ranked` —
+ * see `barMen` on `LineupCard`. Both mean the same thing here: nothing to quote.
+ */
+const freeness = (pct: number | null | undefined, cut: OwnershipCut | null): string =>
+	pct === null || pct === undefined ?
+		"how widely he is rostered was not captured, so whether you could have him is unknown"
+	: !cut?.usable ?
+		`rostered in ${pct}% of leagues, and nothing here can say what that means in a league this size`
+	: pct > cut.cut ?
+		`rostered in ${pct}% of leagues — probably already on somebody's team`
+	:	`rostered in ${pct}% of leagues — probably still free`
+
 /** Who is actually in a lineup, by the id a roster is keyed on. */
 const startingKeys = (lineup: Lineup) =>
 	new Set(lineup.starters.flatMap(s => (s.player ? [rosterKey(s.player.player)] : [])))
@@ -57,7 +92,13 @@ export interface TradeProps {
 }
 
 export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
-	const { rated, scored } = useBoard(snapshot, league, TRADE_FILTERS)
+	// `availability` comes along for its `cut` — the percentage that separates
+	// "probably taken" from "probably free" in a league of THIS size, which is what
+	// lets the lineup card qualify a replacement by the number instead of by a generic
+	// caveat. Nothing else here reads it, and the board's own filtering is untouched:
+	// `useBoard` is still called without a free-agent list, so `cut` is always the
+	// ownership estimate rather than null.
+	const { rated, scored, availability } = useBoard(snapshot, league, TRADE_FILTERS)
 	const [owned, setOwned] = useState<string[]>([])
 	const [storeError, setStoreError] = useState<string | null>(null)
 	const [give, setGive] = useState<string[]>([])
@@ -395,9 +436,27 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 			positionsRead: [],
 			note: `Pasted from your league's own free-agent page: ${found.players.length} players.`
 		})
+		/*
+		 * The screen the reader is standing on uses it too, starting now.
+		 *
+		 * `pool` is filled by the effect below, which asks `api.available` — and on the
+		 * static build that function falls back to exactly the store this paste just
+		 * wrote. So the pasted list DID reach the lineup card, but only on the next
+		 * reload: the effect's deps are the league's id, platform and season, and none of
+		 * them moved. Measured 2026-09-12 on the dev server at 390x844, before this line
+		 * existed: paste a free-agent page, and the eighteen lineup rows went on pricing
+		 * nine seats off the whole-pool estimate while the note under the box said the
+		 * list would be used. The note was true about the other screen and false about
+		 * this one, and "false about this one" is the half a reader is looking at.
+		 *
+		 * Set from the names just read rather than by re-asking: `found.players` IS the
+		 * list, normalised the same way `gettable` compares.
+		 */
+		setPool(new Set(found.players.map(f => normalizeName(f.name))))
 		setWireNote(
 			`Found ${found.players.length} free agent${found.players.length === 1 ? "" : "s"}. ` +
-				`${tab("board")} will use this exact list instead of estimating who is taken.`
+				`Your starting lineup below, and ${tab("board")}, will use this exact list ` +
+				`instead of estimating who is taken.`
 		)
 		setWirePasted("")
 	}
@@ -707,10 +766,14 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 
 			<section className="card full trade-team">
 				<h2>My team</h2>
+				{/* "everything below is priced against it" was the old ending, and below this
+				    card App also renders the league editor, which is priced against nothing
+				    — it is where the scoring comes FROM. The claim is true of the two cards
+				    this screen derives, so it says those. */}
 				<p className="sub">
 					Who you own in {league.meta.league_name ?? leagueKey}. Read it off the platform
 					or add men by name; either way it is saved in this browser, per league, and
-					everything below is priced against it.
+					your starting lineup and every trade verdict are priced against it.
 				</p>
 				{storeError && (
 					<div className="trade-store-error">
@@ -793,10 +856,18 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 							</span>
 						</li>
 					</ol>
+					{/* "it brings the seat each man is in with it" was unconditional, and the
+					    step above this one invites typing the names by hand — which carries no
+					    seats at all. `rosterFromPaste` takes a seat only off a line that has a
+					    slot on it (src/data/paste.ts, `spots`), and where there are none it
+					    CLEARS the stored seats rather than keeping the previous team's. Its own
+					    note already says which of the two happened; this sentence was promising
+					    the good case before the reader had pasted anything. */}
 					<p className="sub">
 						Extra columns, adverts and menus do no harm — only the names are read. It
-						works on a private league, and it brings the seat each man is in with it,
-						which is what lets {tab("board")} show the changes to make.
+						works on a private league, and where the page you copied shows the seat each
+						man is in, that comes too — which is what lets {tab("board")} show the
+						changes to make rather than a whole lineup to set.
 					</p>
 					<textarea
 						data-ctl="paste-roster"
@@ -895,10 +966,15 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								(!readTeamId ?
 									`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
 									`number to read it.`
-								:	"Only publicly-viewable leagues can be read this way, and the platform " +
+								:	// "that always works" was the old ending. A paste is not rate-limited
+									// and nobody can switch it off, which is the real claim; whether it
+									// finds anybody still depends on the text — `rosterFromPaste` answers
+									// "No players found in that" often enough to have its own sentence. So
+									// the guarantee is narrowed to the part that is one.
+									"Only publicly-viewable leagues can be read this way, and the platform " +
 									"can refuse or throttle it at any time — Yahoo does. If it fails or comes " +
-									"back short, paste instead: that always works and reaches private leagues " +
-									"too.")}
+									"back short, paste instead: nobody can switch that off, and it reaches " +
+									"private leagues too.")}
 						</span>
 					</div>
 				)}
@@ -928,6 +1004,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				</div>
 				{ownQuery.trim() && (
 					<div className="trade-results">
+						{/* The legend goes wherever a `Line` goes, because the numbers on a search
+						    result mean what they mean on a team row — see `LineLegend`. */}
+						{!!found(ownQuery, held).length && (
+							<LineLegend unrated={found(ownQuery, held).some(r => !r.rateable)} />
+						)}
 						{found(ownQuery, held).map(r => (
 							<Line
 								key={rosterKey(r.player)}
@@ -968,6 +1049,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								{mine.length} player{mine.length === 1 ? "" : "s"} on this team
 								{unrateable > 0 && ` · ${unrateable} the model cannot price`}
 							</summary>
+							<LineLegend unrated={unrateable > 0} />
 							{mine
 								.slice()
 								.sort((a, b) => b.points - a.points)
@@ -1024,6 +1106,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				count={mine.length}
 				barMen={barMen}
 				wireRead={!!gettable}
+				cut={availability.cut}
 			/>
 
 			{/* The two sides are symmetric now. The right has always been a search box;
@@ -1098,9 +1181,17 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								</label>
 								{/* The chips stay bare names. Putting each man's bscore in the label made every
 								    chip about twice as wide and the card 694px tall against 395 — more
-								    information, more wall. The number rides his title, and "My team" two cards
-								    up already lists all 24 of them with bscore and projected points beside the
-								    name. What the wall gains here is ORDER: the ones you can spare, first. */}
+								    information, more wall. "My team" two cards up lists all of them with the
+								    bscore beside the name, and that column is visible at 390px (only the
+								    projected-points column is dropped there, see trade.css). What the wall
+								    gains here is ORDER: the ones you can spare, first.
+								    The number no longer rides a TITLE, which is the part that was wrong: a
+								    title is a hover and a phone has none, so on a phone that number was not
+								    "on the chip" at all, it was nowhere. Every word the title carried is now
+								    reachable without hovering — the sentence is the group label directly
+								    above the chip, in `g.label`, and the bscore is in the team fold — so it
+								    is gone rather than moved. The two places it was copied to could disagree
+								    with each other, and one of them could not be read. */}
 								{giveGroups.map((g, i) => (
 									// the gap between groups is what makes them read as groups, and
 									// trade.css is not this change's file
@@ -1119,15 +1210,6 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 														type="button"
 														className={`chip-btn${give.includes(k) ? " on" : ""}`}
 														aria-pressed={give.includes(k)}
-														title={
-															g.why ?
-																// the engine's own sentence, not a second one written here that
-																// could disagree with the label directly above the chip
-																`${g.why.charAt(0).toUpperCase()}${g.why.slice(1)} He starts nowhere and counts in no total here, so what giving him up costs cannot be read off a number nothing produced.`
-															: g.key === "spare" ?
-																`${pts(r.points)} projected points, bscore ${r.bscore}. He is not in your starting lineup, so trading him changes nothing below unless somebody else moves.`
-															:	`${pts(r.points)} projected points, bscore ${r.bscore}. He is starting for you, so trading him leaves a spot to refill.`
-														}
 														onClick={() =>
 															setGive(cur => (cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k]))
 														}
@@ -1157,6 +1239,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						</label>
 						{takeQuery.trim() && (
 							<div className="trade-results">
+								{!!found(takeQuery, new Set([...held, ...take])).length && (
+									<LineLegend
+										unrated={found(takeQuery, new Set([...held, ...take])).some(r => !r.rateable)}
+									/>
+								)}
 								{found(takeQuery, new Set([...held, ...take])).map(r => (
 									<Line
 										key={rosterKey(r.player)}
@@ -1174,12 +1261,17 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						<div className="picks">
 							{take.flatMap(k => (byKey.has(k) ? [byKey.get(k)!] : [])).map(r => {
 								const k = rosterKey(r.player)
+								// The "×" is the affordance and it is visible; the title that used to say
+								// "Remove from the offer" restated it for a pointer that has to hover, which
+								// a thumb cannot do. It carried no information the chip did not — so it
+								// becomes an `aria-label`, which is the reader it was actually serving, and
+								// stops pretending to be a visible explanation.
 								return (
 									<button
 										key={k}
 										type="button"
 										className="chip-btn on"
-										title="Remove from the offer"
+										aria-label={`Remove ${r.player.name} from the offer`}
 										onClick={() => setTake(t => t.filter(x => x !== k))}
 									>
 										{r.player.name} ×
@@ -1203,6 +1295,34 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	)
 }
 
+/**
+ * What the two numbers on a player row MEAN, said out loud once per list.
+ *
+ * Each `Line` used to carry three `title` attributes — one on the bscore, one on the
+ * projected points, one on "no projection" — so at 390px a reader saw an unlabelled
+ * number in a mono column and had no way to ask what it was. A hover is not an
+ * explanation on a device with no pointer.
+ *
+ * Once per list rather than once per row, because the answer is the same for all
+ * twenty-odd of them and twenty copies of it is a wall. The projected-points clause
+ * is hidden at exactly the width trade.css drops that column at, so the legend never
+ * describes a column that is not on screen; see `.legend-proj` there.
+ *
+ * No horizon is named. The `title` this replaces said "over the horizon in this
+ * league's scoring", and the horizon is whatever `Filters.days` resolves to — the
+ * league's own scoring period by default — so naming a fortnight here would have been
+ * a sentence the code does not do. "His projected points" is true without it.
+ */
+const LineLegend = ({ unrated }: { unrated: boolean }) => (
+	<p className="tiny-note line-legend">
+		Beside each man: how many points he adds over whoever would be left at his spot
+		once every team in your league has filled it
+		<span className="legend-proj">, then his projected points</span>.
+		{unrated &&
+			" A man with no projection can start nowhere, so he is counted in no total here."}
+	</p>
+)
+
 /** One player, the way the board draws one: who he is, what he is worth, and the
  *  single thing you can do with him here. */
 const Line = ({
@@ -1225,25 +1345,34 @@ const Line = ({
 				{r.injury && <em className="hurt">{r.injury}</em>}
 			</span>
 		</span>
+		{/*
+		   * The three titles these two columns carried are gone, promoted into the one
+		   * visible sentence `LineLegend` prints above the list.
+		   *
+		   * They said: "Points above whoever is left at this slot once every team has
+		   * filled it", "Projected points over the horizon in this league's scoring", and
+		   * "No projection was possible for him, so he can start nowhere". All three were
+		   * correct and all three were hovers, so at 390px the bscore column was an
+		   * unlabelled number in a mono font and the horizon sentence reached nobody.
+		   *
+		   * The bar the bscore is measured against is NOT "the best man still on waivers":
+		   * it is the (teams x seats)-th best eligible man, an estimate of who would be
+		   * left, and plenty of those men are taken. Re-derived on the committed capture
+		   * 2026-09-12 with the shipped 10-team league, `replacementBySlot` with no wire:
+		   * 6 of the 10 bars are set by somebody rostered in more than the 35% this league
+		   * runs out of room at — Ketel Marte 95%, Matt Olson 99%, Jeremy Pena 87%, Trevor
+		   * Megill 85%, Cal Quantrill 50%, Nick Gonzales 42%. The old wording of this note
+		   * said "five of the ten bars ... rostered in 85-99%"; on this capture it is FOUR
+		   * at 85% or above (Marte, Olson, Pena, Megill), so the count is re-stated rather
+		   * than left standing. The claim it was making holds and is stronger with the
+		   * league's own cut in it.
+		   */}
 		{r.rateable ?
 			<>
-				<span
-					className={`r bs${r.bscore < 0 ? " neg" : ""}`}
-					/* Not "the best man still on waivers": the bar is the (teams x seats)-th best
-					   eligible man, and on the shipped league five of the ten bars are set by
-					   somebody rostered in 85-99% of leagues. src/engine/trade.ts had named this
-					   sentence as wrong; it was still on screen in two places. */
-					title="Points above whoever is left at this slot once every team has filled it"
-				>
-					{r.bscore}
-				</span>
-				<span className="r proj" title="Projected points over the horizon in this league's scoring">
-					{pts(r.points)}
-				</span>
+				<span className={`r bs${r.bscore < 0 ? " neg" : ""}`}>{r.bscore}</span>
+				<span className="r proj">{pts(r.points)}</span>
 			</>
-		:	<span className="r none" title="No projection was possible for him, so he can start nowhere">
-				no projection
-			</span>
+		:	<span className="r none">no projection</span>
 		}
 		<button type="button" className="chip-btn act" onClick={onAction}>
 			{action}
@@ -1279,7 +1408,8 @@ const LineupCard = ({
 	lineup,
 	count,
 	barMen,
-	wireRead
+	wireRead,
+	cut
 }: {
 	league: League
 	lineup: Lineup
@@ -1287,11 +1417,20 @@ const LineupCard = ({
 	/** Who each slot's replacement bar actually is, best first, so a spot the wire
 	 *  covers can name him instead of leaving the reader to guess — and so two seats
 	 *  of the same slot name two different men. */
-	barMen: Map<string, { player: { name: string } }[]> | null
+	/** `rosteredPct` is optional only because `replacementPlayerBySlot` is typed to
+	 *  hand back `Rated`, which has no ownership field. The rows really are `Ranked`
+	 *  — the pool passed in is `useBoard`'s `rated` — so the figure is there; the
+	 *  optional marker is the engine signature's, not an absence in the data, and
+	 *  `freeness` treats a genuine absence as unknown anyway. */
+	barMen: Map<string, { player: { name: string }; rosteredPct?: number | null }[]> | null
 	/** True when `barMen` came from the league's own free-agent list rather than
 	 *  from the whole-pool estimate. It decides whether this card may call these men
 	 *  free agents, which is the one thing the estimate can never support. */
 	wireRead: boolean
+	/** Where this league runs out of room, so a replacement's ownership figure can be
+	 *  turned into a sentence. Null, or unusable, where this capture cannot locate the
+	 *  boundary — and then the number is quoted without a verdict attached to it. */
+	cut: OwnershipCut | null
 }) => (
 	<section className="card full trade-lineup">
 		<h2>Your starting lineup</h2>
@@ -1321,11 +1460,14 @@ const LineupCard = ({
 				  */}
 				<details className="lineup-fold">
 				<summary className="lineup-head">
-					<span className="lineup-total" title="The sum of every startable spot below">
-						{total(lineup.points)}
-					</span>
+					{/* The title said "The sum of every startable spot below", which is worth
+					    saying and was a hover. It is four words in the unit label instead, where
+					    a thumb can read it: a reader who opens the fold and adds the column up
+					    should find this number, and nothing else on the summary said so. */}
+					<span className="lineup-total">{total(lineup.points)}</span>
 					<span className="lineup-unit">
-						projected points · {lineup.starters.filter(s => s.source === "roster").length} of{" "}
+						projected points, every spot below added up ·{" "}
+						{lineup.starters.filter(s => s.source === "roster").length} of{" "}
 						{lineup.starters.length} spots filled by your own players
 						{lineup.holes.length > 0 &&
 							` · ${lineup.holes.length} nothing can fill`}
@@ -1338,7 +1480,11 @@ const LineupCard = ({
 				<div className="lineup">
 					{lineup.starters.map((s, i) => {
 						const nth = lineup.starters.slice(0, i).filter(x => x.slot === s.slot).length
-						const bar = barMen?.get(s.slot)?.[nth]
+						/* The whole list, not just this seat's man, because a seat with nobody
+						   left on it and a seat with nobody free at the slot AT ALL are two
+						   different sentences and only the count can tell them apart. */
+						const free = barMen?.get(s.slot)
+						const bar = free?.[nth]
 						return (
 						<div className={`lineup-row ${SOURCE_CLASS[s.source]}`} key={`${s.slot}-${i}`}>
 							<span className="code">{s.slot}</span>
@@ -1346,29 +1492,76 @@ const LineupCard = ({
 								{s.player ?
 									s.player.player.name
 								: s.source === "replacement" ?
-									/* Two different claims, and the card may only make the one its data
-									   supports. With the league's wire read, this man IS free and the
-									   card says so. Without it he is the (teams x seats)-th best
-									   eligible player anywhere — an estimate of who would be left — and
-									   he may well be on somebody's roster, which is what the card said
-									   about every spot before the wire was ever consulted. */
-									<em
-										title={
-											wireRead ?
-												`Free in your league right now, read off its own free-agent list: ` +
-												`the best ${s.slot} on the wire. Nobody you own beats him here.`
-											:	`Priced at what a free ${s.slot} is worth in a ` +
-												`${league.meta.max_teams}-team league — nobody you own beats that ` +
-												`here. This one has not been checked against your league's own list, ` +
-												`so he may already be taken.`
-										}
-									>
-										{wireRead ? "free agent" : "replacement"} {s.slot}
-										{bar && ` · ${bar.player.name}`}
-									</em>
-								:	<em className="hole-name" title="No price is known for this spot — nobody in the whole pool is eligible here, so there is no freely available body to price it at.">
-										nothing can fill this
-									</em>
+									/*
+									 * Two different claims, and the card may only make the one its data
+									 * supports — IN TEXT, not in a hover.
+									 *
+									 * This row used to read "replacement RP · Josh Hader", with the whole
+									 * qualification sitting in a `title`. Measured 2026-09-12 on the dev
+									 * server at 390x844, eleven men on the team: nine of the eighteen rows
+									 * were covered this way, four of them named somebody, and all four were
+									 * men the league's own cut calls taken — Aranda 84%, Abrams 98%, Gilbert
+									 * 98%, Nola 73%. A phone has no hover, so the screen was offering four
+									 * other people's players as though they were the reader's to take.
+									 *
+									 * Two things changed. The hedge is a VISIBLE second line generated from
+									 * his ownership figure, so a 98% man and a 4% man get different
+									 * sentences — see `freeness`. And the word "replacement" is gone: it is
+									 * a word about the model, not about baseball, and the slot it was glued
+									 * to is already printed in the code column to the left of it, so the
+									 * line was spending its width saying the row's own label back.
+									 *
+									 * The wire-read branch also stopped claiming "the best {slot} on the
+									 * wire". `wireBySlot` hands back the gettable men ranked, and this row
+									 * takes the nth of them, so on a slot with two seats covered the second
+									 * one was calling the second-best man the best. It now says only what is
+									 * true of every seat: he is on the list, so he is free.
+									 */
+									<span className="wire-fill">
+										<span className="wire-who">
+											{bar ? bar.player.name : "not one of yours"}
+										</span>
+										<span className="wire-hedge">
+											{bar ?
+												wireRead ?
+													"free in your league, off its own free-agent list"
+												:	freeness(bar.rosteredPct, cut)
+											: wireRead ?
+												/*
+												 * Measured 2026-09-12 and WRONG when first written, which is the
+												 * reason for the split: this branch said "priced at what the best one
+												 * on it is worth" for every uncovered seat, and pasting a sixty-man
+												 * free-agent list with no relievers in it put that sentence on four
+												 * seats priced at 0.0 — there was no best one. `replacementBySlot`
+												 * sets a slot with nothing free at it to zero rather than dropping
+												 * it, deliberately (see its own note: bare-at-catcher is a different
+												 * and commoner fact than nobody-in-baseball-is-eligible), so the
+												 * card has to be able to say both.
+												 *
+												 * The non-empty case is the engine's arithmetic said plainly: one bar
+												 * per SLOT, applied to every seat of it, so a second seat really is
+												 * priced at the man already counted in the first. That is worth
+												 * saying out loud rather than leaving a reader to assume the list
+												 * had a second body in it.
+												 */
+												free?.length ?
+													`priced at the best free ${s.slot} on your league's list, who is ` +
+													`already counted in a seat above`
+												:	`nobody on your league's free-agent list can play ${s.slot}, so ` +
+													`this seat is worth nothing until somebody can`
+											:	`priced at what a free ${s.slot} would be worth, with nobody ` +
+												`named for the seat`}
+										</span>
+									</span>
+								:	/* The title here said "No price is known for this spot — nobody in the
+								     whole pool is eligible here, so there is no freely available body to
+								     price it at." Every hole also gets a line of its own in
+								     `.lineup-holes` below, by slot and with its count, saying that nobody
+								     at all can play there and that the seat is therefore worth nothing
+								     rather than something unknown. The title was a second copy of a claim
+								     already on screen, reachable only by hovering, so it is gone rather
+								     than moved. */
+									<em className="hole-name">nothing can fill this</em>
 								}
 							</span>
 							<span className="lineup-pts">{s.source === "empty" ? "—" : pts(s.points)}</span>
@@ -1376,6 +1569,38 @@ const LineupCard = ({
 					)
 					})}
 				</div>
+				{/*
+				  * WHERE the prices for the seats you do not fill come from, once, under
+				  * the rows they apply to.
+				  *
+				  * Each row now carries its own hedge, and this is the part that is the same
+				  * for all of them: whether anybody checked, and what "probably taken" is
+				  * measured against. The cut is the league's own — `ownershipCut` counts the
+				  * capture's ownership column down to the (teams × seats)-th name — so a
+				  * 12-team league is told a different number from a 10-team one, and the
+				  * figure is quoted rather than described.
+				  *
+				  * Only shown when there is a row it is about. A reader whose own players fill
+				  * all eighteen seats is not handed a paragraph about the free-agent estimate.
+				  */}
+				{lineup.starters.some(s => s.source === "replacement") && (
+					<p className="tiny-note lineup-basis">
+						{wireRead ?
+							`The seats you do not fill yourself are priced off your league's own ` +
+							`free-agent list, so those men really were free when it was read.`
+						: cut?.usable ?
+							`Nobody here has been checked against your league's own free-agent list, so ` +
+							`who is free is an estimate: a ${league.meta.max_teams}-team league with ` +
+							`${cut.seats} seats holds ${cut.depth} players, and ${cut.depth} names down ` +
+							`the capture's rostered column sits a man rostered in ${cut.cut}% of leagues ` +
+							`— so above ${cut.cut}% is treated as taken. Paste your free agents above and ` +
+							`this becomes your league's own list instead.`
+						:	`Nobody here has been checked against your league's own free-agent list, and ` +
+							`this capture cannot say where the line between taken and free falls either, ` +
+							`so who is free is a guess. Paste your free agents above and it stops being ` +
+							`one.`}
+					</p>
+				)}
 				<div className="lineup-holes">
 					{lineup.holes.length ?
 						<ul className="notes warn">
@@ -1386,9 +1611,18 @@ const LineupCard = ({
 								</li>
 							))}
 						</ul>
-					:	<p className="tiny-note">
+					:	/* "the ones you leave empty are priced at what a free man would be worth" was
+					     the old second half of this sentence, and without the league's wire it was
+					     the same unbacked claim the rows were making: the body it prices them at is
+					     the (teams x seats)-th best player anywhere, who on the committed capture is
+					     rostered in 84-99% of leagues at four of the slots this team could not fill.
+					     So "a free man" survives only where a free-agent list was actually read, and
+					     otherwise the sentence says what the price IS rather than who it belongs to. */
+						<p className="tiny-note">
 							Every seat here has somebody who could fill it, so none of them is a hole —
-							the ones you leave empty are priced at what a free man would be worth.
+							{wireRead ?
+								" the ones you leave empty are priced at the best man on your league's list."
+							:	" the ones you leave empty are priced at what a freely available body would be worth, estimated."}
 						</p>
 					}
 				</div>
@@ -1405,6 +1639,31 @@ const LineupCard = ({
 				{lineup.bench.length > 0 && (
 					<div className="bench">
 						<h3>On your bench</h3>
+						{/*
+						  * Both halves of the old titles, said once and visibly.
+						  *
+						  * Every chip carried one of two hovers: "N projected points — somebody
+						  * better holds every spot he can fill", or "N projected points — below the
+						  * replacement bar at every slot he can fill, so the spot is worth more left
+						  * to a free agent". The difference between those two is the only reason this
+						  * list is marked at all, and on a phone neither could be read, so the mark
+						  * "· under the wire" was an unexplained two words.
+						  *
+						  * The per-man points total is not promoted with them. It is beside his name
+						  * in "N players on this team" on the card above, which is visible at 390px,
+						  * and eighteen numbers on eighteen chips is the wall the chips exist to
+						  * avoid. "Replacement bar" goes too — a word about the model.
+						  *
+						  * The second sentence is conditional because the first is unconditionally
+						  * true of this list and the second is only true of the marked ones.
+						  */}
+						<p className="tiny-note bench-legend">
+							Somebody better already holds every spot these men can fill.
+							{lineup.belowBar.length > 0 &&
+								(wireRead ?
+									" The ones marked are behind a man on your league's free-agent list rather than behind one of yours, so that seat is worth more left open."
+								:	" The ones marked are behind what a freely available body is estimated to be worth rather than behind one of yours, so that seat may be worth more left open.")}
+						</p>
 						<div className="picks">
 							{lineup.bench.map(r => {
 								const under = lineup.belowBar.some(b => rosterKey(b.player) === rosterKey(r.player))
@@ -1412,13 +1671,6 @@ const LineupCard = ({
 									<span
 										className={`chip${under ? " chip-under" : ""}`}
 										key={rosterKey(r.player)}
-										title={
-											under ?
-												`${pts(r.points)} projected points — below the replacement bar at every ` +
-												`slot he can fill, so the spot is worth more left to a free agent`
-											:	`${pts(r.points)} projected points — somebody better holds every spot ` +
-												`he can fill`
-										}
 									>
 										{r.player.name}
 										{under && <span className="chip-mark"> · under the wire</span>}

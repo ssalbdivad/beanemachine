@@ -7,7 +7,7 @@ import { roster } from "./roster.ts"
 import { useStored } from "./stores.ts"
 import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import {
-	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, SORT_DEFAULT, useBoard,
+	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
 	type BoardRow, type Filters, type Ranked
 } from "./useBoard.ts"
 import {
@@ -29,6 +29,31 @@ const MISSING_LABEL: Record<string, string> = {
 
 /** Rows rendered per step as the reader scrolls. */
 const PAGE = 60
+
+/**
+ * WHERE THE LIST STOPS, and it used not to stop at all.
+ *
+ * The board rendered every row it ranked. Measured at 390x844 on the fortnight, with
+ * the list scrolled to its end: 1,008 `.board-row` nodes, 9,247 elements on the page
+ * against 716 before any scrolling, and a document 59,395px tall — nothing ever
+ * unmounted, because `PAGE` only ever grows. Scrolling that far is not a thing anybody
+ * does; paying for it is.
+ *
+ * No windowing library, deliberately. A cap is the honest version of the same saving,
+ * because the rows past it are not rows a reader was going to act on: 400 is chosen so
+ * that NOTHING THE RANKING RECOMMENDS IS CUT on any horizon. Measured on the dev league
+ * with default filters, counting rows whose bscore clears zero — a man who beats the
+ * body already available at his own slot, and therefore the only kind of man this board
+ * has any business recommending: Streaming 19 of 77, the fortnight 100 of 1,008, Stash
+ * 327 of 1,446. The deepest of the three is 327, so the cap sits above all of them and
+ * everything it removes projects at or behind the man you could have for nothing.
+ *
+ * AND IT SAYS SO, with the count of what is not drawn, because a truncated list that
+ * reads as a complete one is worse than a long one. The name box filters the whole
+ * ranking before the cap is applied, so a man at rank 900 is still one search away —
+ * which is the sentence the note gives him, on the two horizons that draw that box.
+ */
+const CAP = 400
 
 /**
  * `const WIDELY_ROSTERED = 70` used to live here — the bar Billy's pick used to
@@ -168,36 +193,23 @@ const BOARD_GRID_CSS = `
 .board .board-head>[data-col=pts],.board .board-row>[data-col=pts]{grid-column:3}
 
 /*
-  THE ORDERING'S OWN TRACK, inserted left of "ahead by" because it is the number the
-  list is in and the eye reads left to right. Present only when the sort has no column
-  here already — see SORTED_COL — so four combinations exist and all four are written
-  out. An inherited grid-column is how two cells end up on one track, which this file
-  has now shipped twice.
+  THE ORDERING'S OWN TRACK STOOD HERE — a generic [data-col=sorted] column inserted left
+  of "ahead by", headed with whatever metric the reader had ordered by, in four
+  written-out combinations because an inherited grid-column is how two cells end up on
+  one track and this file has shipped that twice.
+
+  It existed to enforce a rule this board genuinely needs — A BOARD MUST ALWAYS SHOW THE
+  NUMBER IT IS SORTED BY — against a "Rank by" select that offered orderings no column
+  drew. The select is gone, and the only orderings left are the sortable column heads:
+  bscore (a column on all three horizons), points (a column on Streaming), deltaMine (a
+  column once a roster exists) and name. The sortable() clamp in useBoard.ts holds the
+  shared sort state to an ordering THIS horizon draws, so the rule now holds by
+  construction and there is no missing column left for a generic track to stand in for.
+
+  The rule itself is not deleted, it is enforced somewhere cheaper. Four CSS combinations
+  and a nine-entry lookup table were the cost of being able to order the board by a figure
+  nobody can see; not being able to do that is the better answer.
 */
-.board[data-ordered] .board-head,.board[data-ordered] .board-row{
-	grid-template-columns:28px minmax(0,1fr) 76px 78px 58px;
-}
-.board[data-ordered] .board-head>[data-col=sorted],
-.board[data-ordered] .board-row>[data-col=sorted]{grid-column:3}
-.board[data-ordered] .board-head>[data-col=bscore],
-.board[data-ordered] .board-row>[data-col=bscore]{grid-column:4}
-.board[data-ordered] .board-head>[data-col=games],
-.board[data-ordered] .board-row>[data-col=games]{grid-column:5}
-.board[data-mine][data-ordered] .board-head,.board[data-mine][data-ordered] .board-row{
-	grid-template-columns:26px minmax(0,1fr) 70px 70px 62px 52px;
-}
-.board[data-mine][data-ordered] .board-head>[data-col=sorted],
-.board[data-mine][data-ordered] .board-row>[data-col=sorted]{grid-column:3}
-.board[data-mine][data-ordered] .board-head>[data-col=bscore],
-.board[data-mine][data-ordered] .board-row>[data-col=bscore]{grid-column:4}
-.board[data-mine][data-ordered] .board-head>[data-col=mine],
-.board[data-mine][data-ordered] .board-row>[data-col=mine]{grid-column:5}
-.board[data-mine][data-ordered] .board-head>[data-col=games],
-.board[data-mine][data-ordered] .board-row>[data-col=games]{grid-column:6}
-/* It is a number the reader asked for, so it is not dimmed into the furniture, but it
-   is not the headline either: "ahead by" keeps the weight. */
-.board .board-row>[data-col=sorted]{font-family:var(--mono);font-variant-numeric:tabular-nums;
-	font-size:var(--fs-3);color:var(--muted)}
 /* The player's name is never cut. */
 .board .board-row .who b{overflow:visible;text-overflow:clip;white-space:normal}
 /*
@@ -252,20 +264,8 @@ const BOARD_GRID_CSS = `
 	.board[data-mine] .board-row>[data-col=bscore]{grid-column:4}
 	.board .board-head>[data-col=games],.board .board-row>[data-col=games],
 	.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{display:none}
-	/* Ordered by something with no column of its own, the ONE number that fits beside
-	   the name is that one — "ahead by" is not what this list is in. */
-	.board[data-ordered] .board-head,.board[data-ordered] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 74px;gap:var(--sp-2);
-	}
-	.board[data-ordered] .board-head>[data-col=sorted],
-	.board[data-ordered] .board-row>[data-col=sorted]{grid-column:3}
-	.board[data-ordered] .board-head>[data-col=bscore],
-	.board[data-ordered] .board-row>[data-col=bscore]{display:none}
-	.board[data-mine][data-ordered] .board-head,.board[data-mine][data-ordered] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 68px 60px;gap:var(--sp-2);
-	}
-	.board[data-mine][data-ordered] .board-head>[data-col=mine],
-	.board[data-mine][data-ordered] .board-row>[data-col=mine]{grid-column:4}
+	/* The phone's two [data-ordered] templates stood here, for the same generic track the
+	   desktop block above describes at length. Nothing sets data-ordered any more. */
 	/* Streaming shows what he scores; the board shows what he is ahead by. One number
 	   each at this width, and it is always the one the list is ordered by. */
 	.board[data-mode=stream] .board-head>[data-col=pts],
@@ -699,7 +699,18 @@ export const Board = ({
 			:	[],
 		[pool]
 	)
-	const { rows, scored, slotsRanked, edgeCoverage, period, streaming, teamNames, availability, sort, injuryError } =
+	/**
+	 * `mine` rather than `!!myNames`, and that is not a cosmetic swap.
+	 *
+	 * The "for you" column and the "for you" ORDERING have to agree about whether the
+	 * number exists, and they are two different tests if this file asks one question
+	 * and `useBoard` asks another: a roster of men the ranking cannot place — sixteen
+	 * names with no projectable playing time between them — gives a non-empty
+	 * `myNames` and a `worstMineBySlot` of null, which is a drawn column of dashes
+	 * beside a heading that sorts by nothing. One boolean, computed where the seats are
+	 * actually priced.
+	 */
+	const { rows, scored, slotsRanked, period, streaming, teamNames, availability, sort, desc, mine, injuryError } =
 		useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
@@ -713,11 +724,6 @@ export const Board = ({
 			innings: deriveInningsMinimum(raw).perPeriod
 		}
 	}, [league])
-
-	/** The ordering's own cell, where the ordering is not one of the columns already
-	 *  drawn — see SORTED_COL. Computed once here so the head and every row agree
-	 *  about whether the track exists, which is the failure BOARD_GRID_CSS opens with. */
-	const orderedBy = orderedCell(sort, filters.mode === "stream", !!myNames)
 
 	const availableOnly = filters.availableOnly ?? AVAILABLE_ONLY_DEFAULT[filters.mode]
 	/**
@@ -871,7 +877,37 @@ export const Board = ({
 	// bscore <= 0 means the freely available body at his own slot outscores him, so
 	// adding him is a net loss of points. There is no honest way to recommend that.
 	const addable = rows.filter(r => r.bscore > 0)
-	const best = (c: BoardRow[]) => c.reduce((a, b) => (b.bscore > a.bscore ? b : a))
+	/**
+	 * WHO IS BEST, and the answer changed the moment the reader told the app his team.
+	 *
+	 * This reduced on bscore alone, on the reasoning recorded above: every clause on the
+	 * card is denominated in bscore, so crowning any other column's leader would print a
+	 * sentence that does not explain the number beside it. That reasoning is sound and
+	 * the conclusion was wrong once `deltaMine` existed, because the fix is to write the
+	 * other sentence rather than to keep answering the other question. Driven at 390x844
+	 * with sixteen real players typed in: the board opened 35.27 / 34.85 / 33.53 by
+	 * bscore, Billy picked Grant Taylor at the top of it, and the "for you" column
+	 * beside those same rows read +20.3 / +65.4 / +64.0 — the recommendation was beaten
+	 * on the reader's own number by seven of the eight rows printed under it, and by
+	 * Josh Bell (+66.3), who was not on the first screen at all.
+	 *
+	 * A NULL LOSES TO ANY NUMBER and never wins on being large. `deltaMine` is null when
+	 * nobody the reader owns is eligible for a seat this man could take, which is the
+	 * absence of an answer rather than a good one — so a priced row beats an unpriced one
+	 * outright, and bscore decides only among rows nobody's roster can price (which is
+	 * every row when no team has been entered, i.e. exactly the old behaviour).
+	 *
+	 * Still a REDUCE and still not `rows[0]`, for the reason the long note above gives:
+	 * the pick must be the same man ascending and descending, because direction is a way
+	 * of looking at the board and not a change of question.
+	 */
+	const best = (c: BoardRow[]) =>
+		c.reduce((a, b) => {
+			if (a.deltaMine === null && b.deltaMine === null) return b.bscore > a.bscore ? b : a
+			if (a.deltaMine === null) return b
+			if (b.deltaMine === null) return a
+			return b.deltaMine > a.deltaMine ? b : a
+		})
 	/**
 	 * The same three tiers, from the same place.
 	 *
@@ -890,12 +926,24 @@ export const Board = ({
 	const basis: "pool" | "ownership" | "none" =
 		picked === undefined ? "none" : availability.basis === "pool" ? "pool" : "ownership"
 
-	const narrowed = [
-		filters.group === "hitting" ? "batters only"
-		: filters.group === "pitching" ? "pitchers only"
-		: "",
-		filters.hideInjured ? "injured hidden" : ""
-	].filter(Boolean)
+	/**
+	 * What the reader has narrowed, in his own words.
+	 *
+	 * "batters only" and "pitchers only" used to head this list, from the Side select
+	 * that is now gone. "injured hidden" is scoped to Stash for the same reason the
+	 * checkbox is — on the other two horizons the filter cannot match, so naming it
+	 * there would be the page claiming a cut it did not make.
+	 *
+	 * It no longer opens a disclosure, because there is no disclosure: the `.more` fold
+	 * held these three controls and held them badly. `open={narrowed.length > 0}` is a
+	 * CONTROLLED prop, so clearing the last filter slammed the fold shut under a reader
+	 * who had opened it himself — driven on the published build: open the fold, choose
+	 * "batters", put Side back to "batters + pitchers", and the fold is closed with
+	 * "Rank by" and "Hide injured" off screen mid-gesture.
+	 */
+	const narrowed = [filters.mode === "stash" && filters.hideInjured ? "injured hidden" : ""].filter(
+		Boolean
+	)
 
 	/**
 	 * A league that pays for one side of the ball and not the other, said on the
@@ -951,10 +999,23 @@ export const Board = ({
 	 *  a board just as thoroughly. */
 	/** Everything narrowing the board right now, in the reader's words, so the empty-state
 	 *  message can name the actual cause rather than only the two in `narrowed`. */
+	/**
+	 * ...and only the ones that are ON THIS HORIZON, which they were not.
+	 *
+	 * The position chips and the name box are drawn on the fortnight and Stash and not
+	 * on Streaming, and `rows` in useBoard.ts now reads them only where they are drawn.
+	 * This sentence has to agree with that or it names a control the reader cannot see:
+	 * driven before the scoping, a C chip picked on the fortnight emptied the Streaming
+	 * tab completely and the note under it read "No players match the C position. Clear
+	 * one of those to widen it" — an instruction to clear a chip that is not on the
+	 * screen it is printed on.
+	 */
 	const narrowingNames = [
 		...narrowed,
-		filters.slot ? `the ${filters.slot} position` : "",
-		filters.search.trim() ? `the search for "${filters.search.trim()}"` : ""
+		filters.mode !== "stream" && filters.slot ? `the ${filters.slot} position` : "",
+		filters.mode !== "stream" && filters.search.trim() ?
+			`the search for "${filters.search.trim()}"`
+		:	""
 	].filter(Boolean)
 	/** The ones that went, named in the note so their absence is stated rather than
 	 *  left as a gap the reader has to notice. */
@@ -1182,121 +1243,71 @@ export const Board = ({
 						</span>
 					</label>
 					)}
-				</div>
-				{/* The four controls above are the ones reached for constantly. These three
-				    are not, and permanently on screen they were part of what pushed the
-				    first ranked row to y=1187 — below the fold on a 1200px screen.
-				    The summary names any of them that is ON, because the page has already
-				    learned once that a filter you cannot see must not be one you cannot
-				    escape: a mode-scoped filter went on filtering a view whose checkbox had
-				    stopped rendering, and the board emptied with nothing on screen to undo. */}
-				<details className="more" open={narrowed.length > 0}>
-					<summary>
-						More filters
-						{narrowed.length > 0 && <em> · {narrowed.join(", ")}</em>}
-					</summary>
-					<div className="filters">
-						{/*
-						  Ordering lives here, not above the table: the column heads are already
-						  sort controls, so standing permanently above the ranking this cost 66px
-						  on a phone to offer a second way to do a thing one tap away. What it
-						  earns its place for is the orderings that are NOT columns, and every one
-						  of those now draws its number beside the name while it is in force (see
-						  SORTED_COL) — before that, four of these six reordered the board by a
-						  figure printed nowhere on it.
-						  
-						  `uscore` was the sixth and is gone from the list. It is bscore times the
-						  share of leagues where he is still free, on a list this screen has
-						  already filtered to men he can get — the same discount applied twice,
-						  which reorders the survivors by who is rarer rather than by who is
-						  better. It is also null wherever Yahoo prices no ownership: 553 of 1,435
-						  players on the committed capture, the top row of the gettable list among
-						  them. The number survives in the drill-down, where it is one of several
-						  readings rather than the order of the table.
-						  
-						  The words are the reader's, not the engine's. "market edge (what the
-						  field is wrong about)" asked him to hold a definition in his head to
-						  pick an ordering; the definition is under the heads once he picks it.
-						  
-						  "best contact vs results" went too, because it was the SAME ORDERING.
-						  `undervaluation` is the within-side percentile of the signed
-						  `regressionGap`; `contact` is that same signed gap raw. A percentile is
-						  monotone within a side, so the two coincide exactly whenever Side is not
-						  "batters + pitchers" — measured in the browser on the dev league: 60 of
-						  60 rows identical with Side=batters, 40 of 40 with Side=pitchers. The
-						  percentile is the one that survives, because it is the one that is
-						  comparable when both sides are on the list.
-						*/}
-						{filters.mode !== "stream" && (
-						<label className="ctl">
-							<span>Rank by</span>
-							<select
-								data-ctl="sort"
-								value={sort}
-								onChange={e => set("sort", e.currentTarget.value as Filters["sort"])}
-							>
-								<option value="bscore">how far ahead of a free man he is</option>
-								<option value="points">the points he should score</option>
-								<option value="marketEdge">how far he beats his own ownership</option>
-								<option value="undervaluation">who has been unluckiest</option>
-							</select>
-						</label>
-						)}
-						{/*
-						  Gone entirely where the league scores one side only, and that is the
-						  point rather than tidiness. Its three options are "batters + pitchers",
-						  "batters" and "pitchers": with no pitching scoring the first is a label
-						  for a list that holds no pitchers, the second is the same list under a
-						  second name, and the third can only ever return nothing. One control,
-						  three settings, no question it can answer.
+					{/*
+					  HIDE INJURED, on the one horizon where it can match.
 
-						  Kept while the reader has one of the narrow ones selected, for the same
-						  reason `slotChips` keeps a picked chip: the way out of a narrowed board
-						  must never be the thing that disappears.
-						*/}
-						{(!unscored || filters.group !== "all") && (
-						<label className="ctl">
-							<span>Side</span>
-							<select
-								data-ctl="group"
-								value={filters.group}
-								onChange={e => set("group", e.currentTarget.value as Filters["group"])}
-							>
-								<option value="all">batters + pitchers</option>
-								<option value="hitting">batters</option>
-								<option value="pitching">pitchers</option>
-							</select>
-						</label>
-						)}
-						{/*
-						  "Min confidence" was here, and it is gone.
-						  
-						  Two things were wrong with it and either alone would have been enough.
-						  It filtered on a number the board stopped drawing in the four-column
-						  pass, so a reader could narrow the list and had nothing on screen to
-						  check the narrowing against — a hidden filter, which is the defect this
-						  project already has a comment about in view.ts.
-						  
-						  And it did nothing where anyone looks. Measured on the committed capture
-						  with the reference league: 463 distinct confidence values across 1,248
-						  rateable players, and the floors remove 42% (at 40%+) and 58.5% (at
-						  70%+) of that whole list — but next to nothing of the top 60 by "ahead by"
-						  (0 at the 40% floor, 2 at the 70% floor), 55 of
-						  which sit at exactly 100%. Almost everything it removes is deep-bench men
-						  who were never candidates, and all but two of the rows a reader actually
-						  reads clear both floors. The number itself is unchanged and still in the drill-down,
-						  where the reasons behind it are printed with it.
-						*/}
-						<label className="toggle">
-							<input
-								type="checkbox"
-								checked={filters.hideInjured}
-								onChange={e => set("hideInjured", e.currentTarget.checked)}
-							/>
-							<span>Hide injured</span>
-						</label>
-					</div>
-				</details>
+					  It lived behind "More filters" with two controls that are now deleted,
+					  and it is here rather than deleted with them because on Stash it really
+					  filters: driven on the published build, 1,446 rows to 1,245, and one man
+					  off the visible top sixty (Braxton Ashcraft, rank 50, listed 15-day).
+					  On the other two horizons it cannot match at all — `rateAll` is already
+					  passed `injuryPolicy: "exclude"` there, so the fortnight went 1,008 to
+					  1,008 and Streaming 77 to 77 with every rendered row byte-identical.
+
+					  Stash is also the only horizon where the question makes sense: over the
+					  rest of a season an injured man is a legitimate hold, which is why that
+					  is the horizon that keeps him in the ranking in the first place.
+
+					  Rendered and SCOPED, not one or the other — `rows` in useBoard.ts reads
+					  it only in stash mode, so it cannot go on filtering a board whose
+					  checkbox has stopped being drawn. That is not a hypothetical: this page
+					  has shipped exactly that bug, and the comment on `startersOnly` is the
+					  record of it.
+					*/}
+					{filters.mode === "stash" && (
+					<label className="toggle">
+						<input
+							type="checkbox"
+							checked={filters.hideInjured}
+							onChange={e => set("hideInjured", e.currentTarget.checked)}
+						/>
+						<span>Hide injured</span>
+					</label>
+					)}
+				</div>
+				{/*
+				  "MORE FILTERS" STOOD HERE and held three controls, every one of which is
+				  gone. Measured at 390x844 before this pass: 25 controls above the first
+				  ranked row, and that row at document y895 on an 844px screen — not one
+				  ranked row on the first screen of the page whose job is ranked rows.
+
+				  "Hide injured" could not match on two of the three horizons, because
+				  `rateAll` already excludes injured men everywhere except Stash. Driven:
+				  the fortnight 1,008 rows to 1,008 and Streaming 77 to 77 with every
+				  rendered row byte-identical; Stash 1,446 to 1,245, and one man out of the
+				  visible top sixty. So it is not deleted, it is rendered on the one horizon
+				  where it filters anything — in the always-visible row above, because a
+				  control worth keeping is worth reaching in one gesture.
+
+				  "Side" duplicated the Util and P chips one row up AND disagreed with them:
+				  chip Util 441 against Side=batters 440, chip P 567 against Side=pitchers
+				  568, with the first sixty rows name-for-name identical both ways. See the
+				  note in useBoard.ts's `rows` for the one man the pair contradicts itself
+				  about. The chips survive because they name a seat and cost one tap.
+
+				  "Rank by" offered four orderings. One was the "ahead by" column head, one
+				  was the points head on the horizon that draws it, and the other two put the
+				  rows in an order whose number no column showed — which is why the generic
+				  `[data-col=sorted]` track had to be invented. The heads ARE the orderings
+				  now, and `sortable` in useBoard.ts makes "every ordering has a visible
+				  column" true by construction instead of by patching it per metric.
+
+				  And the fold carried a defect of its own: `open={narrowed.length > 0}` is a
+				  CONTROLLED prop, so clearing the last filter shut it under a reader who had
+				  opened it himself, taking the other two controls off screen mid-gesture.
+				  Driven on the published build: open it, choose "batters", put Side back to
+				  "batters + pitchers", and it is closed with his cursor still inside it.
+				*/}
 			</section>
 
 			{pick ?
@@ -1390,12 +1401,11 @@ export const Board = ({
 						<b>{tab("trade")}</b> and they come back.
 					</p>
 				)}
-				{filters.sort === "marketEdge" && edgeCoverage < 0.35 && (
-					<p className="sub warn-note">
-						Yahoo listed ownership for only {Math.round(edgeCoverage * 100)}% of this
-						board, so edge can rank just that slice. bscore ranks everyone.
-					</p>
-				)}
+				{/* A coverage warning stood here, for a board ranked by market edge: "Yahoo
+				    listed ownership for only N% of this board, so edge can rank just that
+				    slice". Market edge is no longer an ordering this screen offers, so there
+				    is no such board to warn above — see Filters["sort"] in useBoard.ts. The
+				    number itself is untouched and still in the drill-down under every row. */}
 				{/* One line, because it is read on every visit: how many, over what window.
 				    Everything about HOW the ranking was built — which horizon this is, what
 				    playing time leans on, what each column means — is a click below, where
@@ -1536,14 +1546,18 @@ export const Board = ({
 				    The row marking went with them. Highlighting "your top N" is the same
 				    recommendation wearing a border, and it is what pulled the answer down
 				    here in the first place. The board ranks; the card decides. */}
-				{/* `data-sort` is read by the 640px rule in BOARD_GRID_CSS, which puts the
-				    uscore column back on a phone when the board is ranked by it. */}
+				{/* `data-sort` is no longer read by any rule — the 640px block it was written
+				    for put the uscore column back on a phone when the board was ranked by it,
+				    and neither that column nor that ordering exists. It stays on the element
+				    because it is what a reader of this markup (and a test of it) uses to see
+				    which ordering the rows are in, which is otherwise only inferable from an
+				    arrow glyph; `grep -rn data-sort src/ test/` finds this attribute and this
+				    comment and nothing else. */}
 				<div
 					className="board"
 					data-sort={sort}
 					data-mode={filters.mode}
-					data-mine={myNames ? "" : undefined}
-					data-ordered={orderedBy ? "" : undefined}
+					data-mine={mine ? "" : undefined}
 					data-preview={preview ? "" : undefined}
 				>
 					{/* Four columns, five when a roster exists or the ordering needs one of its
@@ -1554,14 +1568,14 @@ export const Board = ({
 					    carries the measurements. */}
 					<div className="board-head">
 						<span data-col="rank">#</span>
-						<SortHead col="who" field="name" filters={filters} setFilters={setFilters}>Player</SortHead>
+						<SortHead col="who" field="name" sort={sort} desc={desc} setFilters={setFilters}>Player</SortHead>
 						{/* uscore discounts value by availability, which on a list already
 						    filtered to what he can add is that discount applied twice — see
 						    STREAM_GRID_CSS. What replaces it is the half of his question the
 						    board never answered: what this man actually scores over the
 						    window. */}
 						{filters.mode === "stream" && (
-							<SortHead col="pts" field="points" filters={filters} setFilters={setFilters} right>
+							<SortHead col="pts" field="points" sort={sort} desc={desc} setFilters={setFilters} right>
 								points
 							</SortHead>
 						)}
@@ -1575,24 +1589,11 @@ export const Board = ({
 						    heading sat over the wrong column. A head and a row that disagree about
 						    how many cells they have is the exact failure named at the top of
 						    BOARD_GRID_CSS. */}
-						{/* The ordering, where it is not one of the columns already here. See
-						    SORTED_COL: a board ranked by a number it does not print is asking to
-						    be taken on trust, and four of the six orderings were doing exactly
-						    that. Its heading is the sort control for the sort already in force,
-						    so pressing it reverses the direction. */}
-						{orderedBy && (
-							<SortHead
-								col="sorted"
-								field={sort}
-								filters={filters}
-								setFilters={setFilters}
-								unit={orderedBy.unit}
-								right
-							>
-								{orderedBy.head}
-							</SortHead>
-						)}
-						<SortHead col="bscore" field="bscore" filters={filters} setFilters={setFilters} right>
+						{/* A generic `sorted` heading stood here, drawn whenever the ordering had
+						    no column of its own. Nothing is ordered by a number without a column
+						    any more — see the note where its CSS used to be, and `sortable` in
+						    useBoard.ts, which is what makes that true rather than hoped for. */}
+						<SortHead col="bscore" field="bscore" sort={sort} desc={desc} setFilters={setFilters} right>
 							ahead by
 						</SortHead>
 						{/* Δ MINE: what he gains over the man he would actually displace on YOUR
@@ -1603,8 +1604,8 @@ export const Board = ({
 						    makes a good free-agent outfielder worth nothing to him; a hole at
 						    catcher makes a mediocre one worth a great deal. Rendered only when a
 						    roster has been entered — a column of blanks teaches nothing. */}
-						{myNames && (
-							<SortHead col="mine" field="deltaMine" filters={filters} setFilters={setFilters} right>
+						{mine && (
+							<SortHead col="mine" field="deltaMine" sort={sort} desc={desc} setFilters={setFilters} right>
 								for you
 							</SortHead>
 						)}
@@ -1637,22 +1638,21 @@ export const Board = ({
 					*/}
 					<details className="board-legend">
 						<summary>
-							{orderedBy ?
-								/* Ranked by something that is not one of the standing columns. The
-								   sentence names the column the rows are actually in, and the cell
-								   beside every name carries its value — this branch used to not
-								   exist, so ranking by luck or by edge reordered the board and left
-								   "Ahead by — points more than the best man still free at his spot"
-								   underneath it, describing a different number. */
-								<>
-									Ordered by <b>{orderedBy.head}</b>, the column beside each name.
-								</>
-							: sort === "points" ?
+							{/* The `orderedBy` branch stood first here, for an ordering with no
+							    column of its own. There are none left — see `sortable` in
+							    useBoard.ts — so the three that remain are the three columns this
+							    table can be ordered by, and each gets its own sentence about its
+							    own bar. Never one sentence with the other's number dropped in:
+							    that is the mistake `theManLeftAt` and `theWorstManYouHold` exist
+							    to make impossible. */}
+							{sort === "points" ?
 								<>Ordered by the points he should score in this window.</>
 							: sort === "deltaMine" ?
 								<>
-									<b>For you</b> &mdash; what he adds over the man he would take a seat
-									from on your team.
+									<b>For you</b> &mdash; points more than {theWorstManYouHold()}
+									{preview ?
+										", in this league\u2019s scoring."
+									:	", in your league\u2019s points."}
 								</>
 							:	<>
 									{/*
@@ -1673,9 +1673,19 @@ export const Board = ({
 									  shipped preset and none of it is about his league yet. Two sentences
 									  on one screen disagreeing about whose scoring this is.
 									*/}
+									{/*
+									  NOT "the standard scoring", and the ban on that word is written
+									  down twice in this repo — fourteen lines under the banner that
+									  retracts it, and in panels.tsx beside the values drawer. The
+									  shipped preset pays HR 10.4 where Yahoo's own head-to-head points
+									  default pays 4, so a reader who opens his own settings page to
+									  compare finds nothing that matches and concludes the site is
+									  broken. The banner above this list already has the true words for
+									  it: one real league's scoring, not yours.
+									*/}
 									<b>Ahead by</b> &mdash; points more than {theManLeftAt(null)}
 									{preview ?
-										", in the standard scoring this board is running."
+										", in one real league\u2019s scoring \u2014 not yours yet."
 									:	", in your league\u2019s points."}
 								</>
 							}
@@ -1687,9 +1697,7 @@ export const Board = ({
 						{/* The definition of the number the board is in, which is the one a reader
 						    who changed the ordering is owed. It is the same sentence the cell's own
 						    tooltip carries, because a phone has no hover. */}
-						{orderedBy ?
-							<>{orderedBy.help}</>
-						: sort === "points" ?
+						{sort === "points" ?
 							<>
 								The streaming list is ordered by what a man actually scores over the window
 								you picked, not by what he is ahead of a free pickup by &mdash; because the
@@ -1702,7 +1710,24 @@ export const Board = ({
 								every team has filled it, which is the bar for the league. This one is the
 								bar for you: the worst man you own who could hold the seat. A deep outfield makes a good
 								free-agent outfielder worth nothing to you; a hole at catcher makes a
-								mediocre one worth a great deal.
+								mediocre one worth a great deal.{" "}
+								{/*
+								  WHAT THIS ORDERING IS AND IS NOT, said where the reader meets it.
+								  
+								  The board opens in this order as soon as a team has been entered, and
+								  that is a change of DEFAULT rather than of model: nothing about how a
+								  player is rated moved, and "ahead by" is still on every row with its
+								  own sortable heading one tap away. It also has no backtest behind it.
+								  The evidence this project holds — +61.8 points a week, 80 of 111 weeks
+								  — was measured on an add list ranked by "ahead by", and no ranking by
+								  this column has ever been measured at all. So the claim made here is
+								  the only one that is true: it is the question the reader just
+								  answered, not the ordering that is known to win.
+								*/}
+								Which of the two predicts better is not something this app has measured:
+								ordering by your own roster is the question you just answered by telling
+								us your team, and &ldquo;ahead by&rdquo; is the one with a season of
+								results behind it. Both are on every row.
 							</>
 						:	<>
 								It ranks players; it does not promise points. 35 means further ahead of the
@@ -1722,15 +1747,16 @@ export const Board = ({
 							</>
 						}
 					</details>
-					{rows.slice(0, limit).map((r, i) => (
+					{/* `Math.min(limit, CAP)`: the observer below still pages the list in so the
+					    first paint stays cheap, and CAP is where the paging stops. */}
+					{rows.slice(0, Math.min(limit, CAP)).map((r, i) => (
 						<Row
 							key={r.player.id}
 							rank={i + 1}
 							r={r}
 							stream={filters.mode === "stream"}
 							starts={startsFor(r)}
-							mine={!!myNames}
-							orderedBy={orderedBy}
+							mine={mine}
 							/* the reader's budget, counted down the ranking he is actually
 							   looking at — his filters have already decided who is on it */
 							open={open === r.player.id}
@@ -1776,7 +1802,11 @@ export const Board = ({
 								<>
 									Nothing left to rank. This league scores nothing for{" "}
 									{unscored === "pitching" ? "pitchers" : "batters"}
-									{filters.slot ?
+									{/* `filters.mode !== "stream"` as well, for the same reason
+									    `narrowingNames` carries it: the chip is not drawn on Streaming,
+									    and on the horizon that does not draw it the chip is also no
+									    longer read, so naming it here would be wrong twice over. */}
+									{filters.mode !== "stream" && filters.slot ?
 										<>
 											, and the <b>{filters.slot}</b> chip can never match one
 										</>
@@ -1796,11 +1826,26 @@ export const Board = ({
 				{/* The end of the rendered window. Scrolling to it grows the list; when
 				    everything is on screen it is an empty div and says nothing. */}
 				<div ref={sentinel} aria-hidden />
-				{limit < rows.length && (
+				{/*
+				  Two different sentences, because they are two different facts. One says the
+				  rest is coming if you keep going; the other says the rest is not coming at
+				  all, and how many men that is. A list that has stopped for good must never
+				  be able to read as a list that is still loading — see CAP.
+				*/}
+				{rows.length > CAP ?
+					<p className="sub" style={{ marginTop: 12 }}>
+						Showing the top <b className="count">{CAP}</b>. The other{" "}
+						<b className="count">{rows.length - CAP}</b> are ranked below them and not
+						drawn
+						{filters.mode !== "stream" ?
+							" — type a name above to pull one up."
+						:	"."}
+					</p>
+				: limit < rows.length ?
 					<p className="sub" style={{ marginTop: 12 }}>
 						{limit} of {rows.length} — keep scrolling.
 					</p>
-				)}
+				:	null}
 			</section>
 
 		</>
@@ -1846,7 +1891,9 @@ const BillysPick = ({
 	basis,
 	streaming
 }: {
-	r: Ranked
+	/** A BoardRow, not a Ranked, because the card now leads on the number the reader's
+	 *  own roster produced where there is one — see `theWorstManYouHold`. */
+	r: BoardRow
 	horizon: string
 	/** Which availability source picked him, and therefore which claim the card is
 	 *  entitled to make. */
@@ -1856,6 +1903,28 @@ const BillysPick = ({
 	streaming: boolean
 }) => {
 	const clauses: string[] = []
+	/**
+	 * THE NUMBER THAT CHOSE HIM LEADS, and it is not always the same number.
+	 *
+	 * `best()` picks by `deltaMine` wherever a roster can price it, so on a visit where
+	 * the reader has told the app his team the card is crowning a man for what he adds
+	 * over the reader's own bench — and the old sentence described a different
+	 * subtraction entirely. Both are stated, in the order they decided anything, each in
+	 * its own words: the bar for you first because it is why he is here, the bar for the
+	 * league second because it is the number the column and the methodology are in.
+	 *
+	 * Each sentence is built by the function that owns it (`theWorstManYouHold`,
+	 * `theManLeftAt`) precisely so that neither can be relabelled into the other.
+	 */
+	if (r.deltaMine !== null)
+		clauses.push(
+			r.deltaMine > 0 ?
+				`Adding him is worth ${r.deltaMine} more points over ${horizon} than ${theWorstManYouHold()}`
+				// A negative one is a real state and it is not dressed as a positive: the
+				// candidate list is everyone with a bscore above zero, so a man can beat the
+				// league's bar while every eligible man in the reader's own dugout beats him.
+			:	`Over ${horizon} he projects ${Math.abs(r.deltaMine)} points BEHIND ${theWorstManYouHold()}`
+		)
 	clauses.push(
 		`Projected for ${r.bscore} more points than ${theManLeftAt(r.slot)}, over ${horizon}`
 	)
@@ -1928,6 +1997,19 @@ const BillysPick = ({
 		)
 	else if (r.projection.horizonGames)
 		clauses.push(`his team plays ${r.projection.horizonGames} games in that stretch`)
+	/**
+	 * The reason not to act that only a roster can state, and it is outside the fold for
+	 * the same reason every other worry is: a reason not to act that has to be opened is
+	 * a reason nobody reads.
+	 *
+	 * Reachable whenever the best row the filters leave is behind the reader's own bench
+	 * — he is ahead of the league's bar, which is what put him on the candidate list, and
+	 * behind the man he would have to bench for him, which is what decides the move.
+	 */
+	const bench =
+		r.deltaMine !== null && r.deltaMine <= 0 ?
+			`He clears the league's bar and not yours: ${theWorstManYouHold()} already projects ${Math.abs(r.deltaMine)} points more over ${horizon}.`
+		:	null
 	const worry =
 		r.injury ? `He's listed ${r.injury.toLowerCase()}, so treat that number carefully.`
 		: r.confidence.value < 0.7 ?
@@ -1987,14 +2069,24 @@ const BillysPick = ({
 						<summary>why him</summary>
 						{clauses.join(" · ")}.
 					</details>
+					{bench && <em className="pick-worry"> {bench}</em>}
 					{worry && <em className="pick-worry"> {worry}</em>}
 				</div>
 			</div>
+			{/*
+			  THE BADGE CARRIES THE NUMBER THAT CHOSE HIM, under the heading the column
+			  that carries it uses.
+
+			  It said "bscore", a word this app invented and nobody else uses, and was
+			  changed to "ahead by" to match the column. That is now only half right: once
+			  a roster exists the pick is made on "for you", so a badge reading "ahead by"
+			  would print the league's bar beside a sentence explaining a choice made on the
+			  reader's own — the same class of disagreement, one layer up. Whichever number
+			  decided is the number shown, named in the words of the column it lives in.
+			*/}
 			<span className="pick-score">
-				<b>{r.bscore}</b>
-				{/* The badge said "bscore", which is a word this app invented and nobody
-				    else uses. The column beside it already says what the number is. */}
-				<span>ahead by</span>
+				<b>{r.deltaMine !== null ? (r.deltaMine > 0 ? `+${r.deltaMine}` : r.deltaMine) : r.bscore}</b>
+				<span>{r.deltaMine !== null ? "for you" : "ahead by"}</span>
 			</span>
 		</section>
 	)
@@ -2018,150 +2110,130 @@ const BillysPick = ({
 const theManLeftAt = (slot: string | null): string =>
 	`the man left at ${slot ?? "his spot"} once every team has filled it`
 
+/**
+ * WHO YOUR OWN BAR IS — the second sentence, written out here so that it can never be
+ * the first one with a different number dropped into it.
+ *
+ * `theManLeftAt` above exists because two screens disagreed about whose bar bscore
+ * subtracts. This is the same hazard one step further on: the board now opens ordered
+ * by `deltaMine` when a roster exists, and the cheap way to ship that would have been
+ * to leave the bscore sentence in place and put the new figure in front of it. That
+ * sentence would have been false about the new number in the direction that matters —
+ * the league's bar is the (teams x seats)-th man at the spot, usually a man rostered
+ * everywhere, while this bar is the worst man in the reader's OWN dugout, and the two
+ * are routinely tens of points apart.
+ *
+ * NO SLOT IS NAMED, deliberately. `useBoard` takes the minimum over every seat he is
+ * eligible for — a manager benches his worst eligible man, not his worst man — so the
+ * man displaced need not be at the slot printed on the row, and naming one would be a
+ * claim the arithmetic does not make.
+ */
+const theWorstManYouHold = (): string => "the worst man you hold who could take one of his spots"
+
+/**
+ * What each sortable heading means, one entry per ordering the board can be in.
+ *
+ * TEN ENTRIES became four, and one of the six that went had already outlived its
+ * control: `uscore` was still written down here for an ordering the Rank-by select had
+ * stopped offering, so this table was documenting a state the app could not reach. The
+ * other five — market edge, waiver points, confidence, luck and contact — went with
+ * that select.
+ *
+ * Every number they described is still computed and still printed in the drill-down
+ * one tap under the row, with the reasons beside it. What is gone is the ability to put
+ * the whole table in an order whose number appears nowhere on it.
+ */
 const COLUMN_HELP: Record<NonNullable<Filters["sort"]>, string> = {
 	name: "Sort by player name.",
 	deltaMine:
-		"\u0394 mine \u2014 what adding him gains over the man he would actually displace on YOUR roster, over this window. bscore prices every row against the (teams \u00d7 seats)-th man in the league, which is the bar for the league; this is the bar for you. A deep outfield makes a good free-agent outfielder worth nothing to you, and a hole at catcher makes a mediocre one worth a great deal. Blank where nobody you own is eligible for a seat he could take, or where he is already yours.",
-	uscore:
-		"uscore — underrated score, in the same points as bscore. What he adds, times the share of leagues where he is still free: bscore \u00d7 (1 \u2212 owned). bscore asks who is best; uscore asks who is the best you can actually get. The ownership it divides by is printed under it; \u201cunlisted\u201d means Yahoo prices no ownership for him — unknown, not unowned, so there is no uscore either.",
+		"For you \u2014 what adding him gains over the worst man you hold who could take one of his spots, over this window. bscore prices every row against the (teams \u00d7 seats)-th man in the league, which is the bar for the league; this is the bar for you. A deep outfield makes a good free-agent outfielder worth nothing to you, and a hole at catcher makes a mediocre one worth a great deal. Blank where nobody you own is eligible for a seat he could take, or where he is already yours.",
 	bscore:
 		"bscore — beanescore. Projected points over the horizon minus what a man you could still pick up at the same slot would score — the (teams × seats)-th of them, which is who is left once every team has filled that slot. 40 means forty more points than that man.",
-	marketEdge:
-		"Edge — how many points he beats the typical player rostered about as widely as he is. Like uscore but a subtraction rather than a ratio, so it stays in league points and is less swayed by the barely-owned.",
-	points: "Projected points — what he scores over the horizon in your league's own scoring.",
-	replacement:
-		"Waiver points — what the man you would have instead is projected to score: the (teams × seats)-th player at this slot that your league still lets you pick up.",
-	confidence:
-		"How much real data stands behind the projection: playing time so far, whether Statcast has him, and whether he's healthy. Not the odds he plays well.",
-	undervaluation:
-		"Luck — how far his results trail the quality of his contact over the last three weeks, ranked against everyone on his side of the ball. 90 means only 10% have been unluckier.",
-	contact:
-		"Contact vs results — the gap between expected and actual wOBA over the last three weeks, where contact and results actually diverge."
+	points: "Projected points — what he scores over the horizon in your league's own scoring."
 }
 
 
-/**
- * A BOARD MUST ALWAYS SHOW THE NUMBER IT IS SORTED BY.
+/*
+ * `SORTED_COL`, `OrderedCell` and `orderedCell` stood here — about sixty lines of
+ * generic-column machinery, and the comment above them opened with the rule they
+ * existed to keep: A BOARD MUST ALWAYS SHOW THE NUMBER IT IS SORTED BY.
  *
- * The rule is old and the enforcement is new. The nine-column board had a column for
- * nearly every ordering, so the rule mostly held by accident; the four-column pass cut
- * five of those columns and left the Rank-by select offering six orderings, four of
- * which ranked the rows by a number printed nowhere on them. Worse, `.board-legend`
- * branches on three values and falls through — so ranked by most undervalued, the
- * board reordered itself and the sentence under the heads still read "Ahead by —
- * points more than the best man still free at his spot". A table ordered by an
- * invisible number, captioned with the name of a different one, is asking to be taken
- * on trust, which is the one thing this app is not for.
+ * THE RULE IS NOT BEING DROPPED. It was a real defect, recorded in that comment and
+ * worth restating: ranked by "most undervalued" the board reordered itself by a
+ * percentile printed nowhere, under a caption that still read "Ahead by — points more
+ * than the best man still free at his spot", describing a different number entirely. A
+ * table ordered by an invisible figure and captioned with the name of another one is
+ * asking to be taken on trust, which is the one thing this app is not for.
  *
- * So the ordering gets a cell of its own whenever it has no column of its own: ONE
- * generic track, headed with the metric's short name and carrying its value, placed
- * immediately left of "ahead by" because it is the number the list is in. What used to
- * be five conditional columns is one, and it cannot be out of step with the sort
- * because it is read out of the sort.
+ * What the machinery was FOR was an ordering with no column, and there are none left.
+ * The "Rank by" select offered four, two of which had no column on the horizon that
+ * offered them; it is deleted, and the only way to reorder this table now is to press
+ * a column heading. Four headings exist — Player, points (Streaming), ahead by, for you
+ * (once a roster is entered) — and `sortable` in useBoard.ts holds the shared sort
+ * state to one this horizon actually draws, so an ordering with no column cannot be
+ * reached even across a tab switch, which was the one remaining way in.
  *
- * `read` returns a string, because these are five different kinds of quantity — league
- * points, a percentile, a wOBA gap to three places — and rounding them all the same
- * way is how a number starts claiming a precision its measurement does not have.
+ * So the proof is structural rather than per-metric, which is the point: before, the
+ * rule held because a lookup table had an entry for every ordering, and the way it
+ * broke was somebody adding a tenth ordering without a tenth entry. Now the set of
+ * orderings IS the set of drawn columns, and there is no table to forget to update.
+ *
+ * Every quantity the nine entries could draw — uscore, market edge, luck, contact,
+ * confidence, waiver points — is still computed by the engine and still printed in the
+ * drill-down under the row it belongs to, where the reasons behind it are printed with
+ * it. What is gone is ordering a thousand rows by one of them.
  */
-const SORTED_COL: Partial<
-	Record<NonNullable<Filters["sort"]>, { head: string; unit?: string; read: (r: BoardRow) => string }>
-> = {
-	uscore: { head: "gettable", read: r => (r.uscore === null ? "\u2014" : String(r.uscore)) },
-	points: { head: "points", read: r => r.points.toFixed(1) },
-	marketEdge: {
-		head: "edge",
-		read: r => (r.marketEdge === null ? "\u2014" : r.marketEdge > 0 ? `+${r.marketEdge}` : String(r.marketEdge))
-	},
-	undervaluation: {
-		head: "luck",
-		unit: "/100",
-		read: r => (r.undervaluation === null ? "\u2014" : String(Math.round(r.undervaluation)))
-	},
-	contact: {
-		head: "contact",
-		read: r =>
-			r.regressionGap === null ? "\u2014"
-			: r.regressionGap > 0 ? `+${r.regressionGap.toFixed(3)}`
-			: r.regressionGap.toFixed(3)
-	},
-	confidence: { head: "conf", read: r => pct(r.confidence.value) },
-	replacement: { head: "free man", read: r => r.replacement.toFixed(1) },
-	deltaMine: {
-		head: "for you",
-		read: r => (r.deltaMine === null ? "\u2014" : r.deltaMine > 0 ? `+${r.deltaMine}` : String(r.deltaMine))
-	}
-}
-
-/**
- * Which cell, if any, the ordering needs. Null when the board already draws it:
- * "ahead by" is always there, "points" on the streaming tab, "for you" once a roster
- * exists, and sorting by name orders the column the names are already in.
- */
-export type OrderedCell = {
-	head: string
-	unit?: string
-	read: (r: BoardRow) => string
-	/** The definition, carried with the cell. COLUMN_HELP used to reach a reader only
-	 *  as the `title` of a sortable heading, and five of those headings were deleted —
-	 *  leaving numbers on screen, correct, and undefined. */
-	help: string
-}
-
-const orderedCell = (
-	sort: NonNullable<Filters["sort"]>,
-	stream: boolean,
-	mine: boolean
-): OrderedCell | null => {
-	if (sort === "bscore" || sort === "name") return null
-	if (stream && sort === "points") return null
-	if (mine && sort === "deltaMine") return null
-	const col = SORTED_COL[sort]
-	return col ? { ...col, help: COLUMN_HELP[sort] } : null
-}
 
 const SortHead = ({
-	col, field, filters, setFilters, right, unit, children
+	col, field, sort, desc, setFilters, right, children
 }: {
 	/** Which board column this heading is, echoed onto the cell as `data-col`.
 	 *  The grid places by that name rather than by child index — see
 	 *  BOARD_GRID_CSS for why an index is not survivable here. */
 	col: string
 	field: NonNullable<Filters["sort"]>
-	filters: Filters
+	/**
+	 * THE ORDERING THE ROWS ARE ACTUALLY IN, handed down rather than recomputed here.
+	 *
+	 * This used to take the whole `filters` object and work the answer out itself, as
+	 * `filters.sort ?? SORT_DEFAULT[filters.mode]`, and that was already once the source
+	 * of a real defect: `filters.sort` is null until a reader presses a heading, so on a
+	 * first visit the rows descended 35.27 / 34.85 / 33.53 by "ahead by" with NO heading
+	 * marked — no arrow for a sighted reader, and "Sort by ahead by" instead of "sorted
+	 * descending" for a screen reader — and the first press on the ordering column pinned
+	 * it rather than reversing it, because the handler compared against the same raw
+	 * value.
+	 *
+	 * Recomputing it is no longer even possible to get right from here: the default now
+	 * depends on whether the reader's roster can price a row, and `useBoard` is the only
+	 * place that knows, and it CLAMPS the answer to an ordering this horizon can draw.
+	 * Two copies of that rule would be two chances to mark the wrong column. One copy,
+	 * passed in.
+	 */
+	sort: NonNullable<Filters["sort"]>
+	desc: boolean
 	setFilters: (f: (p: Filters) => Filters) => void
 	right?: boolean
-	/**
-	 * A denominator shown quietly beside the label — "/100" on a percentile column.
-	 * Separate from `children` so the spoken name can say "out of 100" in words
-	 * while the heading stays two glyphs wide.
-	 */
-	unit?: string
+	/* A `unit` prop stood here — a denominator shown quietly beside the label, "/100" on a
+	   percentile column, separate from `children` so the spoken name could say "out of 100"
+	   in words while the heading stayed two glyphs wide. The only column that ever carried
+	   one was the generic ordering track, headed "luck /100"; nothing passes it now. A prop
+	   kept "in case" is how a deleted column comes back wearing somebody else's heading. */
 	/** A plain string, because the sort state is announced by interpolating it. */
 	children: string
 }) => {
-	/*
-	 * The RESOLVED sort, not the raw one.
-	 *
-	 * `filters.sort` is null until a reader clicks a heading, while `useBoard` ranks by
-	 * `filters.sort ?? SORT_DEFAULT[mode]` — so on every first visit the rows descended
-	 * 35.27, 34.55, 33.18 by "ahead by" and NO heading was marked: no arrow for a
-	 * sighted reader, and "Sort by ahead by" rather than "sorted descending" for a
-	 * screen reader. A table that will not say which column orders it is asking to be
-	 * taken on trust, which is the one thing this app is not for.
-	 *
-	 * It also made the first click on the ordering column pin it instead of reversing
-	 * it, because the click handler compared against the same raw value.
-	 */
-	const sort = filters.sort ?? SORT_DEFAULT[filters.mode]
 	const active = sort === field
 	return (
 		<button
 			type="button"
 			data-col={col}
 			className={`sort-head${right ? " r" : ""}${active ? " active" : ""}`}
+			// Pressing the column the rows are already in reverses it; pressing any other
+			// takes it, descending — except Player, where ascending is alphabetical order
+			// and that is what a reader pressing a name column means.
 			onClick={() =>
 				setFilters(f =>
-					(f.sort ?? SORT_DEFAULT[f.mode]) === field ?
+					active ?
 						{ ...f, sort: field, desc: !f.desc }
 					:	{ ...f, sort: field, desc: field !== "name" }
 				)
@@ -2173,14 +2245,13 @@ const SortHead = ({
 			// the name instead. The title stays as the column's description.
 			aria-label={
 				active ?
-					`${children}${unit ? ` out of ${unit.replace("/", "")}` : ""}, sorted ${filters.desc ? "descending" : "ascending"}, activate to reverse`
-				:	`Sort by ${children}${unit ? ` out of ${unit.replace("/", "")}` : ""}`
+					`${children}, sorted ${desc ? "descending" : "ascending"}, activate to reverse`
+				:	`Sort by ${children}`
 			}
 			title={COLUMN_HELP[field]}
 		>
 			{children}
-			{unit && <span className="of">{unit}</span>}
-			<span className="arrow">{active ? (filters.desc ? "▾" : "▴") : ""}</span>
+			<span className="arrow">{active ? (desc ? "▾" : "▴") : ""}</span>
 		</button>
 	)
 }
@@ -2317,7 +2388,6 @@ const Row = ({
 	stream,
 	starts,
 	mine,
-	orderedBy,
 	open,
 	onToggle
 }: {
@@ -2330,10 +2400,6 @@ const Row = ({
 	/** On the Streaming tab, where the row answers a different question and
 	 *  therefore carries different columns — see STREAM_GRID_CSS. */
 	stream: boolean
-	/** The ordering's own cell, when the ordering has no column here of its own. The
-	 *  head computes it once and passes the same object to every row, so the two
-	 *  cannot disagree about whether the track exists. */
-	orderedBy: OrderedCell | null
 	/** His schedule in this window, on the streaming tab. Null everywhere else. */
 	starts: Starts | null
 	open: boolean
@@ -2403,11 +2469,6 @@ const Row = ({
 					title={`Projected for ${r.points} points over this window in your league's own scoring.`}
 				>
 					{r.points.toFixed(1)}
-				</span>
-			)}
-			{orderedBy && (
-				<span className="r dim" data-col="sorted" title={orderedBy.help}>
-					{orderedBy.read(r)}
 				</span>
 			)}
 			<span className="r bscore" data-col="bscore">{r.bscore}</span>

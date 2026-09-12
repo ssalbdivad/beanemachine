@@ -858,7 +858,10 @@ pre{
 .pick-avail{margin:2px 0 var(--sp-2);font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
 /* A denominator carried in a column heading: present enough to be read, quiet
    enough not to compete with the label it qualifies. */
-.board-head .of{opacity:.55;font-size:.85em;letter-spacing:0}
+/* `.board-head .of` stood here — the quiet denominator beside a heading, "/100" on the
+   percentile column. The only heading that ever carried one was the generic ordering
+   track, and nothing draws that or passes a unit any more; see the note where SORTED_COL
+   used to be in Board.tsx. */
 /* Reading the roster off Yahoo is the fast path into this page, so it sits above
    the manual search rather than beside it, with its own outcome line. */
 .pull-roster{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 var(--sp-2)}
@@ -1162,6 +1165,25 @@ kbd{
     flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
     -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
     mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);
+    /*
+      THE FADE MUST NOT EAT THE LAST CHIP.
+
+      The mask is anchored to the scroll BOX, not to the content, so it sits over the
+      right-hand 20px at every scroll position — including the end of the scroll, where
+      there is nothing left to hint at. Measured at 390px: the row is 346px wide over
+      549px of chips, so Util, SP, RP and P start off screen; scrolled fully right,
+      scrollLeft 203, the last chip ("P") ends at exactly 346 — its final 20px drawn
+      semi-transparent, under a fade still promising more to come. The one position
+      filter hardest to reach was the one the affordance erased.
+
+      20px of right padding inside the scroll box gives the content that much clearance,
+      so the end of the scroll puts every chip fully outside the gradient and the fade
+      reads as what it is: there is more to the right, until there is not. It costs no
+      height — the row is 44px either way — which is the whole reason this is the fix and
+      wrapping to two lines is not: a second line is 44px more above the ranking, on the
+      one screen where this file has measured that nothing ranked fits at all.
+    */
+    padding-right:20px;
   }
   .board-controls>.chips::-webkit-scrollbar{display:none}
   .board-controls>.chips>*{flex:none}
@@ -1192,7 +1214,11 @@ kbd{
   .board-controls>.chips{flex:1 1 auto}
   .board-controls .filters{flex:0 0 auto;align-items:center;gap:var(--sp-3)}
   .board-controls .ctl-search input[type=text]{width:190px}
-  .board-controls>.more{flex:0 0 auto;margin:0}
+  /* `.board-controls>.more` sat here, and on the 640px blocks below. The "More filters"
+     disclosure is gone: it held Side, Rank by and Hide injured, the first two are
+     deleted and the third is in the always-visible row, so there is no fourth band of
+     chrome left for this toolbar to lay out. A rule kept for a deleted element is how a
+     deleted element comes back wearing somebody else's spacing. */
 }
 
 /* On a phone every band of whitespace above the table is a row of ranking pushed off
@@ -1217,7 +1243,6 @@ kbd{
    things nobody was confusing, and costs a row of ranking to do it. */
 @media(max-width:640px){
   .board-controls{border-top:0;padding-top:0;margin-top:var(--sp-2);gap:var(--sp-2)}
-  .board-controls>.more{margin-top:0}
   .card.pick.pick-strip{margin-top:var(--sp-2)}
 }
 
@@ -1365,7 +1390,9 @@ button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
 .toggle input[type=checkbox]{width:20px;height:20px}
 
 @media(max-width:640px){
-  .views button,.modes .mode,.chip-btn,.board-controls .more>summary,
+  /* `.board-controls .more>summary` was in this list, for the deleted "More filters"
+     disclosure. The thumb rule itself is unchanged for every other 44px target. */
+  .views button,.modes .mode,.chip-btn,
   .onboard-alts>summary,.period-fold>summary{
     min-height:44px;display:inline-flex;align-items:center;
   }
@@ -1427,8 +1454,26 @@ button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
     padding:var(--sp-1) 0;
   }
   .board-head{top:var(--nav-h)}
-  /* The pick is a hook, not a paragraph: on a phone it is the name and the number. */
-  .pick-strip .pick-bot,.pick-strip .pick-body h2{display:none}
+  /* The pick is a hook, not a paragraph: on a phone it is the name and the number.
+     THE HEADING COMES BACK, and the 78px robot does not.
+
+     Both were hidden together, and the reasoning was sound while the card was a
+     duplicate of row one: "Billy's pick" over the same name the table's first row
+     already carried is a label for something the reader can see, and on a 390px screen
+     that label cost height it had not earned. That stopped being true the moment the
+     board started ordering itself by the reader's own roster — the pick is chosen on
+     "for you" now, the list is in the same order, and the two still part company
+     whenever the top row is priced against nobody. An unlabelled name and number
+     floating above a table is then a claim with no subject.
+
+     MEASURED rather than taken from the brief that asked for it, and the brief was
+     describing a box rather than a typeface: the heading is 11px of type in a 17px line
+     box, which is what it already is at every other width, so it is simply un-hidden
+     and nothing about its size is restated here. At 390px the pick card grows from
+     157px to 176px and the first ranked row moves from document y895 to y865 — the
+     "More filters" fold above it paid for this twice over. The robot stays off: it is
+     78px of the identity the masthead has already established twice on this screen. */
+  .pick-strip .pick-bot{display:none}
   .pick-strip .pick-avail{
     flex-basis:100%;font-size:var(--fs-1);margin-top:2px;
   }
@@ -1468,4 +1513,5 @@ button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
 /* main is focused programmatically by the skip link and never by tabbing, so it must
    not draw a ring — the scroll and the next Tab are the feedback. */
 main#main:focus{outline:none}
+
 

@@ -84,7 +84,23 @@ export const useSnapshot = () => {
 export interface Filters {
 	search: string
 	slot: string
-	group: "all" | "hitting" | "pitching"
+	/**
+	 * Drop anyone the injured list names.
+	 *
+	 * STASH ONLY, read nowhere else, and that is not tidiness — on the other two
+	 * horizons it cannot match. `injuryPolicy` below is already
+	 * `filters.mode === "stash" ? "keep" : "exclude"`, so Streaming and the fortnight
+	 * have removed every injured man from the ranking before this filter is reached.
+	 * Driven on the published build: the fortnight went 1,008 rows to 1,008 and
+	 * Streaming 77 to 77, with all sixty rendered rows byte-identical, while Stash
+	 * went 1,446 to 1,245 and lost one man from the visible top sixty (Braxton
+	 * Ashcraft, rank 50, listed 15-day).
+	 *
+	 * Scoped in `rows` the same way `startersOnly` is, and for the same reason: this
+	 * page has already shipped a mode-scoped filter that went on filtering after its
+	 * checkbox stopped rendering, and the board emptied with nothing on screen to
+	 * undo it.
+	 */
 	hideInjured: boolean
 	/**
 	 * Keep only players the reader can actually ADD.
@@ -127,18 +143,27 @@ export interface Filters {
 	 * the top 10 rows were hitters, who cannot be streamed for a start at all.
 	 */
 	startersOnly: boolean
-	/** Null until the reader picks one, so each view can open on the ranking its own
-	 *  question wants — see `SORT_DEFAULT`. Same shape as `availableOnly`. */
+	/**
+	 * Null until the reader picks one, so each view can open on the ranking its own
+	 * question wants — see `defaultSort`. Same shape as `availableOnly`.
+	 *
+	 * FOUR VALUES, and it used to be ten. The six that went — uscore, market edge,
+	 * undervaluation ("who has been unluckiest"), contact, replacement and confidence
+	 * — were reachable only through a "Rank by" select above the table, and that
+	 * select is gone: two of its four remaining entries were also sortable column
+	 * heads, and the other two ordered the rows by a number no column drew, which is
+	 * the defect `orderedCell` was built to paper over. What is left is exactly the
+	 * set of sortable column HEADS, so every ordering this board can be in is an
+	 * ordering by a number the reader can see and check.
+	 *
+	 * Each of the six is still computed and still printed in the drill-down under the
+	 * row — nothing measured was thrown away, only the ability to put the table in an
+	 * order whose number is nowhere on it.
+	 */
 	sort:
 		| null
-		| "uscore"
-		| "marketEdge"
 		| "bscore"
 		| "points"
-		| "undervaluation"
-		| "contact"
-		| "replacement"
-		| "confidence"
 		/** What he gains over the man he would displace on YOUR roster — see
 		 *  `BoardRow.deltaMine`. Null-sorted last, because "no man to displace" is not
 		 *  a small number, it is the absence of one. */
@@ -150,7 +175,6 @@ export interface Filters {
 export const DEFAULT_FILTERS: Filters = {
 	search: "",
 	slot: "",
-	group: "all",
 	hideInjured: false,
 	// unset, so each tab opens on the answer its own question wants — see the field
 	availableOnly: null,
@@ -240,12 +264,48 @@ export const AVAILABLE_ONLY_DEFAULT: Record<Filters["mode"], boolean> = {
  * is wrong regardless of which number wins by a point and a half.
  *
  * bscore stays on the row, so the disagreement is visible rather than buried.
+ *
+ * AND THE OTHER TWO NOW OPEN ON THE READER'S OWN NUMBER, once he has given the app a
+ * team.
+ *
+ * The board did not care that he had told it his roster. Driven on the dev server at
+ * 390x844 — sixteen real players typed into "Who's on your team?", then "That's my
+ * team" — the fortnight board still opened ordered 35.27 / 34.85 / 33.53 by bscore and
+ * Billy still picked Grant Taylor, while the "for you" column beside those same rows
+ * read +20.3 / +65.4 / +64.0. Seven of the eight rows under the recommendation beat
+ * the recommendation on the one number that is about HIS team, and the man who
+ * actually topped it — Josh Bell, +66.3 — was nowhere near the top of the screen. The
+ * reader answers a question about his roster and the ranking ignores the answer.
+ *
+ * WHAT THIS IS AND IS NOT. It changes a DEFAULT, not the model. bscore is unchanged,
+ * it is still computed for every row, it still has its own column on every horizon
+ * and its own sortable head one tap away, and Billy's card still prints it. Nothing
+ * is hidden and no number is lost.
+ *
+ * AND IT IS NOT MEASURED TO BE BETTER, which has to be said here because the evidence
+ * this project holds belongs to the other ordering.
+ * data/results/moves2_2021-2022-2023-2024-2025_moves2.json backtests a bscore-RANKED
+ * add list: +61.8 points a week over season-to-date, 80 of 111 weeks, t 6.60. Nothing
+ * has ever backtested a deltaMine-ranked board, and this comment is not to be read as
+ * claiming one would do better. The argument is narrower and it is about the question
+ * rather than the answer: the reader has just said which men he holds, and "what does
+ * he add over the man I would bench for him" is the question he asked. The app must
+ * never imply the re-rank is measured to win — see the sentence under the heads,
+ * which says whose bar each number is and claims nothing about which predicts better.
+ *
+ * Without a roster there is no deltaMine to rank by and the default is bscore, exactly
+ * as before.
  */
-export const SORT_DEFAULT: Record<Filters["mode"], NonNullable<Filters["sort"]>> = {
-	stream: "points",
-	board: "bscore",
-	stash: "bscore"
-}
+export const defaultSort = (
+	mode: Filters["mode"],
+	/** Whether the board can price a row against the reader's own men — the same test
+	 *  that decides whether the "for you" column is drawn at all, so the ordering and
+	 *  the column can never disagree about whether the number exists. */
+	mine: boolean
+): NonNullable<Filters["sort"]> =>
+	mode === "stream" ? "points"
+	: mine ? "deltaMine"
+	: "bscore"
 
 /** The join key, lifted to src/data/names.ts because this file and
  *  src/data/yahoo-pool.ts each carried a verbatim copy of it — and `Decide.tsx` crosses
@@ -704,51 +764,78 @@ export const useBoard = (
 		return out
 	}, [rated])
 
-	/**
-	 * Is there enough market data for market edge to be the DEFAULT ranking?
-	 *
-	 * Ownership is read from Yahoo's public pages, and how much comes back depends
-	 * on who is asking: a local run reads ~845 players, the CI runner that builds
-	 * the published snapshot gets throttled down to ~229. Ranking by edge silently
-	 * drops everyone unpriced, so on a thin capture the board went from 1,400 rows
-	 * to a handful — a broken page that looked like a short list.
-	 *
-	 * The default therefore has to survive its optional input going missing. Below
-	 * the threshold the board falls back to bscore and SAYS it did; edge stays
-	 * available as an explicit choice, because a user who picks it has asked for
-	 * exactly the subset it can rank.
+	/*
+	 * `edgeCoverage` stood here: the share of the rateable pool Yahoo had priced, so a
+	 * board ranked by market edge could warn that "ownership was listed for only N% of
+	 * this board, so edge can rank just that slice". Market edge is no longer an
+	 * ordering this screen offers — see `Filters["sort"]` — so there is no board for
+	 * that warning to stand above, and its one reader in Board.tsx went with it.
+	 * `marketEdge` itself is untouched: `withMarketEdge` still computes it and the
+	 * drill-down under every row still prints it.
 	 */
-	const edgeCoverage = useMemo(() => {
-		const rateable = rated.filter(r => r.rateable)
-		if (!rateable.length) return 0
-		return rateable.filter(r => r.marketEdge !== null).length / rateable.length
-	}, [rated])
 
 	/**
-	 * How many players the RANKING itself can place, before the reader's filters.
+	 * THE ORDERING, RESOLVED — and clamped to an ordering this horizon can DRAW.
 	 *
-	 * Market edge can only rank someone the field has priced, and only recommends
-	 * someone worth rostering — so the board opens on 67 of 1,433 and a bare count
-	 * reads as a broken capture. The board says what did the cutting, and to say it
-	 * truthfully it needs the ranking's cut separated from the reader's own: with
-	 * a position chip on, "market edge dropped the rest" would be a lie about why
-	 * the list is short.
+	 * `filters.sort` is one piece of state shared by three horizons, and the horizons
+	 * do not carry the same columns: "points" has a column on Streaming and none on
+	 * the other two, and "for you" exists only once a roster has been entered. So a
+	 * reader who tapped the points head on Streaming and then went back to the
+	 * fortnight left the board ordered by a number with no column on it — a table
+	 * ordered by an invisible figure, which is the one thing this app is not for.
+	 *
+	 * That used to be answered by DRAWING the missing column: a generic
+	 * `[data-col=sorted]` track, headed with the metric's short name, added by
+	 * `orderedCell` in Board.tsx whenever the ordering had no column of its own. It
+	 * existed because the "Rank by" select offered six orderings and four of them were
+	 * printed nowhere on the table. The select is gone, the only orderings left are the
+	 * sortable column heads, and so the honest fix is the cheaper one: an ordering this
+	 * horizon cannot show falls back to the horizon's own default rather than conjuring
+	 * a column for it. Same precedent as `days` and `startersOnly` — a control is read
+	 * only where it renders, so it can neither be left on invisibly nor strand a board
+	 * it reordered.
+	 *
+	 * Every ordering reachable from here therefore has a visible column, BY
+	 * CONSTRUCTION rather than by inspection: `bscore` has a column on all three
+	 * horizons, `points` only where the points column is drawn, `deltaMine` only where
+	 * the "for you" column is drawn, and `name` orders the column the names are
+	 * already in.
 	 */
-	const sort: NonNullable<Filters["sort"]> = filters.sort ?? SORT_DEFAULT[filters.mode]
+	const sortable = (s: NonNullable<Filters["sort"]>): boolean =>
+		s === "bscore" || s === "name" ||
+		(s === "points" && filters.mode === "stream") ||
+		(s === "deltaMine" && worstMineBySlot !== null)
+	const chosen = filters.sort && sortable(filters.sort) ? filters.sort : null
+	const sort: NonNullable<Filters["sort"]> =
+		chosen ?? defaultSort(filters.mode, worstMineBySlot !== null)
+	/**
+	 * ...AND THE DIRECTION IS CLAMPED WITH IT, because half a clamp is its own defect.
+	 *
+	 * `desc` is one piece of state shared by the three horizons just as `sort` is, and
+	 * the two travel together: pressing the points heading on Streaming a second time
+	 * sets `sort: "points", desc: false`, and the fortnight then fell back to "ahead by"
+	 * — correctly — while keeping the direction, so the board opened ASCENDING and the
+	 * reader's first screen was the thousand men projected furthest BEHIND the wire.
+	 * Driven before this line existed: head "ahead by ▴", row one Grant Taylor replaced
+	 * by a body at roughly minus a hundred.
+	 *
+	 * A direction is a way of looking at a particular column. Where the column the
+	 * reader chose does not exist here, neither does the direction he chose it in, so
+	 * this horizon opens the way it would have opened: descending, except on Player,
+	 * where ascending is alphabetical and that is what a name column means.
+	 */
+	const desc = chosen ? filters.desc : sort !== "name"
 
-	const rankable = useMemo(
-		() =>
-			rated.filter(r => {
-				if (!r.rateable) return false
-				if (sort === "undervaluation" && r.bscore <= 0) return false
-				if (sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
-					return false
-				if (sort === "uscore" && r.uscore === null) return false
-				if (sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
-				return true
-			}).length,
-		[rated, sort]
-	)
+	/*
+	 * `rankable` stood here — how many players the RANKING could place before the
+	 * reader's own filters, so a short board could say "market edge dropped the rest"
+	 * without blaming a position chip for it. All four of its clauses tested an
+	 * ordering that no longer exists (undervaluation, market edge, uscore, contact),
+	 * which left it counting `r.rateable`; and nothing has read it since the "How this
+	 * ranking was built" disclosure was deleted. `grep -rn rankable src/ test/`
+	 * returned its definition and its own name in this hook's return value, and
+	 * nothing else.
+	 */
 
 	/**
 	 * What a streaming decision needs on the page beside the ranking: who each
@@ -844,36 +931,70 @@ export const useBoard = (
 		 * board is ranking.
 		 */
 		const startersOnly = streaming !== null && filters.startersOnly
+		/*
+		 * THE NAME BOX AND THE POSITION CHIPS ARE READ WHERE THEY ARE DRAWN, which
+		 * until now they were not, and the gap was a live defect rather than an
+		 * untidiness.
+		 *
+		 * Board.tsx renders both on the fortnight and on Stash and neither on
+		 * Streaming — a streaming list is already only men with a start, so every row
+		 * is a pitcher and the chips would separate P from RP and nothing else. They
+		 * went on FILTERING there all the same, off one shared piece of state. Driven
+		 * on the published build: type "Grant" on the fortnight (4 rows), switch to
+		 * Streaming, and the tab shows 1 row with no search box anywhere on it; pick the
+		 * C chip on the fortnight (83 rows), switch to Streaming, and the tab is empty
+		 * with "No players match the C position. Clear one of those to widen it." —
+		 * naming a control that is not on the screen it is printed on.
+		 *
+		 * `startersOnly` one line above won this exact argument already and the comment
+		 * on it says why at length. Same treatment, and the fix is the same shape: a
+		 * control is read only on the horizons that draw it, so it can neither be left
+		 * on invisibly nor strand a board it emptied.
+		 */
+		const narrowing = filters.mode !== "stream"
 		const out = board.filter(r => {
 			// a player with no projectable volume has no bscore to rank
 			if (!r.rateable) return false
-			// "most undervalued" asks who is due for positive regression among players
-			// worth rostering. Unrestricted it just finds the unluckiest replacement-level
-			// player in baseball, which answers nobody's question.
-			if (sort === "undervaluation" && r.bscore <= 0) return false
-			// Same guard for market edge: a replacement-level body nobody rosters beats
-			// the par for his ownership by definition, and recommending him is noise.
-			// No longer gated on coverage: edge is no longer the default, so picking it
-			// is an explicit request for the subset it can price, and quietly handing
-			// back a bscore ranking under the "market edge" label is now the confusing
-			// behaviour rather than the safe one.
-			if (sort === "marketEdge" && (r.marketEdge === null || r.bscore <= 0))
-				return false
-			// No bscore floor here, unlike the other comparative sorts. Those two can be
-			// gamed by a replacement-level body — a tiny denominator or a par he beats by
-			// definition — but uscore is `addValue × (1 − owned)`, which is bounded by
-			// bscore and floors at zero, so a player nobody should add simply sorts to the
-			// bottom instead of needing to be excluded. The old floor cut the board to 44
-			// rows, which read as a broken capture.
-			if (sort === "uscore" && r.uscore === null) return false
-			// Contact quality only means something for someone worth rostering, and only
-			// where a rolling Statcast window actually exists for him.
-			if (sort === "contact" && (r.regressionGap === null || r.bscore <= 0)) return false
+			/*
+			 * FOUR ORDERING GUARDS stood here and all four are gone with the orderings
+			 * they guarded. "most undervalued" dropped anyone at or below replacement,
+			 * because unrestricted it finds the unluckiest replacement-level body in
+			 * baseball; market edge dropped the unpriced and the sub-replacement for the
+			 * same reason; uscore dropped the unpriced; contact dropped anyone with no
+			 * rolling Statcast window. None of the four is a reachable ordering any more
+			 * — see `Filters["sort"]` — so each guard was a branch on a value this hook
+			 * can no longer be handed. The numbers themselves are untouched and still in
+			 * the drill-down under every row.
+			 *
+			 * What this means for the COUNT in the card head is the point of recording it:
+			 * the board's row count no longer moves when the ordering changes, so the
+			 * count beside "The wire" is now a property of the reader's filters alone.
+			 */
 			if (startersOnly && !(r.scheduledStarts != null && r.scheduledStarts > 0)) return false
-			if (q && !r.player.name.toLowerCase().includes(q)) return false
-			if (filters.group !== "all" && r.player.group !== filters.group) return false
-			if (filters.slot && !r.slots.includes(filters.slot)) return false
-			if (filters.hideInjured && r.injury) return false
+			if (narrowing && q && !r.player.name.toLowerCase().includes(q)) return false
+			/*
+			 * `filters.group` stood here — the "Side" select's batters / pitchers / both.
+			 * It is gone because it DISAGREED with the position chips one row above it
+			 * while appearing to duplicate them. Driven on the published build, fortnight,
+			 * default filters: the Util chip returns 441 rows and Side=batters 440, the P
+			 * chip 567 and Side=pitchers 568, with the first sixty rows name-for-name
+			 * identical in both pairs. The one man each pair differs by is the same man —
+			 * José Fermin, snapshot id 820862, a PITCHER whom Yahoo's eligibility sweep
+			 * joined by name to the hitter José Fermín, so the board seats him at
+			 * 2B/3B/OF/Util while `player.group` still says "pitching". The chip asks what
+			 * seats he can fill and the select asked which side of the ball he is on, and
+			 * on him the two answers contradict each other. One of the pair had to go, and
+			 * it is the one that cost two taps to change and named no seat.
+			 */
+			if (narrowing && filters.slot && !r.slots.includes(filters.slot)) return false
+			// STASH ONLY — see `Filters.hideInjured`. The other two horizons have already
+			// excluded every injured man in `rateAll` (`injuryPolicy`), so there the
+			// checkbox could not match: driven on the published build it moved the
+			// fortnight 1,008 → 1,008 and Streaming 77 → 77 with every rendered row
+			// byte-identical, against Stash's 1,446 → 1,245. Scoped here rather than
+			// merely unrendered, because this page has already shipped a filter that went
+			// on filtering after its checkbox stopped being drawn.
+			if (filters.mode === "stash" && filters.hideInjured && r.injury) return false
 			/**
 			 * Only players he can get.
 			 *
@@ -891,37 +1012,46 @@ export const useBoard = (
 		const key = (r: (typeof out)[number]) => {
 			switch (sort) {
 				case "points": return r.points
-				case "replacement": return r.replacement
-				case "confidence": return r.confidence.value
 				// -Infinity, not 0: "nobody you own could be displaced by him" is the
 				// absence of an answer, and sorting it beside a genuine zero would put men
 				// the column cannot price in among men it prices at nothing.
 				case "deltaMine": return r.deltaMine ?? -Infinity
-				case "undervaluation": return r.undervaluation ?? -1
-				case "uscore": return r.uscore ?? -Infinity
-				case "marketEdge": return r.marketEdge ?? -Infinity
-				case "contact":
-					// a pitcher benefits when his expected is BELOW his actual, so it flips
-					return (
-						(r.player.group === "hitting" ? 1 : -1) * (r.regressionGap ?? -Infinity)
-					)
 				case "name": return r.player.name
+				/*
+				 * SIX CASES went with the six orderings: replacement, confidence,
+				 * undervaluation, uscore, marketEdge and contact. The last of them carried
+				 * the one piece of arithmetic worth naming on the way out — a pitcher
+				 * benefits when his expected wOBA is BELOW his actual, so the contact
+				 * ordering flipped sign by side. That rule now lives only where it is still
+				 * used, in the `regressionGap` sentence in the drill-down.
+				 */
 				default: return r.bscore
 			}
 		}
 		out.sort((a, b) => {
 			const x = key(a), y = key(b)
 			const cmp = typeof x === "string" ? x.localeCompare(y as string) : (x as number) - (y as number)
-			return filters.desc ? -cmp : cmp
+			return desc ? -cmp : cmp
 		})
 		return out
-	}, [board, filters, streaming])
+	}, [board, filters, streaming, sort, desc])
 
 	// `sort` is returned resolved, so the Rank-by control shows what the view is
-	// actually ranked by rather than an empty box when the reader has not chosen.
+	/*
+	 * `sort` is returned RESOLVED — and clamped, which is new. It used to be
+	 * `filters.sort ?? SORT_DEFAULT[mode]`, returned so the Rank-by select could show
+	 * what the view was actually ranked by rather than an empty box. The select is
+	 * gone; what reads it now is every sortable heading, which has to mark the column
+	 * the rows are really in. See the note above `sortable`.
+	 *
+	 * `mine` is the test for whether the reader's own roster can price a row at all —
+	 * returned rather than recomputed in Board.tsx, so the column that is DRAWN and the
+	 * ordering that is OFFERED cannot disagree about whether the number exists.
+	 */
 	return {
-		rated: board, rows, rankable, scored, slotsRanked, edgeCoverage, period, streaming,
-		teamNames, availability, sort, injuryError
+		rated: board, rows, scored, slotsRanked, period, streaming,
+		mine: worstMineBySlot !== null,
+		teamNames, availability, sort, desc, injuryError
 	}
 }
 

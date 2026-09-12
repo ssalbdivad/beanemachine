@@ -105,7 +105,14 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	// caveat. Nothing else here reads it, and the board's own filtering is untouched:
 	// `useBoard` is still called without a free-agent list, so `cut` is always the
 	// ownership estimate rather than null.
-	const { rated, scored, availability, period } = useBoard(snapshot, league, TRADE_FILTERS)
+	/* `ratedOver` and not `period`: the first version of the lineup total's window label printed
+	   the league's scoring period, and the rows on this screen are rated over the FORTNIGHT —
+	   `TRADE_FILTERS` is `DEFAULT_FILTERS`, whose `mode` is "board". So the label said "Sep 12 to
+	   Sep 13" over numbers accumulated to Sep 26, which is the same class of defect the board's
+	   own header had and was fixed by the same field. Measured: 1748.99 projected points under a
+	   two-day label is 97 points a seat a day, which is about four times what a good hitter
+	   scores — the number was right and the label was not. */
+	const { rated, scored, availability, ratedOver } = useBoard(snapshot, league, TRADE_FILTERS)
 	const [owned, setOwned] = useState<string[]>([])
 	const [storeError, setStoreError] = useState<string | null>(null)
 	const [give, setGive] = useState<string[]>([])
@@ -1118,7 +1125,7 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				barMen={barMen}
 				wireRead={!!gettable}
 				cut={availability.cut}
-				window={period ? { from: span(period.start), to: span(period.end) } : null}
+				window={{ from: span(ratedOver.start), to: span(ratedOver.end) }}
 			/>
 
 			{/* The two sides are symmetric now. The right has always been a search box;
@@ -1427,11 +1434,11 @@ const LineupCard = ({
 	league: League
 	lineup: Lineup
 	count: number
-	/** The window every number on this card is over, as two formatted dates, or null where
-	 *  the period could not be resolved. Passed in rather than derived here because
-	 *  `useBoard` already resolved it for the list above and two resolutions of one window
-	 *  is how two numbers on one screen come to disagree. */
-	window: { from: string; to: string } | null
+	/** The window every number on this card is over, as two formatted dates. Passed in rather
+	 *  than derived here because `useBoard` already resolved it for the list above, and two
+	 *  resolutions of one window is how two numbers on one screen come to disagree — which is
+	 *  exactly what happened when this took the league's scoring period instead. */
+	window: { from: string; to: string }
 	/** Who each slot's replacement bar actually is, best first, so a spot the wire
 	 *  covers can name him instead of leaving the reader to guess — and so two seats
 	 *  of the same slot name two different men. */

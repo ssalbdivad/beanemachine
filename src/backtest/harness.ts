@@ -1,6 +1,7 @@
-import { parseCsv, num } from "../data/csv.ts"
-import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
+import { num, parseCsv } from "../data/csv.ts"
+import { mapPlayerSeasons, windowStatsUrl, type PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
+import { countGamesPlayed, scheduleUrl } from "./seasons.ts"
 
 /**
  * Backtest harness. The only way to know whether bscore predicts anything is to
@@ -10,20 +11,20 @@ import type { Underlying } from "../data/savant.ts"
  * Leak-free by construction: both the StatsAPI line and the Savant expected stats
  * are pulled with explicit date ranges ending at the as-of date, so no information
  * from the evaluation window reaches the projection.
+ *
+ * THE READS HERE GO TO THE NETWORK UNCACHED, unlike corpus.ts and season.ts which go
+ * through src/backtest/cache.ts. That is kept deliberately: run.ts and tune.ts, the two
+ * callers, measure one fold at a time against live data. So the duplication that was
+ * removed from this file is the SHAPE of each read — the URL and the mapping — and not
+ * the transport, which is the part that was never the same.
  */
 
-const SAPI = "https://statsapi.mlb.com/api/v1"
 const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"
 
 const json = async (url: string) => {
 	const r = await fetch(url, { headers: { accept: "application/json" } })
 	if (!r.ok) throw new Error(`${url} → ${r.status}`)
 	return r.json()
-}
-
-const asNum = (v: unknown): number | null => {
-	const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN
-	return Number.isFinite(n) ? n : null
 }
 
 /** Stats accumulated strictly inside [startDate, endDate]. */
@@ -33,47 +34,41 @@ export const fetchWindow = async (
 	startDate: string,
 	endDate: string
 ): Promise<PlayerSeason[]> => {
-	const data = await json(
-		`${SAPI}/stats?stats=byDateRange&group=${group}&season=${season}&sportId=1` +
-			`&playerPool=All&limit=3000&startDate=${startDate}&endDate=${endDate}`
-	)
-	const splits = data.stats?.[0]?.splits ?? []
-	return splits
-		.map((s: any): PlayerSeason => {
-			const stats: StatLine = {}
-			for (const [k, v] of Object.entries(s.stat ?? {})) {
-				const n = asNum(v)
-				if (n !== null) stats[k] = n
-			}
-			return {
-				id: s.player?.id,
-				name: s.player?.fullName ?? "",
-				team: s.team?.name ?? null,
-				teamId: s.team?.id ?? null,
-				position: s.position?.abbreviation ?? "",
-				group,
-				stats
-			}
-		})
-		.filter((p: PlayerSeason) => typeof p.id === "number")
+	const data = await json(windowStatsUrl(season, group, startDate, endDate))
+	// no `keepOnly`: the backtest reads every stat MLB returns, because nothing here is
+	// paying to put them on a wire. See `mapPlayerSeasons`.
+	return mapPlayerSeasons(data.stats?.[0]?.splits ?? [], group)
 }
 
-/** Expected stats computed only from batted balls inside the window. */
-export const fetchUnderlyingWindow = async (
+/**
+ * The Savant window, as a URL and as a parse.
+ *
+ * corpus.ts wants the identical request through the disk cache and used to carry its
+ * own transcription of both halves. The URL in particular is not something to keep two
+ * copies of: the `selections` list decides which columns come back, so a drifted copy
+ * does not fail, it quietly returns nulls for barrel rate and hard-hit rate and the
+ * quality adjustment goes flat.
+ *
+ * This is NOT the same request season.ts makes. That one asks for a narrower
+ * `selections` and, since the date parameters on this leaderboard are ignored (see
+ * src/data/statcast-window.ts), has been superseded there by day-by-day aggregation.
+ * Unifying the two would change season.ts's URL, which would change its cache key and
+ * put the stored competition runs out of reach offline.
+ */
+export const underlyingWindowUrl = (
 	season: number,
 	type: "batter" | "pitcher",
 	startDate: string,
 	endDate: string
-): Promise<Map<number, Underlying>> => {
-	const url =
-		`${SAVANT}?year=${season}&type=${type}&filter=&min=1` +
-		`&selections=pa%2Cwoba%2Cxwoba%2Cbarrel_batted_rate%2Chard_hit_percent` +
-		`&chart=false&x=pa&y=pa&r=no&chartType=beeswarm&sort=xwoba&sortDir=desc` +
-		`&start_dt=${startDate}&end_dt=${endDate}&csv=true`
-	const res = await fetch(url, { headers: { accept: "text/csv" } })
-	if (!res.ok) throw new Error(`${url} → ${res.status}`)
+) =>
+	`${SAVANT}?year=${season}&type=${type}&filter=&min=1` +
+	`&selections=pa%2Cwoba%2Cxwoba%2Cbarrel_batted_rate%2Chard_hit_percent` +
+	`&chart=false&x=pa&y=pa&r=no&chartType=beeswarm&sort=xwoba&sortDir=desc` +
+	`&start_dt=${startDate}&end_dt=${endDate}&csv=true`
+
+export const parseUnderlyingCsv = (csv: string): Map<number, Underlying> => {
 	const out = new Map<number, Underlying>()
-	for (const row of parseCsv(await res.text())) {
+	for (const row of parseCsv(csv)) {
 		const id = num(row.player_id)
 		if (id === null) continue
 		const xwoba = num(row.xwoba)
@@ -95,25 +90,24 @@ export const fetchUnderlyingWindow = async (
 	return out
 }
 
+/** Expected stats computed only from batted balls inside the window. */
+export const fetchUnderlyingWindow = async (
+	season: number,
+	type: "batter" | "pitcher",
+	startDate: string,
+	endDate: string
+): Promise<Map<number, Underlying>> => {
+	const url = underlyingWindowUrl(season, type, startDate, endDate)
+	const res = await fetch(url, { headers: { accept: "text/csv" } })
+	if (!res.ok) throw new Error(`${url} → ${res.status}`)
+	return parseUnderlyingCsv(await res.text())
+}
+
 /** Games each team played inside a window — the real volume denominator. */
 export const fetchGamesPlayedWindow = async (
 	startDate: string,
 	endDate: string
-): Promise<Map<number, number>> => {
-	const data = await json(
-		`${SAPI}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}&gameType=R`
-	)
-	const counts = new Map<number, number>()
-	for (const day of data.dates ?? [])
-		for (const g of day.games ?? []) {
-			if (g.status?.abstractGameState && g.status.abstractGameState !== "Final") continue
-			for (const side of ["home", "away"] as const) {
-				const id = g.teams?.[side]?.team?.id
-				if (typeof id === "number") counts.set(id, (counts.get(id) ?? 0) + 1)
-			}
-		}
-	return counts
-}
+): Promise<Map<number, number>> => countGamesPlayed(await json(scheduleUrl(startDate, endDate)))
 
 /* ---------- evaluation ---------- */
 

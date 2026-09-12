@@ -4,12 +4,11 @@ import { MODEL } from "../engine/weights.ts"
 import { isReserveSlot } from "../engine/bscore.ts"
 import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import type { League } from "../schema.ts"
-import type { PlayerSeason } from "../data/statsapi.ts"
+import { mapPlayerSeasons, windowStatsUrl, type PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
 import { aggregateStatcast } from "../data/statcast-window.ts"
 import { cachedFetch } from "./cache.ts"
-import { addDays, seasonRange } from "./seasons.ts"
-import { num, parseCsv } from "../data/csv.ts"
+import { addDays, gamesPlayedIn, scheduleUrl, seasonRange } from "./seasons.ts"
 
 /**
  * Season-long competition.
@@ -22,54 +21,28 @@ import { num, parseCsv } from "../data/csv.ts"
  * pool, so the comparison is of judgement rather than of draft position.
  */
 
-const SAPI = "https://statsapi.mlb.com/api/v1"
-const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"
-
-const asNum = (v: unknown): number | null => {
-	const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN
-	return Number.isFinite(n) ? n : null
-}
-
+/**
+ * The reads this simulator makes were, until now, transcribed here a second time —
+ * the byDateRange URL, the splits mapping, the schedule game count and a Savant CSV
+ * read, all of them also present in corpus.ts and harness.ts. 63 of corpus.ts's 119
+ * substantive lines were verbatim in this file.
+ *
+ * They are now single-sourced: the URL and the mapping from src/data/statsapi.ts, the
+ * game count from ./seasons.ts. The transport stays here, through the disk cache,
+ * because that cache is what makes a five-season replay of the stored runs an offline
+ * 54-second job (`node test/compete.mjs`, 2026-09-12) instead of several thousand live
+ * requests — and because the URL strings are the cache's keys, they are now built in
+ * exactly one place each.
+ */
 const windowStats = async (
 	season: number,
 	group: "hitting" | "pitching",
 	start: string,
 	end: string
 ): Promise<PlayerSeason[]> => {
-	const text = await cachedFetch(
-		`${SAPI}/stats?stats=byDateRange&group=${group}&season=${season}&sportId=1` +
-			`&playerPool=All&limit=3000&startDate=${start}&endDate=${end}`
-	)
-	return (JSON.parse(text).stats?.[0]?.splits ?? [])
-		.map((s: any): PlayerSeason => {
-			const stat: Record<string, number> = {}
-			for (const [k, v] of Object.entries(s.stat ?? {})) {
-				const n = asNum(v)
-				if (n !== null) stat[k] = n
-			}
-			return {
-				id: s.player?.id, name: s.player?.fullName ?? "",
-				team: s.team?.name ?? null, teamId: s.team?.id ?? null,
-				position: s.position?.abbreviation ?? "", group, stats: stat
-			}
-		})
-		.filter((p: PlayerSeason) => typeof p.id === "number")
-}
-
-const gamesPlayed = async (start: string, end: string): Promise<Map<number, number>> => {
-	const data = JSON.parse(
-		await cachedFetch(`${SAPI}/schedule?sportId=1&startDate=${start}&endDate=${end}&gameType=R`)
-	)
-	const counts = new Map<number, number>()
-	for (const day of data.dates ?? [])
-		for (const g of day.games ?? []) {
-			if (g.status?.abstractGameState && g.status.abstractGameState !== "Final") continue
-			for (const side of ["home", "away"] as const) {
-				const id = g.teams?.[side]?.team?.id
-				if (typeof id === "number") counts.set(id, (counts.get(id) ?? 0) + 1)
-			}
-		}
-	return counts
+	const text = await cachedFetch(windowStatsUrl(season, group, start, end))
+	// deliberately unfiltered — see `keepOnly` on `mapPlayerSeasons`
+	return mapPlayerSeasons(JSON.parse(text).stats?.[0]?.splits ?? [], group)
 }
 
 /**
@@ -95,6 +68,20 @@ const statcastStart = (seasonStart: string, priorEnd: string): string => {
 	return Date.parse(rolled) > Date.parse(seasonStart) ? rolled : seasonStart
 }
 
+/*
+ * The fourth copy of the Savant leaderboard read used to live here, under
+ * `if (!REAL_STATCAST) return new Map()` followed by `if (REAL_STATCAST) { ... }` — so
+ * the 22 lines after it, URL and `try`/`catch` and row mapping, were UNREACHABLE for
+ * every value of a `const`. It was the fallback from before the custom leaderboard was
+ * found to ignore its own date parameters; once that made the direct read unusable the
+ * branch that returns nothing was put in front of it and the code was left behind.
+ *
+ * Deleted rather than kept as documentation: it could not run, it asked for a narrower
+ * `selections` list than the two live copies in corpus.ts and harness.ts (so it was a
+ * copy that had already drifted), and reinstating it would reinstate the bug the
+ * comment above describes. `aggregateStatcast` is the only honest path and is the only
+ * one left.
+ */
 const underlyingWindow = async (
 	season: number,
 	type: "batter" | "pitcher",
@@ -102,40 +89,17 @@ const underlyingWindow = async (
 	end: string
 ): Promise<Map<number, Underlying>> => {
 	if (!REAL_STATCAST) return new Map()
-	if (REAL_STATCAST) {
-		const lines = await aggregateStatcast(season, type, start, end, url =>
-			cachedFetch(url, "text/csv")
-		)
-		const out = new Map<number, Underlying>()
-		for (const [id, l] of lines)
-			out.set(id, {
-				id, xwoba: l.xwoba, woba: l.woba,
-				xwobaGap: Number((l.xwoba - l.woba).toFixed(4)),
-				xba: null, xslg: null, pa: l.pa,
-				barrelRate: null, hardHitRate: null, avgExitVelocity: null, sweetSpotRate: null
-			})
-		return out
-	}
-	const url =
-		`${SAVANT}?year=${season}&type=${type}&filter=&min=1` +
-		`&selections=pa%2Cwoba%2Cxwoba&chart=false&x=pa&y=pa&r=no&chartType=beeswarm` +
-		`&start_dt=${start}&end_dt=${end}&csv=true`
+	const lines = await aggregateStatcast(season, type, start, end, url =>
+		cachedFetch(url, "text/csv")
+	)
 	const out = new Map<number, Underlying>()
-	try {
-		for (const row of parseCsv(await cachedFetch(url, "text/csv"))) {
-			const id = num(row.player_id)
-			if (id === null) continue
-			const xwoba = num(row.xwoba), woba = num(row.woba)
-			out.set(id, {
-				id, xwoba, woba,
-				xwobaGap: xwoba !== null && woba !== null ? Number((xwoba - woba).toFixed(4)) : null,
-				xba: null, xslg: null, pa: num(row.pa),
-				barrelRate: null, hardHitRate: null, avgExitVelocity: null, sweetSpotRate: null
-			})
-		}
-	} catch {
-		/* a missing Savant window degrades the projection, it doesn't stop the season */
-	}
+	for (const [id, l] of lines)
+		out.set(id, {
+			id, xwoba: l.xwoba, woba: l.woba,
+			xwobaGap: Number((l.xwoba - l.woba).toFixed(4)),
+			xba: null, xslg: null, pa: l.pa,
+			barrelRate: null, hardHitRate: null, avgExitVelocity: null, sweetSpotRate: null
+		})
 	return out
 }
 
@@ -144,9 +108,7 @@ const underlyingWindow = async (
  * schedule call the game counts come from.
  */
 const opponentsOf = async (start: string, end: string): Promise<Map<number, number[]>> => {
-	const data = JSON.parse(
-		await cachedFetch(`${SAPI}/schedule?sportId=1&startDate=${start}&endDate=${end}&gameType=R`)
-	)
+	const data = JSON.parse(await cachedFetch(scheduleUrl(start, end)))
 	const out = new Map<number, number[]>()
 	const add = (team: number, opp: number) => out.set(team, [...(out.get(team) ?? []), opp])
 	for (const day of data.dates ?? [])
@@ -617,8 +579,8 @@ export const playSeason = async (
 		const [hitPrior, pitPrior, priorGames, gamesAhead, xBat, xPit] = await Promise.all([
 			windowStats(season, "hitting", range.start, priorEnd),
 			windowStats(season, "pitching", range.start, priorEnd),
-			gamesPlayed(range.start, priorEnd),
-			gamesPlayed(week.start, week.end),
+			gamesPlayedIn(range.start, priorEnd),
+			gamesPlayedIn(week.start, week.end),
 			// A ROLLING window, not season-to-date: the signal was measured over three
 			// weeks, and a season-long xwOBA has already regressed most of the way to
 			// the wOBA it is supposed to disagree with.
@@ -632,7 +594,7 @@ export const playSeason = async (
 			const [h, p, g] = await Promise.all([
 				windowStats(season, "hitting", s, priorEnd),
 				windowStats(season, "pitching", s, priorEnd),
-				gamesPlayed(s, priorEnd)
+				gamesPlayedIn(s, priorEnd)
 			])
 			recent[d] = [...h, ...p]
 			recentGames[d] = g

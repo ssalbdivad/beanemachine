@@ -1029,5 +1029,45 @@ t("ownership for fewer players than the league can hold is refused",
 for (const gone of ["recentWindow", "sources"])
   t(`the capture no longer ships ${gone}`, !(gone in snap))
 
+/*
+ * THE BACKTEST'S URLS ARE ITS CACHE KEYS, AND ITS CACHE IS HOW THE STORED RUNS STAY
+ * RE-DERIVABLE.
+ *
+ * data/results holds 23 measurements, and the only thing that makes them checkable is
+ * that `node test/compete.mjs` replays five seasons from data/backtest-cache offline in
+ * about ninety seconds. That cache is keyed by URL string — so a reordered query
+ * parameter is not a cosmetic change, it is 14 GB of cache turned into several thousand
+ * live requests against statsapi.mlb.com and baseballsavant.mlb.com, and a stored run
+ * that can no longer be reproduced without them.
+ *
+ * These three URLs used to be written out in four files (corpus.ts, season.ts,
+ * harness.ts and statsapi.ts); they are now built in one place each, which is precisely
+ * why they need pinning here. The literals below are the strings as they stood before
+ * that consolidation, so this test fails if a builder drifts from the cache on disk.
+ */
+{
+  const { windowStatsUrl } = await import("../src/data/statsapi.ts")
+  const { scheduleUrl } = await import("../src/backtest/seasons.ts")
+  const { underlyingWindowUrl } = await import("../src/backtest/harness.ts")
+  const SAPI = "https://statsapi.mlb.com/api/v1"
+  const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"
+  t("the byDateRange URL still matches the warm cache",
+    windowStatsUrl(2025, "hitting", "2025-03-18", "2025-06-01") ===
+      `${SAPI}/stats?stats=byDateRange&group=hitting&season=2025&sportId=1` +
+      `&playerPool=All&limit=3000&startDate=2025-03-18&endDate=2025-06-01`,
+    windowStatsUrl(2025, "hitting", "2025-03-18", "2025-06-01"))
+  t("the schedule URL still matches the warm cache",
+    scheduleUrl("2025-03-18", "2025-06-01") ===
+      `${SAPI}/schedule?sportId=1&startDate=2025-03-18&endDate=2025-06-01&gameType=R`,
+    scheduleUrl("2025-03-18", "2025-06-01"))
+  t("the Savant window URL still matches the warm cache",
+    underlyingWindowUrl(2025, "batter", "2025-03-18", "2025-06-01") ===
+      `${SAVANT}?year=2025&type=batter&filter=&min=1` +
+      `&selections=pa%2Cwoba%2Cxwoba%2Cbarrel_batted_rate%2Chard_hit_percent` +
+      `&chart=false&x=pa&y=pa&r=no&chartType=beeswarm&sort=xwoba&sortDir=desc` +
+      `&start_dt=2025-03-18&end_dt=2025-06-01&csv=true`,
+    underlyingWindowUrl(2025, "batter", "2025-03-18", "2025-06-01"))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

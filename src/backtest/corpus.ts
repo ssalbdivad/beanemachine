@@ -1,22 +1,23 @@
-import { num, parseCsv } from "../data/csv.ts"
-import type { PlayerSeason, StatLine } from "../data/statsapi.ts"
+import { mapPlayerSeasons, windowStatsUrl, type PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
 import { cachedFetch, stats as cacheStats } from "./cache.ts"
-import { addDays, foldsFor, seasonRange } from "./seasons.ts"
+import { parseUnderlyingCsv, underlyingWindowUrl } from "./harness.ts"
+import { addDays, foldsFor, gamesPlayedIn, seasonRange } from "./seasons.ts"
 
 /**
  * Assembles the evaluation corpus: for each (season, as-of date, side) a fold
  * holding everything knowable at that moment plus what actually happened next.
  * All reads go through the disk cache, so the first build is slow and every
  * subsequent sweep is instant.
+ *
+ * This file used to carry its own copy of all three reads, and 63 of its 119
+ * substantive lines were verbatim in season.ts (53%, measured by stripping comments,
+ * normalising whitespace and keeping lines over 8 characters). What is left is the
+ * only thing a corpus builder should be: which windows to ask for. The reads
+ * themselves now come from src/data/statsapi.ts (the StatsAPI URL and the splits
+ * mapping), ./seasons.ts (the game count) and ./harness.ts (the Savant URL and its
+ * parse) — one place to change each, and one cache key per request.
  */
-const SAPI = "https://statsapi.mlb.com/api/v1"
-const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"
-
-const asNum = (v: unknown): number | null => {
-	const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN
-	return Number.isFinite(n) ? n : null
-}
 
 const windowStats = async (
 	season: number,
@@ -24,41 +25,8 @@ const windowStats = async (
 	start: string,
 	end: string
 ): Promise<PlayerSeason[]> => {
-	const text = await cachedFetch(
-		`${SAPI}/stats?stats=byDateRange&group=${group}&season=${season}&sportId=1` +
-			`&playerPool=All&limit=3000&startDate=${start}&endDate=${end}`
-	)
-	const splits = JSON.parse(text).stats?.[0]?.splits ?? []
-	return splits
-		.map((s: any): PlayerSeason => {
-			const stat: StatLine = {}
-			for (const [k, v] of Object.entries(s.stat ?? {})) {
-				const n = asNum(v)
-				if (n !== null) stat[k] = n
-			}
-			return {
-				id: s.player?.id, name: s.player?.fullName ?? "",
-				team: s.team?.name ?? null, teamId: s.team?.id ?? null,
-				position: s.position?.abbreviation ?? "", group, stats: stat
-			}
-		})
-		.filter((p: PlayerSeason) => typeof p.id === "number")
-}
-
-const gamesPlayed = async (start: string, end: string): Promise<Map<number, number>> => {
-	const data = JSON.parse(
-		await cachedFetch(`${SAPI}/schedule?sportId=1&startDate=${start}&endDate=${end}&gameType=R`)
-	)
-	const counts = new Map<number, number>()
-	for (const day of data.dates ?? [])
-		for (const g of day.games ?? []) {
-			if (g.status?.abstractGameState && g.status.abstractGameState !== "Final") continue
-			for (const side of ["home", "away"] as const) {
-				const id = g.teams?.[side]?.team?.id
-				if (typeof id === "number") counts.set(id, (counts.get(id) ?? 0) + 1)
-			}
-		}
-	return counts
+	const text = await cachedFetch(windowStatsUrl(season, group, start, end))
+	return mapPlayerSeasons(JSON.parse(text).stats?.[0]?.splits ?? [], group)
 }
 
 const underlyingWindow = async (
@@ -66,27 +34,8 @@ const underlyingWindow = async (
 	type: "batter" | "pitcher",
 	start: string,
 	end: string
-): Promise<Map<number, Underlying>> => {
-	const url =
-		`${SAVANT}?year=${season}&type=${type}&filter=&min=1` +
-		`&selections=pa%2Cwoba%2Cxwoba%2Cbarrel_batted_rate%2Chard_hit_percent` +
-		`&chart=false&x=pa&y=pa&r=no&chartType=beeswarm&sort=xwoba&sortDir=desc` +
-		`&start_dt=${start}&end_dt=${end}&csv=true`
-	const out = new Map<number, Underlying>()
-	for (const row of parseCsv(await cachedFetch(url, "text/csv"))) {
-		const id = num(row.player_id)
-		if (id === null) continue
-		const xwoba = num(row.xwoba), woba = num(row.woba)
-		out.set(id, {
-			id, xwoba, woba,
-			xwobaGap: xwoba !== null && woba !== null ? Number((xwoba - woba).toFixed(4)) : null,
-			xba: null, xslg: null, pa: num(row.pa),
-			barrelRate: num(row.barrel_batted_rate), hardHitRate: num(row.hard_hit_percent),
-			avgExitVelocity: null, sweetSpotRate: null
-		})
-	}
-	return out
-}
+): Promise<Map<number, Underlying>> =>
+	parseUnderlyingCsv(await cachedFetch(underlyingWindowUrl(season, type, start, end), "text/csv"))
 
 export interface Fold {
 	season: number
@@ -115,8 +64,8 @@ export const buildFold = async (
 		windowStats(season, group, seasonStart, asOf),
 		underlyingWindow(season, group === "hitting" ? "batter" : "pitcher", seasonStart, asOf),
 		windowStats(season, group, addDays(asOf, 1), end),
-		gamesPlayed(seasonStart, asOf),
-		gamesPlayed(addDays(asOf, 1), end)
+		gamesPlayedIn(seasonStart, asOf),
+		gamesPlayedIn(addDays(asOf, 1), end)
 	])
 	const recent: Record<number, PlayerSeason[]> = {}
 	const recentGames: Record<number, Map<number, number>> = {}
@@ -124,7 +73,7 @@ export const buildFold = async (
 		const start = addDays(asOf, -days)
 		const [rows, games] = await Promise.all([
 			windowStats(season, group, start, asOf),
-			gamesPlayed(start, asOf)
+			gamesPlayedIn(start, asOf)
 		])
 		recent[days] = rows
 		recentGames[days] = games

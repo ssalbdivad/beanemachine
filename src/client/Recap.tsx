@@ -174,11 +174,17 @@ export const Recap = ({
 		  list of eight showed six at either end of its scroll, and the two it hid were the two
 		  a reader would have had to go looking for.
 		  
-		  Six is what fits the state the screen is actually IN when he arrives, which is at rest
-		  with the dock up. The men it drops are the seventh and eighth best nights in baseball;
-		  nothing downstream reads this list, so the cost is exactly two rows of interest.
+		  FIVE, after re-measuring the published build rather than reasoning about it: with six,
+		  the rows land at y=421, 486, 551, 617, 682 and 747, and the dock begins at about 742 —
+		  so the sixth was still under it and `elementFromPoint` at its centre returned the dock's
+		  own paragraph. Five is what fits the state the screen is actually IN when a reader
+		  arrives, which is at rest with the dock up.
+		  
+		  A count that varied by viewport would fit more on a desktop and is not worth the
+		  machinery: the phone is the device this is opened on, nothing downstream reads this list,
+		  and the cost is the sixth-best night in baseball.
 		*/
-		() => (actuals && league && !men.men.length ? bestNights(actuals.lines, league, 6) : null),
+		() => (actuals && league && !men.men.length ? bestNights(actuals.lines, league, 5) : null),
 		[actuals, league, men]
 	)
 

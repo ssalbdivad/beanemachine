@@ -3022,9 +3022,30 @@ await phone.close()
     `${await opened()} rows open, on ${await onTab()}`)
 
   const intro = await first.$eval(".board-intro", e => e.textContent.replace(/\s+/g, " ").trim())
-  const hover = await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))
-  t("the tab's own sentence is on the screen as text and not only as a hover",
-    !!hover && intro.startsWith(hover.trim()), `${intro.slice(0, 80)}… / title: ${hover}`)
+  /*
+   * THE SOURCE OF TRUTH IS panels.tsx, not the nav button, and this assertion has now been
+   * written both ways round.
+   *
+   * It first compared the rendered paragraph against the nav button's `title` — correct while
+   * both existed, and the point of the change was that the hover was the ONLY copy of the
+   * sentence. Once all three screens said their own, the three `title` attributes were
+   * duplicates and went, and this assertion went red on its own mechanism rather than on its
+   * claim. What survives of the hover is only the disabled variant, which a screen cannot carry.
+   *
+   * So the sentence is read out of `VIEWS` as TEXT. panels.tsx cannot be imported here — it
+   * holds JSX, which `--experimental-strip-types` does not transform — and hardcoding the
+   * sentence in this file would put a second copy of it exactly where the defect was. A regex
+   * over the source keeps one copy and still fails if the screen stops printing it.
+   */
+  const { readFileSync } = await import("node:fs")
+  const panels = readFileSync("src/client/panels.tsx", "utf8")
+  const wireBlock = panels.slice(panels.indexOf('id: "wire"'))
+  const want = /purpose:\s*\n?\s*"([^"]+)"/.exec(wireBlock)?.[1]
+  t("the tab's own sentence is on the screen as text, read from the one place it is written",
+    !!want && intro.startsWith(want.trim()), `${intro.slice(0, 80)}… / wanted: ${want}`)
+  t("and the nav no longer carries it as a hover, because the screen says it",
+    (await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))) === null,
+    String(await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))))
   t("and the board says why the men at the top of it are names nobody knows",
     /taken them/.test(intro) && /rostered in \d+% to \d+% of leagues/.test(intro), intro)
   await first.close()

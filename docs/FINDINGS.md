@@ -15,111 +15,51 @@ under the walker's feet. Every entry below was re-run against the 03:42 build af
 says which build it is measured on; anything that changed between the two is recorded as
 changed rather than quietly restated.
 
-**Three whole entries have been cut since that walk, fixed outright, and are named here so the
-next walker knows they were looked at rather than missed.** The setup box refusing six surnames
-and then offering five of the men back as buttons (a one-word line whose surname exactly one man
-in baseball carries is now accepted, «Soto» is still refused and says why, and an accepted
-suggestion's line leaves the box with him). The landscape sheet cutting its own headings off the
-top of the screen (the height cap belongs on the dock, not the sheet — a fixed element anchored
-at the bottom grows upward). And one team's projected points reading 1523.92 on My league and
-33.17 on Tonight with neither number naming its window (both name it now).
+**Six whole entries have been cut since that walk, fixed outright, and are named here so the next
+walker knows they were looked at rather than missed.**
+
+- The setup box refusing six surnames and then offering five of the men back as buttons. A
+  one-word line whose surname exactly one man in baseball carries is accepted now, «Soto» is
+  still refused and says why, and an accepted suggestion's line leaves the box with him.
+- The landscape sheet cutting its own headings off the top of the screen. The height cap belongs
+  on the dock, not the sheet — a fixed element anchored at the bottom grows upward.
+- One team's projected points reading 1523.92 on My league and 33.17 on Tonight with neither
+  number naming its window. Both name it.
+- Back from an open drill-down undoing the tab as well as the row. It pushes in the gesture now,
+  a second row replaces rather than pushes, and Back into Pickups restores the row it was on.
+- The board's header dating itself from the capture — "Sep 8 → Sep 22" over rows rated Sep 12 →
+  Sep 26. It prints the window the rows were actually rated over, and 14 of 30 clubs had
+  different game counts in the two.
+- The board of nobodies having no sentence saying why. It has one, with the rostered range
+  computed off its own rows: 14% to 35%, which is what being under a ten-team league's cut looks
+  like.
+
+And one defect found by the published-build suite while it was being repaired, fixed rather than
+recorded: reaching the board by the TAB set `onboarding` false, and `docked` is `onboarding ||
+!league`, so the moment a league existed — the moment the preset is adopted, mid-first-visit — a
+tab press UNMOUNTED the setup sheet and took the reader's typed lines with it. A tab press closes
+the sheet and keeps the bar now.
 
 ---
 
-## Back: two of three cases FIXED at 03:42, the drill-down still eats two gestures
+## Hovers: the three that carried sentences are text now, and 68 remain on one screen
 
-The oldest entry here, and it moved during the walk. On the **03:35** build all three cases
-failed identically — `history.length` was 2 before and after every gesture, the two entries
-being the walker's own `goto` calls, and Back landed on `about:blank` from the open setup
-sheet, from Pickups, and from an open drill-down. A reader arriving from a link has one
-entry, so Back took him off the site.
+Closed, and the count is restated because both figures in it were wrong. The three tab sentences
+— the best orientation copy in this app — were `title` attributes on the nav buttons, which is a
+hover, on a product opened on a phone. All three are text on their own screens now (Pickups
+renders its own through `purpose()`; Tonight and My league are composed by App, so App renders
+theirs), the nav's `title` attributes are gone, and what survives is the disabled variant "— set
+a league up first", which is information no screen can carry.
 
-Re-measured against the **03:42** build, empty profile each time:
+The counts: it is **70** `title` attributes on Pickups, not the 58 measured on My league, and 68
+of them are longer than six words — because every ranked row hangs a sentence about its own game
+count. That is the remaining work and it is not obviously work: a row's hover repeats what its
+own drill-down says, so the question is whether to delete them rather than where to put them.
+Measured 2026-09-12.
 
-| gesture | `history.length` | Back lands on |
-|---|---|---|
-| open the setup sheet, type three names | 2 → **3** | Tonight, sheet closed, **the three names still in the box** |
-| Tonight → Pickups | 2 → **3** | Tonight, Pickups deselected |
-| Pickups → open a row's drill-down | **3, unchanged** | Tonight, with BOTH the drill-down and the Pickups tab undone |
-
-So the first two are fixed and their entries are retired. What is still open is the third:
-**opening a drill-down pushes nothing**, so the one Back a reader presses to close a row he
-opened by mistake also throws away the tab he was on and returns him to Tonight. That is one
-gesture undoing two actions, and it is the gesture a phone reader uses most.
-
-One more Back from any of the three still exits to `about:blank`, which is correct — that is
-the entry the page was loaded on.
-
-NO LONGER TRUE: **the URL never changes.** It does now — `#tonight`, `#pickups`,
-`#my-league`, written by the same gesture that pushes the history entry. Verified: landing
-writes the hash, a tab press updates it, a reload comes back to the same screen, and a pasted
-`#my-league` link lands there. `hashchange` is listened for as well as `popstate`, because a
-link pasted into the same tab fires only the first. Left here rather than deleted because the
-drill-down half of this entry is still open.
-
-## Everything the ranking is built on is four days old, and the chip says one
-
-The masthead chip reads, verbatim:
-
-> player data **4d ago** — a day of games has happened since
-
-84.3 hours is 3.5 days; `freshness` rounds that to "4d". The clause was hard-coded for every
-stale case, so at 84 hours the app understated its own staleness by three days beside the
-number that contradicted it — the most flattering possible account of how wrong it might be.
-FIXED: `freshness` returns the day count, floored, and the clause reads "3 days of games
-since". Floored rather than rounded because the sentence is about days of games that have
-actually finished; the label rounds for its own and equally honest reason.
-
-It is not only the chip. Tonight's schedule, tonight's posted lineups, the injured list and
-last night's box scores are all read live; the projections underneath them are a static
-file, and two other surfaces date themselves from it:
-
-- Pickups' header reads `1008 players · Sep 8 → Sep 22` — a window that opens four days in
-  the past. `horizonSpan` in `src/client/Board.tsx` prints `snapshot.horizon`, which is
-  baked into the capture.
-- Pickups' top five with no team are the same five names as the 2026-09-11 walk, to the
-  decimal: #1 Grant Taylor RP CHW 35.27, #2 Sam Antonacci OF CHW 34.85, #3 Tristan Peters
-  OF CHW 33.53, #4 Heriberto Hernández OF MIA 32.31, #5 JJ Bleday OF CIN 29.91. Billy's
-  pick is still Grant Taylor.
-
-## A first visit still reaches a board of nobodies, one tap in instead of zero
-
-Partly relieved, not fixed. A first visit now lands on Tonight, so the five names above are
-no longer the whole first impression — but "Everyone you can get →" and the PICKUPS tab both
-land on them, and Billy's pick on that screen is a White Sox relief pitcher. The entry's
-original argument stands: a free-agent board ranked by value over replacement SHOULD be full
-of men nobody has rostered, which is exactly why that screen needs one sentence saying so.
-There is still no such sentence. Measured 2026-09-12, empty profile, one tap from landing.
-
-## Nine hovers became text; fifty-eight did not
-
-The commit message for `918153a` is "Nine hovers a phone cannot reach, on the screen about
-your own team", and nine is the true count. **58 `title=` attributes are still live on My
-league** (`[...document.querySelectorAll("[title]").length]`, 2026-09-12). 51 are under six
-words — labels on the scoring grid's inputs and its eighteen "Remove X" buttons, which is a
-defensible use. Seven are whole sentences a thumb cannot open, and three of those seven are
-the primary navigation:
-
-- TONIGHT — "Who to start before first pitch, which of your seats scores nothing, and the
-  one move worth making."
-- PICKUPS — "Everyone you can actually get, ranked in this league's scoring, over the window
-  you pick."
-- MY LEAGUE — "Your league's scoring, slots and team count, and the men on your team.
-  Everything the other two screens say is priced in these."
-- Set up a league — "Read a league off its own settings page, or start from a preset — the
-  guided setup"
-- the preset button, Remove, Download and Load file each carry a sentence of their own.
-
-The three tab sentences are the best orientation copy in the app and a phone reader never
-sees one of them.
-
-FIXED, the two that carried information nothing else said: the capture-age chip's hover
-("Age of the MLB and Statcast capture the ranking is computed from" — a phone cannot open it,
-and three of its words are about the software) is gone, with the part a reader needs now in
-text on the stale case; and the availability chip's entire explanation, which was a hover on a
-control whose visible text already says "estimated" and "make it exact", is gone too — the WHY
-lives on the screen the button leads to, where My league now prints where the taken/free line
-falls and in which league.
+Still open on the same screen, and smaller than it looks: the two capture-age and availability
+chips were the only two outside src/client/Trade.tsx carrying information rather than restating a
+visible control, and both are fixed.
 
 ## Software talk: all six strings fixed, and recorded rather than deleted
 

@@ -2326,6 +2326,22 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   t("and what he had typed is still in the box when he comes back to it",
     (await p.inputValue("[data-ctl=onboard-team]")) === typed,
     JSON.stringify(await p.inputValue("[data-ctl=onboard-team]")))
+
+  /* AND ONCE A TEAM IS STORED, THE BOX SAYS WHAT IT DOES TO IT.
+  
+     "You can add the rest later" is true of the app and false of this box: a second paste
+     REPLACES the stored team — thirteen names, then two more, leaves two men. Nothing lied
+     about it and nothing warned either, and the box emptying itself on success is what made
+     the second paste look like an append. Asserted after a real save on the published build,
+     because the copy is keyed on how many men the league actually holds. */
+  await p.click(".onboard-go button")
+  await p.waitForTimeout(600)
+  const go = await p.textContent(".onboard-go button")
+  const under = await p.textContent(".onboard-go .sub")
+  t("once a team is stored the button says it replaces rather than adds",
+    /Replace my team/.test(go ?? ""), `${go} — ${under}`)
+  t("and the line under it names the route that really does add one man",
+    /replaces all 3/.test(under ?? "") && /My league/.test(under ?? ""), under ?? "")
   await p.close()
 }
 

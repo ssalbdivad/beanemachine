@@ -5,7 +5,7 @@ import { leagueFromPastedSettings } from "../data/paste-settings.ts"
 import { rosterFromPaste, type PastedRoster } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
-import { leagueGaps } from "./panels.tsx"
+import { leagueGaps, tab } from "./panels.tsx"
 import { typingStore, type Box } from "./typing.ts"
 
 /**
@@ -141,6 +141,17 @@ export const Onboard = ({
 	const [url, setUrl] = useState("")
 	const [team, setTeam] = useState(() => typingStore.of(leagueKey, "team"))
 	const [teamNote, setTeamNote] = useState<string | null>(null)
+	/** How many men this league already holds, read rather than inferred: the copy under the
+	 *  box changes on it, and a count the page guesses at is the kind of sentence this app is
+	 *  not allowed to write. Forgiving, because a damaged roster store is My league's to
+	 *  explain and this box still has to work. */
+	const held = (() => {
+		try {
+			return leagueKey ? roster.of(leagueKey).length : 0
+		} catch {
+			return 0
+		}
+	})()
 	/** The last read of the team box, kept so the sheet can name every player back and
 	 *  quote every line that produced nobody. */
 	const [read, setRead] = useState<PastedRoster | null>(null)
@@ -315,6 +326,23 @@ export const Onboard = ({
 					Nothing leaves this phone. There is no account &mdash; your team is saved in
 					this browser and nowhere else.
 				</p>
+				{/*
+				  THE BOX REPLACES, AND THE LINE UNDER IT PROMISED IT ADDED.
+				  
+				  "You can add the rest later" is true of the app and false of this box: a second
+				  paste REPLACES the stored team. Measured — thirteen names, then two more in a
+				  cleared box, leaves two men on the roster and the first thirteen gone. Nothing
+				  lies about it (the panel below honestly says "Got them. 2 players") and nothing
+				  warns either, and the box emptying itself on success is what makes the second
+				  paste look like an append.
+				  
+				  So once a team is stored, the button and the line state the rule the code already
+				  follows, and name the route that really does add one man — `roster.add`, which is
+				  what the Add control on My league's own-team search calls. The first-visit copy
+				  is untouched: "start with your starters" is the right invitation when there is
+				  nothing to lose yet, and it is also what makes the Tonight card's seat count a
+				  short list, which that card now says out loud.
+				*/}
 				<p className="onboard-go">
 					<button
 						type="button"
@@ -322,10 +350,12 @@ export const Onboard = ({
 						onClick={readTeam}
 						disabled={!team.trim()}
 					>
-						That&rsquo;s my team
+						{held > 0 ? "Replace my team" : "That’s my team"}
 					</button>
 					<span className="sub">
-						Only got a few? Start with your starters. You can add the rest later.
+						{held > 0 ?
+							`Pasting here replaces all ${held} of them. Adding one man is on ${tab("trade")}.`
+						:	"Only got a few? Start with your starters. You can add the rest later."}
 					</span>
 				</p>
 

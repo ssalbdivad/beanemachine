@@ -190,6 +190,10 @@ export const fetchActuals = async (
 		error:
 			!failed.length ? null
 			: deadline.aborted ? `MLB did not answer within ${timeoutMs / 1000}s`
-			: failed.map(f => (f.reason as Error).message).join("; ")
+			: /* De-duplicated: both sides of the ball fail the same way far more often than they
+			     fail differently — an offline browser gives "Failed to fetch" twice — and "Failed
+			     to fetch; Failed to fetch" on the card reads as two separate problems. Measured on
+			     the published build with the network cut. */
+				[...new Set(failed.map(f => (f.reason as Error).message))].join("; ")
 	}
 }

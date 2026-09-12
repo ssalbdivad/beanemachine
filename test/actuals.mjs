@@ -277,6 +277,21 @@ t("what the answered side scored is still totalled", near(partial.ownedTotal, 69
 t("the lineup total is refused under a partial read", partial.startedTotal === null, String(partial.startedTotal))
 t("and so is the bench gap and the regret", partial.leftOnBench === null && partial.biggest === null)
 t("the refusal counts the men nobody could check", partial.blocked.some(b => /4 of your men could not be checked/.test(b)), partial.blocked.join(" | "))
+/* AND POINTS AT THE FIGURE THAT IS ACTUALLY ON THE SCREEN. With one side answered there is a
+   real total and the missing men are missing from it, which is worth saying because a reader
+   comparing it with his platform will find it short. With NEITHER side answered the card
+   prints no figure at all, and this sentence used to point at a total that was not there —
+   seen on the published build with the network cut. */
+t("and says they are missing from the total, because there is one",
+  partial.blocked.some(b => /missing from the total above/.test(b)), partial.blocked.join(" | "))
+const blind = recap({
+  date: "2026-09-11", men: team, lines: new Map(), league: LEAGUE, shape: SHAPE,
+  missing: ["hitting", "pitching"]
+})
+t("with neither side answered it claims nothing about a total it is not printing",
+  blind.blocked.some(b => /Nothing can be said about the night/.test(b)) &&
+    !blind.blocked.some(b => /total above/.test(b)), blind.blocked.join(" | "))
+t("and it is not reported as a day with no baseball in it", blind.noGames === false && blind.tooEarly === false)
 t("and says it once rather than twice", partial.blocked.length === 1, partial.blocked.join(" | "))
 t("the sides that failed come out on the recap", partial.unread.join(",") === "hitting")
 

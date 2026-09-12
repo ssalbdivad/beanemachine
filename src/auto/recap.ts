@@ -200,11 +200,20 @@ export const recap = (input: {
 				"this is a clock, not a result."
 		)
 	else if (unreadMen)
+		/* TWO SENTENCES, BECAUSE THERE IS NOT ALWAYS A TOTAL ABOVE. When one side of the ball
+		   answered, the figure on the card is real and the missing men are missing FROM it —
+		   which is the thing to say, because a reader comparing it with his platform will find
+		   it short. When neither side answered there is no figure at all (the card prints no
+		   headline rather than a bold zero), and "missing from the total above" then points at
+		   a number that is not on the screen. Seen on the published build. */
 		blocked.push(
 			`MLB's record of what ${unread.length === 2 ? "anybody" : unread[0] === "pitching" ? "pitchers" : "hitters"} ` +
 				`did that day did not answer, so ${unreadMen} of your men could not be checked at ` +
-				`all. They are missing from the total above rather than counted as nothing, and ` +
-				`nothing is claimed about your lineup or your bench until the read succeeds.`
+				`all. ` +
+				(unreadMen === scored.length ?
+					`Nothing can be said about the night until the read succeeds.`
+				:	`They are missing from the total above rather than counted as nothing, and ` +
+					`nothing is claimed about your lineup or your bench until the read succeeds.`)
 		)
 
 	const started = scored.filter(

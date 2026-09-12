@@ -750,6 +750,23 @@ export const Decide = ({
 			games: slate ? slate.games.length - slate.called.size : null,
 			readAt: seats.at,
 			/**
+			 * HOW MANY OF HIS SEATS THIS PAGE HAS BEEN GIVEN, against how many the league says
+			 * he has. Null unless the two are both known and the second is larger.
+			 *
+			 * The setup sheet invites him to enter only his starters — "Only got a few? Start
+			 * with your starters. You can add the rest later" — and then every seat he skipped
+			 * is counted as a hole. Measured: thirteen names pasted into a twenty-seven-seat
+			 * league produced "7 seats score nothing tonight" and three waiver adds. If he
+			 * really holds thirteen men those adds are the most valuable thing on the page, so
+			 * the defect is not the advice: it is that the card derives a free seat from a list
+			 * length the reader was told he could truncate, and says nothing about where the
+			 * length came from. The fix is to state the provenance where the claim is made.
+			 */
+			partial:
+				!seats.at && league.roster.counts && seats.spots.length < league.roster.counts.total ?
+					{ given: seats.spots.length, total: league.roster.counts.total }
+				:	null,
+			/**
 			 * Three reasons a man comes out, and they are different claims.
 			 *
 			 * This was a two-way ternary — club idle, else "not projected to play" — and
@@ -1746,6 +1763,25 @@ export const Decide = ({
 									tonight
 								</span>
 							</h3>
+							{/* WHERE THE SEAT COUNT CAME FROM, said before the adds it justifies. See
+							    `partial` above: a hand-typed team is as long as the reader made it,
+							    the sheet told him a short list was fine, and nothing on this card
+							    distinguished a seat he has not filled in his league from a seat he
+							    simply has not told this page about. */}
+							{today.partial && (
+								<p className="sub decide-partial">
+									{/* NO ARITHMETIC BETWEEN THE TWO NUMBERS. The first draft said "so 14
+									    of these are empty" — 27 seats minus 13 men — over a heading that
+									    counted 6, because the heading counts STARTABLE seats and the
+									    league's total includes the bench and the injured list. The honest
+									    claim is about provenance, not about a count. */}
+									These seats come from the {today.partial.given} men you have named, not
+									from your league&rsquo;s own {today.partial.total} &mdash; so a seat is
+									empty here whenever nobody you named can fill it, which is not the same
+									as empty in your league. Reading your roster off your platform on{" "}
+									<b>{tab("trade")}</b> settles it.
+								</p>
+							)}
 							<ul className="decide-list decide-fill">
 								{fillTonight.fills.map(f => (
 									<li key={`${f.slot}-${f.name}`}>

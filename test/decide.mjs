@@ -2069,6 +2069,53 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	await page.close()
 }
 
+/**
+ * A HAND-TYPED TEAM IS AS LONG AS HE MADE IT, and the card said nothing about that.
+ *
+ * The setup sheet invites a short list — "Only got a few? Start with your starters. You can
+ * add the rest later" — and every seat he skipped was then counted as a hole. Measured:
+ * thirteen names in a twenty-seven-seat league produced "7 seats score nothing tonight" and
+ * three waiver adds. The adds are not the defect: if he really holds thirteen men they are the
+ * most valuable thing on the page. The defect is that the seat count is derived from a list
+ * length the reader was told he could truncate, and nothing said where the length came from.
+ *
+ * No arithmetic between the two numbers, either: 27 seats minus 13 men is 14, over a heading
+ * that counts 6, because the heading counts startable seats and the league's total includes
+ * the bench and the injured list. The claim is about provenance.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	const bats = snap.players.filter(p => p.group === "hitting" && (p.stats?.plateAppearances ?? 0) > 400).slice(0, 9)
+	const arms = snap.players.filter(p => p.group === "pitching" && (p.stats?.outs ?? 0) > 300).slice(0, 4)
+	const ids = [...bats.map(p => `${p.id}:hitting`), ...arms.map(p => `${p.id}:pitching`)]
+	/* A ROSTER WITH NO SEATS, which is the hand-typed route and the only one a phone has. The
+	   lineup store is deliberately not seeded: that is what makes `seats.at` null and the seat
+	   list as long as the names he gave. */
+	const page = await open({ config: cfg, roster: { [KEY]: ids }, pool: seedPool }, { noMlb: true })
+	const said = await page.$$eval(".decide-partial", n => n.map(e => e.innerText))
+	t("a card built from a short typed list says where its seat count came from",
+		said.length === 1 && /13 men you have named/.test(said[0]) && /own 27/.test(said[0]),
+		said.join(" | ") || "(nothing said)")
+	t("and says what that means for an empty seat, in his terms",
+		/not the same as empty in your league/.test(said[0] ?? ""), said[0] ?? "")
+	/* And it does not do the subtraction: 27 − 13 = 14 is not the number of empty seats on
+	   this card, and printing it there was the first version of this sentence. */
+	t("and claims no count of empty seats it cannot back",
+		!/14 of these/.test(said[0] ?? ""), said[0] ?? "")
+	await page.close()
+
+	/* THE OTHER SIDE OF THE SAME CLAIM: a full roster read off a platform says nothing, because
+	   there is nothing to say. A provenance line on every card would be furniture. */
+	const full = await open(
+		{ config: cfg, lineup: { [KEY]: { at: new Date().toISOString(), spots } }, pool: seedPool },
+		{ noMlb: true }
+	)
+	t("a team whose seats were read says nothing about how many it was given",
+		(await full.$$(".decide-partial")).length === 0,
+		(await full.$$eval(".decide-partial", n => n.map(e => e.innerText))).join(" | "))
+	await full.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

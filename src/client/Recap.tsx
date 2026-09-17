@@ -18,6 +18,8 @@ import { useStored } from "./stores.ts"
 import { useActuals, usePeriodActuals, lastNight } from "./useActuals.ts"
 import { fetchSlate, localDate } from "../data/today.ts"
 import "./recap.css"
+import { extensionHere } from "./extension.ts"
+import { tab } from "./panels.tsx"
 
 /** "Sep 12" from an ISO date, at noon so a zone west of Greenwich cannot print yesterday.
  *  Same helper and same reason as `plainDate` in src/client/Decide.tsx and `span` in
@@ -913,6 +915,26 @@ export const Recap = ({
 								</p>
 							)}
 						</>
+					)}
+					{/*
+					  WHERE THE OTHER TEAM CAME FROM, and how to get it again.
+					
+					  This box was written when the only way to know who a reader was playing was
+					  to ask him to paste a roster. His own browser can read it off the matchup
+					  page now, on the same press that reads his league — so the box is still here
+					  for every reader who has no browser reader, and above it is the one line
+					  that saves the rest of them a paste.
+					
+					  It does not say WHICH way this particular list arrived. Nothing records
+					  that, and a sentence claiming it would be the app guessing about its own
+					  history — the honest version is to offer the cheaper route and let the
+					  count speak for itself.
+					*/}
+					{extensionHere() && (
+						<p className="sub">
+							Your browser can read this off your matchup page &mdash; it comes across with
+							your league on <b>{tab("trade")}</b>, and there is nothing to paste.
+						</p>
 					)}
 					<OpponentBox
 						leagueKey={leagueKey}

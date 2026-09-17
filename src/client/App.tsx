@@ -17,7 +17,9 @@ import { leagues } from "./leagues.ts"
 import { roster } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
 import { slotsFor } from "../engine/bscore.ts"
-import { useStored } from "./stores.ts"
+import { stored, useStored } from "./stores.ts"
+import { useExtension } from "./extension.ts"
+import { refreshPool } from "./read-yahoo.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
 	EligibilityPanel,
@@ -303,6 +305,9 @@ export const App = () => {
 	/** Any write to this browser — a pasted free-agent list included — makes the
 	 *  masthead and the board re-read. See src/client/stores.ts. */
 	const rev = useStored()
+	/** The browser reader, when there is one. See src/client/extension.ts — this is the
+	 *  only place the whole app asks whether Yahoo can be read from here. */
+	const ext = useExtension()
 	const wire = useMemo(() => (key ? poolStore.of(key) : null), [key, config, rev])
 	/**
 	 * Remounts the two views that ask for a free-agent list when the list changes
@@ -887,6 +892,29 @@ export const App = () => {
 					setOnboarding(false)
 					go({ view: "trade", sheet: false })
 				}}
+				/*
+				  THE ONE CONTROL THAT IS ON EVERY SCREEN, so the reminder to go and get a
+				  fresher list is too. Offered only when this browser can actually do it and
+				  only for the league the chip is about; a button that cannot do the thing it
+				  names is worse than no button.
+				*/
+				onRefreshWire={
+					ext.present && snapshot && key && league?.meta.platform === "yahoo" ?
+						() =>
+							void run(async () => {
+								const id = key.startsWith("yahoo:") ? key.slice("yahoo:".length) : null
+								if (!id) return
+								const got = await refreshPool(ext, snapshot, key, id)
+								stored()
+								show(
+									got.added !== null ?
+										`Read ${got.added} free agents off your league.`
+									:	`${got.failure?.what ?? "That could not be read"}${got.failure?.fix ? ` — ${got.failure.fix}` : ""}`
+								)
+							})
+					:	null
+				}
+				wireBusy={ext.busy}
 			/>
 
 			{/* A store that can't be read is not an empty store, and every tab's own
@@ -1816,7 +1844,9 @@ const Status = ({
 	snapshot,
 	snapshotError,
 	wire,
-	onFixWire
+	onFixWire,
+	onRefreshWire,
+	wireBusy
 }: {
 	league: League | null
 	store: StoreState
@@ -1830,6 +1860,9 @@ const Status = ({
 	wire: StoredPool | null
 	/** Where the masthead sends a reader whose availability is still an estimate. */
 	onFixWire: () => void
+	/** Re-read the free agents from Yahoo, when this browser can. Null when it cannot. */
+	onRefreshWire: (() => void) | null
+	wireBusy: boolean
 }) => {
 	const age = freshness(snapshot?.capturedAt, Date.now())
 	const data =
@@ -1871,7 +1904,13 @@ const Status = ({
 					` — ${age.days === 1 ? "a day" : `${age.days} days`} of games since`
 				:	""}
 			</span>
-			<WireChip league={league} wire={wire} onFix={onFixWire} />
+			<WireChip
+				league={league}
+				wire={wire}
+				onFix={onFixWire}
+				onRefresh={onRefreshWire}
+				busy={wireBusy}
+			/>
 		</div>
 	)
 }
@@ -1908,26 +1947,59 @@ const STALE_WIRE_HOURS = 24
 const WireChip = ({
 	league,
 	wire,
-	onFix
+	onFix,
+	onRefresh,
+	busy
 }: {
 	league: League | null
 	wire: StoredPool | null
 	/** Where a reader goes to answer this. See the note on the button below for why it
 	 *  is no longer the file picker. */
 	onFix: () => void
+	/** Re-read the list from Yahoo, when this browser can. Absent when it cannot, which is
+	 *  the case the chip has always been written for. */
+	onRefresh: (() => void) | null
+	busy: boolean
 }) => {
 	if (league?.meta.platform !== "yahoo") return null
 	if (wire) {
 		const age = since(wire.at, Date.now())
+		const stale = age.hours > STALE_WIRE_HOURS || !Number.isFinite(age.hours)
+		/*
+		  THE REMINDER LIVES ON THE READOUT, and only once it is true.
+		
+		  A free-agent list is the most perishable thing this app holds: one rival's claim
+		  invalidates a row of it, and Yahoo processes waivers overnight, which is where the
+		  24 hours comes from. Until today the only thing the app could do about an old list
+		  was colour the chip amber and hope — the fix was a command line on another machine.
+		  A browser that can re-read it turns the readout into the control, in the one place
+		  that is already on every screen.
+		
+		  It stays a plain readout while the list is fresh. A button that is always there is
+		  a button asking to be pressed, and pressing it is nine requests to somebody else's
+		  site for an answer that has not changed.
+		*/
+		if (stale && onRefresh)
+			return (
+				<button
+					type="button"
+					className="chip warn"
+					data-wire="stale"
+					style={{ font: "inherit", fontSize: "var(--fs-3)", cursor: "pointer" }}
+					onClick={onRefresh}
+					disabled={busy}
+				>
+					free agents <b>{wire.players.length}</b> read {age.label} &mdash;{" "}
+					{busy ? "reading\u2026" : "read them again"}
+				</button>
+			)
 		return (
 			<span
-				className={`chip${age.hours > STALE_WIRE_HOURS || !Number.isFinite(age.hours) ? " warn" : " ok"}`}
+				className={`chip${stale ? " warn" : " ok"}`}
 				data-wire="carried"
 				title={
-					`The exact free agents in your league, read on your own machine at ${wire.at} ` +
-					`and carried here in a file — no browser can read them, so this is the only ` +
-					`way this page has them. Anyone added or dropped since is not reflected; run ` +
-					`the import again for a fresher list. ${wire.note}`
+					`The exact free agents in your league, read at ${wire.at}. Anyone added or ` +
+					`dropped since is not reflected. ${wire.note}`
 				}
 			>
 				free agents <b>{wire.players.length}</b> read {age.label}

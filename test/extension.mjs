@@ -326,6 +326,77 @@ t("a throttle is reported as a throttle, not as an empty league",
 	JSON.stringify(refused).slice(0, 200))
 await walled.close()
 
+/* ── THE READER'S OWN PATH, through the screens he actually touches ──────────────────
+   Everything above proves the wire. This drives the UI: open the setup sheet, take the
+   offer, press the button, and check that what lands in this browser is a league, a team
+   with seats and a list of free agents — through the same stores every other route writes
+   to, because the reader is a way of getting the pages and not a second way of having a
+   league. */
+{
+	const ui = await context.newPage()
+	const uiErrs = []
+	ui.on("pageerror", e => uiErrs.push(String(e)))
+	await ui.addInitScript(c => {
+		localStorage.clear()
+		localStorage.setItem("beanemachine:config", JSON.stringify(c))
+	}, { ...cfg, active_league: KEY, leagues: { [KEY]: cfg.leagues[KEY] } })
+	await ui.goto(`${APP}#my-league`, { waitUntil: "domcontentloaded" })
+	await ui.waitForSelector("nav button", { timeout: 30000 })
+	await ui.waitForTimeout(2500)
+
+	const setup = await ui.$('button:text-is("Set up a league")')
+	if (setup) await setup.click()
+	await ui.waitForSelector(".onboard", { timeout: 20000 })
+	const offer = await ui.$(".onboard-offer button")
+	t("the sheet offers to read the league, in a browser that can", !!offer,
+		await ui.$eval(".onboard", e => e.innerText.slice(0, 120)))
+	await offer.click()
+	await ui.waitForSelector(".connect", { timeout: 10000 })
+
+	/* The extension is installed in this browser, so the walkthrough must NOT be what he
+	   sees: a screen that keeps telling a reader how to install the thing he has installed
+	   is a screen that has not noticed him. */
+	t("and once it is there, the steps are gone and the button is the button",
+		(await ui.$$(".step")).length === 0 && !!(await ui.$(".connect.connected")),
+		await ui.$eval(".connect", e => e.innerText.slice(0, 160)))
+
+	await ui.click(".connect .primary")
+	/* The sweep is nine sequential requests with a quarter-second between them, so this
+	   waits on the STORE rather than on a spinner. */
+	await ui.waitForFunction(
+		() => {
+			try {
+				return Object.keys(JSON.parse(localStorage.getItem("beanemachine:pool") ?? "{}")).length > 0
+			} catch {
+				return false
+			}
+		},
+		{ timeout: 60000 }
+	)
+	const got = await ui.evaluate(k => {
+		const read = n => JSON.parse(localStorage.getItem(`beanemachine:${n}`) ?? "null")
+		const pool = read("pool")?.[k]
+		return {
+			roster: read("roster")?.[k]?.length ?? 0,
+			spots: read("lineup")?.[k]?.spots?.length ?? 0,
+			pool: pool?.players?.length ?? 0,
+			asked: pool?.positionsRequested?.length ?? 0,
+			note: pool?.note ?? "",
+			stamped: !!pool?.at
+		}
+	}, KEY)
+	t("one press puts his team in this browser, with the seat each man is in",
+		got.roster === seated.length && got.spots === seated.length, JSON.stringify(got))
+	t("and his league's free agents, stamped with when they were read",
+		got.pool === 27 && got.stamped, JSON.stringify(got))
+	t("and says where they came from, because a carried file and a read age differently",
+		/read off your league in this browser/.test(got.note), got.note)
+	t("and records which positions it asked for, so a throttled sweep is refused as partial",
+		got.asked === 9, String(got.asked))
+	t("with nothing thrown on the way", uiErrs.length === 0, uiErrs.join(" | "))
+	await ui.close()
+}
+
 t("and the app logged no errors through any of it", errs.length === 0, errs.join(" | "))
 
 await context.close()

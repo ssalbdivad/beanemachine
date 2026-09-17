@@ -941,9 +941,9 @@ export const WaysIn = ({
 						:	<>
 								Put an <b>ESPN</b> league&rsquo;s web address in the box{" "}
 								{onOpenSetup ? <>on {tab("trade")}</> : "above"} and it reads the
-								real values straight off it. Yahoo does not let any website read
-								your league &mdash; this one included &mdash; so for a Yahoo league,
-								copy the page instead.
+								real values straight off it. No website can read a Yahoo league
+								&mdash; this one included &mdash; so a Yahoo league is read by your
+								own browser, or copied off the page.
 							</>
 						}
 					</Fragment2>

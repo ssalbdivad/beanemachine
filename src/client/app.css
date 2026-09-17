@@ -1674,3 +1674,7 @@ main#main:focus{outline:none}
 	text-underline-offset: 2px;
 	cursor: pointer;
 }
+/* The arrow and the words it points at, on one line, arrow first — its head is at the
+   bottom right, so an arrow drawn after the words ends in empty space. Measured at 390px:
+   the head landed 40px clear of the facsimile before this. */
+.step-point { display: inline-flex; align-items: flex-end; gap: 2px }

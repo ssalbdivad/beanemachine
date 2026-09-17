@@ -54,6 +54,26 @@ export interface ExtensionState {
  *  that a dead extension does not leave a button spinning forever. */
 const PATIENCE_MS = 90_000
 
+/**
+ * IS THE READER IN THIS BROWSER, asked from anywhere, without a hook.
+ *
+ * The bridge stamps the document as soon as it runs, at `document_start`, so this is
+ * answerable synchronously during a first render — which is what the sentences elsewhere in
+ * the app need. A sentence that says "no website can read your Yahoo league" is TRUE for a
+ * reader without it and FALSE for a reader with it, and the difference has to be decidable
+ * at the moment the sentence is written rather than a tick later.
+ *
+ * It answers the narrow question — is it installed — and deliberately not "can it read
+ * right now", which depends on a Yahoo tab being open and is only knowable by asking.
+ */
+export const extensionHere = (): boolean => {
+	try {
+		return !!document.documentElement.getAttribute("data-beanemachine-extension")
+	} catch {
+		return false
+	}
+}
+
 let nextId = 0
 
 export const useExtension = (): ExtensionState => {

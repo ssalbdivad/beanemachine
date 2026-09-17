@@ -8,7 +8,7 @@ import { roster } from "./roster.ts"
 import { leagueGaps, tab } from "./panels.tsx"
 import { typingStore, type Box } from "./typing.ts"
 import { Connect, browserOf, takesExtension } from "./Connect.tsx"
-import { useExtension } from "./extension.ts"
+import { extensionHere, useExtension } from "./extension.ts"
 import { readGrabs } from "../data/yahoo-read.ts"
 import { pool as poolStore } from "./pool.ts"
 import type { GrabFailure } from "../data/extension.ts"
@@ -719,10 +719,25 @@ export const Onboard = ({
 						<>
 							{/* The one sentence about Yahoo a reader needs, said once. It is a
 							    fact about Yahoo and not a thing to make his problem. */}
+							{/* THE SENTENCE BRANCHES NOW, because the claim in it stopped being true of
+							    every reader on the day the browser reader shipped. It is still true of
+							    a WEB PAGE — Yahoo sends no header that would let one read a league, and
+							    it never will — and it is false of a reader whose own browser is doing
+							    the reading from inside his own signed-in tab. Saying the old sentence
+							    to him would be claiming an absence the app has filled. */}
 							{where === "yahoo" && (
 								<p className="sub">
-									Yahoo won&rsquo;t let any website read your league &mdash; not this one,
-									not anyone. Copying your own page works, private leagues included.
+									{extensionHere() ?
+										<>
+											Your browser reads your league itself now &mdash; copying the page
+											still works and needs nothing installed.
+										</>
+									:	<>
+											No website can read your Yahoo league &mdash; not this one, not
+											anyone. Copying your own page works, private leagues included, and
+											so does letting your own browser read it for you.
+										</>
+									}
 								</p>
 							)}
 							<ol className="paste-how">

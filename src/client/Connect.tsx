@@ -224,10 +224,13 @@ export const Connect = ({
 	return (
 		<div className="connect">
 			<h2>Let it read my league</h2>
+			{/* Two lines, not four. Measured at 390x844: the card came to 623px inside a sheet
+			    capped at 591px, so the third step and the way back were below the fold — the
+			    exact defect this file's own header warns about, arriving in the file that warns
+			    about it. What was cut is the part a reader does not need before he presses
+			    anything; what stays is the one thing he might be worried about. */}
 			<p className="sub">
-				Your browser is already signed in to Yahoo. A small reader, added once, hands your
-				team, your league&rsquo;s scoring and who is free straight to this page. Nothing is
-				sent anywhere else.
+				It reads your league in your own browser. Nothing is sent anywhere else.
 			</p>
 			<ol className="steps">
 				<li className="step">
@@ -249,13 +252,20 @@ export const Connect = ({
 						<p className="step-say">
 							Press <b>{store.press}</b>, then <b>{store.then}</b>.
 						</p>
-						{/* OUR drawing of the words he is looking for, with the arrow at them. Not a
-						    screenshot: this is what the button SAYS, which is the part that does not
-						    change when somebody restyles a browser. */}
-						<span className="step-target" aria-hidden="true">
-							{store.press}
+						{/* OUR drawing of the words he is looking for, with the arrow pointing INTO
+						    them. Not a screenshot: this is what the button SAYS, which is the part
+						    that does not change when somebody restyles a browser.
+						
+						    The arrow is drawn first and the words second, because the arrow's head is
+						    at its bottom-right and an arrow that ends where nothing is reads as a
+						    doodle — which is what the first version was: measured at 390px, the head
+						    landed 40px to the right of the facsimile with the facsimile to its left. */}
+						<span className="step-point">
+							<Arrow label={`pointing at the words ${store.press}`} />
+							<span className="step-target" aria-hidden="true">
+								{store.press}
+							</span>
 						</span>
-						<Arrow label={`pointing at the words ${store.press}`} />
 					</div>
 				</li>
 				<li className="step">

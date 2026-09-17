@@ -22,6 +22,7 @@ import type { PlayerSeason } from "./statsapi.ts"
 import { leagueIdFrom, sportFrom, teamIdFrom, SPORT, type Grab } from "./extension.ts"
 import { leagueFromPastedSettings } from "./paste-settings.ts"
 import { rosterFromPaste, type PastedRoster } from "./paste.ts"
+import { normalizeName } from "./names.ts"
 import { parsePage, type PoolEntry } from "./yahoo-pool.ts"
 
 export interface YahooReading {
@@ -214,9 +215,57 @@ export const readGrabs = (
 			"That is somebody else's team page, so your own team was left as it was. Open your team and press it again."
 		)
 	} else if (team) {
-		out.roster = rosterFromPaste(team.text, snapshot)
+		const read = rosterFromPaste(team.text, snapshot)
+		/*
+		   A TEAM PAGE IS NOT ONLY A TEAM, and this is where the extension route parts company
+		   with the paste.
+		
+		   A reader pasting SELECTS his roster: whatever else is on the page — the matchup strip
+		   naming his opponent's men, a trending-players module, a news blurb about somebody's
+		   trade — is not in what he copied. The extension has no selection; it hands over
+		   `document.body.innerText`, which is the whole page, and `rosterFromPaste` matches
+		   every known name anywhere in it. Nine men in the table plus six more from a sidebar
+		   is a fifteen-man roster the reader never had, replacing his real one wholesale, with
+		   "15 men, in the seats they are in" as the only thing he is told.
+		
+		   THE SEAT IS WHAT SEPARATES THEM. Every man on a roster table has a seat printed
+		   beside him — C, 1B, BN, IL — and a man named in a news module has nothing. So where
+		   the page gave seats to most of the men it named, the seated men ARE the team and the
+		   rest are the page around it.
+		
+		   "Most", not "any", because the fallback has to survive Yahoo restyling the table out
+		   of recognition: if seats stop parsing, taking only seated men would store an empty
+		   team, which is the failure this whole route exists to avoid. Two thirds is the same
+		   line the matchup gap uses for the same kind of judgement. Below it, everything
+		   matched is kept — the old behaviour — and the note says the seats could not be read
+		   rather than pretending they were.
+		*/
+		const seatedNames = new Set(read.spots.map(sp => normalizeName(sp.name)))
+		const seated = read.players.filter(p => seatedNames.has(normalizeName(p.name)))
+		const trustSeats = read.players.length > 0 && seated.length >= Math.ceil(read.players.length * (2 / 3))
+		const dropped = trustSeats ? read.players.length - seated.length : 0
+		out.roster =
+			trustSeats ?
+				{
+					...read,
+					players: seated,
+					keys: seated.map(p => `${p.id}:${p.group}`)
+				}
+			:	read
 		if (!out.roster.players.length)
 			notes.push("No players were found on that team page, so your team was left as it was.")
+		else if (dropped > 0)
+			/* Counted rather than named: the men dropped are the page's furniture, and listing
+			   six strangers back at a reader as "not on your team" is a paragraph about
+			   somebody else's news module. What he needs is that the number he is about to be
+			   told is the table and not the page. */
+			notes.push(
+				`${dropped} other ${dropped === 1 ? "player was" : "players were"} named elsewhere on that page — a matchup strip or a news panel — and ${dropped === 1 ? "is" : "are"} not counted as yours.`
+			)
+		else if (!trustSeats && read.players.length)
+			notes.push(
+				"The seats on that page could not be read, so everyone it names is on your team until you say otherwise."
+			)
 	} else if (grabs.some(g => g.kind !== "players")) {
 		/*
 		   HE PRESSED IT FROM THE WRONG PAGE, and it used to say nothing at all.

@@ -196,8 +196,21 @@ export const readLeagueHere = async (
 	  and would have gone on looking at a board priced in borrowed values believing it was
 	  his own.
 	*/
+	/* THE MEN THE PARSER REFUSED, said rather than computed and dropped.
+	
+	   `rosterFromPaste` writes a sentence naming every line it could not match — a surname two
+	   men share, a nickname, a typo — and the paste box has always shown it. This route
+	   computed the same sentence and threw it away, so two men could vanish off a reader's
+	   team for the rest of the season with nothing on any screen mentioning them. It is only
+	   carried when it has something to say about a REFUSAL: on a clean read the parser's note
+	   is a count the receipt already gives in better words. */
+	const refused =
+		reading.roster && (reading.roster.unmatched.length || reading.roster.ambiguous.length) ?
+			reading.roster.note
+		:	null
 	const snags = [
 		answer.failure ? `${answer.failure.what}${answer.failure.fix ? ` — ${answer.failure.fix}` : ""}` : null,
+		refused,
 		...reading.notes
 	].filter(Boolean)
 	const got = said.length ? `${said.join(", ")}.` : ""

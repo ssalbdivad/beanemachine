@@ -15,7 +15,8 @@ import { rosterFromPaste } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { ledgerStore } from "./ledger.ts"
 import { useStored } from "./stores.ts"
-import { useActuals, usePeriodActuals, lastNight } from "./useActuals.ts"
+import { useActuals, lastNight } from "./useActuals.ts"
+import type { Matchup } from "./useMatchup.ts"
 import { fetchSlate, localDate } from "../data/today.ts"
 import "./recap.css"
 import { extensionHere } from "./extension.ts"
@@ -53,11 +54,15 @@ const plainDay = (iso: string): string =>
 export const Recap = ({
 	snapshot,
 	league,
-	leagueKey
+	leagueKey,
+	matchup
 }: {
 	snapshot: Snapshot | null
 	league: League | null
 	leagueKey: string | null
+	/** The one period read the page makes — see src/client/useMatchup.ts. This card used
+	 *  to make its own, identical to the Tonight card's in window, league and group. */
+	matchup: Matchup
 }) => {
 	const rev = useStored()
 	const date = lastNight()
@@ -214,7 +219,9 @@ export const Recap = ({
 	 * against, and the sentence says which of the two it is.
 	 *
 	 * One request pays for it and the innings floor both: same window, same dates, and
-	 * `usePeriodActuals` is shared so the pitching rows are not fetched twice.
+	 * The read is the PAGE's — src/client/useMatchup.ts — so the pitching rows are not fetched
+ * twice, which they were: this card and the Tonight card asked for the same window, the same
+ * league and the same groups, a few hundred lines apart.
 	 */
 	/* The league's own period, resolved the same way every other screen resolves it — from the
 	   league and the capture's last scheduled day, never from a guess about a week. Null where
@@ -224,16 +231,12 @@ export const Recap = ({
 		[league, snapshot]
 	)
 	const periodTo = lastNight()
-	const soFar = usePeriodActuals(
-		season,
-		/* The period's OWN first day, not `start`, which is today wherever today is inside the
-		   period — that edge is for a forward-looking rating and this question is about what has
-		   already happened. See `periodStart` in src/engine/period.ts. */
-		period?.periodStart ?? null,
-		periodTo,
-		!!period?.periodStart && period.periodStart <= periodTo && men.men.length > 0,
-		["hitting", "pitching"]
-	)
+	/* THE READ IS THE PAGE'S, NOT THIS CARD'S. It used to be made here — same window, same
+	   league, same two groups as the Tonight card's innings read, a few hundred lines apart,
+	   and neither knew about the other. `useMatchup` holds it now and both cards are handed
+	   the same map, so the two figures on the two screens cannot disagree about the period
+	   they are measuring, which they previously could by one request's worth of timing. */
+	const soFar = { lines: matchup.lines, error: matchup.error, loading: matchup.loading }
 	/**
 	 * AND WHAT HIS MEN SCORED, once the reader has told the page who they are.
 	 *

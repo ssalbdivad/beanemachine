@@ -71,8 +71,14 @@ export const useMatchup = (
 	league: League | null,
 	horizonEnd: string | null,
 	leagueKey: string | null,
-	/** The reader's own men, as `id:group`. */
+	/** The reader's own men, as `id:group`. May be empty while his seats are not — the
+	 *  hand-typed route stores seats and no roster — which is why `wanted` is a separate
+	 *  argument rather than `owned.length > 0`. That inference cost the recap card its whole
+	 *  week block on a team read from seats alone. */
 	owned: string[],
+	/** Whether this page has a team at all, by any measure the caller recognises. The read
+	 *  is 38 KB and is not made for a visitor who has told the page nothing. */
+	wanted: boolean,
 	/** Bumped when a store changes, so a freshly pasted opponent is read. */
 	rev: number
 ): Matchup => {
@@ -89,7 +95,7 @@ export const useMatchup = (
 		season,
 		start,
 		periodTo,
-		!!start && start <= periodTo && owned.length > 0,
+		!!start && start <= periodTo && wanted,
 		["hitting", "pitching"]
 	)
 

@@ -697,6 +697,10 @@ export const App = () => {
 		snapshot?.horizon.end ?? null,
 		key,
 		ownedIds,
+		/* A team by EITHER measure: the hand-typed route stores seats and no roster, and
+		   inferring "has a team" from the roster alone took the recap card's week block away
+		   from exactly those readers. */
+		hasTeam || !!(key && lineupStore.of(key)?.spots.length),
 		rev
 	)
 	/**
@@ -1110,7 +1114,9 @@ export const App = () => {
 					  overrule. A manager opening the app at 6:40pm is working against a lock;
 					  the morning reader scrolls one card.
 					*/}
-					{!hasTeam && <Recap snapshot={snapshot} league={shown} leagueKey={key} />}
+					{!hasTeam && (
+						<Recap snapshot={snapshot} league={shown} leagueKey={key} matchup={matchup} />
+					)}
 					<Decide
 						snapshot={snapshot}
 						league={shown}
@@ -1119,7 +1125,9 @@ export const App = () => {
 						matchup={matchup}
 						onOpenTeam={() => go({ view: "trade" })}
 					/>
-					{hasTeam && <Recap snapshot={snapshot} league={shown} leagueKey={key} />}
+					{hasTeam && (
+						<Recap snapshot={snapshot} league={shown} leagueKey={key} matchup={matchup} />
+					)}
 					<p className="next-screen">
 						<button type="button" className="chip-btn" onClick={() => go({ view: "wire" })}>
 							Everyone you can get →

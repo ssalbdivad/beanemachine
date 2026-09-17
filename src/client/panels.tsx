@@ -735,6 +735,7 @@ export const PresetNote = ({
 // src/client/command.ts so api.ts can use the same string without importing React.
 export { IMPORT_COMMAND } from "./command.ts"
 import { IMPORT_COMMAND } from "./command.ts"
+import { extensionHere } from "./extension.ts"
 
 /**
  * Three screens. "league" was a fourth and is gone: the League setup editor is now
@@ -909,8 +910,35 @@ export const WaysIn = ({
 			<div className="routes">
 				<h3>Ways in</h3>
 				<dl>
-					{preset && onUsePreset && (
+					{/*
+					  THE READER FIRST, WHERE THERE IS ONE, and it is not there for most readers.
+					
+					  This list is ordered by what is worth trying, and for a reader whose browser
+					  can read his league in one press nothing else on it competes: no typing, no
+					  selecting a page, no command, and it reaches a private league because the
+					  browser doing the reading is his own and already signed in.
+					
+					  Rendered only when it is actually installed — an entry that says "there is a
+					  faster way, which you do not have" at the top of a list of things he CAN do
+					  is an advert in the place a reader goes for help. The screens that teach the
+					  reader about it are the setup sheet and My league, where the button lives.
+					*/}
+					{extensionHere() && (
 						<Fragment2 term="Fastest">
+							Your own browser reads your league &mdash; your scoring, your seats, who is
+							free and who you are playing &mdash; from the Yahoo page you have open.
+							Nothing is typed and nothing leaves this browser.
+							{onOpenSetup && (
+								<p style={{ margin: "var(--sp-2) 0 0" }}>
+									<button className="primary" onClick={onOpenSetup}>
+										Read my league on {tab("trade")}
+									</button>
+								</p>
+							)}
+						</Fragment2>
+					)}
+					{preset && onUsePreset && (
+						<Fragment2 term={extensionHere() ? "Instant" : "Fastest"}>
 							<b>{preset}</b> — a ready-made scoring table, roster and team count,
 							copied from a league that was read off its own settings page. Nothing
 							in it came from your league, so the page keeps saying so until you

@@ -1,0 +1,5 @@
+VERIFY 2021: copied helpers reproduce src/backtest/season.ts week for week: yes (22 weeks, total 14686.4)
+VERIFY 2022: copied helpers reproduce src/backtest/season.ts week for week: yes (21 weeks, total 14965.8)
+VERIFY 2023: copied helpers reproduce src/backtest/season.ts week for week: yes (22 weeks, total 16529.2)
+VERIFY 2024: copied helpers reproduce src/backtest/season.ts week for week: yes (23 weeks, total 16140.4)
+VERIFY 2025: copied helpers reproduce src/backtest/season.ts week for week: yes (23 weeks, total 16885.9)

@@ -1,0 +1,87 @@
+
+2021 — 22 weeks, 5 move(s)/week
+  nowire    11048 pts  105 moves
+  depth     11530 pts   76 moves
+  best      11383 pts   86 moves
+  own       12397 pts   84 moves
+
+2022 — 21 weeks, 5 move(s)/week
+  nowire    12086 pts   99 moves
+  depth     11688 pts   77 moves
+  best      10829 pts   82 moves
+  own       11684 pts   88 moves
+
+2023 — 22 weeks, 5 move(s)/week
+  nowire    12288 pts  103 moves
+  depth      9844 pts   71 moves
+  best      10698 pts   83 moves
+  own       10789 pts   88 moves
+
+2024 — 23 weeks, 5 move(s)/week
+  nowire    12790 pts  108 moves
+  depth     11634 pts   61 moves
+  best      13060 pts   67 moves
+  own       12595 pts   64 moves
+
+2025 — 23 weeks, 5 move(s)/week
+  nowire    12306 pts  109 moves
+  depth     10735 pts   54 moves
+  best      12021 pts   70 moves
+  own       12058 pts   83 moves
+
+POOLED — 111 weeks, seasons 2021, 2022, 2023, 2024, 2025
+  nowire     60518 pts  524 moves
+  depth      55431 pts  339 moves
+  best       57990 pts  388 moves
+  own        59523 pts  407 moves
+  wire size: mean 1024 men, min 669, max 1257
+
+PAIRED WEEKLY SIGN TEST (ties excluded)
+  best vs depth: 62W 43L 6T  +23.1/wk  z +1.85  p 0.064
+  own vs depth: 74W 28L 9T  +36.9/wk  z +4.55  p 0.000
+  best vs own: 45W 60L 6T  -13.8/wk  z -1.46  p 0.143
+  best vs nowire: 48W 58L 5T  -22.8/wk  z -0.97  p 0.331
+  depth vs nowire: 37W 69L 5T  -45.8/wk  z -3.11  p 0.002
+  own vs nowire: 52W 53L 6T  -9.0/wk  z -0.10  p 0.922
+
+PER-SEASON TOTALS (points) — the honest unit when a difference is set at the draft
+  season     nowire    depth     best      own
+  2021       11048    11530    11383    12397
+  2022       12086    11688    10829    11684
+  2023       12288     9844    10698    10789
+  2024       12790    11634    13060    12595
+  2025       12306    10735    12021    12058
+
+PER-SEASON, best vs depth (the question) — paired weeks
+  2021  11W 10L 1T  -6.7/wk
+  2022  5W 15L 1T  -40.9/wk
+  2023  12W 9L 1T  +38.8/wk
+  2024  16W 5L 2T  +62.0/wk
+  2025  18W 4L 1T  +55.9/wk
+
+SEASON-LEVEL SIGN TEST (5 seasons, exact binomial)
+  best vs depth: 3/5 seasons  p 1.000
+  own vs depth: 4/5 seasons  p 0.375
+  best vs own: 1/5 seasons  p 0.375
+  best vs nowire: 2/5 seasons  p 1.000
+  depth vs nowire: 1/5 seasons  p 0.375
+  own vs nowire: 1/5 seasons  p 0.375
+
+HOW OFTEN THE SEMANTICS EVEN DISAGREE (weeks where the rosters differ)
+  best vs depth: 106/111 weeks hold a different roster
+  own vs depth: 105/111 weeks hold a different roster
+  best vs own: 106/111 weeks hold a different roster
+  depth vs nowire: 106/111 weeks hold a different roster
+
+MEAN REPLACEMENT BAR BY SLOT (projected points per week)
+  slot      nowire      depth       best        own
+  C          29.68      18.61      26.52      25.34
+  1B         45.12      31.28      41.56      40.28
+  2B         39.05      22.88      35.40      34.00
+  3B         39.26      22.89      35.42      33.70
+  SS         41.07      21.05      36.68      34.96
+  OF         38.70      24.91      36.13      34.39
+  Util       53.71      35.93      48.66      44.31
+  SP         28.49      17.29      21.73      21.14
+  RP         16.95      11.56      14.72      14.24
+  P          24.04      14.62      21.73      20.59

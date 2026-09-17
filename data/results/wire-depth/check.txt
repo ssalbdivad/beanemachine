@@ -1,0 +1,40 @@
+
+TODAY: teams x count down the wire
+  holds   [ships] the ownership estimate and a real list set most replacement bars identically  — 1 of 8 moved
+  holds   [ships] none of the bars that do move moves far (< 5)  — largest 1.64
+  holds   [ships] the top of the board is the same 20 men either way  — 20 of 20
+  holds   [ships] declaring a complete read changes nothing
+  holds   [ships] C was read, so it keeps the bar the wire sets  — 48.85 vs 48.85
+  holds   [ships] 1B was read, so it keeps the bar the wire sets  — 62.39 vs 62.39
+  holds   [ships] 3B was read, so it keeps the bar the wire sets  — 61.67 vs 61.67
+  holds   [ships] SS was never read, so it falls back to the no-wire bar  — 92.52 vs 92.52
+  holds   [ships] OF was never read, so it falls back to the no-wire bar  — 88.47 vs 88.47
+  holds   [ships] Util was never read, so it falls back to the no-wire bar  — 106.43 vs 106.43
+  holds   [ships] P was never read, so it falls back to the no-wire bar  — 63.29 vs 63.29
+  holds   [ships] SS came back with men on it, so only declaring coverage catches its bar  — 47.9 vs 92.52
+  holds   [ships] OF came back with men on it, so only declaring coverage catches its bar  — 28.93 vs 88.47
+  holds   [ships] Util came back with men on it, so only declaring coverage catches its bar  — 64.84 vs 106.43
+  holds   [ships] P came back with nobody, so the empty-slot guard had already caught it  — 63.29 vs 63.29 vs 63.29
+  holds   [ships] no pitcher is priced against a bar of zero
+  holds   [ships] and no pitcher's bscore is simply his whole projected total
+
+PROPOSED: count down the wire
+  holds   [own] the ownership estimate and a real list set most replacement bars identically  — 2 of 9 moved
+  BREAKS  [own] none of the bars that do move moves far (< 5)  — largest 7.60
+  BREAKS  [own] the top of the board is the same 20 men either way  — 16 of 20
+  holds   [own] declaring a complete read changes nothing
+  holds   [own] C was read, so it keeps the bar the wire sets  — 62.12 vs 62.12
+  holds   [own] 1B was read, so it keeps the bar the wire sets  — 87.78 vs 87.78
+  holds   [own] 3B was read, so it keeps the bar the wire sets  — 81.08 vs 81.08
+  holds   [own] SS was never read, so it falls back to the no-wire bar  — 92.52 vs 92.52
+  holds   [own] OF was never read, so it falls back to the no-wire bar  — 88.47 vs 88.47
+  holds   [own] Util was never read, so it falls back to the no-wire bar  — 106.43 vs 106.43
+  holds   [own] P was never read, so it falls back to the no-wire bar  — 63.29 vs 63.29
+  holds   [own] SS came back with men on it, so only declaring coverage catches its bar  — 72.81 vs 92.52
+  holds   [own] OF came back with men on it, so only declaring coverage catches its bar  — 72.81 vs 88.47
+  holds   [own] Util came back with men on it, so only declaring coverage catches its bar  — 87.78 vs 106.43
+  holds   [own] P came back with nobody, so the empty-slot guard had already caught it  — 63.29 vs 63.29 vs 63.29
+  holds   [own] no pitcher is priced against a bar of zero
+  holds   [own] and no pitcher's bscore is simply his whole projected total
+
+32 hold, 2 break

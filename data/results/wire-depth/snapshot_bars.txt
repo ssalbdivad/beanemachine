@@ -1,0 +1,20 @@
+ownership cut: usable=true cut=35% depth=270 priced=880 tied=4
+wire (listed and <= cut): 612 men priced there
+points identical with and without the wire: yes
+
+rebuilt bars match rateAll's own: yes
+
+REPLACEMENT BARS (projected points over the committed fortnight)
+  slot   depth   pool@slot  wire@slot     NOWIRE         A (ships)      B (best free)    OWN (count deep)
+  C        10         98         82       75.04           48.85              75.04              62.12
+  1B       10        116         81      103.90           62.39              90.72              87.78
+  2B       10        160        127       90.72           66.89              95.18              74.27
+  3B       10        138        107       94.23           61.67              95.18              81.08
+  SS       10        105         76       92.52           57.20              82.94              77.93
+  OF       30        251        135       88.47           60.73              95.18              84.39
+  Util     20        579        368      106.43           72.81              96.74              93.69
+  SP       20        300        104       73.56           39.74              73.56              62.73
+  RP       20        444        124       53.79           37.00              73.56              52.02
+  P        40        669        172       63.29           35.34              73.56              52.61
+
+nowire vs A: spearman(bscore) 0.972844, slot changes 553/1248, first ranking difference at row 5, top-20 overlap 19/20

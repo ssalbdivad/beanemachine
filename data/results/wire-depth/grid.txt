@@ -1,0 +1,31 @@
+Every cell: 111 paired weeks, 2021-2025, same starting roster, lineup on projected
+points (the app's rule), moves on bscore. Sign test, ties excluded.
+
+field  fldseats mv                best-depth               own-depth             best-nowire            depth-nowire
+hot    23       1      -1.4/wk 49W55L p0.556  +21.5/wk 64W40L p0.019  -29.1/wk 34W72L p0.000  -27.6/wk 36W67L p0.002
+hot    23       2     -12.6/wk 45W61L p0.120  +28.8/wk 68W38L p0.004  -38.3/wk 38W68L p0.004  -25.7/wk 37W67L p0.003
+hot    23       3     -22.8/wk 40W66L p0.012  +44.2/wk 78W28L p0.000  -69.0/wk 25W81L p0.000  -46.2/wk 28W78L p0.000
+hot    23       5      +1.2/wk 58W48L p0.331  +56.7/wk 76W30L p0.000  -69.0/wk 21W85L p0.000  -70.2/wk 21W85L p0.000
+mixed  18       2     -17.0/wk 43W63L p0.052  +41.0/wk 71W34L p0.000  -57.1/wk 25W80L p0.000  -40.1/wk 31W75L p0.000
+mixed  18       3     -17.0/wk 42W64L p0.033  +35.3/wk 69W37L p0.002  -49.2/wk 31W75L p0.000  -32.2/wk 36W70L p0.001
+mixed  23       1      -6.4/wk 47W59L p0.244  +21.5/wk 58W47L p0.283  -10.5/wk 49W57L p0.437   -4.2/wk 53W52L p0.922
+mixed  23       2     -28.6/wk 34W71L p0.000  +21.1/wk 62W44L p0.080  -31.9/wk 37W68L p0.002   -3.4/wk 52W53L p0.922
+mixed  23       3     -11.4/wk 48W57L p0.380  +58.7/wk 79W26L p0.000  -71.2/wk 22W84L p0.000  -59.8/wk 26W80L p0.000
+mixed  23       5      -6.9/wk 53W52L p0.922  +44.5/wk 69W37L p0.002  -41.2/wk 38W68L p0.004  -34.3/wk 40W66L p0.012
+mixed  27       2     -11.3/wk 50W56L p0.560  +34.0/wk 62W41L p0.039  -37.5/wk 34W72L p0.000  -26.2/wk 40W65L p0.015
+mixed  27       3     -15.9/wk 50W56L p0.560  +40.8/wk 73W31L p0.000  -45.0/wk 30W76L p0.000  -29.1/wk 36W69L p0.001
+sharp  23       1     -33.3/wk 42W62L p0.050  -14.5/wk 43W59L p0.113  -50.0/wk 32W74L p0.000  -16.6/wk 41W65L p0.020
+sharp  23       2     +13.3/wk 59W46L p0.205  +25.3/wk 65W40L p0.015  -25.8/wk 40W65L p0.015  -39.1/wk 32W74L p0.000
+sharp  23       3     +19.3/wk 64W41L p0.025  +36.5/wk 65W39L p0.011  -21.4/wk 39W66L p0.008  -40.7/wk 40W66L p0.012
+sharp  23       5     +23.1/wk 62W43L p0.064  +36.9/wk 74W28L p0.000  -22.8/wk 48W58L p0.331  -45.8/wk 37W69L p0.002
+stale  23       1      -3.7/wk 50W56L p0.560   +2.8/wk 48W54L p0.552  +36.7/wk 70W35L p0.001  +40.4/wk 77W26L p0.000
+stale  23       2     -27.5/wk 37W66L p0.004   +0.6/wk 53W52L p0.922  +59.0/wk 74W32L p0.000  +86.4/wk 87W18L p0.000
+stale  23       3      -6.1/wk 50W55L p0.626  +11.2/wk 59W45L p0.170  +69.6/wk 77W29L p0.000  +75.7/wk 84W22L p0.000
+stale  23       5      -9.1/wk 50W56L p0.560  +13.2/wk 58W48L p0.331  +55.2/wk 78W28L p0.000  +64.3/wk 83W23L p0.000
+
+best  - depth  : 20 configs | 4 positive | mean   -8.7/wk | p<0.05 in 5 (1 of them positive) | seasons won 36/100
+own   - depth  : 20 configs | 19 positive | mean  +28.0/wk | p<0.05 in 13 (13 of them positive) | seasons won 78/100
+best  - own    : 20 configs | 0 positive | mean  -36.7/wk | p<0.05 in 13 (0 of them positive) | seasons won 15/100
+best  - nowire : 20 configs | 4 positive | mean  -22.4/wk | p<0.05 in 18 (4 of them positive) | seasons won 27/100
+depth - nowire : 20 configs | 4 positive | mean  -13.7/wk | p<0.05 in 18 (4 of them positive) | seasons won 34/100
+own   - nowire : 20 configs | 12 positive | mean  +14.3/wk | p<0.05 in 6 (5 of them positive) | seasons won 59/100

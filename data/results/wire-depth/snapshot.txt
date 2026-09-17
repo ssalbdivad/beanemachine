@@ -1,0 +1,78 @@
+ownership cut: usable=true cut=35% depth=270 priced=880 tied=4
+wire (listed and <= cut): 612 men priced there
+points identical with and without the wire: yes
+
+rebuilt bars match rateAll's own: yes
+
+REPLACEMENT BARS (projected points over the committed fortnight)
+  slot   depth   pool@slot  wire@slot     NOWIRE         A (ships)      B (best free)    OWN (count deep)
+  C        10         98         82       75.04           48.85              75.04              62.12
+  1B       10        116         81      103.90           62.39              90.72              87.78
+  2B       10        160        127       90.72           66.89              95.18              74.27
+  3B       10        138        107       94.23           61.67              95.18              81.08
+  SS       10        105         76       92.52           57.20              82.94              77.93
+  OF       30        251        135       88.47           60.73              95.18              84.39
+  Util     20        579        368      106.43           72.81              96.74              93.69
+  SP       20        300        104       73.56           39.74              73.56              62.73
+  RP       20        444        124       53.79           37.00              73.56              52.02
+  P        40        669        172       63.29           35.34              73.56              52.61
+
+WHERE THE NO-WIRE BAR LANDS ON THIS WIRE (men on the wire who out-project it)
+  slot   teams x count   count   measured
+  C               10       1          0
+  1B              10       1          0
+  2B              10       1          1
+  3B              10       1          1
+  SS              10       1          0
+  OF              30       3          2
+  Util            20       2          0
+  SP              20       2          0
+  RP              20       2          1
+  P               40       4          2
+
+nowire vs A: spearman(bscore) 0.972844, slot changes 553/1248, first ranking difference at row 5, top-20 overlap 19/20
+  best gettable under nowire: Grant Taylor 19.77 | Sam Antonacci 6.71 | Tristan Peters 5.22 | Zebby Matthews 2.12 | Tyler Stephenson 0
+  best gettable under A: Grant Taylor 38.22 | Sam Antonacci 34.45 | Tristan Peters 32.96 | Zebby Matthews 30.07 | Jake Burger 28.33
+  largest bscore moves: Rafael Devers 11.16→52.67 | Jonathan Aranda 3.08→44.59 | Ty France -16.12→25.39 | Michael Busch -27.51→14.00 | Trey Mancini -101.62→-60.11
+  |rank move| mean 65.2, median 66, max 399
+  gettable men with a POSITIVE bscore: nowire 4, A 101, in both 4
+
+nowire vs B: spearman(bscore) 0.932486, slot changes 474/1248, first ranking difference at row 2, top-20 overlap 13/20
+  best gettable under nowire: Grant Taylor 19.77 | Sam Antonacci 6.71 | Tristan Peters 5.22 | Zebby Matthews 2.12 | Tyler Stephenson 0
+  best gettable under B: Grant Taylor 0 | Sam Antonacci 0 | Jake Burger 0 | Tyler Stephenson 0 | Cole Carrigg 0
+  largest bscore moves: Luke Murphy -45.66→-65.43 | Easton McGee -50.66→-70.43 | Zak Kent -52.66→-72.43 | Seth Martinez -53.91→-73.68 | Winston Santos -53.91→-73.68
+  |rank move| mean 103.1, median 104, max 503
+  gettable men with a POSITIVE bscore: nowire 4, B 0, in both 0
+
+A vs B: spearman(bscore) 0.981542, slot changes 772/1248, first ranking difference at row 2, top-20 overlap 13/20
+  best gettable under A: Grant Taylor 38.22 | Sam Antonacci 34.45 | Tristan Peters 32.96 | Zebby Matthews 30.07 | Jake Burger 28.33
+  best gettable under B: Grant Taylor 0 | Sam Antonacci 0 | Jake Burger 0 | Tyler Stephenson 0 | Cole Carrigg 0
+  largest bscore moves: Hancel Rincon -93.89→-132.11 | Chris Sale 73.23→35.01 | Taj Bradley 37.13→-1.09 | Bryan Hudson 2.95→-35.27 | Brent Headrick 2.63→-35.59
+  |rank move| mean 51.3, median 41, max 297
+  gettable men with a POSITIVE bscore: A 101, B 0, in both 0
+
+nowire vs own: spearman(bscore) 0.974569, slot changes 67/1248, first ranking difference at row 4, top-20 overlap 17/20
+  best gettable under nowire: Grant Taylor 19.77 | Sam Antonacci 6.71 | Tristan Peters 5.22 | Zebby Matthews 2.12 | Tyler Stephenson 0
+  best gettable under own: Grant Taylor 21.54 | Sam Antonacci 20.91 | Tyler Stephenson 12.92 | Zebby Matthews 12.8 | Jared Jones 10.12
+  largest bscore moves: Leo Rivas -80.18→-63.73 | Sal Stewart 24.29→40.74 | Brooks Lee 7.08→23.53 | Jazz Chisholm Jr. -6.24→10.21 | Adael Amador -23.46→-7.01
+  |rank move| mean 66.7, median 64, max 263
+  gettable men with a POSITIVE bscore: nowire 4, own 12, in both 4
+
+A vs own: spearman(bscore) 0.993897, slot changes 590/1248, first ranking difference at row 4, top-20 overlap 17/20
+  best gettable under A: Grant Taylor 38.22 | Sam Antonacci 34.45 | Tristan Peters 32.96 | Zebby Matthews 30.07 | Jake Burger 28.33
+  best gettable under own: Grant Taylor 21.54 | Sam Antonacci 20.91 | Tyler Stephenson 12.92 | Zebby Matthews 12.8 | Jared Jones 10.12
+  largest bscore moves: Jonathan Aranda 44.59→19.20 | Rafael Devers 52.67→27.28 | Matt Olson 44.04→18.65 | TJ Rumfield 38.54→13.15 | Freddie Freeman 34.04→8.65
+  |rank move| mean 24.0, median 11, max 268
+  gettable men with a POSITIVE bscore: A 101, own 12, in both 12
+
+nowire: best gettable bscore 19.77, 1 men tied there; 4 of 540 gettable men above their own bar
+
+A: best gettable bscore 38.22, 1 men tied there; 101 of 540 gettable men above their own bar
+
+B: best gettable bscore 0.00, 6 men tied there; 0 of 540 gettable men above their own bar
+
+own: best gettable bscore 21.54, 1 men tied there; 12 of 540 gettable men above their own bar
+  nowire rostered men below keepFloor 25 (droppable): 688 of 708
+  A      rostered men below keepFloor 25 (droppable): 584 of 708
+  B      rostered men below keepFloor 25 (droppable): 694 of 708
+  own    rostered men below keepFloor 25 (droppable): 666 of 708

@@ -695,10 +695,39 @@ that slot. `BN`, `IL` and `NA` are excluded, because a bench spot doesn't create
 demand for a specific position.
 
 ```
-depth_slot       = teams × count_slot
+depth_slot       = teams × count_slot          (a pool of every player in baseball)
+depth_slot       = count_slot                  (a pool that is already YOUR league's wire)
 replacement_slot = points of the (depth + 1)-th best eligible player at that slot
 bscore           = max over the player's slots of (points − replacement_slot)
 ```
+
+**The depth is not the same in the two pools, and treating it as one was a
+double-count.** `teams × count` is right in a pool of every player in baseball: the
+man you can actually get is the one below all the men the other rosters have taken.
+A league's own free-agent list is that pool *with those rosters already removed*, so
+walking the same distance down it takes them out a second time and lands on a man
+far worse than anyone you could add today.
+
+Measured three ways on 2026-09-17, all refuting the old line by an order of
+magnitude — the number of men on a real wire who out-project the whole-pool bar is
+0–2 a slot on the committed capture (mean 0.7), 0–5 in a simulated ten-team league
+over 111 weeks of 2021–2025 (mean 1.8), and this league's own seats per slot are
+1.8. The old line walked 10 to 40. Against the previous rule over 20 configurations
+of field composition and move budget, walking `count` wins 19 of 20 at a mean of
++28.0 points a week, significant in 13, and takes 78 of 100 season-comparisons; at
+one move a week every variant is inside the noise. The evidence is in
+[`data/results/wire-depth/`](../data/results/wire-depth/README.md) and re-derivable
+with `node --experimental-strip-types src/backtest/wire/bars.ts`.
+
+The candidate that prompted the measurement — replacement as the wire's *best* man,
+on the argument that the rosters have already run out — was measured and rejected:
+it loses to the previous rule in 16 of 20 configurations, and under it no man on a
+wire can score above zero, so "who should I add" becomes a tie at 0.00 broken
+arbitrarily.
+
+A slot the sweep never reached, and a slot whose wire came back empty, keep the
+whole-pool depth: they are drawn from all of baseball, where the league's depletion
+has not already been taken out.
 
 A player eligible at several slots is credited at the slot where he is worth
 most, and the board shows which one won.

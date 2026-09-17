@@ -283,7 +283,10 @@ export const Onboard = ({
 			}
 		}
 		setReceipt({
-			league: reading.league?.meta.league_name ?? reading.leagueId ?? null,
+			/* The league's NAME, or the words "your league" — never the id. A number a reader
+			   has never typed and does not recognise is the app naming its own key at him,
+			   and the receipt is the one line on this screen he reads twice. */
+			league: reading.league?.meta.league_name ?? (reading.leagueId ? "your league" : null),
 			free: null,
 			at: reading.at
 		})

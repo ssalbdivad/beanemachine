@@ -3,6 +3,9 @@ import type { GrabFailure } from "../data/extension.ts"
 import type { PlayerSeason } from "../data/statsapi.ts"
 import type { ExtensionState } from "./extension.ts"
 import { pool as poolStore } from "./pool.ts"
+import { roster as rosterStore } from "./roster.ts"
+import { lineupStore } from "./lineup.ts"
+import { opponentStore } from "./opponent.ts"
 
 /**
  * READING A LEAGUE, IN ONE PLACE, because two places would drift.
@@ -88,6 +91,64 @@ export const refreshPool = async (
 		}
 	}
 	return { added: got.pool.players.length, failure: swept.failure ?? null }
+}
+
+/**
+ * THE WHOLE LEAGUE, INTO THIS BROWSER, from wherever the reader pressed.
+ *
+ * The setup sheet and My league both offer this, and written twice they would be two
+ * slightly different answers to "what did we just read" — which is how one screen ends up
+ * saying 231 free agents and another 27. The sheet additionally creates the league when
+ * there is not one yet, which is why `onLeague` is a callback rather than a store write:
+ * adopting a preview as a real league is a decision that belongs to the screen that was
+ * showing the preview.
+ */
+export const readLeagueHere = async (
+	ext: ExtensionState,
+	snapshot: { players: PlayerSeason[]; eligibility?: Record<string, string[]> },
+	leagueKey: string,
+	onLeague?: (league: import("../schema.ts").League) => void
+): Promise<{ said: string; read: boolean }> => {
+	const answer = await ext.ask("league")
+	if (!answer.grabs?.length) {
+		const f = answer.failure
+		return { said: `${f?.what ?? "That could not be read"}${f?.fix ? ` — ${f.fix}` : ""}`, read: false }
+	}
+	const reading = readGrabs(answer.grabs, snapshot)
+	const said: string[] = []
+	if (reading.league && onLeague) {
+		onLeague(reading.league)
+		said.push("Read your league's own scoring")
+	}
+	if (reading.roster?.players.length) {
+		try {
+			rosterStore.set(leagueKey, reading.roster.keys)
+			if (reading.roster.spots.length)
+				lineupStore.set(leagueKey, reading.roster.spots, reading.at ?? new Date().toISOString())
+			said.push(`${reading.roster.players.length} men, in the seats they are in`)
+		} catch (e) {
+			said.push(`your team could not be saved: ${(e as Error).message}`)
+		}
+	}
+	if (reading.opponent?.length) {
+		try {
+			opponentStore.set(leagueKey, reading.opponent)
+			said.push(`${reading.opponent.length} on the other side of your matchup`)
+		} catch {
+			/* An opponent is one paste away and worth nothing if it costs the read that
+			   carried it. */
+		}
+	}
+	const id = reading.leagueId
+	if (id) {
+		const swept = await refreshPool(ext, snapshot, leagueKey, id, reading.sport ?? "baseball")
+		if (swept.added !== null) said.push(`${swept.added} free agents`)
+		else if (swept.failure) said.push(swept.failure.what)
+	}
+	return {
+		said: said.length ? `${said.join(", ")}.` : reading.notes.join(" ") || "Nothing new came back.",
+		read: said.length > 0
+	}
 }
 
 /** Hours since an ISO instant, or null when there is nothing to measure. Shared so the

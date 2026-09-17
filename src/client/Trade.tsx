@@ -12,6 +12,9 @@ import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
 import { slotsFor, type OwnershipCut } from "../engine/bscore.ts"
 import { localDate } from "../data/today.ts"
+import { extensionHere, useExtension } from "./extension.ts"
+import { readLeagueHere } from "./read-yahoo.ts"
+import { stored } from "./stores.ts"
 import "./trade.css"
 import { tab, tradesClosed } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
@@ -99,6 +102,18 @@ export interface TradeProps {
 }
 
 export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
+	/* The browser reader, when there is one. See src/client/read-yahoo.ts — the same two
+	   asks the setup sheet makes, so a league read from this screen and a league read from
+	   that one cannot come out different. */
+	const ext = useExtension()
+	const [readSaid, setReadSaid] = useState<string | null>(null)
+	const readFromYahoo = async (): Promise<void> => {
+		if (!snapshot || !leagueKey) return
+		setReadSaid(null)
+		const got = await readLeagueHere(ext, snapshot, leagueKey)
+		setReadSaid(got.said)
+		stored()
+	}
 	// `availability` comes along for its `cut` — the percentage that separates
 	// "probably taken" from "probably free" in a league of THIS size, which is what
 	// lets the lineup card qualify a replacement by the number instead of by a generic
@@ -836,6 +851,42 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 				  * and it reaches PRIVATE leagues — which is most leagues, and which
 				  * nothing else here has ever reached.
 				  */}
+				{/*
+				  THE READER FIRST, WHERE THERE IS ONE, and the paste directly under it.
+				
+				  This screen's paste boxes are the route that has always worked and still is the
+				  only one on a phone, in a private window and behind a locked-down browser — so
+				  nothing here is taken away. What changes is the order: a reader whose own
+				  browser can do this in one press should not have to read four steps about
+				  selecting a page first. The boxes stay open below, not folded, because a reader
+				  who came to this screen came to paste something.
+				*/}
+				{extensionHere() && league?.meta.platform === "yahoo" && (
+					<div className="paste-roster read-yahoo">
+						<h3>Read it from Yahoo</h3>
+						<p className="sub">
+							Open your team on Yahoo in another tab, then press this. Your seats, your
+							league&rsquo;s scoring and who is free all come across.
+						</p>
+						<p>
+							<button
+								type="button"
+								className="primary"
+								disabled={ext.busy || !snapshot || !leagueKey}
+								onClick={() => void readFromYahoo()}
+							>
+								{ext.busy ? "Reading\u2026" : "Read my league"}
+							</button>
+							{!ext.yahooOpen && (
+								<button type="button" onClick={() => ext.openYahoo()} style={{ marginLeft: "var(--sp-2)" }}>
+									Open Yahoo
+								</button>
+							)}
+						</p>
+						{ext.progress && <p className="sub connect-progress">{ext.progress}</p>}
+						{readSaid && <p className="sub">{readSaid}</p>}
+					</div>
+				)}
 				<div className="paste-roster">
 					<h3>Paste your roster</h3>
 					{/* Named steps, and the actual keystrokes. "Select the page" assumes the

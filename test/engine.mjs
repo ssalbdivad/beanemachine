@@ -1313,12 +1313,35 @@ t("while the four fields that are about the rows all move, so the rows are reall
     t("the ownership estimate and a real list set most replacement bars identically",
       moved.length <= slots.length / 2,
       `${moved.length} of ${slots.length} moved: ${moved.map(s => `${s} ${be.get(s)}->${br.get(s)}`).join(", ")}`)
-    t("and none of the bars that do move moves far, in a league scoring hundreds a fortnight",
-      worst < 5, `largest move ${worst.toFixed(2)}`)
+    /*
+     * BOTH OF THESE MOVED, AND THE REASON IS A FIX RATHER THAN A DRIFT.
+     *
+     * They used to require the largest bar move to be under 5 points and the top 20 to be
+     * the same 20 men — measured 2026-09-17 at 1.64 and 20 of 20. Later that day the
+     * replacement DEPTH on a real wire changed from `teams x count` to `count`, because
+     * walking a wire the same distance as the whole of baseball takes the other nine rosters
+     * out twice: the wire is already the list of men nobody has. Measured three ways, the
+     * number of men above the whole-pool bar on a real wire is 0-5 (mean 1.8) against the
+     * 10-40 the old line walked, and the change is worth a measured +28.0 points a week
+     * across 20 configurations of a simulated season.
+     *
+     * So the bar on a real list is now SHALLOWER than the estimate's, and the two answers
+     * are further apart: largest move 7.60, top-20 overlap 16 of 20. That is not the estimate
+     * getting worse — it is the real list finally being read at the right depth, and it makes
+     * the estimate matter MORE than this block used to say, which is worth knowing next to
+     * `likelyAvailable`.
+     *
+     * The property under test is unchanged in kind and restated at the new size: most bars
+     * still identical, no bar moving by a league-changing amount, and the top of the board
+     * still mostly the same men. What would fail is the estimate and a real list disagreeing
+     * about who is worth having.
+     */
+    t("and none of the bars that do move moves by a league-changing amount",
+      worst < 12, `largest move ${worst.toFixed(2)}`)
     const top = rs => rs.filter(r => r.rateable).slice(0, 20).map(r => r.player.name)
     const shared = top(est).filter(n => top(real).includes(n)).length
-    t("so the top of the board is the same men either way",
-      shared === 20, `${shared} of 20 shared`)
+    t("so the top of the board is mostly the same men either way",
+      shared >= 15, `${shared} of 20 shared`)
   }
 
   /**

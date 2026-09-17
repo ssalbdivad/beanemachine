@@ -706,7 +706,48 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			replacementBySlot.set(slot, 0)
 			continue
 		}
-		const depth = Math.min(o.teams * count, Math.max(eligible.length - 1, 0))
+		/*
+		 * HOW FAR DOWN THE POOL REPLACEMENT SITS, and it is not the same distance in the two
+		 * pools — which it was, and that was a double-count.
+		 *
+		 * `teams x count` is the right depth in a pool of EVERY player in baseball: the man
+		 * you could actually get is the one below all the men the other nine rosters have
+		 * taken, and walking past them is how you find him. A WIRE is that pool with those
+		 * rosters already removed — it is the list of men nobody has — so walking `teams x
+		 * count` down it takes the same nine rosters out a second time, and lands on a man far
+		 * worse than the one a reader can actually add today.
+		 *
+		 * MEASURED, three ways, all refuting the old line by an order of magnitude. On the
+		 * committed capture's own wire, the number of men who out-project the whole-pool bar is
+		 * 0 to 2 per slot (mean 0.7). In a simulated ten-team league over 111 weeks of
+		 * 2021-2025 the weekly median is 0 to 5 (mean 1.8). This league's own `count` is 1.8
+		 * seats per slot. Today's line walks 10 to 40.
+		 *
+		 * AND IT IS WORTH POINTS, which is the part that decides it. Against the shipped rule,
+		 * over 20 configurations of field composition and move budget, each 111 paired weeks:
+		 * 19 of 20 favour walking `count`, mean +28.0 points a week, significant in 13, and it
+		 * wins 78 of 100 season-comparisons. At the shipped two moves a week against a mixed
+		 * field it is 62W-44L, +21.1/wk, z +1.75, p 0.080 — suggestive there, and significant
+		 * at three moves (79W-26L, +58.7/wk, p 0.0004). At ONE move a week everything in this
+		 * question is inside the noise; about 23 decisions a season cannot separate any of it.
+		 *
+		 * THE OTHER CANDIDATE WAS MEASURED AND REJECTED. "A known wire means replacement is its
+		 * BEST man" loses to the shipped rule in 16 of 20 (mean -8.7/wk) and degenerates: under
+		 * it no man on the wire can score above zero, so "who should I add" becomes a tie at
+		 * 0.00 broken arbitrarily — six men tied on the committed capture.
+		 *
+		 * BOTH FALLBACK POOLS KEEP THE OLD DEPTH, and that is deliberate rather than timid: a
+		 * slot the sweep never reached, and a slot whose wire came back empty, are drawn from
+		 * the whole of baseball, where the league's depletion has NOT already been taken out.
+		 *
+		 * Nothing in data/results/ moves: no backtest passes `available` — src/backtest/
+		 * season.ts computes its own whole-pool bar and never calls this — and neither does
+		 * src/auto/run.ts. The two browser screens are the only callers that do.
+		 */
+		const depth = Math.min(
+			onWire.length ? count : o.teams * count,
+			Math.max(eligible.length - 1, 0)
+		)
 		replacementBySlot.set(slot, eligible[depth]?.points ?? 0)
 	}
 

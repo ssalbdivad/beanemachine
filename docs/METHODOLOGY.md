@@ -66,7 +66,7 @@ because a capture is necessarily wrong about tonight.
 | Baseball Savant — pitch level | `/statcast_search/csv?…&game_date_gt=…&game_date_lt=…` | wOBA and xwOBA over a **rolling 21-day window**, aggregated a day at a time | 468 batters, 535 pitchers |
 | Baseball Savant — expected stats | `/leaderboard/expected_statistics?min=1&csv=true` | season-long xBA, xSLG, PA | 654 batters, 851 pitchers |
 | Baseball Savant — Statcast | `/leaderboard/statcast?min=1&csv=true` | barrel rate, hard-hit rate, average exit velocity, sweet-spot rate | joined onto the above by `player_id` |
-| Yahoo | public league player pages | "% Ros", the market's price; the eligibility Yahoo prints beside each name; and (server only) who is still available in your league | 1,110 rows read, 880 of the pool priced; 411 multi-position lines, 328 matched into the pool |
+| Yahoo | public league player pages | "% Ros", the market's price; the eligibility Yahoo prints beside each name; and (never from the page itself — from a server, from `src/cli.ts`, or from the browser reader in `extension/`) who is still available in your league | 1,110 rows read, 880 of the pool priced; 411 multi-position lines, 328 matched into the pool |
 
 Every count in that last column is re-derivable from `data/snapshot.json` itself: the
 pooled 651 + 795

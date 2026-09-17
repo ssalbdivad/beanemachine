@@ -599,9 +599,51 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 */
 	const inFold = new Set(rows.filter(r => r.who).map(r => r.who))
 	const benchNames = new Set(benched.map(m => m.name))
-	const unaccounted = [...activeSeated].filter(n => inFold.has(n) === benchNames.has(n))
-	t("every man in an active seat is either benched or in tonight's lineup, never neither",
+	/*
+	   THERE IS A THIRD LIST, and this assertion did not know about it until live data
+	   produced one.
+	
+	   A man the engine cannot price at all is in neither the lineup nor the bench rows — he
+	   is in the "could not be priced" note at the foot, by name, which is the card's whole
+	   answer to the quiet failure this assertion exists to catch. It went unnoticed because
+	   the note only appears when somebody on the seeded roster is unrateable, and on the
+	   committed capture nobody was: it took MLB putting William Contreras on the injured
+	   list, read live on 2026-09-17, for the branch to be taken at all.
+	
+	   The claim is unchanged and is now stated in full: every man in an active seat is
+	   accounted for SOMEWHERE the reader can see. What would still fail is a man in none of
+	   the three, which is the seat that is simply unmentioned.
+	*/
+	/* FOUR PLACES, not three, and the fourth is what caught this.
+	
+	   A man whose game has already started is named in the locked sentence — "his game was
+	   due to start at 1:05pm, so that seat is no longer yours to change" — and is
+	   deliberately left out of the could-not-be-priced note, because the note names only men
+	   the card has not already named. So a man who is BOTH unrateable and locked is accounted
+	   for exactly once, in the sentence that tells him the thing he can act on, which is
+	   nothing. Measured on 2026-09-17: William Contreras, on the injured list live and on a
+	   club that had already started, was in none of the first three lists and in that one. */
+	const named = sel =>
+		page.$$eval(sel, n => n.map(e => e.textContent ?? "")).catch(() => [])
+	const unpriced = new Set(
+		[
+			...(await named(".decide-watch b")),
+			...(await named(".decide-locked b")),
+			...(await named(".decide-stuck b")),
+			...(await named(".decide-scratch b")),
+			...(await named(".decide-called b"))
+		]
+			.flatMap(x => x.split(",").map(y => y.trim()))
+			.filter(Boolean)
+	)
+	const unaccounted = [...activeSeated].filter(
+		n => !inFold.has(n) && !benchNames.has(n) && !unpriced.has(n)
+	)
+	const twice = [...activeSeated].filter(n => inFold.has(n) && benchNames.has(n))
+	t("every man in an active seat is either benched, in tonight's lineup, or named as unpriceable",
 		unaccounted.length === 0, JSON.stringify(unaccounted))
+	t("and no man is in two of those at once",
+		twice.length === 0, JSON.stringify(twice))
 
 	/*
 	 * A man in Yahoo's "IL+" seat is not a man to bench.
@@ -757,12 +799,25 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		const claimed = /(\d+) players on your roster could not be priced|One player on your roster could not be priced/.exec(txt)
 		if (claimed) {
 			const n = claimed[1] ? Number(claimed[1]) : 1
-			const named = (txt.match(/could not be priced this period, so nothing above counts them: ([^.]+)\./) ?? [])[1]
+			/* THE CARD HAS NEVER SAID "this period", and this regex has expected it to since
+			   it was written — latent, because the block only runs when somebody on the
+			   roster is unrateable, which the committed capture never produced. Matched on
+			   the words the card actually renders (src/client/Decide.tsx:2492), and on both
+			   the singular and plural forms it builds. */
+			const named = (txt.match(/could not be priced, so nothing above counts (?:him|them): ([^.]+)\./) ?? [])[1]
 			t("it names every player it could not price, not just a count",
 				!!named && named.split(",").length === n, `${n} claimed, named: ${named}`)
-			if (shelved)
-				t("and the injured man this test seated is one of the names",
-					named?.includes(shelved.name) ?? false, `${shelved.name} not in: ${named}`)
+			if (shelved) {
+				/* ACCOUNTED FOR SOMEWHERE THE READER CAN SEE, which is the claim — not "in
+				   this particular note". The note names only men the card has not already
+				   named, so an injured man whose club has also started is named in the locked
+				   sentence instead and correctly absent from here. It used to require this
+				   note specifically and passed for two years because the seeded roster's
+				   injured man was never also locked; on 2026-09-17 he was. */
+				const anywhere = await page.$eval(".decide", e => e.innerText)
+				t("and the injured man this test seated is named somewhere on the card",
+					anywhere.includes(shelved.name), `${shelved.name} is on no list`)
+			}
 		} else {
 			t("with every player priced, no unpriceable note is invented", true,
 				"nothing on this roster was skipped")

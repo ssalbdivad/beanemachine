@@ -51,6 +51,64 @@ export const FROM_APP = "beanemachine-page" as const
 export const FROM_EXTENSION = "beanemachine-extension" as const
 
 /**
+ * THE TWO HALVES SHIP ON DIFFERENT CLOCKS, AND THIS IS THE NUMBER THAT SAYS SO.
+ *
+ * The app is a static site: a fix is live a minute after it is pushed, and every reader
+ * gets it on his next load whether he wanted it or not. The half inside the browser is not:
+ * it goes through a store review, it lands when the store feels like landing it, and a
+ * reader can switch off updates entirely. So the two are ALWAYS allowed to disagree, and
+ * the only question is whether the disagreement is announced or silent.
+ *
+ * Silent is what it was. An older half in the browser, asked for something it has never
+ * heard of, returned `false` from its listener; Chrome closed the reply channel; the page
+ * saw a dead channel and said "the connection was lost. Reload this page." — advice that
+ * cannot work, for a reader whose only real problem was that he had not updated. He would
+ * reload forever.
+ *
+ * So both halves say which protocol they speak, and the mismatch gets a sentence naming
+ * which side is behind. The number goes up only when the page starts NEEDING something an
+ * older half cannot do — not when a sentence changes, not when a bug is fixed.
+ *
+ *   1  the original: hello / page / league / pool, grabs and failures.
+ *   2  a sweep may come back partial (`failure` alongside `grabs`); a swept page is marked
+ *      as swept; the browser half refuses an ask it does not know instead of going quiet.
+ */
+export const PROTOCOL = 2
+
+/** Every ask this protocol defines. The browser half checks an incoming ask against this
+ *  rather than falling through, because falling through is what made an unknown ask look
+ *  like a lost connection. */
+export const ASKS = ["hello", "page", "league", "pool"] as const
+
+export const isKnownAsk = (ask: unknown): ask is Ask =>
+	typeof ask === "string" && (ASKS as readonly string[]).includes(ask)
+
+/**
+ * WHERE THE APP LIVES. One list, read by the manifest the build writes AND by the router
+ * that has to find an app tab to send progress to.
+ *
+ * Written twice they drift, and the drift is invisible: the manifest injects the bridge
+ * into a page the router will not send progress to, so the reader watches a button spin
+ * with no words under it and nothing anywhere says why. The local entries stay in the
+ * shipped build on purpose — this is a static site somebody can clone and serve, and a
+ * bridge that only spoke to the hosted copy would be untestable by the person developing
+ * it, which is how a bridge ends up shipped broken. Match patterns ignore the port, so one
+ * line covers every dev server.
+ */
+export const APP_MATCHES = [
+	"https://beanemachine.com/*",
+	"https://*.beanemachine.com/*",
+	"http://127.0.0.1/*",
+	"http://localhost/*"
+]
+
+export const YAHOO_MATCHES = ["*://*.fantasysports.yahoo.com/*"]
+
+/** The only sport this app knows. Everything else Yahoo runs fantasy for is a page that
+ *  parses into a team of nobody, which is why it is refused by name rather than read. */
+export const SPORT = "baseball"
+
+/**
  * Which Yahoo page a grab came off.
  *
  * Decided from the URL alone, by `pageKind` below, because a URL is the one thing on a
@@ -86,6 +144,44 @@ export interface Grab {
 	 *  card prints its age: a free-agent list is the most perishable thing this app
 	 *  holds, and one rival's waiver claim invalidates a row of it. */
 	at: string
+	/**
+	 * THIS PAGE WAS ASKED FOR BY A SWEEP, rather than being the page the reader happened
+	 * to be standing on.
+	 *
+	 * It matters for exactly one thing and the thing is expensive. `poolIsPartial` in
+	 * src/client/api.ts calls a pool partial when fewer than two thirds of the positions it
+	 * ASKED for came back — so a pool built from nine requested positions and four answers
+	 * is refused, correctly. But a reader who happens to be looking at the shortstop page
+	 * and presses "read my league" produces one players grab, from which the requested list
+	 * is derived as one position, and one of one is not partial: a single page of
+	 * shortstops would be promoted to "the exact list of everyone free in your league" and
+	 * the board would tell him nobody else is available anywhere.
+	 *
+	 * Nothing calls that path today — `readLeagueHere` throws away the pool it reads off a
+	 * league press — so this is a gun that was loaded rather than a bug that fired. The mark
+	 * is what makes the difference explicit instead of leaving it to whether a grab happened
+	 * to carry innerText.
+	 */
+	swept?: true
+	/**
+	 * WHAT THE SWEEP SET OUT TO GET, carried on every page it did get.
+	 *
+	 * `poolIsPartial` in src/client/api.ts refuses a pool when fewer than two thirds of the
+	 * positions it ASKED for came back, and that rule is the only thing standing between a
+	 * throttled sweep and a board that says nobody else in the league is available. It was
+	 * not working. `readGrabs` derived the asked-for list from the URLs of the pages IN
+	 * HAND, so a sweep stopped at the fifth position reported four positions asked and four
+	 * read — complete, by its own account — and only a page that came back EMPTY was ever
+	 * counted as missing. The one failure the rule exists for was the one it could not see.
+	 *
+	 * Measured in test/extension.mjs, which walls the fixture at the fifth position: with
+	 * the list derived from the grabs, `poolIsPartial` returned false on four positions of
+	 * nine. With it carried here, true.
+	 *
+	 * On every grab rather than alongside them, because a page that never arrived cannot
+	 * carry anything, and the list has to survive whichever pages are the ones that made it.
+	 */
+	asked?: string[]
 }
 
 /** What the extension could not do, in the same shape `src/auto/session.ts` uses — one
@@ -130,14 +226,40 @@ export type ExtensionMessage =
 			from: typeof FROM_EXTENSION
 			id: null
 			kind: "hello"
-			/** The extension's own version, so the app can say "update the extension"
-			 *  rather than "something went wrong" when a protocol changes. */
+			/** The version a reader would see in his browser's own list. For saying WHICH
+			 *  one is installed; the protocol number below is what decides whether it can
+			 *  do what is being asked. */
 			version: string
-			/** Whether a Yahoo tab is open RIGHT NOW, which decides whether the app offers
-			 *  "read it" or "open Yahoo first". */
+			/**
+			 * Which protocol it speaks. Absent from anything built before there was one,
+			 * which is why `protocolSkew` reads a missing number as 1 rather than as a
+			 * fault: the first shipped build genuinely spoke protocol 1 and said nothing.
+			 */
+			protocol?: number
+			/** Whether a BASEBALL fantasy tab is open right now, which decides whether the
+			 *  app offers "read it" or "open Yahoo first". A football tab does not count:
+			 *  offering to read a league off it is an offer that ends in "that page is your
+			 *  football league". */
 			yahooOpen: boolean
 	  }
-	| { from: typeof FROM_EXTENSION; id: string; kind: "grabs"; grabs: Grab[] }
+	| {
+			from: typeof FROM_EXTENSION
+			id: string
+			kind: "grabs"
+			grabs: Grab[]
+			/**
+			 * WHAT WENT WRONG ANYWAY. A sweep that is throttled at the fifth position has
+			 * four positions of real free agents and a reason it stopped, and both have to
+			 * travel: four positions of list beat none, and a reader told nothing about the
+			 * stop would take a partial wire for the whole wire.
+			 *
+			 * This field was being sent already — `yahoo.ts` has replied with it since the
+			 * sweep was written — and was simply missing from the type, so the page's own
+			 * handler had to declare a wider shape locally to read it. Typed here so the two
+			 * sides cannot drift.
+			 */
+			failure?: GrabFailure
+	  }
 	| { from: typeof FROM_EXTENSION; id: string; kind: "failed"; failure: GrabFailure }
 	| {
 			from: typeof FROM_EXTENSION
@@ -208,6 +330,96 @@ export const sportFrom = (url: string): string | null => {
 	} catch {
 		return null
 	}
+}
+
+/**
+ * WHOSE TEAM PAGE THIS IS.
+ *
+ * `/b1/<leagueId>/<teamId>` — the second number is the team, and every team in the league
+ * has a page at the same shape. A reader who follows a link from the standings, or who
+ * opens his rival's roster to see what he is up against, is on a page that reads EXACTLY
+ * like his own: the same table, the same slot labels, the same `innerText`. `rosterFromPaste`
+ * matches names against the snapshot and has no way to notice that the names are somebody
+ * else's, so the read succeeds and quietly replaces his team with a rival's.
+ *
+ * The id is the only thing on the page that tells them apart, and it is in the URL, which
+ * is the one part of a Yahoo page that does not move. Compare it against a team id the app
+ * already knows and the sentence "that is not your team" becomes sayable — see
+ * `readGrabs`'s `expect` in src/data/yahoo-read.ts.
+ */
+export const teamIdFrom = (url: string): string | null => {
+	try {
+		const seg = new URL(url).pathname.split("/").filter(Boolean)
+		// b1 / <leagueId> / <teamId> — both digits, and the team is the second of them
+		return seg.length >= 3 && /^\d+$/.test(seg[1]!) && /^\d+$/.test(seg[2]!) ? seg[2]! : null
+	} catch {
+		return null
+	}
+}
+
+/**
+ * THE SENTENCE FOR "THESE TWO HALVES ARE NOT THE SAME AGE".
+ *
+ * Returns null when they can work together, and a failure naming WHICH side is behind when
+ * they cannot. Naming the side is the whole value: "something went wrong" sends a reader to
+ * reload, and reloading is the one thing that cannot help, because the page is already the
+ * newest thing he has.
+ *
+ * A number from the future is not treated as a fault. A newer half in the browser is
+ * expected to keep answering everything an older page asks — that is what a protocol number
+ * is FOR — so the page says nothing and carries on. If that ever stops being true the
+ * failure will be a specific ask being refused, which already has its own sentence.
+ */
+export const protocolSkew = (theirs: number | undefined, ours: number = PROTOCOL): GrabFailure | null => {
+	/* Missing means the first build, which spoke protocol 1 and had no field to say so. */
+	const spoken = typeof theirs === "number" && Number.isFinite(theirs) ? theirs : 1
+	if (spoken >= ours) return null
+	return {
+		step: "extension",
+		what: "what reads Yahoo in this browser is older than this page, and cannot do this yet",
+		fix: "Update it in your browser's extensions list, then reload this page."
+	}
+}
+
+/**
+ * THE SAME ROWS, WITHOUT THE PAGE AROUND THEM.
+ *
+ * A players page is the one page sent as HTML rather than as text, because `parsePage`
+ * reads `data-ys-playerid` and the row's `title=` out of the markup and an id is what makes
+ * a free agent the same man as a snapshot player rather than a name that might be two
+ * people. The cost is the whole page: src/data/yahoo-pool.ts records, from a real sweep,
+ * that the last row of a players page is followed by roughly 90 KB of footer — and a sweep
+ * sends nine of them across `postMessage` at once.
+ *
+ * THIS IS A CUT, NOT A PARSE, and the difference is the point. It does not read a value, it
+ * does not know what a player is, and it cannot change what the app decides any row means.
+ * It keeps, for each of `parsePage`'s own row markers, exactly the span `parsePage` would
+ * have looked at — the marker plus the 9000 characters after it, which is the cap
+ * `parsePage` applies itself — and throws the rest away. What comes back therefore parses
+ * to the identical rows BY CONSTRUCTION, and test/extension.mjs asserts that equality
+ * against the fixture rather than taking the argument's word for it.
+ *
+ * The marker is duplicated from `parsePage` rather than imported, because importing it
+ * would pull the parser itself into the shipped extension and the whole design is that the
+ * parser lives on the side that can be fixed in a minute. The duplication is safe in the
+ * only direction that matters: if Yahoo ever moves the marker, NOTHING matches, this
+ * returns null, and the caller sends the entire page exactly as it did before. A redesign
+ * costs bandwidth here and never costs a row.
+ */
+const ROW_MARKER = /(?=data-ys-playerid="\d+"[^>]*title=")/
+const ROW_HEAD = /^data-ys-playerid="(\d+)"[^>]*title="([^"]+)"/
+/** `parsePage`'s own per-row cap. A row is never read further than this, so nothing beyond
+ *  it can change an answer. */
+const ROW_SPAN = 9000
+
+export const rowsOnly = (html: string): string | null => {
+	const kept: string[] = []
+	for (const part of html.split(ROW_MARKER)) {
+		const m = ROW_HEAD.exec(part)
+		if (!m) continue
+		kept.push(part.slice(0, m[0].length + ROW_SPAN))
+	}
+	return kept.length ? kept.join("") : null
 }
 
 export const isFromExtension = (data: unknown): data is ExtensionMessage =>

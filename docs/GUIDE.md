@@ -58,11 +58,18 @@ Six gestures on a phone, and nothing about platforms, settings pages or file for
 appears unless you ask for it.
 
 Everything else lives behind **My league scores differently**, which is shut until you
-open it: pasting your league's own settings page (which carries the scoring, the roster
-slots, the team count and the league's id in one gesture, and works on a private
-league), reading an ESPN league from its URL, typing the values in yourself, or loading
-a league you saved earlier. If a paste comes up short it says exactly what it did not
-find rather than filling it in.
+open it: letting a reader you add to your browser read your Yahoo league for you,
+pasting your league's own settings page (which carries the scoring, the roster slots,
+the team count and the league's id in one gesture, and works on a private league),
+reading an ESPN league from its URL, typing the values in yourself, or loading a league
+you saved earlier. If a paste comes up short it says exactly what it did not find
+rather than filling it in.
+
+The reader is the shortest of those and it is offered first on Yahoo, but it is offered
+and never assumed: it exists on Chrome, Edge and Firefox on a computer and on Firefox
+for Android, and on Safari, on an iPhone, or on a browser somebody else administers
+there is nothing to add. Every route above still leads to the same league, and none of
+this appears at all until you open that section.
 
 Already have a league and want the guided setup back? **Set up a league** in the
 toolbar on **My league** reopens it.
@@ -109,8 +116,11 @@ three different sentences instead of one guess. A live read that failed says so.
 
 It needs to know your team, and with no roster it says one sentence and offers one
 button: **Add your players**. It does not print a command. On ESPN the page can read
-your roster for itself; on Yahoo nothing can, and the exact route for a reader who
-wants one is folded away on **My league** under *I'm comfortable with a terminal*.
+your roster for itself; on Yahoo the page cannot, and one of two other things reads it
+instead — a reader added to your own browser, which reads the Yahoo tab you are already
+signed into, or, for somebody who would rather not add anything, typing the names in.
+The terminal route is still there and still folded away on **My league** under *I'm
+comfortable with a terminal*; it is now the third answer rather than the only one.
 
 ### Pickups is the ranking
 
@@ -599,13 +609,43 @@ built on them. The mapping is evidence-backed, not certified.
 
 ### If your league is on Yahoo — read this, it is the common case
 
-Yahoo sends no CORS headers on any of the pages the importer reads, so a browser is
-never handed the response body. That is a fact about Yahoo, not a limitation of this
-build, and no version of the hosted site will ever be able to import a Yahoo league.
-Measured 2026-09-09, it is worse than that from a server too: the sweep that had been
-returning 150 free agents returned 25, then 0, then the string "Request denied".
+Yahoo sends no CORS headers on any of the pages the importer reads, so a page on
+beanemachine.com is never handed the response body. That is a fact about Yahoo, not a
+limitation of this build, and no version of the hosted site will ever be able to import
+a Yahoo league *from its own page*. Measured 2026-09-09, it is worse than that from a
+server too: the sweep that had been returning 150 free agents returned 25, then 0, then
+the string "Request denied".
 
-**Paste the settings page.** This is the route, and it needs nothing installed:
+This paragraph used to end "no version of the hosted site will ever be able to import a
+Yahoo league", flat. The measurement under it has not moved and the sentence was true of
+every route that existed when it was written. What it missed is that your own browser is
+not only the page it is showing you: a reader you add to it runs inside your Yahoo tab,
+signed in as you, and what it reads is the page you are already looking at. So there are
+now three routes below rather than two, and the first is the one to try.
+
+**Let the reader do it.** Nothing to type, and it is the whole league in two presses —
+but it is an add-on, so it is only there if your browser takes one:
+
+1. On **My league**, or in the setup, press the button offering to let it read your
+   league for you. The app walks you through adding the reader to your browser and
+   names the exact words you will be pressing there ("Add to Chrome", then "Add
+   extension") rather than showing you a screenshot of somebody else's toolbar.
+2. Open your Yahoo team in another tab and sign in as you normally would. The reader
+   never opens a tab by itself, and it never asks Yahoo for anything you did not press.
+3. Back on beanemachine, press the read button. Your team page and your settings page
+   come back together, which is your roster, your scoring, your slots and your team
+   count in one gesture.
+4. Your free agents are a second press, because that one is nine requests spaced out on
+   purpose, and it tells you which position it is on while it runs.
+
+The reader hands over the *text of the pages*, and nothing else, to the app in the same
+browser. Nothing is sent to any server on this route — not to beanemachine's, which has
+no part in it, and not anywhere else. What it cannot do is work in a browser with no
+add-ons: Safari and iPhones take none, and a browser your employer administers can
+forbid them. If that is you, the next route needs nothing installed at all and is
+exactly as good, just slower to do.
+
+**Or paste the settings page.** This is the route that needs nothing installed:
 
 1. Open your league's **Settings** page — **League** → **Settings**, or add
    `/settings` to your league's URL.
@@ -621,9 +661,12 @@ league this repo fetched back when the importer still worked, pasting it, and
 asserting the league that comes out is the same league. It works on a private league,
 which no import ever has.
 
-Your team page and your free-agent page paste the same way, on **My league**.
+Your team page and your free-agent page paste the same way, on **My league**. The
+reader above and this paste end in the same place, through the same parsers: a grab and
+a paste of the same page produce the same league, which is the point of splitting it
+that way.
 
-The alternative, if you would rather have the file: one local run.
+**Or, if you would rather have the file:** one local run.
 
 ```sh
 npx --yes github:ssalbdivad/beanemachine \

@@ -1359,8 +1359,19 @@ t("and it says none of it in software: no headers, no server, no command",
   // refusal toast no longer carries it, and without it somewhere a reader could still
   // read "Yahoo can't be read" as "no league can".
   const ways = (await gapPage.$eval("dl", e => e.innerText)).replace(/\s+/g, " ")
+  /* THE YAHOO HALF OF THIS SENTENCE CHANGED, and the claim did not.
+  
+     It used to require the words "Yahoo does not let any website read your league". That was
+     true when it was written and is still true of a WEB PAGE — the 2026-09-04 measurement in
+     README.md stands — but it stopped being the whole truth on 2026-09-17, when a browser
+     reader that runs inside the reader's own Yahoo tab landed. Saying the old sentence to
+     somebody who has that reader would claim an absence the app has filled.
+  
+     What is asserted is what the assertion was always about: the page must not read as "no
+     league can be read", so it still says ESPN can be read from its URL, and it still says
+     what is true of a Yahoo league — that no website can read one. */
   t("and the page still says ESPN can be read from its URL, so Yahoo is not a blanket no",
-    /espn/i.test(ways) && /yahoo does not let any website/i.test(ways), ways.slice(0, 300))
+    /espn/i.test(ways) && /no website can read a yahoo league/i.test(ways), ways.slice(0, 300))
   // Folded, and the summary is the whole point of the fold: it names the reader it is
   // for. A command printed unconditionally is the app talking about itself to somebody
   // who came here about baseball, which is what the Yahoo toast was doing.

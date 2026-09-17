@@ -146,6 +146,49 @@ export interface PlanInput {
 	available?: { name: string; positions: string[] }[]
 	shape: RosterShape
 	options?: PlanOptions
+	/**
+	 * THE LEAGUE'S OWN PER-PERIOD RULES, where its settings page states them.
+	 *
+	 * `options.maxMoves` is a JUDGEMENT — two a week, because two measured best over 111
+	 * weeks against every opponent the simulator plays. The league's cap is a RULE: make
+	 * more than it allows and the platform refuses the claim. They are different kinds of
+	 * number and the planner had only the first, so on a league capped at one acquisition
+	 * a week it would cheerfully offer two and the reader could act on exactly half the
+	 * card. `movesAllowed` below takes the lower of the two and says which one bit.
+	 *
+	 * Until the browser reader landed this was nearly unreachable — the rows exist only
+	 * for a league somebody had fetched or pasted, which almost nobody had. A reader who
+	 * connects now hands over his settings page in the same press that brings his roster,
+	 * so both numbers are his league's own. `leagueLimits` in src/import.ts reads them.
+	 *
+	 * Null in either field means the page did not say, and is read as unlimited moves and
+	 * no innings floor — never as zero. Absent altogether is the same thing, which is what
+	 * keeps every caller written before this unchanged.
+	 */
+	limits?: { movesPerPeriod: number | null; inningsPerPeriod: number | null }
+}
+
+/**
+ * How many moves this run may actually make, and which number decided it.
+ *
+ * The cap is the LOWER of the measured default and the league's own rule, and the two
+ * are reported separately because they mean different things to a reader. `maxMoves`
+ * biting is a preference he can raise; his league's cap biting is a fact he cannot.
+ *
+ * A stated cap of 0 is a real answer — a league that allows no in-season acquisitions
+ * at all — and it produces a plan with no moves rather than a plan with the default
+ * two. That is why this takes the minimum rather than treating 0 as "unset": `null` is
+ * how "unset" is spelled here, exactly as `deriveMoveLimit` spells it.
+ */
+export const movesAllowed = (
+	options: PlanOptions,
+	limits: PlanInput["limits"]
+): { cap: number; byLeague: boolean } => {
+	const stated = limits?.movesPerPeriod
+	if (stated === null || stated === undefined) return { cap: options.maxMoves, byLeague: false }
+	return stated < options.maxMoves ?
+			{ cap: stated, byLeague: true }
+		:	{ cap: options.maxMoves, byLeague: false }
 }
 
 const r2 = (n: number): number => Number(n.toFixed(2))
@@ -571,6 +614,13 @@ export const planMoves = (
 	const resolved = resolveRoster(input)
 	const skipped: string[] = []
 	const notes: string[] = []
+	/** The lower of the measured default and the league's own rule — see `movesAllowed`. */
+	const { cap, byLeague } = movesAllowed(options, input.limits)
+	if (byLeague)
+		notes.push(
+			`your league allows ${cap} acquisition${cap === 1 ? "" : "s"} a week, which is fewer ` +
+				`than the ${options.maxMoves} moves this run would otherwise make, so ${cap} is the cap`
+		)
 
 	const onRoster = new Set(input.roster.map(s => normalizeName(s.name)))
 	const rostered = resolved.filter(r => !isReserve(r.spot.slot))
@@ -666,7 +716,7 @@ export const planMoves = (
 	 */
 	const room = Math.max(0, rosterCounts(input.shape.slots).total - input.roster.length)
 	for (const a of addable) {
-		if (moves.length >= Math.min(room, options.maxMoves)) break
+		if (moves.length >= Math.min(room, cap)) break
 		if (usedAdds.has(a.player.id.toString())) continue
 		if (a.bscore < options.minGain) continue
 		usedAdds.add(a.player.id.toString())
@@ -697,7 +747,7 @@ export const planMoves = (
 
 	let bestSeen: { gain: number; add: string; drop: string } | null = null
 	for (const drop of droppable) {
-		if (moves.length >= options.maxMoves) break
+		if (moves.length >= cap) break
 		// Yahoo's own eligibility when we could read it; the projection's single
 		// primary position only as a stated fallback, never as a silent one.
 		const dropSlots = drop.legal ?? drop.rated.slots
@@ -780,8 +830,17 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 		input.roster.flatMap(s => (isReserve(s.slot) ? [normalizeName(s.name)] : []))
 	)
 
-	if (result.moves.length > options.maxMoves)
-		out.push(`${result.moves.length} moves proposed, above the cap of ${options.maxMoves}`)
+	/* THE CAP THIS RAIL AUDITS IS THE ONE THE PLANNER WAS ACTUALLY UNDER. It read
+	   `options.maxMoves` alone, so a plan that proposed two moves in a league allowing one
+	   passed its own audit — the rail was checking the preference and not the rule. Both
+	   are re-derived here rather than taken from the planner, which is the point of a
+	   rail: the same arithmetic done independently. */
+	const { cap, byLeague } = movesAllowed(options, input.limits)
+	if (result.moves.length > cap)
+		out.push(
+			`${result.moves.length} moves proposed, above the cap of ${cap}` +
+				(byLeague ? ` your league allows each week` : ``)
+		)
 	/* Recomputed rather than taken from the planner, which is the point of a rail: it is
 	   the same arithmetic done independently, so a planner that got it wrong is caught. */
 	const room = Math.max(0, rosterCounts(input.shape.slots).total - input.roster.length)
@@ -976,10 +1035,20 @@ export const planSwaps = (
 	/** Every seat the league lets him hold — active, bench and injured. A move only has
 	 *  to take somebody out once these are all full; see the note on `d: null` below. */
 	const capacity = rosterCounts(input.shape.slots).total
+	/** The lower of the measured default and the league's own rule — see `movesAllowed`. */
+	const { cap, byLeague } = movesAllowed(options, input.limits)
+	if (byLeague)
+		notes.push(
+			`your league allows ${cap} acquisition${cap === 1 ? "" : "s"} a week, which is fewer ` +
+				`than the ${options.maxMoves} moves this run would otherwise make, so ${cap} is the cap`
+		)
 	let roster = input.roster
+	/** The lineup before any of this, kept so the innings floor below can be asked of
+	 *  the roster the moves LEAVE rather than the one they started from. */
+	const openingStarters = planLineup({ ...input, roster }).starters
 	let base = planLineup({ ...input, roster }).pointsPlanned
 
-	for (let round = 0; round < options.maxMoves; round++) {
+	for (let round = 0; round < cap; round++) {
 		const resolved = resolveRoster({ ...input, roster })
 		// A star is never offered up, whatever this week's arithmetic says. This is
 		// the one rail carried over unchanged, and it is a rail rather than a
@@ -1203,7 +1272,7 @@ export const planSwaps = (
 	 * where the measurement put it, and a planner that quietly exceeded its own cap
 	 * because the next gain looked good would be the churn the cap exists to stop.
 	 */
-	if (moves.length === options.maxMoves) {
+	if (moves.length === cap) {
 		const resolved = resolveRoster({ ...input, roster })
 		const droppable = resolved.filter(
 			r =>
@@ -1241,18 +1310,68 @@ export const planSwaps = (
 			 * showing that they have. The cap is a real caveat when another move WOULD help,
 			 * and a false one when it would not.
 			 */
+			/* WHICH CAP IS SPEAKING. The sentence used to say "N a week is where the
+			   measurement put the cap", which is true of `maxMoves` and false of a league
+			   rule — a reader whose league allows one acquisition a week would have been
+			   told a backtest was what stopped him, and invited to raise a number he
+			   cannot raise. */
 			if (Number.isFinite(bestNext) && bestNext > 0)
 				notes.push(
-					`a ${ordinal(options.maxMoves + 1)} move would gain ${r2(bestNext)} more on ` +
-						`top of these ${options.maxMoves} — ${options.maxMoves} a week is where the ` +
-						`measurement put the cap, not where the gains stop`
+					`a ${ordinal(cap + 1)} move would gain ${r2(bestNext)} more on top of these ` +
+						`${cap} — ` +
+						(byLeague ?
+							`${cap} a week is all your league allows, so this one is not available`
+						:	`${cap} a week is where the measurement put the cap, not where the gains stop`)
 				)
 			else if (Number.isFinite(bestNext))
 				notes.push(
-					`a ${ordinal(options.maxMoves + 1)} move would LOSE ${r2(-bestNext)} here, so ` +
+					`a ${ordinal(cap + 1)} move would LOSE ${r2(-bestNext)} here, so ` +
 						`the cap is not what is stopping this list`
 				)
 		}
+	}
+
+	/**
+	 * THE OTHER LEAGUE RULE A PLAN CAN BREAK, and it breaks it by accident.
+	 *
+	 * A league that sets a weekly innings minimum zeroes or forfeits the pitching side of
+	 * a matchup that falls short of it, and two add/drops can take an arm out of the
+	 * lineup. So a plan that is right about points can be wrong about the week, and the
+	 * planner had no idea: it optimises projected points and an innings floor is not a
+	 * points quantity at all.
+	 *
+	 * REPORTED, NOT ENFORCED, and the distinction is the whole of this block. Refusing a
+	 * move here would need two numbers nobody has handed over — how many innings his
+	 * staff has ALREADY thrown this period, which is on his team page and no reader here
+	 * opens, and whether this board's window is his scoring period at all. Declining a
+	 * good move on a guess at either is worse than naming the risk and leaving it to him.
+	 *
+	 * The two windows are named separately in the sentence for the same reason. The
+	 * innings are over whatever horizon the board was rated on, and the floor is per
+	 * week; where those differ the numbers are not comparable, and a note that quietly
+	 * compared them would be the kind of sentence this project exists not to write.
+	 *
+	 * WHICH IS ALSO WHY THE GATE IS "THE MOVES TOOK INNINGS OUT" rather than "the result
+	 * is under the floor". Gating on the level would need the two windows to be the same
+	 * one, and both ways of getting that wrong are live: over a fortnight, 25 innings
+	 * clears a 20-a-week floor on the arithmetic and misses it badly in fact, while over
+	 * a three-day period anything at all above the floor is certain to clear it. So the
+	 * condition is the thing the planner actually knows — that its own moves made this
+	 * number smaller — and the floor is quoted beside it rather than tested against it.
+	 * The cost is a note on a plan whose reader was never close to the floor; the
+	 * alternative cost is silence on one who was.
+	 */
+	const floor = input.limits?.inningsPerPeriod
+	if (floor !== null && floor !== undefined && moves.length) {
+		const before = seatedInnings(input.rated, openingStarters)
+		const after = seatedInnings(input.rated, planLineup({ ...input, roster }).starters)
+		if (after < before)
+			notes.push(
+				`${moves.length === 1 ? "this move takes" : `these ${moves.length} moves take`} the ` +
+					`arms in your lineup from ${before} to ${after} projected innings over this ` +
+					`window, and your league asks for ${floor} a week — worth checking against what ` +
+					`you have already thrown before you make ${moves.length === 1 ? "it" : "them"}`
+			)
 	}
 
 	return { moves, skipped, notes }

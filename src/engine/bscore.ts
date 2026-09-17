@@ -120,6 +120,55 @@ export const startableSeats = (shape: {
 }
 
 /**
+ * WHICH SLOTS A FREE-AGENT LIST ACTUALLY SPEAKS FOR, given the positions it was read at.
+ *
+ * A wire is read one POSITION at a time — Yahoo's player table takes `pos=C`, `pos=SP`
+ * and so on — and a league's SLOTS are not that set of names. This league seats four men
+ * at "P" and Yahoo has no P page; it seats two at "Util" and Yahoo's Util page is a
+ * different population from the union of its infield pages.
+ *
+ * The league already states the mapping, and states it exactly: `slot_accepts` is the
+ * list of eligibility positions each seat will take. So a slot is covered when EVERY
+ * position it accepts was read, and not otherwise. That is the direction that is safe to
+ * be wrong in — claiming coverage a sweep does not have is what puts a bar of zero under
+ * a whole side of the ball, while declining coverage it does have only falls back to the
+ * estimate this app used before any wire existed.
+ *
+ * Worked on league 228947's own seats. A complete nine-position sweep
+ * (C, 1B, 2B, 3B, SS, OF, Util, SP, RP) covers all ten startable slots, including the two
+ * Yahoo never names: P accepts SP and RP and both were read, Util accepts the six batting
+ * positions and all six were read. A sweep throttled after C, 1B, 2B and 3B covers
+ * exactly those four — Util is NOT covered, because SS and OF feed it and neither was
+ * read, and Util is the case a rule written the other way round ("does the read touch
+ * anything this seat takes?") gets wrong.
+ *
+ * `null` means the caller stated nothing about coverage, which is what every caller
+ * written before this did, and it is read as "every slot is covered" so their behaviour
+ * is unchanged. A league with no `slot_accepts` table falls back to the slot's own name,
+ * which is right for the eight seats Yahoo and the league spell identically and wrong
+ * only for P and Util — and wrong in the direction of declining coverage.
+ */
+export const slotsCoveredBy = (
+	league: League,
+	positionsRead: string[] | undefined
+): Set<string> | null => {
+	if (positionsRead === undefined) return null
+	const read = new Set(positionsRead.map(p => p.trim()))
+	const accepts = league.roster.slot_accepts
+	const out = new Set<string>()
+	for (const slot of Object.keys(league.roster.slots)) {
+		if (isReserveSlot(slot)) continue
+		const takes = accepts?.[slot]
+		// "any" is the bench and "injured_only" the IL, both already dropped by
+		// `isReserveSlot`; a seat whose list is empty states nothing, so its own name is
+		// the only claim left to test.
+		const needed = Array.isArray(takes) && takes.length ? takes : [slot]
+		if (needed.every(p => read.has(p))) out.add(slot)
+	}
+	return out
+}
+
+/**
  * The bscore: a player's projected points over the horizon, minus what a freely
  * available replacement at the same roster slot would produce, in THIS league's
  * scoring. Points above replacement is the honest unit — it is denominated in the
@@ -286,6 +335,50 @@ export interface RateOptions {
 	 * from the whole pool — see the comment where it is used.
 	 */
 	available?: (r: { player: { id: number; name: string } }) => boolean
+	/**
+	 * WHICH POSITIONS THAT LIST WAS ACTUALLY READ AT — the difference between "nobody
+	 * is free at shortstop" and "we never looked at shortstop".
+	 *
+	 * A league's own wire is read one POSITION at a time, nine separate page requests,
+	 * and Yahoo throttles by serving an EMPTY page rather than an error (commit de44045
+	 * records 150 players, then 25, then 0, then "Request denied"). So a sweep that
+	 * asked for nine positions and got four arrives looking exactly like a league with
+	 * four positions' worth of free agents, and the engine had no way to tell the two
+	 * apart. It did not try: `available` was applied at every slot alike.
+	 *
+	 * Measured on data/snapshot.json against league 228947 over the committed fortnight,
+	 * with a wire derived from the capture's own ownership column (611 men at or below
+	 * this league's 35% cut) and then truncated to the 300 of them the engine seats at
+	 * C, 1B, 2B or 3B — the four-position throttle above. Replacement bars, points over
+	 * the fortnight:
+	 *
+	 *   slot   complete wire   truncated, before this   truncated, with this
+	 *   C             48.85    48.85                    48.85
+	 *   1B            62.39    62.39                    62.39
+	 *   2B            66.89    66.89                    66.89
+	 *   3B            61.67    61.67                    61.67
+	 *   SS            57.20    47.90                    92.52  ← the no-wire bar
+	 *   OF            60.73    28.93                    88.47  ← the no-wire bar
+	 *   Util          72.81    64.84                   106.43  ← the no-wire bar
+	 *   SP            39.74     0                       73.56
+	 *   RP            37.00     0                       53.79
+	 *   P             35.34     0                       63.29
+	 *
+	 * Six of the ten startable slots were corrupted by a read that was right about four,
+	 * and three of them were set to zero — which says a freely available pitcher
+	 * produces nothing, so every pitcher's bscore became his whole projected total. The
+	 * top of that board is Pete Crow-Armstrong 103.47, Jake McCarthy 94.23, Kyle
+	 * Schwarber 89.20, where the complete wire has those three at 71.67, 62.43 and
+	 * 57.40 and puts Ben Rice at 84.59 above all of them.
+	 *
+	 * Given this list, a slot whose positions were not all read falls back to the
+	 * whole-pool simulation — the same bar a page with no wire at all uses, which is
+	 * this app's own stated answer for "unknown". Absent, every slot is treated as
+	 * covered, which is exactly the behaviour before this existed: on the committed
+	 * capture with a complete wire, passing it or omitting it produces a board that is
+	 * identical row for row, bscore and bar included.
+	 */
+	availablePositions?: string[]
 	/** Teams in the league — sets how deep the replacement level sits. Required:
 	 *  defaulting it would silently move every replacement level and therefore
 	 *  every bscore, which is exactly the kind of quiet assumption this app exists
@@ -552,9 +645,14 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	 * configuration rather than a rule of thumb.
 	 */
 	const replacementBySlot = new Map<string, number>()
+	/** Which slots the availability list is entitled to speak for. Null when the caller
+	 *  named no positions, which reads as "all of them" — see `availablePositions`. */
+	const covered = o.available ? slotsCoveredBy(o.league, o.availablePositions) : null
 	for (const [slot, count] of Object.entries(slotCounts)) {
 		if (RESERVE_SLOTS.has(slot)) continue
-		const all = rated.filter(r => r.rateable && r.slots.includes(slot))
+		const all = rated
+			.filter(r => r.rateable && r.slots.includes(slot))
+			.sort((a, b) => b.points - a.points)
 		/**
 		 * Whom the bar is drawn from.
 		 *
@@ -576,10 +674,34 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 * is denominated in and the quantity src/auto/plan.ts sorts by, so the CLI and
 		 * the backtests keep the number they were measured on; only a page that has
 		 * actually read a wire passes this.
+		 *
+		 * ── TWO WAYS A LIST STOPS BEING THE TRUTH ABOUT THIS SLOT ──────────────────
+		 *
+		 * IT WAS NEVER READ HERE. `covered` is the league's own `slot_accepts` crossed
+		 * with the positions the sweep actually came back with, and a slot outside it
+		 * falls back to the whole-pool simulation rather than to whatever the sweep's
+		 * other positions happened to sweep up. Measured on the committed capture with a
+		 * four-position read, the five slots it never looked at were priced against
+		 * bars of 47.90, 28.93, 64.84, 0, 0 and 0 against a complete wire's 57.20,
+		 * 60.73, 72.81, 39.74, 37.00 and 35.34 — the table is under `availablePositions`.
+		 *
+		 * IT WAS READ AND CAME BACK EMPTY. That used to set the bar to 0, which is the
+		 * most expensive number in this function: a bar of zero says a freely available
+		 * man at this seat produces nothing, so everyone eligible there is credited with
+		 * his whole projected total. Zero is not what "nobody is free" means either — if
+		 * you genuinely cannot add a catcher, the value of the next catcher up is not
+		 * nothing, it is unknown — so the honest answer is the one a page with no wire
+		 * uses. The 0 stays for the case it was actually written for: no rateable player
+		 * is eligible at this slot AT ALL, which is an unconfigured league or a seat
+		 * nobody in baseball qualifies for, where there is no pool to simulate from.
+		 *
+		 * Both branches are inert on a complete read: measured on the committed capture,
+		 * all ten startable slots are covered, none comes back empty, and the board is
+		 * identical row for row with and without the declaration.
 		 */
-		const eligible = (o.available ? all.filter(r => o.available!(r)) : all).sort(
-			(a, b) => b.points - a.points
-		)
+		const speaksHere = o.available !== undefined && (covered === null || covered.has(slot))
+		const onWire = speaksHere ? all.filter(r => o.available!(r)) : []
+		const eligible = onWire.length ? onWire : all
 		if (!eligible.length) {
 			replacementBySlot.set(slot, 0)
 			continue
@@ -779,6 +901,40 @@ export const withMarketEdge = (
  *
  * The snapshot already carries Yahoo's "% Ros" for everyone Yahoo listed, so the
  * estimate below needs nothing the hosted page does not already have.
+ *
+ * ── AND NOW THAT A REAL LIST CAN ARRIVE, HOW GOOD WAS THE ESTIMATE? ──────────
+ *
+ * A reader can now hand over his own league's free-agent list in one press, so the
+ * estimate is no longer the only answer and can be measured against the thing it was
+ * standing in for. Measured on data/snapshot.json against league 228947 over the
+ * committed fortnight, with a wire read out of the capture's own ownership column —
+ * the 611 men it prices at or below this league's 35% cut — and passed as
+ * `available`:
+ *
+ *  · THE REPLACEMENT BAR BARELY MOVES. Seven of the ten startable slots land on the
+ *    same number to the cent. The three that move are all on the pitching side and
+ *    all move down by about a point over a fortnight: SP 40.02 → 39.74, RP
+ *    37.97 → 37.00, P 36.98 → 35.34.
+ *  · THE BOARD BARELY MOVES. The top 20 is the same 20 men both ways; the first
+ *    reordering is at row 3, where a 1.64-point move at P lifts Chris Sale past Pete
+ *    Crow-Armstrong. The list of men you could add is the same 540 names in the same
+ *    order down to row 6.
+ *  · WHAT DOES MOVE IS WHO IS SHOWN. The estimate calls 1,010 of 1,248 rateable men
+ *    gettable; the real list calls 540. All 470 of the difference are men Yahoo never
+ *    priced at all, which the estimate treats as probably free — see
+ *    `likelyAvailable`, which argues for that and is the rule being measured here.
+ *
+ * So the estimate was good AT THE JOB THE BAR NEEDS IT FOR, and the real list's worth
+ * is that it halves the list of men it will offer you. That is a finding about this
+ * league and this capture, not a theorem: a 12-team league cuts deeper and an
+ * ownership column read on a day of heavy waiver activity is staler.
+ *
+ * The comparison is also narrower than it looks, and saying so is the point. The wire
+ * it measures against is DERIVED from the same ownership column the estimate reads,
+ * so the only thing separating the two is how each treats a man Yahoo never listed.
+ * It cannot say anything about men Yahoo prices wrongly, and nothing here has been
+ * checked against a wire actually read off Yahoo — that needs a reader's own league
+ * and a captured sweep, and when one exists this measurement should be re-run on it.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 

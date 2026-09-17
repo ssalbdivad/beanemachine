@@ -12,13 +12,26 @@ import type { League } from "./schema.ts"
  * Read one league — its settings, its free agents and your team — and write the
  * lot into scoring.json.
  *
- * This is the ONLY route to a Yahoo league, and Yahoo is the platform most of this
- * app's users are on. Measured 2026-09-04: Yahoo sends no `access-control-allow-*`
- * headers on any of the pages this reads, so a browser is never handed the
- * response body — the hosted build at beanemachine.com cannot import a Yahoo
- * league, cannot read your roster and cannot list your free agents, and never will
- * be able to. Running this once is what a Yahoo user does instead, and the file it
- * writes is portable: drop it on beanemachine.com and `leagues.replace` loads it.
+ * Yahoo is the platform most of this app's users are on. Measured 2026-09-04: Yahoo
+ * sends no `access-control-allow-*` headers on any of the pages this reads, so a PAGE
+ * is never handed the response body — the hosted build at beanemachine.com cannot
+ * import a Yahoo league from its own origin, cannot read your roster there and cannot
+ * list your free agents there, and never will be able to. Running this once is one of
+ * the things a Yahoo user does instead, and the file it writes is portable: drop it on
+ * beanemachine.com and `leagues.replace` loads it.
+ *
+ * THIS USED TO SAY "the ONLY route to a Yahoo league", and that stopped being true on
+ * 2026-09-17 with the browser reader in `extension/`. The measurement above is
+ * unchanged and still decides what a page can do; what it never decided is what the
+ * reader's own browser can do OUTSIDE that page. A content script in his Yahoo tab is
+ * signed in as him and makes no cross-origin request at all, so it reads the same three
+ * things this command reads, in two presses, with no terminal.
+ *
+ * So this command is now the route for somebody who has no reader installed — a browser
+ * that takes no add-ons (Safari, anything on iOS), a browser somebody else administers,
+ * a machine where the work is scripted rather than clicked — and it is not deprecated
+ * and is not going anywhere. It is also the only one of the three that produces a FILE,
+ * which is how a league crosses from one browser to another.
  *
  * It used to write the league SETTINGS and nothing else, which is why the hosted
  * site could rank all of baseball for your scoring and still not answer the
@@ -80,16 +93,19 @@ if (flag("--help") || flag("-h") || !url) {
 			`\n` +
 			`Three reads, one command. For a Yahoo league it also reads:\n` +
 			`  · the FREE AGENTS in your league, which is the list "who should I stream"\n` +
-			`    is actually a question about. No browser can read it, so carrying this\n` +
-			`    file is the only way beanemachine.com ever sees it.\n` +
+			`    is actually a question about. No web page can read it, so carrying this\n` +
+			`    file is the way beanemachine.com sees it with no reader installed.\n` +
 			`  · your ROSTER and the seat each man is in, so the add/drop planner and the\n` +
 			`    trade verdict have a team to reason about.\n` +
 			`Both are stamped with the time they were read, and the app says how old they\n` +
 			`are rather than showing them as live. --settings-only skips them.\n` +
 			`\n` +
 			`  Yahoo  https://baseball.fantasysports.yahoo.com/b1/<league>/<team>\n` +
-			`         The only way in. Yahoo sends no CORS headers, so no browser can\n` +
-			`         read it — this command can, and beanemachine.com cannot.\n` +
+			`         The way in with no reader installed. Yahoo sends no CORS headers, so\n` +
+			`         no web page can read it — this command can, from here. In a browser\n` +
+			`         that takes add-ons there is now a second way, which needs no terminal\n` +
+			`         and produces no file: beanemachine.com offers it when you set a\n` +
+			`         league up.\n` +
 			`  ESPN   https://fantasy.espn.com/baseball/league?leagueId=<id>&teamId=<id>\n` +
 			`         Works here and equally well in the browser, which reads ESPN itself,\n` +
 			`         roster included. Only the settings are read here.\n` +
@@ -294,8 +310,10 @@ try {
 	if (league.roster.raw) out.push(``, `  Slots: ${league.roster.raw}`)
 
 	/**
-	 * The two reads a browser cannot do, and the only reason this command exists as
-	 * more than a convenience.
+	 * The two reads a web PAGE cannot do, and the reason this command exists as more
+	 * than a convenience. It said "a browser cannot do" until 2026-09-17; the reader in
+	 * `extension/` does both from inside the reader's own Yahoo tab, so the line below
+	 * says "from here" rather than claiming this machine is the only place they happen.
 	 *
 	 * Yahoo-only on purpose. `fetchAvailable` and `fetchRoster` parse Yahoo's own
 	 * markup; ESPN has neither an equivalent here nor any need for one, because
@@ -305,7 +323,7 @@ try {
 	 */
 	const yahoo = league.meta.platform === "yahoo" && league.meta.league_id
 	if (yahoo && !flag("--settings-only")) {
-		out.push(``, `  What only this machine can read:`)
+		out.push(``, `  What a web page cannot read, read from here:`)
 		const extras = await readExtras(league, league.meta.league_id!)
 		out.push(...extras.lines)
 		if (extras.pool) config.pools = { ...config.pools, [key]: extras.pool }

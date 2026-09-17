@@ -19,6 +19,8 @@ import {
 	pageKind,
 	leagueIdFrom,
 	sportFrom,
+	rowsOnly,
+	isKnownAsk,
 	type Ask,
 	type Grab,
 	type GrabFailure
@@ -55,6 +57,33 @@ const samePath = (absolute: string): string => {
 	}
 }
 
+/**
+ * A FETCHED PAGE, REDUCED TO WHAT A BROWSER WOULD HAVE SHOWN.
+ *
+ * Tags are stripped HERE rather than in the app so the 400 KB never crosses the wire, and
+ * text rather than HTML is what goes over because text is what the app's parsers are
+ * written to be handed — `leagueFromPastedSettings` takes what a reader would get by
+ * selecting a page and copying it — and because text is what survives a redesign.
+ *
+ * Script and style bodies go FIRST and that ordering is load-bearing. Stripping only tags
+ * leaves the CONTENTS of every inline script in the text, and a Yahoo page's head is inline
+ * script containing, among much else, the string `login.yahoo.com` — which `wallIn` reads
+ * as "Yahoo asked you to sign in". The reader would be told to sign in on the page he was
+ * already signed in to, and the read would be refused for a wall that was never there.
+ * Written out once because three callers needed it and two of them had their own copy.
+ */
+const renderedText = (html: string): string =>
+	html
+		.replace(/<script[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style[\s\S]*?<\/style>/gi, " ")
+		.replace(/<\/(tr|div|p|li|h\d|table)>/gi, "\n")
+		.replace(/<\/t[dh]>/gi, "\t")
+		.replace(/<[^>]+>/g, "")
+		.replace(/&nbsp;/g, " ")
+		.replace(/&amp;/g, "&")
+		.replace(/[ \t]+\n/g, "\n")
+		.replace(/\n{3,}/g, "\n\n")
+
 const grabHere = (): Grab => {
 	const kind = pageKind(location.href)
 	return {
@@ -71,12 +100,25 @@ const grabHere = (): Grab => {
 	}
 }
 
-/** The sign-in wall and the throttle wall both arrive as a 200 with a page, so the only
- *  way to tell them from a real answer is to read the words. Checked on the text rather
- *  than the HTML because the HTML of every Yahoo page contains the string "sign in"
- *  somewhere in its header. */
+/**
+ * The sign-in wall and the throttle wall both arrive as a 200 with a page, so the only
+ * way to tell them from a real answer is to read the words. Checked on the text rather
+ * than the HTML because the HTML of every Yahoo page contains the string "sign in"
+ * somewhere in its header — and on text put through `renderedText`, which is what takes
+ * `login.yahoo.com` out of the inline script in the head where it would have matched.
+ *
+ * TWO THOUSAND CHARACTERS, not six hundred. The window has to be long enough to reach the
+ * wall and short enough not to reach the ordinary page. A real page's first characters are
+ * the nav — "Fantasy Baseball / My Team / League / Players" — and how much of that comes
+ * first depends on a layout nobody here controls; measured on the fixture suite, the
+ * settings page's own `Stat Category` heading sits 120 characters in, so the nav is short
+ * there, but a real page's is not. 600 was a guess that could have put the wall out of
+ * reach on a page with a fuller header. The risk of the longer window is a page that
+ * legitimately says "rate limit" in its body text within 2000 characters, which is not a
+ * page Yahoo serves to a manager looking at his own league.
+ */
 const wallIn = (text: string): GrabFailure | null => {
-	const head = text.slice(0, 600)
+	const head = text.slice(0, 2000)
 	if (SIGN_IN.test(head))
 		return {
 			step: "yahoo",
@@ -105,6 +147,23 @@ const wallIn = (text: string): GrabFailure | null => {
  * the literal string "Request denied". A partial read is reported as partial — the app
  * already has `poolIsPartial` for exactly this — and is never presented as a small league.
  */
+/** What each slot is called by somebody who plays baseball rather than by somebody who
+ *  writes the roster rules down. Used for the progress line AND for the sentence when a
+ *  position cannot be read: "Yahoo would not answer for the shortstops" is a thing a reader
+ *  can picture, and `Yahoo answered 429 for SS`, which is what this said before, is two
+ *  pieces of machinery and a position code. */
+const SPOKEN: Record<string, string> = {
+	C: "catchers",
+	"1B": "first basemen",
+	"2B": "second basemen",
+	"3B": "third basemen",
+	SS: "shortstops",
+	OF: "outfielders",
+	Util: "utility men",
+	SP: "starters",
+	RP: "relievers"
+}
+
 const sweep = async (
 	leagueId: string,
 	sport: string,
@@ -112,17 +171,7 @@ const sweep = async (
 	say: (s: string, done: number, total: number) => void
 ): Promise<{ grabs: Grab[]; failure: GrabFailure | null }> => {
 	const grabs: Grab[] = []
-	const spoken: Record<string, string> = {
-		C: "catchers",
-		"1B": "first basemen",
-		"2B": "second basemen",
-		"3B": "third basemen",
-		SS: "shortstops",
-		OF: "outfielders",
-		Util: "utility men",
-		SP: "starters",
-		RP: "relievers"
-	}
+	const spoken = SPOKEN
 	for (const [i, pos] of positions.entries()) {
 		say(`reading ${spoken[pos] ?? pos}`, i, positions.length)
 		const url = pageUrl(leagueId, sport, pos, 0, "A")
@@ -137,15 +186,43 @@ const sweep = async (
 					grabs,
 					failure: {
 						step: "pool",
-						what: `Yahoo answered ${res.status} for ${pos}`,
-						fix: "Try again in a few minutes.",
-						detail: url
+						/* A status code is Yahoo's word to a program, not to a reader. What he
+						   can act on is that it stopped, and where. The code travels in `detail`,
+						   which is for whoever is reading a bug report rather than a screen. */
+						what: `Yahoo would not answer for the ${spoken[pos] ?? pos}`,
+						fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+						detail: `${res.status} ${url}`
 					}
 				}
 			const html = await res.text()
-			const wall = wallIn(html.replace(/<[^>]+>/g, " ").slice(0, 600))
+			const wall = wallIn(renderedText(html))
 			if (wall) return { grabs, failure: wall }
-			grabs.push({ url, kind: "players", text: "", html, at: now() })
+			/*
+			   THE ROWS, WITHOUT THE PAGE AROUND THEM.
+
+			   `rowsOnly` keeps, for each of `parsePage`'s own row markers, exactly the span
+			   `parsePage` would have read — so what arrives parses to the identical rows by
+			   construction, which test/extension.mjs asserts rather than assumes. It is a
+			   size cut and not a parse: it reads no value and knows nothing about a player.
+
+			   FAIL-SAFE BY DESIGN. If Yahoo ever moves the marker, nothing matches, this
+			   returns null, and the whole page goes over exactly as it did before. A redesign
+			   costs bandwidth here; it can never cost a row. That is the only shape of
+			   optimisation that belongs on this side of the wire, because this side cannot be
+			   fixed until a store review says so.
+			*/
+			grabs.push({
+				url,
+				kind: "players",
+				text: "",
+				html: rowsOnly(html) ?? html,
+				at: now(),
+				swept: true,
+				/* The whole list this sweep set out to get, on every page of it — see `asked`
+				   in src/data/extension.ts. A page that never arrived cannot carry anything,
+				   and this is the fact that makes a stopped sweep visible as a stopped sweep. */
+				asked: positions
+			})
 		} catch (e) {
 			return {
 				grabs,
@@ -166,6 +243,11 @@ const sweep = async (
 	return { grabs, failure: null }
 }
 
+/** Whether a sweep is running in THIS tab. Not stored, not shared, and gone with the page —
+ *  it is a fact about what this script is doing right now, which is the only thing it is
+ *  allowed to remember. See the note where it is set. */
+let sweeping = false
+
 chrome.runtime.onMessage.addListener(
 	(
 		msg: { ask: Ask; id: string; leagueId?: string; sport?: string; positions?: string[] },
@@ -173,6 +255,23 @@ chrome.runtime.onMessage.addListener(
 		reply
 	) => {
 		if (!msg || typeof msg.ask !== "string") return
+		/* An ask from a page newer than this build. The router refuses it before it gets
+		   here, but a reader can also have a newer ROUTER than content script — the router
+		   is a service worker that restarts on the new build while a tab keeps the content
+		   script it was injected with — so the same refusal is written on both sides rather
+		   than trusted to one. Falling through with no reply is what made this look like a
+		   lost connection. */
+		if (!isKnownAsk(msg.ask)) {
+			reply({
+				kind: "failed",
+				failure: {
+					step: "extension",
+					what: "what reads Yahoo in this browser is older than this page, and cannot do this yet",
+					fix: "Update it in your browser's extensions list, then reload this page."
+				}
+			})
+			return true
+		}
 		const wall = wallIn(document.body?.innerText ?? "")
 		if (wall) {
 			reply({ kind: "failed", failure: wall })
@@ -205,48 +304,26 @@ chrome.runtime.onMessage.addListener(
 			}
 			const settingsUrl = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/settings`
 			const matchupUrl = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/matchup`
+			/** A page fetched from the reader's own signed-in tab, as the text a browser would
+			 *  have rendered — see `renderedText`. Empty string when Yahoo would not serve it,
+			 *  which the caller treats as "not read" rather than as "empty". */
+			const asText = async (url: string): Promise<string> => {
+				const res = await fetch(samePath(url), { credentials: "include" })
+				if (!res.ok) return ""
+				return renderedText(await res.text())
+			}
 			void (async () => {
-				if (here.kind === "settings") {
-					reply({ kind: "grabs", grabs: [here] })
-					return
-				}
-				/** A page fetched from the reader's own signed-in tab, reduced to the text a
-				 *  browser would have rendered. Tags are stripped HERE rather than in the app so
-				 *  the 400 KB never crosses the wire — and text is what the app's parsers are
-				 *  written to be handed, because text is what survives a redesign. */
-				const asText = async (url: string): Promise<string> => {
-					const res = await fetch(samePath(url), { credentials: "include" })
-					if (!res.ok) return ""
-					const html = await res.text()
-					return html
-						.replace(/<script[\s\S]*?<\/script>/gi, " ")
-						.replace(/<style[\s\S]*?<\/style>/gi, " ")
-						.replace(/<\/(tr|div|p|li|h\d|table)>/gi, "\n")
-						.replace(/<\/t[dh]>/gi, "\t")
-						.replace(/<[^>]+>/g, "")
-						.replace(/&nbsp;/g, " ")
-						.replace(/&amp;/g, "&")
-						.replace(/[ \t]+\n/g, "\n")
-						.replace(/\n{3,}/g, "\n\n")
-				}
 				try {
-					const res = await fetch(samePath(settingsUrl), { credentials: "include" })
-					const html = res.ok ? await res.text() : ""
-					/* Text, not HTML, because `leagueFromPastedSettings` is written to be handed
-					   what a reader would get by selecting the page and copying it — and it is the
-					   parser the paste box has used all along, with its own tests. Tags are
-					   stripped here rather than in the app so the 400 KB never crosses the wire. */
-					const text = html
-						.replace(/<script[\s\S]*?<\/script>/gi, " ")
-						.replace(/<style[\s\S]*?<\/style>/gi, " ")
-						.replace(/<\/(tr|div|p|li|h\d|table)>/gi, "\n")
-						.replace(/<\/t[dh]>/gi, "\t")
-						.replace(/<[^>]+>/g, "")
-						.replace(/&nbsp;/g, " ")
-						.replace(/&amp;/g, "&")
-						.replace(/[ \t]+\n/g, "\n")
-						.replace(/\n{3,}/g, "\n\n")
-					const wall = wallIn(text)
+					/*
+					   THE SETTINGS PAGE IS NOT FETCHED WHEN HE IS STANDING ON IT, and the matchup
+					   still is. This used to reply with the settings page alone the moment the
+					   reader pressed the button from his league's settings screen — no opponent,
+					   silently, for no reason beyond where the early-return was written. A press is
+					   a press wherever it is made, so the only thing the current page changes is
+					   which request would have been a duplicate.
+					*/
+					const text = here.kind === "settings" ? "" : await asText(settingsUrl)
+					const wall = text ? wallIn(text) : null
 					/*
 					   AND WHO HE IS PLAYING, on the same press.
 					
@@ -289,6 +366,33 @@ chrome.runtime.onMessage.addListener(
 				})
 				return true
 			}
+			/*
+			   ONE SWEEP AT A TIME, AND THE SECOND PRESS IS TOLD SO.
+
+			   The app disables its own button while a read is running, which is enough for one
+			   screen and nothing at all for two: the board and the setup sheet are different
+			   tabs of the same app, each with its own idea of whether anything is busy, and
+			   both route to this one Yahoo tab. Two sweeps interleaved are eighteen requests in
+			   the time budgeted for nine, against a site that answers nine with a wall often
+			   enough to have its own commit (de44045) — so the second press would not merely
+			   duplicate the first, it would throttle it, and the reader would watch both fail.
+
+			   Refused rather than queued. Queueing makes him wait twice as long for a list he
+			   is about to be given anyway, and a sentence he can read is better than a spinner
+			   that is secretly two spinners.
+			*/
+			if (sweeping) {
+				reply({
+					kind: "failed",
+					failure: {
+						step: "pool",
+						what: "your free agents are being read right now",
+						fix: "Wait for that to finish — it takes a few seconds — and the list will be here."
+					}
+				})
+				return true
+			}
+			sweeping = true
 			void sweep(
 				leagueId,
 				sport,
@@ -296,23 +400,64 @@ chrome.runtime.onMessage.addListener(
 				(say, done, total) => {
 					/* Progress goes to the background rather than back down the reply
 					   channel, which can only be used once. The app renders `say`
-					   verbatim, so it is written in the reader's words. */
-					chrome.runtime.sendMessage({ kind: "progress", id: msg.id, say, done, total })
+					   verbatim, so it is written in the reader's words.
+
+					   Wrapped because the extension can be updated out from under a sweep in
+					   flight, and an uncaught throw here would take the sweep's own `.then`
+					   with it — losing the pages it had already collected as well as the
+					   connection. */
+					try {
+						chrome.runtime.sendMessage({ kind: "progress", id: msg.id, say, done, total })
+					} catch {
+						/* Orphaned. The pages still go back if the channel outlives us; if it
+						   does not, the page's own half says so — see bridge.ts. */
+					}
 				}
-			).then(({ grabs, failure }) => {
-				reply(failure && !grabs.length ? { kind: "failed", failure } : { kind: "grabs", grabs, failure })
-			})
+			)
+				.then(({ grabs, failure }) => {
+					reply(failure && !grabs.length ? { kind: "failed", failure } : { kind: "grabs", grabs, failure })
+				})
+				.finally(() => {
+					sweeping = false
+				})
 			return true
 		}
 		return false
 	}
 )
 
-/* Tells the background this tab can be read, so "is Yahoo open?" is answered without
-   asking every tab in the browser. */
-void chrome.runtime.sendMessage({
-	kind: "yahoo-here",
-	url: location.href,
-	league: leagueIdFrom(location.href),
-	sport: sportFrom(location.href)
+/**
+ * TELLS THE ROUTER THIS TAB CAN BE READ, so "is Yahoo open?" is answered without asking
+ * every tab in the browser — and says it again whenever the reader comes back to this tab.
+ *
+ * The repeat is what makes "the tab he was last looking at" true rather than merely
+ * written. A manager in September has his baseball league and his football league open at
+ * once, and the router picks the most recently announced: with one announcement per page
+ * load, that is the tab he opened LAST, which after ten minutes of switching back and forth
+ * is not the tab he is in front of. Focus and visibility are the two events that mean "he
+ * is here now", and they cost a message each.
+ *
+ * Wrapped, because an orphaned content script — one left in a page after its extension was
+ * updated or switched off — throws on `sendMessage` rather than failing quietly, and an
+ * uncaught throw in a visibility handler is an error in the reader's console on every tab
+ * switch for the rest of the session.
+ */
+const announce = (): void => {
+	try {
+		void chrome.runtime.sendMessage({
+			kind: "yahoo-here",
+			url: location.href,
+			league: leagueIdFrom(location.href),
+			sport: sportFrom(location.href)
+		})
+	} catch {
+		/* The extension went away under this tab. Nothing here can fix that, and the app is
+		   told by its own half of the wire — see bridge.ts. */
+	}
+}
+
+announce()
+window.addEventListener("focus", announce)
+document.addEventListener("visibilitychange", () => {
+	if (!document.hidden) announce()
 })

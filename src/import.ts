@@ -942,6 +942,45 @@ export const deriveInningsMinimum = (
 }
 
 /**
+ * THE TWO PER-PERIOD RULES A PLAN CAN BREAK, read off one league in one call.
+ *
+ * `deriveMoveLimit` and `deriveInningsMinimum` both take the settings rows rather than
+ * the league, because that is the shape a fetch and a paste both produce. Every caller
+ * therefore has to reach through `league_rules.raw_settings` and cast it, and there were
+ * three such reaches before this existed — Board.tsx, Decide.tsx, and the planner had
+ * none at all and used its own defaults.
+ *
+ * WHY THIS IS SUDDENLY WORTH HAVING. Until the browser reader landed, these two rows
+ * were real only for the handful of leagues somebody had fetched or pasted; a typical
+ * reader had no settings page in the app at all, so a planner reading them would have
+ * read nothing. A reader now hands over his settings page in the same press that brings
+ * his roster, so for every reader who connects, both numbers are his league's own. On
+ * league 228947 they are "Max Acquisitions per Week: 6" and "Min innings pitched per
+ * team per week: 20".
+ *
+ * Both stay null where the page did not say, and null means UNLIMITED for the cap and NO
+ * FLOOR for the innings — not zero, and not some large stand-in. A planner handed null
+ * must fall back to its own measured default rather than to a number nobody stated;
+ * `movesAllowed` in src/auto/plan.ts is where that is decided and where the argument is.
+ *
+ * `sources` quotes the rows the numbers came from, in the settings page's own words, so
+ * a screen can say where a limit came from instead of asserting it.
+ */
+export const leagueLimits = (
+	league: Pick<League, "league_rules">
+): { movesPerPeriod: number | null; inningsPerPeriod: number | null; sources: string[] } => {
+	const raw = ((league.league_rules as { raw_settings?: Record<string, string> } | undefined)
+		?.raw_settings ?? {}) as Record<string, string>
+	const moves = deriveMoveLimit(raw)
+	const innings = deriveInningsMinimum(raw)
+	return {
+		movesPerPeriod: moves.perPeriod,
+		inningsPerPeriod: innings.perPeriod,
+		sources: [moves.source, innings.source].filter((s): s is string => s !== null)
+	}
+}
+
+/**
  * The date after which this league takes no more trades.
  *
  * Yahoo prints it as "Trade End Date" and the import already harvests the row. The

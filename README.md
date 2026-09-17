@@ -33,11 +33,16 @@ same week, which is the gap and not the score.
 ## Deploying the API (the one thing that makes Yahoo automatic)
 
 Yahoo sends no CORS headers — measured 2026-09-09, HTTP 200 with no
-`access-control-allow-origin` — so **no browser can ever read a Yahoo league**. The
-site works without a server: you enter your team by hand and availability is
+`access-control-allow-origin` — so **no web page can ever read a Yahoo league**, which
+is why the reader in `extension/` runs inside the reader's own Yahoo tab instead of
+asking from beanemachine.com. That sentence used to end "no browser can ever read a
+Yahoo league" and the measurement behind it has not changed; what changed is that a
+browser is now two places, and only one of them is a page. With neither the reader nor
+a server the site still works: you enter your team by hand and availability is
 estimated from how widely each player is rostered, calibrated to your league's size
 and labelled an estimate everywhere it appears. What a server adds is the exact
-free-agent list and a one-click roster read.
+free-agent list and a one-click roster read, for a reader who would rather deploy
+something once than install anything.
 
 `src/api.ts` has nothing node-specific in it, so it deploys as-is:
 
@@ -230,17 +235,32 @@ have filled, and who you can actually add.
 | | scoring, slots, period | your roster | your league's free agents |
 | --- | --- | --- | --- |
 | **ESPN** | in the browser, or paste | in the browser, or paste | **in the browser, or paste** |
-| **Yahoo** | **paste**, preset, or carry a file | paste, or carry a file | paste, or carry a file |
+| **Yahoo**, reader added | **one press** | **one press** | **one press** |
+| **Yahoo**, nothing added | **paste**, preset, or carry a file | paste, or carry a file | paste, or carry a file |
 | **anywhere else** | paste | paste | paste |
 | **Sleeper** | not supported — Sleeper runs no fantasy baseball | — | — |
 
+The two Yahoo rows are both current, and the second is not a legacy route. The reader
+is a browser add-on, so it exists on Chrome, Edge and Firefox on a computer, and on
+Firefox for Android; Safari takes nothing of the kind, iOS takes nothing of the kind,
+and a managed browser can forbid it. Everyone in that second row still has a working
+Yahoo league, by hand, and every screen is built so that is the ordinary case rather
+than the degraded one.
+
+The two presses in the first row are two, not one, and the split is deliberate: the
+team page and the settings page come back together on the first press, because a
+reader who pressed one button should not be told afterwards that the app still does
+not know how his league scores. The free-agent sweep is the second press, because it
+is nine requests rather than two and it is slow enough that it has to be something he
+chose (`extension/src/yahoo.ts`).
+
 So an **ESPN** league is entirely self-service on beanemachine.com: paste the league
 URL (with `&teamId=` for your own team) and nothing else is installed, configured or
-carried. A **Yahoo** league gets a working board immediately from the preset, and
-everything about *your* team by running the importer once and dropping the file it
-writes on the page.
+carried. A **Yahoo** league gets a working board immediately from the preset;
+everything about *your* team comes either from the reader, in the browser, or from
+running the importer once and dropping the file it writes on the page.
 
-**Why Yahoo cannot work in a browser.** Measured 2026-09-04 with `Origin:
+**Why Yahoo cannot work from a web page.** Measured 2026-09-04 with `Origin:
 https://beanemachine.com` on the exact pages `src/import.ts` reads: ESPN's
 `lm-api-reads.fantasy.espn.com` reflects the origin back in
 `access-control-allow-origin`, so a page may read it. Yahoo's
@@ -248,6 +268,15 @@ https://beanemachine.com` on the exact pages `src/import.ts` reads: ESPN's
 never hands the response body to the script, whatever it contains. That is not a bug
 in this app and no amount of client code fixes it. Yahoo is also an HTML scrape rather
 than an API, which is why `/api/available` exists at all.
+
+This heading used to read "Why Yahoo cannot work in a browser", and the measurement
+under it is unchanged and still decisive — for a page. It was the generalisation that
+was too wide. A browser will not hand `beanemachine.com` a response from another
+origin; it will run the reader's own code inside the tab that origin belongs to, with
+his cookies, because that is what an extension is for. Nothing above is worked around
+there: the reader never makes a cross-origin request at all. It reads the page the
+reader already has open, and its sweep fetches Yahoo paths from a Yahoo tab, which is
+same-origin (`samePath` in `extension/src/yahoo.ts` exists to keep it that way).
 
 ESPN's free-agent list **does** have a browser-direct counterpart, measured the same
 day. Its player endpoint needs the query as a custom `x-fantasy-filter` header, which
@@ -269,8 +298,11 @@ batting stats, 0 pitching stats and slots `QB, RB, WR, TE, FLEX, DEF, BN` — un
 and unrepairable. A pasted Sleeper URL now gets that explanation instead of a league.
 The evidence is kept in `test/ownership.mjs`; the reader that produced it was deleted.
 
-**The Yahoo route, end to end.** There are two, and the first needs nothing
-installed.
+**The Yahoo route, end to end.** There are three. The first needs nothing installed
+at all; the second needs a browser add-on and no terminal; the third needs a terminal
+and no add-on. None of them replaces the others, because the readers they serve do not
+overlap: a phone has no add-on and no terminal, a work laptop often forbids the add-on,
+and a reader who will not type a command is the majority case.
 
 **Paste the page.** Yahoo's settings page prints the batting and pitching stat
 tables, `Roster Positions`, `Max Teams` and `League ID#`, so selecting the whole page
@@ -282,9 +314,42 @@ page, so the two routes cannot disagree about what a league is —
 fetched while the importer still worked, pasting it, and asserting the league that
 comes out is identical. Your team page and free-agent page paste the same way.
 
-This is the only route that works on a **private** league, which is most leagues, and
-the only one no platform can revoke: the browser doing the reading is the reader's
-own, already signed in, and not rate-limited as a scraper because it is not one.
+This works on a **private** league, which is most leagues, and no platform can revoke
+it: the browser doing the reading is the reader's own, already signed in, and not
+rate-limited as a scraper because it is not one. That sentence used to say "the only
+route", and the next one is the second: it has the same property for the same reason,
+and it is the same browser doing the reading. The importer below is the one that does
+not, because it has no session.
+
+**Or add the reader, and press a button.** `extension/` builds a browser add-on whose
+one job is to read the Yahoo page the reader already has open and hand the text to
+beanemachine.com in the same browser. Nothing is sent anywhere: the whole journey is
+between two of his own tabs, and there is no server in it at any point.
+
+One press brings back two pages, because a team page carries the roster and no scoring
+table and the settings page carries the scoring table and no roster — asking for one
+button and then saying the app still does not know how the league scores is asking for
+the button twice. The free-agent sweep is a second press, nine positions one at a time
+with a quarter-second between, because commit `de44045` recorded Yahoo answering 150
+players, then 25, then 0, then "Request denied" to a faster one.
+
+**The add-on retrieves; the app parses.** It hands over a URL and the page's text, and
+`src/data/yahoo-read.ts` runs that through the three parsers a paste already goes
+through and no others — `leagueFromPastedSettings`, `rosterFromPaste` and `parsePage` —
+so a grab and a paste cannot disagree about what a league is. The reason is release latency: an add-on update waits on a
+store review and the site redeploys in a minute, while Yahoo restyles on its own
+schedule — so the parser has to be on the side that can be fixed today.
+
+`test/extension.mjs` drives the real unpacked build in a real browser against a fake
+Yahoo served at Yahoo's own hostname (`--host-resolver-rules`), so the match patterns
+really do decide whether it runs and the sweep's fetches really are same-origin: 19
+assertions, including one press returning two pages, the league's own scoring and team
+count, nine seats with the men in them, a nine-position sweep unioned to 27 free agents
+rather than one page counted nine times, and a throttle reported as a throttle instead
+of as an empty league. What no test here can prove is that Yahoo's live pages still
+look like those fixtures — which is an argument for the app parsing rather than the
+add-on, not against the test. `extension/README.md` has the build and the two install
+routes.
 
 **Or one local run, then a file that goes anywhere:**
 
@@ -299,12 +364,16 @@ each of the four required inputs actually arrived — plus everything the source
 state, verbatim. `--help` lists the URL shapes. The league must be publicly viewable;
 a private one needs a signed-in session the importer cannot hold.
 
-It also makes two reads no browser can: **your league's free agents** and **your own
+It also makes two reads no web page can: **your league's free agents** and **your own
 roster**, seat by seat. The first is the one that matters. "Which starters should I
 stream over the next three days" is a question about the players you can *add*, and
 Yahoo's free-agent page sends no CORS headers — so beanemachine.com will never be
-handed one, and until the list travelled in this file the hosted board answered a
-streaming question with a ranking of everyone in baseball. Measured against league
+handed one from its own origin, and until the list travelled in this file the hosted
+board answered a streaming question with a ranking of everyone in baseball. The reader
+above now reaches the same two lists without a terminal, by sweeping them inside a
+Yahoo tab; this file is what a reader has instead when he has no reader installed, and
+what he still has on a machine where the browser is not his to add things to. Measured
+against league
 228947 on 2026-09-04: over a three-day window, all 20 rows at the head of the
 Streaming tab were on somebody's roster; with the file's 150-player wire loaded, the
 list was 9 starters, all of them actually free, and the two top-20s had nothing in
@@ -340,7 +409,14 @@ npm run check                           # tsc --noEmit
 npm run build                           # static bundle into dist/
 npm test                                # every suite
 npm run test:node                       # just the pure-Node ones — no browser, no server. This is what CI runs.
+node extension/build.mjs                # the browser reader into dist-ext/chrome and dist-ext/firefox
+node test/extension.mjs                 # drives that build in a real browser — see extension/README.md
 ```
+
+`test/extension.mjs` is not in `npm test` and that is on purpose: it needs the build
+line above to have run, it needs the dev server up, and it launches Chromium with a
+resolver override. It is run by hand after touching anything in `extension/`,
+`src/data/extension.ts`, `src/data/yahoo-read.ts` or `src/client/extension.ts`.
 
 **The port is 5299, and it is the config's own, with `strictPort` so it cannot slide.**
 Vite's default is 5173, which on the author's machine belongs to a different application
@@ -355,9 +431,10 @@ install, so they fail; the lines above are what they were meant to do, and
 `node --experimental-strip-types src/cli.ts <league-url>` is the `import` one. (On
 Node 23.6 and later the flag is a no-op — type stripping is on by default — but it is
 required on 22.x and harmless everywhere, so it is what gets printed.) And `npm test`
-runs seventeen suites in two groups: twelve are pure Node (`api`, `paste`, `settings`,
+runs eighteen suites in two groups: thirteen are pure Node (`api`, `paste`, `settings`,
 `today`, `injuries`, `engine`, `leagues`, `trade`, `auto`, `period`, `ownership`,
-`compete` — the `test:node` script, which is also the CI gate) while five (`ui`, `board`,
+`compete`, `actuals` — the `test:node` script, which is also the CI gate) while five
+(`ui`, `board`,
 `trade-ui`, `decide`, `journey`) drive a real page, so **the dev server has to be
 running** or they fail on a connection rather than on a defect. A live server on that
 port that is not this app is the same trap without the connection error, so each of the
@@ -621,14 +698,26 @@ snapshot of observed data. That collapses the server/static split — GitHub Pag
 the same live board — and means re-scoring your league re-ranks it instantly.
 
 `src/data/` fetches and normalises sources; `src/refresh.ts` writes the snapshot.
-Browsers can't call MLB or Savant directly (neither sends CORS headers), so the
-snapshot is how real data reaches the page.
+
+These two paragraphs used to say browsers cannot call MLB or Savant directly because
+neither sends CORS headers, and that the capture was therefore unavoidable. **That was
+wrong and is retracted rather than quietly edited** — the retraction and its
+measurement live in
+[Methodology §1](docs/METHODOLOGY.md#1-data-sources-and-exactly-what-each-provides):
+measured 2026-09-12 with `Origin: https://beanemachine.com`, MLB's
+`/stats?stats=byDateRange` and Savant's `expected_statistics` CSV each answer HTTP/2
+200 with `access-control-allow-origin: *`, and two shipped modules — `src/data/today.ts`
+and `src/data/actuals.ts` — have been relying on that from the browser the whole time.
 
 **Why a snapshot rather than live calls, and why CSV.** Savant serves these
 leaderboards as HTML; `csv=true` is its actual data interface, and there is no JSON
-equivalent — scraping their internals would be more fragile, not less. But the format
-is beside the point: a browser can't call either source directly, so the data has to
-be captured server-side either way. What matters is *cadence*. CI recaptures on every
+equivalent — scraping their internals would be more fragile, not less. The capture is a
+*choice*, and the reasons are cost and agreement rather than permission: nine endpoints
+per board would be slow and rude to APIs nobody is paying for, and every screen has to
+share one dated view or a board that recomputed mid-session would disagree with the card
+above it. The rule that came out of it is that a fact about a SEASON is captured and a
+fact about TODAY is read live, because a capture is necessarily wrong about tonight.
+What matters after that is *cadence*. CI recaptures on every
 push **and on a schedule — 11:00 and 23:00 UTC** — so the board never quietly serves
 numbers from whenever someone last pushed code. The UI states the capture age next to
 the heading and flags it once it passes 36 hours.

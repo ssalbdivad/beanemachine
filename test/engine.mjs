@@ -1205,5 +1205,217 @@ const aboutTheRows = ["underlying", "regressionGap", "confidence", "undervaluati
 t("while the four fields that are about the rows all move, so the rows are really there",
   aboutTheRows.length === 4, `moved: ${aboutTheRows.join(", ")}`)
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 20. A REAL FREE-AGENT LIST, AND WHAT IT IS AND IS NOT ALLOWED TO DECIDE.
+ *
+ * Until the browser reader landed, a Yahoo reader almost never had his league's own
+ * free-agent list, so `available` was either absent or built from the ownership
+ * ESTIMATE. A real list now arrives in one press, per league, and three questions
+ * follow that this section pins:
+ *
+ *   · how much the estimate was actually costing — measured below, and the answer is
+ *     "almost nothing at the bar, a great deal at the list of names";
+ *   · that a COMPLETE list changes nothing about how the bar is computed, so
+ *     declaring coverage is safe to switch on;
+ *   · that a PARTIAL list cannot silently become a complete one, which is the failure
+ *     this whole section exists for.
+ *
+ * The wire used here is DERIVED from the capture's own ownership column — the men it
+ * prices at or below this league's cut — rather than read off Yahoo, because no
+ * captured sweep of a real league is committed to this repo. That makes the
+ * estimate-vs-real comparison narrower than it looks and it is stated as such in
+ * `bscore.ts`: the only thing separating the two is how each treats a man Yahoo never
+ * listed. It does NOT weaken the partial-sweep assertions, which are about what the
+ * engine does with a list of a given shape and would read the same on any list.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+{
+  const { slotsCoveredBy } = await import("../src/engine/bscore.ts")
+  const { normalizeName } = await import("../src/data/yahoo-pool.ts")
+  const cut = ownershipCut(league, hy.ownership)
+  const teams = league.meta.max_teams
+  const base = {
+    league, players: hy.players, underlying: hy.underlying, injuries: hy.injuries,
+    teamGamesPlayed: hy.teamGamesPlayed, gamesByTeam: hy.gamesByTeam,
+    opponentsByTeam: hy.opponentsByTeam, recentVolumeByWindow: hy.recentVolumeByWindow,
+    recentStats: hy.recentStats, ownership: hy.ownership, eligibility: hy.eligibility,
+    probableStarts: hy.probableStarts, probableCoverage: hy.probableCoverage,
+    opposingStarters: hy.opposingStarters, startOpponents: hy.startOpponents, teams
+  }
+
+  // ── which slots a sweep speaks for ─────────────────────────────────────────
+  //
+  // Yahoo has no P page and no page that is the union of the infield, so the two
+  // seats this league fills from a COMBINATION of positions are the ones a naive
+  // rule gets wrong. `slot_accepts` states the combination and is what decides.
+  const ALL9 = ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"]
+  const full = slotsCoveredBy(league, ALL9)
+  t("a complete nine-position sweep speaks for every startable slot, P and Util included",
+    full.size === 10 && full.has("P") && full.has("Util") && !full.has("BN") && !full.has("IL"),
+    [...full].join(","))
+  const four = slotsCoveredBy(league, ["C", "1B", "2B", "3B"])
+  t("a sweep throttled after four positions speaks for exactly those four",
+    four.size === 4 && ["C", "1B", "2B", "3B"].every(s => four.has(s)),
+    [...four].join(","))
+  // The case a rule written the other way round — "does this read touch anything the
+  // seat takes?" — gets wrong: Util takes first basemen, and first base was read.
+  t("and NOT for Util, whose seat also takes the shortstops and outfielders nobody read",
+    !four.has("Util") && !four.has("P"), [...four].join(","))
+  t("a sweep that came back with nothing speaks for no slot at all",
+    slotsCoveredBy(league, []).size === 0)
+  t("and a caller who states no positions is read as stating nothing, not as stating none",
+    slotsCoveredBy(league, undefined) === null)
+
+  // ── the wire, derived from the capture's own ownership column ──────────────
+  const none = rateAll(base)
+  const wireNames = new Set()
+  for (const p of hy.players) {
+    const pct = hy.ownership.get(p.id)
+    if (pct !== undefined && pct <= cut.cut) wireNames.add(normalizeName(p.name))
+  }
+  const wire = r => wireNames.has(normalizeName(r.player.name))
+  const estimate = r => {
+    const pct = hy.ownership.get(r.player.id)
+    return pct === undefined || pct <= cut.cut
+  }
+  const barsOf = rs => {
+    const m = new Map()
+    for (const r of rs) if (!m.has(r.slot)) m.set(r.slot, r.replacement)
+    return m
+  }
+  const sameBoard = (a, b) => a.length === b.length && a.every((r, i) =>
+    r.player.name === b[i].player.name && r.bscore === b[i].bscore &&
+    r.replacement === b[i].replacement && r.slot === b[i].slot)
+
+  const est = rateAll({ ...base, available: estimate })
+  const real = rateAll({ ...base, available: wire })
+  const realDeclared = rateAll({ ...base, available: wire, availablePositions: ALL9 })
+
+  /**
+   * HOW MUCH WAS THE ESTIMATE COSTING? Measured 2026-09-17 on the committed capture
+   * over its own fortnight, league 228947: seven of the ten startable slots land on
+   * the same bar to the cent, and the three that move are all on the pitching side —
+   * SP 40.02 → 39.74, RP 37.97 → 37.00, P 36.98 → 35.34. The top 20 is the same 20
+   * men; the first reordering is at row 3.
+   *
+   * This is asserted as a PROPERTY — most slots unmoved, none moved far, the same men
+   * on top — rather than as those three numbers, because the numbers belong to a
+   * capture that is refreshed and the property is the finding. What the estimate is
+   * worth is that it costs the bar almost nothing, and that is what must keep holding
+   * for the fallback in `likelyAvailable` to be honest.
+   */
+  {
+    const be = barsOf(est), br = barsOf(real)
+    const slots = [...new Set([...be.keys(), ...br.keys()])]
+    const moved = slots.filter(s => be.get(s) !== br.get(s))
+    const worst = Math.max(...slots.map(s => Math.abs((be.get(s) ?? 0) - (br.get(s) ?? 0))))
+    t("the ownership estimate and a real list set most replacement bars identically",
+      moved.length <= slots.length / 2,
+      `${moved.length} of ${slots.length} moved: ${moved.map(s => `${s} ${be.get(s)}->${br.get(s)}`).join(", ")}`)
+    t("and none of the bars that do move moves far, in a league scoring hundreds a fortnight",
+      worst < 5, `largest move ${worst.toFixed(2)}`)
+    const top = rs => rs.filter(r => r.rateable).slice(0, 20).map(r => r.player.name)
+    const shared = top(est).filter(n => top(real).includes(n)).length
+    t("so the top of the board is the same men either way",
+      shared === 20, `${shared} of 20 shared`)
+  }
+
+  /**
+   * DECLARING A COMPLETE READ CHANGES NOTHING. This is what makes the guard safe to
+   * switch on: a caller that starts passing `availablePositions` for a sweep that got
+   * everything gets the board it already had, row for row.
+   */
+  t("declaring a complete sweep's coverage leaves the board identical, row for row",
+    sameBoard(real, realDeclared),
+    `${real.length} vs ${realDeclared.length} rows`)
+
+  /**
+   * A PARTIAL LIST MUST NOT BECOME A COMPLETE ONE.
+   *
+   * The sweep is nine requests and Yahoo throttles by serving an EMPTY page, so four
+   * positions coming back is a live state rather than a hypothetical. Truncated to the
+   * men this engine seats at C, 1B, 2B or 3B — 300 of the wire's 611 — the pitching
+   * seats have nobody on the list at all, and the bar there used to be set to 0. A bar
+   * of zero says a freely available pitcher produces nothing, so every pitcher's
+   * bscore became his whole projected total and the men who had not been read were the
+   * ones that rose.
+   */
+  {
+    const READ = ["C", "1B", "2B", "3B"]
+    const partialNames = new Set(none.flatMap(r =>
+      wire(r) && r.slots.some(s => READ.includes(s)) ? [normalizeName(r.player.name)] : []))
+    const partial = r => partialNames.has(normalizeName(r.player.name))
+    t("the truncated wire really is a proper subset of the whole one",
+      partialNames.size > 0 && partialNames.size < wireNames.size,
+      `${partialNames.size} of ${wireNames.size}`)
+
+    const undeclared = rateAll({ ...base, available: partial })
+    const declared = rateAll({ ...base, available: partial, availablePositions: READ })
+    const bNone = barsOf(none), bReal = barsOf(realDeclared)
+    const bUn = barsOf(undeclared), bDec = barsOf(declared)
+
+    // The positions the sweep DID read keep the wire's answer — the throttle is not a
+    // reason to throw away the four pages that arrived.
+    for (const slot of ["C", "1B", "3B"])
+      t(`${slot} was read, so it keeps the bar the wire sets`,
+        bDec.get(slot) === bReal.get(slot), `${bDec.get(slot)} vs ${bReal.get(slot)}`)
+
+    // The ones it never reached fall back to the whole-pool simulation — the same bar
+    // a page with no wire at all uses, which is this app's stated answer for unknown.
+    for (const slot of ["SS", "OF", "Util", "P"])
+      t(`${slot} was never read, so it falls back to the bar a page with no wire uses`,
+        bDec.get(slot) === bNone.get(slot), `${bDec.get(slot)} vs ${bNone.get(slot)}`)
+
+    /*
+     * WHICH OF THE TWO GUARDS DID THE RESCUING, and they do not overlap.
+     *
+     * SS, OF and Util came back with MEN on them — the four pages read do contain
+     * shortstops and outfielders, because a man eligible at 1B can also be eligible at
+     * SS — so the undeclared read had a list at those seats, used it, and got a bar
+     * that is wrong rather than absent: 47.90, 28.93 and 64.84 against a complete
+     * wire's 57.20, 60.73 and 72.81. Only the coverage declaration can catch that.
+     *
+     * P came back with NOBODY, so the empty-slot guard had already rescued it before
+     * coverage was consulted, and declaring changes nothing there. This assertion used
+     * to demand a difference at P as well and failed on exactly that: 63.29 vs 63.29.
+     * The claim it makes now is the true one — each guard catches a case the other
+     * cannot — which is why both exist.
+     */
+    for (const slot of ["SS", "OF", "Util"])
+      t(`${slot} came back with men on it, so only declaring coverage catches its bar`,
+        bUn.get(slot) !== bDec.get(slot), `${bUn.get(slot)} vs ${bDec.get(slot)}`)
+    t("P came back with nobody, so the empty-slot guard had already caught it",
+      bUn.get("P") === bDec.get("P") && bUn.get("P") === bNone.get("P"),
+      `${bUn.get("P")} vs ${bDec.get("P")} vs ${bNone.get("P")}`)
+
+    /**
+     * The empty-slot half of the same rule, which fires even with nothing declared.
+     *
+     * A bar of 0 is the most expensive number this function can produce, and it was
+     * what a covered-but-empty slot got. It is kept for the one case it was written
+     * for — no rateable player is eligible at the slot AT ALL — and nowhere else.
+     */
+    const pitchers = undeclared.filter(r => r.rateable && r.player.group === "pitching")
+    t("with the pitching seats swept up by nobody, no pitcher is priced against a bar of zero",
+      pitchers.length > 0 && pitchers.every(r => r.replacement > 0),
+      `${pitchers.filter(r => r.replacement === 0).length} of ${pitchers.length} at zero`)
+    t("and no pitcher's bscore is simply his whole projected total, which is what a zero bar means",
+      pitchers.every(r => Math.abs(r.bscore - r.points) > 0.001),
+      JSON.stringify(pitchers.filter(r => Math.abs(r.bscore - r.points) <= 0.001)
+        .slice(0, 3).map(r => `${r.player.name} ${r.bscore}/${r.points}`)))
+
+    // A slot genuinely nobody in baseball can fill still gets the 0 — there is no pool
+    // to simulate from, and that is the case the branch was written for.
+    const noSuchSlot = rateAll({
+      ...base,
+      league: { ...league, roster: { ...league.roster, slots: { ...league.roster.slots, ZZ: 1 } } }
+    })
+    t("a slot no rateable player is eligible for keeps the zero, because there is no pool to walk",
+      noSuchSlot.every(r => r.slot !== "ZZ"),
+      JSON.stringify(noSuchSlot.filter(r => r.slot === "ZZ").slice(0, 2).map(r => r.player.name)))
+  }
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

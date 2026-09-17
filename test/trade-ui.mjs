@@ -1314,15 +1314,30 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			const labels = await page.$$eval(".deal-side .give-unrated .tiny-note", n =>
 				n.map(e => e.textContent.trim())
 			)
+			/* ONE OF THE GROUPS, not every group, and the difference is live data.
+			
+			   The claim is that a side the league pays nothing for is reported AS THAT rather
+			   than as missing data, and it is about the pitching group. Requiring every group
+			   to say it made the assertion depend on nobody on the seeded team being injured
+			   — and the injured list is read live from MLB, so on 2026-09-17 a second group
+			   appeared ("Injured 15-Day — no source states a return date") and this failed
+			   while the thing it protects was working perfectly. Every group is still required
+			   to carry a REASON, which is asserted directly below. */
 			t("a side the league pays nothing for is reported as that, not as missing data",
-				labels.length > 0 && labels.every(l => /scores nothing on the pitching side/.test(l)),
+				labels.some(l => /scores nothing on the pitching side/.test(l)),
 				labels.join(" || ") || "no unpriced group at all")
+			t("and every group carries a reason, whatever it is",
+				labels.length > 0 && labels.every(l => l.trim().length > 20),
+				labels.join(" || "))
 			t("and it does not claim the capture is missing them, because it is not",
 				labels.every(l => !/no projection in this capture/.test(l)),
 				labels.join(" || "))
 			// the reader is told what to DO about it, which is the half a symptom lacks
+			/* Same reason as above: the way out belongs to the group that has one. An injured
+			   man has no way out and the card must not invent one for him. */
 			t("and it names the way out, which is entering the scoring",
-				labels.every(l => /scoring/.test(l)), labels.join(" || "))
+				labels.some(l => /scores nothing on the pitching side/.test(l) && /scoring/.test(l)),
+				labels.join(" || "))
 			t("no page errors on a league that scores one side only", oops.length === 0, oops.join(" | "))
 		}
 	}

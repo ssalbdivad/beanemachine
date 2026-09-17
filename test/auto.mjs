@@ -3,9 +3,10 @@
 // a thing Billy must never do on a real team, so each is checked twice — once by
 // asserting the planner does not do it, and once by handing railViolations a plan
 // that does it and asserting the audit catches it.
+import { readFileSync } from "node:fs"
 import {
-	activeSlots, DEFAULTS, freezeShut, legalSlotsFor, plan, planLineup, planMoves, planSwaps,
-	railViolations, resolveRoster, seatedInnings
+	activeSlots, DEFAULTS, freezeShut, legalSlotsFor, movesAllowed, plan, planLineup, planMoves,
+	planSwaps, railViolations, resolveRoster, seatedInnings
 } from "../src/auto/plan.ts"
 import { normalizeName } from "../src/data/yahoo-pool.ts"
 
@@ -1026,6 +1027,197 @@ const swap = (start, sit, startSlot, gain) => ({
   t("an evening nobody has started yet freezes nothing",
     f.frozen.size === 0 && f.stuck.length === 0 && f.shifts.length === 1 && f.lostToLocks === 0,
     JSON.stringify({ frozen: [...f.frozen], stuck: f.stuck, shifts: f.shifts, lost: f.lostToLocks }))
+}
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE LEAGUE'S OWN LIMITS, AND THE PLANNER OBEYING THEM.
+ *
+ * `maxMoves` is a JUDGEMENT — two a week, because two measured best across 111 weeks —
+ * and a league's "Max Acquisitions per Week" is a RULE: exceed it and the platform
+ * refuses the claim. The planner knew only the first, so in a league capped at one it
+ * would offer two and the reader could act on half the card.
+ *
+ * This was nearly unreachable before the browser reader: the settings rows exist only
+ * for a league somebody had fetched or pasted, which almost nobody had. A reader who
+ * connects now hands over his settings page in the same press that brings his roster,
+ * so both numbers are his league's own — which is why this is worth enforcing now and
+ * was not worth building before.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+{
+  const { deriveMoveLimit, deriveInningsMinimum, leagueLimits } = await import("../src/import.ts")
+  const { leagueFromSettingsText } = await import("../src/data/paste-settings.ts")
+  const real = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
+
+  /*
+   * FIRST, THAT THE NUMBERS SURVIVE THE ROUTE THEY NOW ARRIVE BY.
+   *
+   * The reader hands over the settings page as TEXT — what a browser gives for the
+   * page a person is looking at, which for a table is one row per line with tabs
+   * between the cells. So the fixture is built the way test/settings.mjs builds it, out
+   * of the rows the league really carries, and the two derivations are run on what
+   * comes back out of the parser rather than on the stored map. That is the join that
+   * could silently break: `leagueFromSettingsText` keeps every `Label<tab>value` row
+   * verbatim, and both derivations look their row up by its exact label.
+   */
+  const asText = Object.entries(real.league_rules.raw_settings)
+    .map(([k, v]) => `${k}\t${v}`).join("\n")
+  const parsed = leagueFromSettingsText(asText).settings
+  t("the settings page as text still carries every row the league stated",
+    Object.keys(parsed).length === Object.keys(real.league_rules.raw_settings).length,
+    `${Object.keys(parsed).length} of ${Object.keys(real.league_rules.raw_settings).length}`)
+  t("the weekly acquisition cap is read off that text, not typed",
+    deriveMoveLimit(parsed).perPeriod === 6, JSON.stringify(deriveMoveLimit(parsed)))
+  t("and so is the weekly innings floor",
+    deriveInningsMinimum(parsed).perPeriod === 20, JSON.stringify(deriveInningsMinimum(parsed)))
+  t("and both quote the row they came from, so a screen can say where the number is from",
+    deriveMoveLimit(parsed).source.includes("6") &&
+      deriveInningsMinimum(parsed).source.includes("20"),
+    `${deriveMoveLimit(parsed).source} | ${deriveInningsMinimum(parsed).source}`)
+
+  // one call for the pair, which is what the planner is handed
+  const limits = leagueLimits(real)
+  t("leagueLimits reads both off the league in one call",
+    limits.movesPerPeriod === 6 && limits.inningsPerPeriod === 20 && limits.sources.length === 2,
+    JSON.stringify(limits))
+  // A league whose page said neither: null is UNLIMITED and NO FLOOR, never zero.
+  const silent = leagueLimits({ league_rules: { raw_settings: {} } })
+  t("a league whose page stated neither gets null for both, which is not zero",
+    silent.movesPerPeriod === null && silent.inningsPerPeriod === null && !silent.sources.length,
+    JSON.stringify(silent))
+
+  /* ── the cap arithmetic ─────────────────────────────────────────────────── */
+  t("a league stricter than the planner's default is what binds",
+    movesAllowed(opts({ maxMoves: 2 }), { movesPerPeriod: 1, inningsPerPeriod: null })
+      .cap === 1)
+  t("and it says the league is why, because that is a limit the reader cannot raise",
+    movesAllowed(opts({ maxMoves: 2 }), { movesPerPeriod: 1, inningsPerPeriod: null })
+      .byLeague === true)
+  t("a league more generous than the default leaves the measured default standing",
+    movesAllowed(opts({ maxMoves: 2 }), { movesPerPeriod: 6, inningsPerPeriod: null })
+      .cap === 2 &&
+      !movesAllowed(opts({ maxMoves: 2 }), { movesPerPeriod: 6, inningsPerPeriod: null }).byLeague)
+  t("an unstated cap is unlimited, so the default stands",
+    movesAllowed(opts({ maxMoves: 2 }), { movesPerPeriod: null, inningsPerPeriod: null })
+      .cap === 2 &&
+      movesAllowed(opts({ maxMoves: 2 }), undefined).cap === 2)
+  /* A league that allows NO in-season acquisitions is a real answer, and it is the one
+     a "0 means unset" reading gets exactly backwards: it would hand such a reader the
+     default two moves, both of which his league will refuse. */
+  t("a league that allows no acquisitions at all allows none, rather than falling back to two",
+    movesAllowed(opts({ maxMoves: 2 }), { movesPerPeriod: 0, inningsPerPeriod: null }).cap === 0)
+
+  /* ── the planners, on a roster where three moves are all worth making ───── */
+  const board = [
+    rated("Mine A", { points: 1, bscore: -50, slots: ["C"] }),
+    rated("Mine B", { points: 1, bscore: -50, slots: ["1B"] }),
+    rated("Mine C", { points: 1, bscore: -50, slots: ["OF"] }),
+    rated("Free A", { points: 90, bscore: 40, slots: ["C"] }),
+    rated("Free B", { points: 80, bscore: 30, slots: ["1B"] }),
+    rated("Free C", { points: 70, bscore: 20, slots: ["OF"] })
+  ]
+  const three = {
+    roster: [spot("C", "Mine A", ["C"]), spot("1B", "Mine B", ["1B"]), spot("OF", "Mine C", ["OF"])],
+    rated: board,
+    availableNames: new Set(["Free A", "Free B", "Free C"].map(normalizeName)),
+    available: [
+      { name: "Free A", positions: ["C"] },
+      { name: "Free B", positions: ["1B"] },
+      { name: "Free C", positions: ["OF"] }
+    ],
+    shape: shape({ C: 1, "1B": 1, OF: 1 }, { C: ["C"], "1B": ["1B"], OF: ["OF"] }, ["C", "1B", "OF"]),
+    options: opts({ maxMoves: 3 })
+  }
+  t("with no league limit the planner makes the moves its own cap allows",
+    planSwaps(three).moves.length === 3, JSON.stringify(planSwaps(three).moves.map(m => m.add)))
+  const capped = planSwaps({ ...three, limits: { movesPerPeriod: 1, inningsPerPeriod: null } })
+  t("a league that allows one acquisition a week gets one move, not three",
+    capped.moves.length === 1, JSON.stringify(capped.moves.map(m => m.add)))
+  t("and the card says the league is what stopped it, not a backtest",
+    capped.notes.some(n => /league allows 1 acquisition a week/.test(n)), JSON.stringify(capped.notes))
+  /* The sentence about the move it did NOT make used to read "N a week is where the
+     measurement put the cap, not where the gains stop" whatever the cap was — an
+     invitation to raise a number the reader's league sets and he cannot. */
+  t("and the note about the next move does not invite him to raise a limit he does not own",
+    !capped.notes.some(n => /where the measurement put the cap/.test(n)) &&
+      capped.notes.some(n => /all your league allows/.test(n)),
+    JSON.stringify(capped.notes))
+  // the older planner is under the same rule
+  const cappedOld = planMoves({ ...three, limits: { movesPerPeriod: 1, inningsPerPeriod: null } })
+  t("the older planner obeys the league's cap too",
+    cappedOld.moves.length <= 1, JSON.stringify(cappedOld.moves.map(m => m.add)))
+
+  /* ── and the rail catches a plan that broke it ──────────────────────────── */
+  const forged = {
+    lineup: { starters: [], swaps: [], shifts: [], gain: 0, pointsPlanned: 0, emptySlots: [], skipped: [], blocked: null },
+    moves: planSwaps(three).moves,
+    skipped: [],
+    notes: []
+  }
+  t("a plan with three moves passes the audit in a league that allows three",
+    !railViolations(forged, { ...three, limits: { movesPerPeriod: 3, inningsPerPeriod: null } })
+      .some(v => /above the cap/.test(v)),
+    JSON.stringify(railViolations(forged, { ...three, limits: { movesPerPeriod: 3, inningsPerPeriod: null } })))
+  /* The rail audited `options.maxMoves` alone, so this exact plan — three moves, in a
+     league that allows one, planned with a generous default — passed its own audit. */
+  t("and the same plan is caught in a league that allows one",
+    railViolations(forged, { ...three, limits: { movesPerPeriod: 1, inningsPerPeriod: null } })
+      .some(v => /above the cap of 1 your league allows/.test(v)),
+    JSON.stringify(railViolations(forged, { ...three, limits: { movesPerPeriod: 1, inningsPerPeriod: null } })))
+
+  /* ── the innings floor: reported, never enforced ────────────────────────── */
+  {
+    /*
+     * A ROSTER WHERE THE BEST MOVE IS THE ONE THAT EMPTIES THE MOUND.
+     *
+     * Two seats, both full. The outfielder is above the keep floor and cannot be offered
+     * up, so the only man who can come out is the arm — and the free agent is worth so
+     * much more than either that taking him is right on points even with the pitching
+     * seat left empty: 200 against the 115 the roster projects now. That is the exact
+     * shape an innings floor is broken by, and every number on the card gets better
+     * while it happens, which is why it needs saying out loud.
+     */
+    const arms = [
+      rated("My Arm", { points: 20, bscore: -50, slots: ["SP", "P"], group: "pitching" }),
+      rated("Free Bat", { points: 200, bscore: 40, slots: ["OF"] })
+    ]
+    arms[0].projection = { stats: { outs: 60 } }   // twenty innings, and he is the only arm
+    arms[1].projection = { stats: {} }
+    const swapArmForBat = {
+      roster: [spot("SP", "My Arm", ["SP"]), spot("OF", "Keep Me", ["OF"])],
+      rated: [...arms, rated("Keep Me", { points: 95, bscore: 99, slots: ["OF"] })],
+      availableNames: new Set([normalizeName("Free Bat")]),
+      available: [{ name: "Free Bat", positions: ["OF"] }],
+      shape: shape({ SP: 1, OF: 1 }, { SP: ["SP"], OF: ["OF"] }, ["SP", "OF"]),
+      options: opts({ maxMoves: 1 })
+    }
+    const quiet = planSwaps(swapArmForBat)
+    t("a league that sets no innings floor is told nothing about innings",
+      !quiet.notes.some(n => /innings/.test(n)), JSON.stringify(quiet.notes))
+    const loud = planSwaps({
+      ...swapArmForBat,
+      limits: { movesPerPeriod: null, inningsPerPeriod: 20 }
+    })
+    /* THE MOVE IS STILL MADE. The planner cannot know how many innings his staff has
+       already thrown this period — that is on his team page and no reader here opens it
+       — so declining a good move on a guess at it would be worse than naming the risk.
+       What changes is that the risk is named. */
+    t("a move that takes an arm out of the lineup is still offered",
+      loud.moves.length === quiet.moves.length, JSON.stringify(loud.moves.map(m => m.add)))
+    t("the move it makes really is the one that takes the arm out",
+      loud.moves.length === 1 && loud.moves[0].drop === "My Arm" &&
+        loud.moves[0].add === "Free Bat",
+      JSON.stringify(loud.moves.map(m => `${m.add} for ${m.drop}`)))
+    t("but the innings it costs are reported, against the floor the league stated",
+      loud.notes.some(n => /projected innings over this window/.test(n) && /20 a week/.test(n)),
+      JSON.stringify(loud.notes))
+    /* The number, not just the shape of the sentence: his one arm's 60 outs are twenty
+       innings, and after the move nobody in a seat throws any. A note that said
+       "from 0 to 0" would pass a regex for the words and tell the reader nothing. */
+    t("and it quotes both sides of the fall, so the sentence carries the fact",
+      loud.notes.some(n => /from 20 to 0 projected innings/.test(n)), JSON.stringify(loud.notes))
+  }
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

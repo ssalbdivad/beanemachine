@@ -104,6 +104,15 @@
           your fantasy platform sends that league's id to this site's API, which
           fetches the same public page you could open yourself and keeps nothing.
         </p>
+        <p>
+          On Yahoo there is a second way, and it sends nothing here: a reader you add
+          to this browser reads the Yahoo page you already have open, in the tab you
+          are already signed into, and hands it to this page in the same browser. That
+          hand-off is between two of your own tabs — this site's API has no part in it
+          and is never told your league exists. The only requests it makes are to
+          Yahoo, from your own signed-in browser, for the same pages you could click
+          through yourself, and only when you press something.
+        </p>
       </main>
     </noscript>
     <script type="module" src="/src/client/main.tsx"></script>

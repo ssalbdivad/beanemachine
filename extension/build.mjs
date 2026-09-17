@@ -17,6 +17,7 @@
  *   dist-ext/beanemachine-chrome.zip / -firefox.zip   what a store takes
  */
 import { build } from "vite"
+import { APP_MATCHES, YAHOO_MATCHES } from "../src/data/extension.ts"
 import { cp, mkdir, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
@@ -29,31 +30,29 @@ const here = dirname(fileURLToPath(import.meta.url))
 const out = resolve(here, "../dist-ext")
 const run = promisify(execFile)
 
-/** Bumped by hand. The app reads it out of the manifest and can say "update the
- *  extension" rather than "something went wrong" when the two disagree. */
-const VERSION = "0.1.0"
+/**
+ * Bumped by hand, and it is the version a READER sees in his browser's list — not the
+ * thing the page compares itself against. That is `PROTOCOL` in src/data/extension.ts,
+ * which the bridge sends on every hello: "0.1.0 against 0.3.2" is not a question a page can
+ * answer, and "speaks 1, needs 2" is.
+ *
+ * 0.2.0 is the first build whose sweep may come back partial, whose swept pages are marked
+ * as swept, and which refuses an ask it does not know instead of going quiet — protocol 2.
+ */
+const VERSION = "0.2.0"
 
 const NAME = "beanemachine — read my Yahoo league"
 const DESCRIPTION =
 	"Reads your own Yahoo fantasy baseball league — your team, your league's scoring and " +
 	"who is free — and hands it to beanemachine.com in this browser. Nothing is sent anywhere else."
 
-/**
- * WHERE THE APP LIVES, for the bridge content script.
- *
- * The local ones are here on purpose and stay in the shipped build: this project is a
- * static site somebody can clone and serve, and an extension that only spoke to the
- * hosted copy would be untestable by the person developing it — which is how a bridge ends
- * up shipped broken. Match patterns ignore the port, so one line covers every dev server.
- */
-const APP_MATCHES = [
-	"https://beanemachine.com/*",
-	"https://*.beanemachine.com/*",
-	"http://127.0.0.1/*",
-	"http://localhost/*"
-]
-
-const YAHOO_MATCHES = ["*://*.fantasysports.yahoo.com/*"]
+/*
+   WHERE THE APP LIVES and where Yahoo lives are imported rather than written here, because
+   the router needs the same two lists — it has to find an app tab to send progress to — and
+   written twice they drift silently: the manifest injects the bridge into a page the router
+   will not talk to, and the reader watches a button spin with no words under it. The
+   argument for keeping the local addresses in the shipped build is in src/data/extension.ts.
+*/
 
 const common = {
 	manifest_version: 3,

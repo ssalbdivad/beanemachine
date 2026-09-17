@@ -571,5 +571,62 @@ t("and a league that seats nobody there is not told he is eligible there",
   espnPositions([0, 5], new Set([5])).join("/") === "OF",
   espnPositions([0, 5], new Set([5])).join("/"))
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE SWEEP HAS TO ASK FOR EVERY POSITION THE LEAGUE SEATS, OR IT CAN NEVER BE COMPLETE.
+ *
+ * A sweep is one request per position, and the engine now asks which slots a given read
+ * is entitled to speak for: a seat is covered when every position it accepts came back.
+ * That makes the sweep's own list of positions load-bearing in a way it was not before.
+ * Ask for eight of the nine and one seat is permanently uncovered — the wire never
+ * governs it, the ownership estimate silently does, and nothing anywhere says so,
+ * because every individual read looks like a success.
+ *
+ * So the two ends are checked against each other here, on the league that is committed:
+ * the positions the sweep asks for, read back out of the URLs it actually builds, must
+ * cover every startable seat the league states. Neither side is written out by hand —
+ * the positions come from `pageUrl`, the seats from the league's own `slot_accepts` —
+ * so a change to either is what fails this, which is the point.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+{
+  const { readFileSync } = await import("node:fs")
+  const { slotsCoveredBy, isReserveSlot } = await import("../src/engine/bscore.ts")
+  const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
+
+  // What a full sweep asks for, taken from the URLs rather than from a list retyped
+  // here: this is the same `pos=` the reader's own browser sends and the same one
+  // `readGrabs` reads back off the URL to say which positions came home.
+  const SWEPT = ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"]
+  const asked = SWEPT.map(pos =>
+    new URL(pageUrl("228947", "baseball", pos, 0, "A")).searchParams.get("pos"))
+  t("every position the sweep asks for survives into the URL it sends",
+    asked.length === SWEPT.length && asked.every((p, i) => p === SWEPT[i]), asked.join(","))
+
+  const startable = Object.keys(league.roster.slots).filter(s => !isReserveSlot(s))
+  const covered = slotsCoveredBy(league, asked)
+  t("and a sweep of all of them covers every startable seat this league has",
+    covered.size === startable.length && startable.every(s => covered.has(s)),
+    `covered ${[...covered].join(",")} against seats ${startable.join(",")}`)
+
+  /*
+   * The failure this pins is one position going missing, which is how Yahoo throttles:
+   * it serves an empty page rather than an error, so a position that did not come home
+   * is indistinguishable from a position with nobody free on it. Dropping the starters'
+   * page costs this league TWO seats, not one — SP, and the four P seats that also take
+   * a starter — and that second one is the seat the sweep never names.
+   */
+  const withoutSp = slotsCoveredBy(league, asked.filter(p => p !== "SP"))
+  t("losing one position's page costs the seat it names and every seat that also takes it",
+    !withoutSp.has("SP") && !withoutSp.has("P") && withoutSp.has("RP") && withoutSp.has("C"),
+    [...withoutSp].join(","))
+  /* And the reverse, which is what makes the rule worth having: Util is named by the
+     sweep AND accepts six other positions, so it survives only while all six come home. */
+  const withoutSs = slotsCoveredBy(league, asked.filter(p => p !== "SS"))
+  t("and a seat that takes six positions is only covered while all six come home",
+    !withoutSs.has("Util") && !withoutSs.has("SS") && withoutSs.has("OF"),
+    [...withoutSs].join(","))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -20,6 +20,7 @@ import { slotsFor } from "../engine/bscore.ts"
 import { stored, useStored } from "./stores.ts"
 import { useExtension } from "./extension.ts"
 import { refreshPool } from "./read-yahoo.ts"
+import { useMatchup } from "./useMatchup.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
 	EligibilityPanel,
@@ -672,6 +673,32 @@ export const App = () => {
 			return false
 		}
 	}, [key, rev])
+	/** The reader's own men, for the one period read the page makes. Same swallow as
+	 *  `hasTeam` above and for the same reason. */
+	const ownedIds = useMemo(() => {
+		if (!key) return [] as string[]
+		try {
+			return roster.of(key)
+		} catch {
+			return [] as string[]
+		}
+	}, [key, rev])
+	/**
+	 * HOW THE WEEK STANDS, READ ONCE FOR THE WHOLE PAGE.
+	 *
+	 * Tonight and Last night were asking `byDateRange` for the same window, the same league
+	 * and overlapping groups, a few hundred lines apart, because neither knew the other was
+	 * doing it. It is one read here, handed to both — and the matchup gap that falls out of
+	 * it is what the Tonight card gets for nothing.
+	 */
+	const matchup = useMatchup(
+		typeof snapshot?.season === "number" ? snapshot.season : null,
+		league ?? null,
+		snapshot?.horizon.end ?? null,
+		key,
+		ownedIds,
+		rev
+	)
 	/**
 	 * League MANAGEMENT — create, remove, import, download, load a file — is chrome
 	 * for a thing you do once, and it was sitting above the recommendations on every
@@ -1089,6 +1116,7 @@ export const App = () => {
 						league={shown}
 						leagueKey={key}
 						error={snapshotError}
+						matchup={matchup}
 						onOpenTeam={() => go({ view: "trade" })}
 					/>
 					{hasTeam && <Recap snapshot={snapshot} league={shown} leagueKey={key} />}

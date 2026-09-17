@@ -18,7 +18,8 @@ import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
 import { andList } from "../data/names.ts"
 import { useSlate } from "./useSlate.ts"
-import { lastNight, useActuals, usePeriodActuals } from "./useActuals.ts"
+import { lastNight, useActuals } from "./useActuals.ts"
+import type { Matchup } from "./useMatchup.ts"
 import { useStored } from "./stores.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { statusOf, lockFor, nextLock, clock, localDate, asSlateGames, type TodayStatus } from "../data/today.ts"
@@ -88,11 +89,16 @@ export const Decide = ({
 	league,
 	leagueKey,
 	error,
+	matchup,
 	onOpenTeam
 }: {
 	snapshot: Snapshot | null
 	league: League | null
 	leagueKey: string | null
+	/** How the week stands, read once for the whole page — see src/client/useMatchup.ts.
+	 *  This card uses the pitching half of it for the innings floor and the gap for the one
+	 *  thing it could never say: whether he is ahead. */
+	matchup: Matchup
 	/** Why the player data could not be read, when it could not. */
 	error: string | null
 	/** Takes the reader to the one screen that always works, on every platform:
@@ -1021,13 +1027,17 @@ export const Decide = ({
 	  what you have already thrown", which is the app handing a reader a subtraction it had
 	  the other half of two hundred lines away.
 	*/
+	/*
+	  ONE READ FOR THE WHOLE PAGE, and this card no longer makes its own.
+	
+	  It used to ask `byDateRange` for the pitching side of the league's period, to say how
+	  many innings had been banked against the floor — and the recap card asked for the same
+	  window, the same league and the same group a few hundred lines away, because neither
+	  knew about the other. `useMatchup` holds the one read, and the gap it also computes is
+	  what this card gets out of the change.
+	*/
 	const periodStart = rated?.period.periodStart ?? null
-	const thrown = usePeriodActuals(
-		typeof snapshot?.season === "number" ? snapshot.season : null,
-		periodStart,
-		lastNight(),
-		!!periodStart && ownedIds.some(k => k.endsWith(":pitching"))
-	)
+	const thrown = { lines: matchup.lines }
 	/**
 	 * WHAT HIS LINEUP HAS ACTUALLY SCORED TONIGHT, which no screen in this app could say.
 	 *
@@ -2175,9 +2185,48 @@ export const Decide = ({
 						    — which is the software describing itself, and a reader who has just been
 						    told who is scratched and who is hurt has watched it do all three. What he
 						    is owed here is the ABSENCE, which is the rest of the paragraph. */}
-						Nothing here is playing for or against a lead &mdash; it does not know your
-						league&rsquo;s scoreboard, and how your week stands is on <b>Last night</b>,
-						against an opponent you tell it about.
+						{/*
+						  THE GAP, WHERE THERE IS ONE, and the same refusal where there is not.
+						
+						  This sentence has said "it does not know your league's scoreboard" since it
+						  was written, and that half is still exactly true: nothing in this app reads
+						  a scoreboard, and what is below is not one. What it CAN say now is the gap
+						  — every man each side holds, scored over the league's own period, measured
+						  the same way twice — because the reader's own browser can read his
+						  opponent's roster off the matchup page in the press that reads his league.
+						
+						  AND IT STOPS THERE, deliberately. A margin does not steer a single row of
+						  this card: the spread that would be needed to turn "behind by 40" into
+						  "start the wilder arm" was measured on 64,027 player-days and does not
+						  survive the test — a player's own measured spread predicts his next spread
+						  18-31% WORSE than knowing only his cohort and his level (src/engine/
+						  spread.ts). So the number is told to the reader, who can act on it, and is
+						  kept out of the ranking, which cannot.
+						*/}
+						{matchup.gap !== null && matchup.rivals > 0 ?
+							<>
+								You are{" "}
+								{matchup.gap === 0 ?
+									"level"
+								: matchup.gap > 0 ?
+									<>ahead by {matchup.gap}</>
+								:	<>behind by {Math.abs(matchup.gap)}</>}
+								{matchup.daysLeft !== null && (
+									<>
+										{" "}
+										with {matchup.daysLeft} {matchup.daysLeft === 1 ? "day" : "days"} left
+									</>
+								)}
+								&nbsp;&mdash; every man each side holds, over this scoring period, which is
+								not the score your league will pay. Nothing below is playing for or against
+								that lead: it is the same answer either way.
+							</>
+						:	<>
+								Nothing here is playing for or against a lead &mdash; it does not know your
+								league&rsquo;s scoreboard, and how your week stands is on <b>Last night</b>,
+								against an opponent you tell it about.
+							</>
+						}
 					</p>
 				</>
 			)}

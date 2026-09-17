@@ -4,6 +4,7 @@ import { fetchAvailable, normalizeName } from "../data/yahoo-pool.ts"
 import { rateAll, withUndervaluation } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
 import { DEFAULTS, plan, railViolations, type PlanInput } from "./plan.ts"
+import { leagueLimits } from "../import.ts"
 import { applyLineup, describeMoves, permits as permitsFor } from "./execute.ts"
 import { readRoster } from "./roster.ts"
 import { checkSession, login, openSession, type ReadFailure } from "./session.ts"
@@ -164,7 +165,11 @@ const input: PlanInput = {
 		slot_order: league.roster.slot_order,
 		slot_accepts: league.roster.slot_accepts
 	},
-	options
+	options,
+	/* The league's own stated rules, so the autonomous run obeys the same cap the card
+	   does. `--max-moves` is still a rail on top of it: the planner takes the lower of the
+	   two, and a league that allows six does not make this run take six. */
+	limits: leagueLimits(league)
 }
 const result = plan(input)
 

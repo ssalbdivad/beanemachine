@@ -6,7 +6,7 @@ import {
 } from "../engine/trade.ts"
 import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
-import { pool as poolStore } from "./pool.ts"
+import { pool as poolStore, since } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
@@ -107,6 +107,21 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	   that one cannot come out different. */
 	const ext = useExtension()
 	const [readSaid, setReadSaid] = useState<string | null>(null)
+	/** What this browser is holding for this league, for the standing receipt below the
+	 *  button. Read on every render rather than remembered, so it cannot outlive the thing
+	 *  it describes. */
+	const poolHeld = useMemo(() => {
+		try {
+			return leagueKey ? poolStore.of(leagueKey) : null
+		} catch {
+			return null
+		}
+	}, [leagueKey, readSaid])
+	const poolAge = poolHeld ? since(poolHeld.at, Date.now()).label : ""
+	const poolMissed = poolHeld?.positionsRequested
+		? poolHeld.positionsRequested.filter(x => !poolHeld.positionsRead.includes(x))
+		: []
+
 	const readFromYahoo = async (): Promise<void> => {
 		if (!snapshot || !leagueKey) return
 		setReadSaid(null)
@@ -885,6 +900,31 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 						</p>
 						{ext.progress && <p className="sub connect-progress">{ext.progress}</p>}
 						{readSaid && <p className="sub">{readSaid}</p>}
+						{/*
+						  WHAT IS ACTUALLY IN THIS BROWSER, from the store rather than from the
+						  last press.
+						
+						  `readSaid` is what just happened and is gone on the next render of this
+						  screen. This is the standing answer: how many free agents are held, how
+						  old they are, and — the part that decides whether a board is worth
+						  reading — which positions the sweep never reached. "Nobody is free at
+						  catcher" and "the catcher page did not answer" are opposite claims about
+						  the same empty list, and only one of them is about the league.
+						*/}
+						{poolHeld && (
+							<p className="sub">
+								Holding <b>{poolHeld.players.length}</b> free agents, read{" "}
+								{poolAge}.
+								{poolMissed.length > 0 && (
+									<>
+										{" "}
+										{poolMissed.join(", ")} never came back, so nobody is listed at{" "}
+										{poolMissed.length === 1 ? "that position" : "those positions"} —
+										that is a gap in the read, not an empty wire.
+									</>
+								)}
+							</p>
+						)}
 					</div>
 				)}
 				<div className="paste-roster">

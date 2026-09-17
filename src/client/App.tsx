@@ -1259,7 +1259,24 @@ export const App = () => {
 						if (!next && league) setOnboarding(false)
 					}}
 					summary={
-						league ?
+						/*
+						  THE RECEIPT, where the bar used to say the least interesting true thing
+						  it could.
+						
+						  "Editing Yahoo H2H-Pts 228947" tells a reader the name of the thing he is
+						  looking at, which he can see. Once his league has actually been READ, the
+						  bar can tell him what came across — the count of free agents and how long
+						  ago — which is the first time this line says something he did not already
+						  know. Both halves are read from the store rather than remembered from the
+						  read, so the sentence stays true on the next visit and cannot outlive the
+						  thing it describes.
+						*/
+						league && wire?.players.length ?
+							<>
+								Read <b>{league.meta.league_name ?? "your league"}</b> &mdash;{" "}
+								{wire.players.length} free agents, {since(wire.at, Date.now()).label}.
+							</>
+						: league ?
 							<>
 								Editing <b>{league.meta.league_name ?? key}</b>.
 							</>

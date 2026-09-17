@@ -429,6 +429,21 @@ export const useBoard = (
 	 *  because "no free catcher" and "the catcher page did not answer" are different
 	 *  facts and only one of them is about the league. */
 	missedPositions: string[] = [],
+	/**
+	 * Positions the sweep DID get, handed to the rating so a seat nobody looked at falls
+	 * back instead of scoring zero.
+	 *
+	 * Measured by the engine pass that added `slotsCoveredBy`: on a wire truncated to the
+	 * men seated at C/1B/2B/3B, the unread seats came back with a replacement bar of 0 — SP
+	 * 0, RP 0, P 0 against a complete wire's 39.74, 37.00, 35.34 — and a bar of zero makes
+	 * every pitcher's bscore his whole projected total. Mason Miller went 75.74 to 111.08
+	 * and the top of the board rearranged itself around men nothing had looked for.
+	 *
+	 * That was a hypothetical until this week. The reader sweeps nine pages one at a time
+	 * and Yahoo throttles by serving an empty one, so a partial read is now the ORDINARY
+	 * failure rather than the exotic one — which is what makes this line worth the note.
+	 */
+	positionsRead?: string[] | null,
 	/** Your own men, by normalised name, so a row can be priced against the seat it
 	 *  would actually take rather than against the league's generic bar. Empty or
 	 *  absent means no roster has been entered and the column stays blank. */
@@ -736,6 +751,12 @@ export const useBoard = (
 				rateAll({
 				league,
 				available: gettable,
+				/* Only where the list IS a read list. With the ownership estimate there are no
+				   positions to speak of: the estimate speaks for every man in baseball at once,
+				   and declaring coverage off a set that does not exist would be the guard
+				   protecting nothing. */
+				availablePositions:
+					availability.basis === "pool" && positionsRead?.length ? positionsRead : undefined,
 				players: h.players,
 				underlying: h.underlying,
 				injuries,
@@ -782,7 +803,7 @@ export const useBoard = (
 		   disagreeing about a number is the worst failure this page can produce. Nothing
 		   re-orders — the proof above is that the ranking is byte-identical either way — so
 		   what the reader sees change is only the numbers that were waiting on the file. */
-	}, [snapshot, league, filters.mode, using, week, longWindows, gettable, injuries, contact])
+	}, [snapshot, league, filters.mode, using, week, longWindows, gettable, injuries, contact, availability.basis, positionsRead])
 
 	/**
 	 * Can the reader actually add this man — and how sure is the answer.

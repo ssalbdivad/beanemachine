@@ -8,7 +8,7 @@ import { scoreStats, tableFor } from "../engine/points.ts"
 import {
 	activeSlots, freezeShut, isBench, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
-import { deriveInningsMinimum, deriveMoveLimit } from "../import.ts"
+import { deriveInningsMinimum, deriveMoveLimit, leagueLimits } from "../import.ts"
 import { freshness, tab } from "./panels.tsx"
 import { canReadPool, api, poolIsPartial, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
@@ -374,6 +374,21 @@ export const Decide = ({
 		[wire, estimatedWire]
 	)
 
+	/**
+	 * Which positions the free-agent read actually reached, so the seats it never looked at
+	 * fall back to the whole-pool bar instead of to zero.
+	 *
+	 * Only from a REAL read: `estimatedWire` is the ownership estimate, which speaks for
+	 * every man in baseball at once and has no positions to declare. Measured in the engine
+	 * pass that added the guard — a wire truncated to four infield positions put a
+	 * replacement bar of 0 under SP, RP and P, which credits every pitcher with his whole
+	 * projected total and rearranged the top of the board around men nothing had looked for.
+	 */
+	const wirePositions = useMemo(
+		() => (wire?.players.length ? (wire.positionsRead ?? null) : null),
+		[wire]
+	)
+
 	/** The league's own free-agent list as a test any rated player can be put to. */
 	const wireTest = useMemo(() => {
 		const names = new Set(candidates.map(x => normalizeName(x.name)))
@@ -406,6 +421,7 @@ export const Decide = ({
 				 * card was built to end.
 				 */
 				available: wireTest,
+				availablePositions: wirePositions ?? undefined,
 				teamGamesPlayed: h.teamGamesPlayed,
 				gamesByTeam: w.games,
 				opponentsByTeam: w.opponents,
@@ -429,7 +445,7 @@ export const Decide = ({
 		// whole-pool simulation, if none had loaded at first render — while `plan` and
 		// `keepForSeason` moved on. That is the exact defect the memo above says it
 		// exists to end, one memo up.
-	}, [snapshot, league, wireTest, injuries])
+	}, [snapshot, league, wireTest, wirePositions, injuries])
 
 	/**
 	 * TODAY — the decision this league actually forces every day.
@@ -979,7 +995,8 @@ export const Decide = ({
 		const w = windowFrom(h.slate ?? [], today, h.seasonEnd)
 		if (!w.games.size) return new Set<string>()
 		const rows = rateAll({
-			players: h.players, league, available: wireTest, teamGamesPlayed: h.teamGamesPlayed,
+			players: h.players, league, available: wireTest, availablePositions: wirePositions ?? undefined,
+			teamGamesPlayed: h.teamGamesPlayed,
 			gamesByTeam: w.games, opponentsByTeam: w.opponents,
 			recentVolumeByWindow: h.recentVolumeByWindow, recentStats: h.recentStats,
 			ownership: h.ownership, eligibility: h.eligibility, underlying: h.underlying,
@@ -1012,7 +1029,21 @@ export const Decide = ({
 				slot_order: league.roster.slot_order,
 				slot_accepts: league.roster.slot_accepts
 			},
-			options: DEFAULTS
+			options: DEFAULTS,
+			/*
+			  THE LEAGUE'S OWN LIMITS, rather than this app's defaults alone.
+			
+			  `DEFAULTS.maxMoves` is 2 a week, and the comment on it says plainly that the
+			  number is inherited rather than established. A league that allows six is not
+			  served by two, and — the half that actually costs a reader something — a league
+			  that allows ONE was being offered two, which is a plan he cannot carry out. The
+			  planner takes the lower of the two and says which one bit.
+			
+			  This card already read both numbers for its own display (the innings floor line
+			  and the move-cap clause) and then let the planner work from the default, so the
+			  screen was quoting his league's rule beside advice that ignored it.
+			*/
+			limits: leagueLimits(league)
 		}
 		return { lineup: planLineup(input), swaps: planSwaps(input, 60, keepForSeason) }
 	}, [rated, league, seats, candidates, keepForSeason])

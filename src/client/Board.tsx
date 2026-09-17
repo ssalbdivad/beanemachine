@@ -863,7 +863,18 @@ export const Board = ({
 		   them — see `useContact` in useBoard.ts. Two things come back: which state that
 		   file is in, and the call that asks for it. Only the drill-down asks. */
 		contactStatus, askForContact
-	} = useBoard(snapshot, league, filters, availableNames, poolEligibility, missedPositions, myNames)
+	} = useBoard(
+		snapshot,
+		league,
+		filters,
+		availableNames,
+		poolEligibility,
+		missedPositions,
+		/* What the sweep actually reached. See the note on the parameter: an unread position
+		   used to put a replacement bar of 0 under every man who plays it. */
+		pool && !poolIsPartial(pool) ? pool.positionsRead : null,
+		myNames
+	)
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
 	/** What this league lets you spend in a week, where it says. Null is "it did not

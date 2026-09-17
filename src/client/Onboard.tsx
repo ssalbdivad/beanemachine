@@ -142,7 +142,31 @@ export const Onboard = ({
 	  the way back is a line at the foot of it.
 	*/
 	const ext = useExtension()
-	const [connecting, setConnecting] = useState(false)
+	/*
+	  A READER WHO ALREADY HAS IT LANDS ON THE BUTTON, not on the box.
+	
+	  The default sheet asks him to type his team in, which is the right question for every
+	  reader who cannot have it read for him — and the wrong one for a reader whose browser
+	  is sitting there able to do it in one press. Opening in connect mode is only done when
+	  BOTH are true: the reader is there, and there is no team stored yet. With a team
+	  already in, the sheet opens where it always did, because he came back to change
+	  something rather than to be onboarded again.
+	
+	  `extensionHere()` rather than the hook's `present`, because this decides the FIRST
+	  render: the hook's state arrives a tick later, and a sheet that opens on the box and
+	  then jumps to the walkthrough is worse than either.
+	*/
+	const [connecting, setConnecting] = useState(() => {
+		/* `roster.of` THROWS on a damaged store, on purpose — a roster is typed in by hand
+		   and must never be silently treated as empty. A throw in this initialiser would
+		   blank the whole sheet, so the question it is asked here ("has he got a team yet")
+		   degrades to "assume he has", which opens the sheet exactly where it always did. */
+		try {
+			return extensionHere() && !(leagueKey ? roster.of(leagueKey).length : 0)
+		} catch {
+			return false
+		}
+	})
 	const [readFailure, setReadFailure] = useState<GrabFailure | null>(null)
 	const [receipt, setReceipt] = useState<{ league: string | null; free: number | null; at: string | null }>({
 		league: null,

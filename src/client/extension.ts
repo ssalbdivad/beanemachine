@@ -126,12 +126,40 @@ export const useExtension = (): ExtensionState => {
 			settle(msg as never)
 		}
 		window.addEventListener("message", onMessage)
+		/*
+		  WATCHING FOR IT TO ARRIVE, because the screen promises that it is.
+		
+		  The install walkthrough's last line says "this page notices the moment it is added —
+		  nothing to press here", and until now nothing in this app could keep that promise: the
+		  bridge stamps the document when it loads, and a page that was already open when the
+		  reader installed it is never stamped at all. He would have watched three steps sit
+		  there and concluded the install had failed, at the highest-attrition moment in the
+		  product.
+		
+		  A poll rather than a MutationObserver: the attribute is set on `document.documentElement`
+		  at `document_start`, an observer on the root element with `attributes: true` is the same
+		  cost, and this stops as soon as it finds it. Two seconds is under the time it takes to
+		  read the step it sits beside.
+		*/
+		const watch = setInterval(() => {
+			const now = document.documentElement.getAttribute("data-beanemachine-extension")
+			if (!now) return
+			clearInterval(watch)
+			setPresent(true)
+			setVersion(now)
+			/* And ask, so `yahooOpen` and the protocol version arrive too — the attribute alone
+			   says it is there and nothing else. */
+			window.postMessage({ from: FROM_APP, id: "hello", ask: "hello" as Ask }, location.origin)
+		}, 2000)
 		/* Asking is how a page that loaded after the extension finds out it is there: the
 		   bridge answers a hello with a hello, without anything leaving the browser. Sent
 		   once, on mount, not on a timer — the answer also arrives unasked on focus and on
 		   the extension's own load. */
 		window.postMessage({ from: FROM_APP, id: "hello", ask: "hello" as Ask }, location.origin)
-		return () => window.removeEventListener("message", onMessage)
+		return () => {
+			clearInterval(watch)
+			window.removeEventListener("message", onMessage)
+		}
 	}, [])
 
 	const ask = useCallback<ExtensionState["ask"]>(

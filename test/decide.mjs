@@ -2093,7 +2093,12 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 {
 	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
 	const teams = [...new Set(snap.players.map(p => p.teamId).filter(Boolean))]
-	const SOON = 6_000
+	/* SIX SECONDS WAS A RACE THIS TEST KEPT LOSING. The card has to load the capture, rate
+	   1,446 players and render before the assertion runs, and on a slower run that took longer
+	   than the six seconds the first pitch was set at — so the card correctly said "every seat
+	   has started" and the assertion, which is about the state BEFORE the lock, failed. Twenty
+	   seconds is comfortably past the slowest render measured here and still a short test. */
+	const SOON = 20_000
 	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
 	const firstPitch = new Date(Date.now() + SOON).toISOString()
 	await page.route("**statsapi.mlb.com/api/v1/schedule**", r =>

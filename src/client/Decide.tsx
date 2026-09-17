@@ -1097,6 +1097,16 @@ export const Decide = ({
 		return any ? { points: Number(sum.toFixed(1)), lineup: !!seats.at } : null
 	}, [sofar.actuals, sofar.missing, league, seats, today])
 
+	/** Seated names to pitching ids, off the capture rather than off the rating, so a man in a
+	 *  seat still counts toward the innings he has thrown even on a day the rating skipped
+	 *  him — which is every day he is hurt, and exactly when a floor starts to bite. */
+	const pitcherIdByName = useMemo(() => {
+		const m = new Map<string, number>()
+		for (const p of snapshot?.players ?? [])
+			if (p.group === "pitching") m.set(normalizeName(p.name), p.id)
+		return m
+	}, [snapshot])
+
 	const banked = useMemo((): number | null => {
 		/* A PERIOD THAT OPENED TODAY HAS THROWN NOTHING, and that is a fact rather than an
 		   absence. The hook asks for no range in that case — a window running backwards is not
@@ -1106,13 +1116,30 @@ export const Decide = ({
 		   day in seven. */
 		if (!thrown.lines)
 			return periodStart && periodStart > lastNight() ? 0 : null
-		let outs = 0
-		for (const k of ownedIds) {
-			if (!k.endsWith(":pitching")) continue
-			outs += thrown.lines.get(k)?.stats.outs ?? 0
+		/*
+		   ONLY THE MEN IN SEATS, because only they throw innings that count.
+		
+		   This summed every pitcher the reader HOLDS, and the floor it is compared against is a
+		   quantity about his lineup: `seatedInnings` in src/auto/plan.ts sums seats alone, and
+		   its own comment records summing the whole staff reporting 82.5 against a floor of 20
+		   — a comfortable pass built out of four pitchers on the bench. The same mistake made
+		   here is worse, because it is the reassuring direction: "with 211.2 already thrown that
+		   still lands clear of your league's 20" about innings that never counted toward it.
+		
+		   Seats come from the lineup store, so a team with no seats read has no seated total and
+		   the honest answer is null rather than the whole staff's.
+		*/
+		const seated = seats?.spots.filter(sp => !isReserveSlot(sp.slot)) ?? []
+		if (!seated.length) return null
+		const seatedKeys = new Set<string>()
+		for (const sp of seated) {
+			const id = pitcherIdByName.get(normalizeName(sp.name))
+			if (id !== undefined) seatedKeys.add(`${id}:pitching`)
 		}
+		let outs = 0
+		for (const k of seatedKeys) outs += thrown.lines.get(k)?.stats.outs ?? 0
 		return Number((outs / 3).toFixed(1))
-	}, [thrown.lines, ownedIds, periodStart])
+	}, [thrown.lines, seats, pitcherIdByName, periodStart])
 
 
 	const plan = useMemo(() => {
@@ -2203,7 +2230,19 @@ export const Decide = ({
 						  spread.ts). So the number is told to the reader, who can act on it, and is
 						  kept out of the ranking, which cannot.
 						*/}
-						{matchup.gap !== null && matchup.rivals > 0 ?
+						{/* AND ONLY WHERE THE TWO LISTS ARE COMPARABLE. "Every man each side holds" is
+						    the clause that makes this number defensible, and it is false whenever the
+						    opponent list is short — which is the ordinary failure of both routes that
+						    fill it: a paste where three names did not match, and a matchup page read
+						    before the reader's own roster was stored. A gap of 262.9 against a
+						    two-man opponent is not a lead, and the recap card already refuses the
+						    same comparison; this card was printing it in bold. Two thirds, because a
+						    roster differs from a roster by an injured-list seat or two and not by a
+						    third. */}
+						{matchup.gap !== null &&
+						matchup.rivals > 0 &&
+						matchup.mine !== null &&
+						matchup.rivals >= Math.ceil(ownedIds.length * (2 / 3)) ?
 							<>
 								You are{" "}
 								{matchup.gap === 0 ?

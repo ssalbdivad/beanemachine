@@ -1915,7 +1915,8 @@ export const Board = ({
 									  broken. The banner above this list already has the true words for
 									  it: one real league's scoring, not yours.
 									*/}
-									<b>Ahead by</b> &mdash; points more than {theManLeftAt(null)}
+									<b>Ahead by</b> &mdash; points more than{" "}
+									{theManLeftAt(null, availability.basis === "pool")}
 									{preview ?
 										", in one real league\u2019s scoring \u2014 not yours yet."
 									:	", in your league\u2019s points."}
@@ -2166,7 +2167,10 @@ const BillysPick = ({
 			:	`Over ${horizon} he projects ${Math.abs(r.deltaMine)} points BEHIND ${theWorstManYouHold()}`
 		)
 	clauses.push(
-		`Projected for ${r.bscore} more points than ${theManLeftAt(r.slot)}, over ${horizon}`
+		/* `basis` is already this card's argument for which claim it may make, and whose bar
+		   the number subtracts is the same question one step further on: a real wire is walked
+		   the reader's own seats deep, a simulated one the whole league's. */
+		`Projected for ${r.bscore} more points than ${theManLeftAt(r.slot, basis === "pool")}, over ${horizon}`
 	)
 	// The "rostered in N% of leagues" clause used to live here. It came off the
 	// "% Ros" sweep, most of which is the per-game weather line rather than a
@@ -2376,8 +2380,26 @@ const BillysPick = ({
  * to live. `bscore.ts` computes `depth = teams x seats` and takes the man AT that depth;
  * this sentence says exactly that and nothing stronger.
  */
-const theManLeftAt = (slot: string | null): string =>
-	`the man left at ${slot ?? "his spot"} once every team has filled it`
+/**
+ * WHOSE BAR THIS NUMBER SUBTRACTS, and it is not the same man in the two pools.
+ *
+ * This sentence was written when there was one depth: the (teams x seats)-th man, i.e. the
+ * best player still left once every team in the league has filled that spot. That is still
+ * exactly right when the app is simulating a wire it cannot see.
+ *
+ * It is false on a board that HAS the reader's own free-agent list. A wire is the whole pool
+ * with the other rosters already removed, so the engine walks the reader's own seats down it
+ * rather than the league's (src/engine/bscore.ts, and the measurement in
+ * data/results/wire-depth/) — and the man it lands on is a few places down the free-agent
+ * list rather than a man every team has passed over. Saying "once every team has filled it"
+ * about him is the same class of mistake `theManLeftAt` was written to prevent: two screens
+ * disagreeing about whose bar the number subtracts, in the sentence a reader checks the
+ * number against.
+ */
+const theManLeftAt = (slot: string | null, onWire = false): string =>
+	onWire ?
+		`the best man still free at ${slot ?? "his spot"} once your own seats there are filled`
+	:	`the man left at ${slot ?? "his spot"} once every team has filled it`
 
 /**
  * WHO YOUR OWN BAR IS — the second sentence, written out here so that it can never be

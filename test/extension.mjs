@@ -397,6 +397,49 @@ await walled.close()
 	await ui.close()
 }
 
+/* ── WHAT EACH STORE WILL ACCEPT ─────────────────────────────────────────────────────
+   The Chromium run above proves one of the two builds. Firefox cannot be driven with an
+   unpacked extension from here, so what is asserted instead is the thing that actually
+   goes wrong when one source has to make two builds — and it goes wrong SILENTLY.
+
+   Firefox does not support `background.service_worker` at all (bug 1573659) and runs an
+   event page from `background.scripts`. Ship Chrome's key to Firefox and the add-on
+   installs, shows up in the list, and never runs a line of background code: no router, no
+   answer to any question the page asks, and nothing on screen saying why. That is the
+   failure this block exists to make loud. */
+{
+	const manifest = b => JSON.parse(readFileSync(new URL(`../dist-ext/${b}/manifest.json`, import.meta.url), "utf8"))
+	const chrome = manifest("chrome")
+	const firefox = manifest("firefox")
+	t("Chrome gets a service worker", chrome.background?.service_worker === "background.js" && !chrome.background.scripts,
+		JSON.stringify(chrome.background))
+	t("and Firefox gets an event page, never a service worker",
+		firefox.background?.scripts?.[0] === "background.js" && !firefox.background.service_worker,
+		JSON.stringify(firefox.background))
+	t("Firefox gets an id it can recognise across updates",
+		/@/.test(firefox.browser_specific_settings?.gecko?.id ?? ""),
+		JSON.stringify(firefox.browser_specific_settings))
+	/* 128 rather than 109. MV3 has been available since 109, but host permissions are only
+	   GRANTED at install from 127 — before that they sit ungranted with nothing telling the
+	   reader why nothing works. 128 is the ESR, which is what a cautious install runs. */
+	t("and a floor where host permissions are actually granted at install",
+		Number.parseInt(firefox.browser_specific_settings?.gecko?.strict_min_version ?? "0", 10) >= 127,
+		firefox.browser_specific_settings?.gecko?.strict_min_version)
+	for (const [name, m] of [["chrome", chrome], ["firefox", firefox]]) {
+		t(`${name} asks for the Yahoo host and nothing wider`,
+			JSON.stringify(m.host_permissions) === JSON.stringify(["*://*.fantasysports.yahoo.com/*"]),
+			JSON.stringify(m.host_permissions))
+		/* A permission nobody uses is a permission somebody has to justify — to a store
+		   reviewer and to a reader reading the install prompt. Nothing is stored, so
+		   `storage` is not asked for. */
+		t(`${name} asks for no storage, because it keeps nothing`,
+			!(m.permissions ?? []).includes("storage"), JSON.stringify(m.permissions))
+		t(`${name} reads the app's own origin, so the two halves can talk`,
+			m.content_scripts?.some(c => c.matches.includes("https://beanemachine.com/*")),
+			JSON.stringify(m.content_scripts?.map(c => c.matches)))
+	}
+}
+
 t("and the app logged no errors through any of it", errs.length === 0, errs.join(" | "))
 
 await context.close()

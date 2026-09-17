@@ -105,6 +105,22 @@ const teamPage = () =>
 		.join("") +
 	`</table></body>`
 
+/** The matchup page: both teams' men, the way the page prints them, with no label a
+ *  name-matcher can see saying which half is whose. That is the point — the reader's own
+ *  roster is what separates them. */
+const rivals = snap.players
+	.filter(p => p.group === "hitting" && (p.stats?.plateAppearances ?? 0) > 400)
+	.filter(p => !seated.some(s => s.p.id === p.id))
+	.slice(0, 7)
+
+const matchupPage = () =>
+	`<!doctype html><meta charset="utf-8"><title>Matchup</title><body><table>` +
+	`<tr><td>Mrs. Met's Harem</td><td>Rival Nine</td></tr>` +
+	seated
+		.map(({ p }, i) => `<tr><td>${p.name}</td><td>${rivals[i]?.name ?? ""}</td></tr>`)
+		.join("") +
+	`</table></body>`
+
 /** A player-table row in Yahoo's shape — from test/ownership.mjs, including the second
  *  id-bearing link with no title and the AccuWeather tooltip that once broke the parser. */
 const row = (id, name, pct) =>
@@ -140,6 +156,7 @@ const server = createServer((req, res) => {
 		res.end(html)
 	}
 	if (url.pathname.endsWith("/settings")) return send(settingsPage(real))
+	if (url.pathname.endsWith("/matchup")) return send(matchupPage())
 	if (url.pathname.endsWith("/players")) return send(playersPage(url.searchParams.get("pos") ?? "C"))
 	if (/\/b1\/\d+\/\d+$/.test(url.pathname)) return send(teamPage())
 	if (/\/b1\/\d+$/.test(url.pathname)) return send(`<!doctype html><body>League home</body>`)
@@ -246,7 +263,10 @@ const askFor = (ask, opts = {}) =>
 
 /* ── one press: the team page and the settings page ──────────────────────────────── */
 const league = await askFor("league")
-t("one press brings back two pages", league.kind === "grabs" && league.grabs.length === 2, JSON.stringify(league).slice(0, 300))
+t("one press brings back the three pages a league is made of",
+	league.kind === "grabs" && league.grabs.length === 3 &&
+		league.grabs.map(g => g.kind).join(",") === "team,settings,matchup",
+	(league.grabs ?? []).map(g => g.kind).join(",") || JSON.stringify(league).slice(0, 200))
 t("the team page comes back as text, not as 400 KB of markup",
 	league.grabs?.[0]?.kind === "team" && league.grabs[0].text.length > 40 && !league.grabs[0].html,
 	JSON.stringify(league.grabs?.[0] ?? null).slice(0, 200))
@@ -266,6 +286,8 @@ const read = await app.evaluate(async grabs => {
 		teams: out.league?.meta.max_teams ?? null,
 		players: out.roster?.players.length ?? 0,
 		spots: out.roster?.spots.length ?? 0,
+		opponent: out.opponent?.length ?? 0,
+		mineOnBoth: (out.opponent ?? []).filter(k => (out.roster?.keys ?? []).includes(k)).length,
 		notes: out.notes
 	}
 }, league.grabs)
@@ -279,6 +301,14 @@ t("and the team count that moves every ranking", read.teams === real.meta.max_te
 t("and the team, with the seat each man is in",
 	read.players === seated.length && read.spots === seated.length,
 	JSON.stringify({ players: read.players, spots: read.spots, want: seated.length }))
+
+/* WHO HE IS PLAYING, off the same press. The recap card has been asking him to paste his
+   opponent's roster; the page his league already shows him carries both teams, and his own
+   roster is the only thing that tells them apart — so a man on his own team must never come
+   back as his opponent's. */
+t("and the other side of the matchup, told apart from his own team",
+	read.opponent === rivals.length, JSON.stringify({ got: read.opponent, want: rivals.length }))
+t("with none of his own men on the other side of it", read.mineOnBoth === 0, String(read.mineOnBoth))
 
 /* ── the sweep ───────────────────────────────────────────────────────────────────── */
 const before = asked.length

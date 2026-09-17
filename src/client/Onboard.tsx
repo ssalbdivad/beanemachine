@@ -11,6 +11,7 @@ import { Connect, browserOf, takesExtension } from "./Connect.tsx"
 import { extensionHere, useExtension } from "./extension.ts"
 import { readGrabs } from "../data/yahoo-read.ts"
 import { pool as poolStore } from "./pool.ts"
+import { opponentStore } from "./opponent.ts"
 import type { GrabFailure } from "../data/extension.ts"
 
 /**
@@ -269,6 +270,16 @@ export const Onboard = ({
 					what: `your team could not be saved in this browser: ${(e as Error).message}`,
 					fix: "A private window usually does this, and so does a full phone."
 				})
+			}
+		}
+		/* WHO HE IS PLAYING, off the same press. The recap card has been asking him to paste
+		   his opponent's roster; when the matchup page came across, it does not have to. */
+		if (reading.opponent?.length && key) {
+			try {
+				opponentStore.set(key, reading.opponent)
+			} catch {
+				/* An opponent is one paste away and worth nothing if it cost the read that
+				   carried it — the league and the team are already saved above. */
 			}
 		}
 		setReceipt({

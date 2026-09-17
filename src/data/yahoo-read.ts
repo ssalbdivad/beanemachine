@@ -36,6 +36,20 @@ export interface YahooReading {
 	roster: PastedRoster | null
 	/** Free agents, when a sweep was. */
 	pool: { players: PoolEntry[]; positionsRead: string[]; positionsRequested: string[] } | null
+	/**
+	 * The men on the OTHER side of this week's matchup, as `id:group` keys.
+	 *
+	 * Names only, and only the ones that are not the reader's own. The matchup page shows
+	 * both teams, so his own roster is what separates them — which also means this is empty
+	 * until his roster is known, and that is the honest answer rather than a guess at which
+	 * half of the page belongs to whom.
+	 *
+	 * NO SCORE. The page prints one, and it is deliberately not read: nobody working on
+	 * this has seen the real page, and a regular expression written against a page nobody
+	 * has seen is a number the app would print with total confidence and no idea whether it
+	 * was the score, the projection, or last week's.
+	 */
+	opponent: string[] | null
 	/** The oldest read in the set, which is what any age the app prints must be measured
 	 *  from — a set of pages read over four minutes is as old as its oldest page. */
 	at: string | null
@@ -68,6 +82,7 @@ export const readGrabs = (
 		league: null,
 		roster: null,
 		pool: null,
+		opponent: null,
 		at: null,
 		notes
 	}
@@ -114,6 +129,23 @@ export const readGrabs = (
 		out.roster = rosterFromPaste(team.text, snapshot)
 		if (!out.roster.players.length)
 			notes.push("No players were found on that team page, so your team was left as it was.")
+	}
+
+	const matchup = grabs.find(g => g.kind === "matchup")
+	if (matchup) {
+		const both = rosterFromPaste(matchup.text, snapshot)
+		/* HIS MEN ARE THE ONES THAT ARE NOT YOURS. The page carries both rosters and does
+		   not label which is which in any way a name-matcher can see, so the reader's own
+		   team is the only thing that separates them. Without a roster read in the same
+		   breath there is nothing to subtract, and the honest answer is none — not "all of
+		   them", which would put his own team on both sides of his own matchup. */
+		const mine = new Set(out.roster?.keys ?? [])
+		const his = both.keys.filter(k => !mine.has(k))
+		out.opponent = mine.size ? his : []
+		if (!mine.size)
+			notes.push(
+				"Your opponent could not be told apart from you on that page until your own team is read."
+			)
 	}
 
 	const players = grabs.filter(g => g.kind === "players" && g.html)

@@ -204,10 +204,30 @@ chrome.runtime.onMessage.addListener(
 				return true
 			}
 			const settingsUrl = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/settings`
+			const matchupUrl = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/matchup`
 			void (async () => {
 				if (here.kind === "settings") {
 					reply({ kind: "grabs", grabs: [here] })
 					return
+				}
+				/** A page fetched from the reader's own signed-in tab, reduced to the text a
+				 *  browser would have rendered. Tags are stripped HERE rather than in the app so
+				 *  the 400 KB never crosses the wire — and text is what the app's parsers are
+				 *  written to be handed, because text is what survives a redesign. */
+				const asText = async (url: string): Promise<string> => {
+					const res = await fetch(samePath(url), { credentials: "include" })
+					if (!res.ok) return ""
+					const html = await res.text()
+					return html
+						.replace(/<script[\s\S]*?<\/script>/gi, " ")
+						.replace(/<style[\s\S]*?<\/style>/gi, " ")
+						.replace(/<\/(tr|div|p|li|h\d|table)>/gi, "\n")
+						.replace(/<\/t[dh]>/gi, "\t")
+						.replace(/<[^>]+>/g, "")
+						.replace(/&nbsp;/g, " ")
+						.replace(/&amp;/g, "&")
+						.replace(/[ \t]+\n/g, "\n")
+						.replace(/\n{3,}/g, "\n\n")
 				}
 				try {
 					const res = await fetch(samePath(settingsUrl), { credentials: "include" })
@@ -227,11 +247,28 @@ chrome.runtime.onMessage.addListener(
 						.replace(/[ \t]+\n/g, "\n")
 						.replace(/\n{3,}/g, "\n\n")
 					const wall = wallIn(text)
-					reply({
-						kind: "grabs",
-						grabs: wall || !text.trim() ? [here] : [here, { url: settingsUrl, kind: "settings", text, at: now() }],
-						failure: wall ?? undefined
-					})
+					/*
+					   AND WHO HE IS PLAYING, on the same press.
+					
+					   "Am I winning?" is the question a head-to-head manager asks most, and until
+					   now the only way this app could answer it was to ask him to paste his
+					   opponent's roster — a second gesture, on a second page, for a fact his own
+					   league page already shows him. One more request to a page of his own league
+					   is the whole cost.
+					
+					   The app takes the NAMES out of it and nothing else. A score is printed on
+					   that page too, and it is deliberately not read: nobody here has seen the
+					   real page, and a regular expression written against a page nobody has seen
+					   is a number this app would print with total confidence and no idea whether
+					   it was the score, the projection, or last week's.
+					*/
+					const matchup = await asText(matchupUrl).catch(() => "")
+					const extra: Grab[] = []
+					if (!wall && text.trim())
+						extra.push({ url: settingsUrl, kind: "settings", text, at: now() })
+					if (matchup.trim() && !wallIn(matchup))
+						extra.push({ url: matchupUrl, kind: "matchup", text: matchup, at: now() })
+					reply({ kind: "grabs", grabs: [here, ...extra], failure: wall ?? undefined })
 				} catch {
 					reply({ kind: "grabs", grabs: [here] })
 				}

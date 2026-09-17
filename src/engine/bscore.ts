@@ -352,6 +352,14 @@ export interface RateOptions {
 	 * C, 1B, 2B or 3B — the four-position throttle above. Replacement bars, points over
 	 * the fortnight:
 	 *
+	 * DENOMINATED IN THE DEPTH THAT SHIPPED WHEN IT WAS TAKEN — `teams × count` down a wire
+	 * — which changed to `count` later the same day. Left as measured rather than restated
+	 * from memory: what this table is evidence FOR is the shape of the failure, that six of
+	 * ten slots were corrupted by a read that was right about four and three were set to
+	 * zero, and that shape does not depend on the depth. Re-derive it against the shipped
+	 * rule with `node --experimental-strip-types src/backtest/wire/bars.ts`, which
+	 * cross-checks itself against what `rateAll` actually did.
+	 *
 	 *   slot   complete wire   truncated, before this   truncated, with this
 	 *   C             48.85    48.85                    48.85
 	 *   1B            62.39    62.39                    62.39
@@ -639,10 +647,16 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	for (const r of rated) r.points = r.projected.points
 
 	/**
-	 * Replacement level per slot: the (teams × slots)-th best projected player who
-	 * is eligible there. That is literally the best player still on waivers once
-	 * every team has filled the slot — so the depth follows the league's own roster
-	 * configuration rather than a rule of thumb.
+	 * Replacement level per slot, and the depth is not the same in the two pools.
+	 *
+	 * Simulating a wire this app cannot see, it is the (teams × slots)-th best eligible
+	 * player: literally the best man still on waivers once every team has filled the slot,
+	 * so the depth follows the league's own roster configuration rather than a rule of
+	 * thumb. Given the reader's OWN free-agent list, it is his own seats deep instead —
+	 * that list is the same pool with the other rosters already taken out of it, and
+	 * walking the league's depth down it removes them twice. The measurement is at the
+	 * `depth` line below; this paragraph used to state only the first depth and was the
+	 * wording two screens copied their now-corrected sentences from.
 	 */
 	const replacementBySlot = new Map<string, number>()
 	/** Which slots the availability list is entitled to speak for. Null when the caller
@@ -681,7 +695,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 * with the positions the sweep actually came back with, and a slot outside it
 		 * falls back to the whole-pool simulation rather than to whatever the sweep's
 		 * other positions happened to sweep up. Measured on the committed capture with a
-		 * four-position read, the five slots it never looked at were priced against
+		 * four-position read, the six slots it never looked at were priced against
 		 * bars of 47.90, 28.93, 64.84, 0, 0 and 0 against a complete wire's 57.20,
 		 * 60.73, 72.81, 39.74, 37.00 and 35.34 — the table is under `availablePositions`.
 		 *
@@ -728,7 +742,9 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 * 19 of 20 favour walking `count`, mean +28.0 points a week, significant in 13, and it
 		 * wins 78 of 100 season-comparisons. At the shipped two moves a week against a mixed
 		 * field it is 62W-44L, +21.1/wk, z +1.75, p 0.080 — suggestive there, and significant
-		 * at three moves (79W-26L, +58.7/wk, p 0.0004). At ONE move a week everything in this
+		 * at three moves (79W-26L, +58.7/wk, p below the resolution the run prints — its own
+		 * line in data/results/wire-depth/grid.txt reads `p0.000`, and quoting a rounder
+		 * number than the evidence carries is how a measurement drifts from what it measured). At ONE move a week everything in this
 		 * question is inside the noise; about 23 decisions a season cannot separate any of it.
 		 *
 		 * THE OTHER CANDIDATE WAS MEASURED AND REJECTED. "A known wire means replacement is its

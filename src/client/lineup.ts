@@ -28,7 +28,26 @@ const Spot = type({
 	positions: "string[]",
 	"team?": "string | null"
 })
-const Stored = type({ "[string]": { at: "string", spots: Spot.array() } })
+const Stored = type({
+	"[string]": {
+		at: "string",
+		spots: Spot.array(),
+		/**
+		 * WHICH TEAM IN THE LEAGUE THESE SEATS ARE, when the reader's own browser read them.
+		 *
+		 * Optional because every set of seats stored before the browser reader existed was
+		 * pasted, and a pasted page does not say which team it is — the reader knows, because
+		 * he was looking at it. A read does say, in the URL, and the id is what lets the NEXT
+		 * read refuse a page that is somebody else's team: "you are on another manager's
+		 * roster" is a sentence this app can only say if it remembers whose roster it stored.
+		 *
+		 * It lives here rather than in a store of its own because it is a fact ABOUT these
+		 * seats and arrived with them. A fourth store holding one string per league would be
+		 * a fourth thing to clear, to migrate and to explain.
+		 */
+		"teamId?": "string | null"
+	}
+})
 type Stored = typeof Stored.infer
 
 export type StoredLineup = typeof Stored.infer[string]
@@ -70,9 +89,19 @@ const write = (next: Stored): Stored => {
 const of = (league: string): StoredLineup | null => read()[league] ?? null
 
 /** A read is the whole truth about that team, so it replaces rather than merges. */
-const set = (league: string, spots: StoredLineup["spots"], at: string): StoredLineup => {
+const set = (
+	league: string,
+	spots: StoredLineup["spots"],
+	at: string,
+	/** Only the reader's own browser knows this, and only off the URL it read. Absent on
+	 *  every pasted team, which is most of them. */
+	teamId?: string | null
+): StoredLineup => {
 	const stored = read()
-	return write({ ...stored, [league]: { at, spots } })[league]!
+	return write({
+		...stored,
+		[league]: teamId ? { at, spots, teamId } : { at, spots }
+	})[league]!
 }
 
 /**

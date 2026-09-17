@@ -103,6 +103,22 @@ export const refreshPool = async (
  * adopting a preview as a real league is a decision that belongs to the screen that was
  * showing the preview.
  */
+/**
+ * The team id this browser has already seen for a league, or null the first time.
+ *
+ * Kept on the lineup store's own entry rather than in a store of its own: it is a fact
+ * ABOUT the seats that were read, it arrived with them, and a fourth store holding one
+ * string per league would be a fourth thing to clear, migrate and explain.
+ */
+const knownTeamId = (leagueKey: string | null): string | null => {
+	if (!leagueKey) return null
+	try {
+		return lineupStore.of(leagueKey)?.teamId ?? null
+	} catch {
+		return null
+	}
+}
+
 export const readLeagueHere = async (
 	ext: ExtensionState,
 	snapshot: { players: PlayerSeason[]; eligibility?: Record<string, string[]> },
@@ -114,7 +130,25 @@ export const readLeagueHere = async (
 		const f = answer.failure
 		return { said: `${f?.what ?? "That could not be read"}${f?.fix ? ` — ${f.fix}` : ""}`, read: false }
 	}
-	const reading = readGrabs(answer.grabs, snapshot)
+	/*
+	  WHAT THIS READ IS SUPPOSED TO BE ABOUT, handed over so the parser can refuse.
+	
+	  The screen has an active league; the reader's browser has whatever Yahoo tab he left
+	  open. When those differ every page in the grab set belongs to the open tab's league,
+	  and this function writes it under the SCREEN's key — a rival league's nine men landing
+	  in this league's roster store with nothing anywhere saying so. The sweep was already
+	  safe, because the router refuses a tab whose league is not the one asked for; a `league`
+	  press names no league at all, and this is the hole that closes it.
+	
+	  `teamId` is the same argument one step finer: a press from another manager's roster page
+	  in the reader's own league is a page this app can parse perfectly and must not store.
+	  It is only known once a first read has stored one, which is why it is optional here
+	  rather than required.
+	*/
+	const reading = readGrabs(answer.grabs, snapshot, undefined, {
+		leagueKey,
+		teamId: knownTeamId(leagueKey) ?? undefined
+	})
 	const said: string[] = []
 	if (reading.league && onLeague) {
 		onLeague(reading.league)
@@ -124,7 +158,14 @@ export const readLeagueHere = async (
 		try {
 			rosterStore.set(leagueKey, reading.roster.keys)
 			if (reading.roster.spots.length)
-				lineupStore.set(leagueKey, reading.roster.spots, reading.at ?? new Date().toISOString())
+				lineupStore.set(
+					leagueKey,
+					reading.roster.spots,
+					reading.at ?? new Date().toISOString(),
+					/* Stored so the NEXT press can refuse another manager's roster page — which
+					   is a page this app parses perfectly and must not write. */
+					reading.teamId
+				)
 			said.push(`${reading.roster.players.length} men, in the seats they are in`)
 		} catch (e) {
 			said.push(`your team could not be saved: ${(e as Error).message}`)
@@ -145,8 +186,23 @@ export const readLeagueHere = async (
 		if (swept.added !== null) said.push(`${swept.added} free agents`)
 		else if (swept.failure) said.push(swept.failure.what)
 	}
+	/*
+	  A READ THAT PARTLY FAILED SAYS SO, and it did not.
+	
+	  `answer.failure` is set whenever a page in the set could not be fetched — a settings
+	  page Yahoo refused, a matchup page behind a wall — while the grabs that DID arrive come
+	  back as normal. This returned only what had worked, so a reader whose scoring table
+	  silently failed to arrive was told "9 men, in the seats they are in" and nothing else,
+	  and would have gone on looking at a board priced in borrowed values believing it was
+	  his own.
+	*/
+	const snags = [
+		answer.failure ? `${answer.failure.what}${answer.failure.fix ? ` — ${answer.failure.fix}` : ""}` : null,
+		...reading.notes
+	].filter(Boolean)
+	const got = said.length ? `${said.join(", ")}.` : ""
 	return {
-		said: said.length ? `${said.join(", ")}.` : reading.notes.join(" ") || "Nothing new came back.",
+		said: [got, ...snags].filter(Boolean).join(" ") || "Nothing new came back.",
 		read: said.length > 0
 	}
 }

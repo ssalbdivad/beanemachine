@@ -11,8 +11,8 @@
  * requested at `http://baseball.fantasysports.yahoo.com/b1/228947/8`, the extension's own
  * match patterns really do decide whether its content script runs, and the fetches the
  * sweep makes really are same-origin requests carrying whatever cookies that origin has.
- * Nothing about the extension is stubbed: the build in dist-ext/chrome is loaded unpacked,
- * exactly as a reader loads it.
+ * Nothing about the extension is stubbed: the suite builds it and loads the result
+ * unpacked, exactly as a reader loads it.
  *
  * WHAT THIS PROVES: that the three scripts load, that the two content scripts find each
  * other through the background, that a page grabbed inside Yahoo arrives in the app, and
@@ -30,6 +30,7 @@
 import { chromium } from "playwright-core"
 import { createServer } from "node:http"
 import { readFileSync, mkdtempSync } from "node:fs"
+import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 /* The protocol's own pure parts, asserted directly rather than through a browser. They are
@@ -213,6 +214,22 @@ const playersPage = pos => {
 const WALL = `<!doctype html><meta charset="utf-8"><body>Request denied. Too many requests from your network.</body>`
 
 /**
+ * THE SAME WALL, BEHIND A HEADER.
+ *
+ * Yahoo's real pages open with a nav, a league name and a row of tabs before anything that
+ * is about the request at all, and how much of that comes first is a layout nobody here
+ * controls. The wall check used to read the first 600 characters, so a refusal that sat
+ * behind a fuller header than the fixture's was invisible — and a throttle that is not seen
+ * is a throttle parsed as a league and written into his stores as an empty team.
+ *
+ * 900 characters of nav is not a measurement of Yahoo's header; no real page has been read
+ * by this project. It is a page built to sit between the old window and the new one, which
+ * is what makes the assertion about the two windows mean something.
+ */
+const NAV = "Fantasy Baseball My Team League Players Scoreboard Standings Transactions Draft Research ".repeat(10)
+const WALLED_BEHIND_NAV = `<!doctype html><meta charset="utf-8"><body>${NAV}Request denied. Too many requests from your network.</body>`
+
+/**
  * HOW MANY PLAYERS PAGES THIS FIXTURE WILL SERVE BEFORE IT STARTS REFUSING.
  *
  * Yahoo throttles a sweep partway through — commit de44045 records 150 players, then 25,
@@ -228,6 +245,14 @@ let playersServed = 0
  *  branches through the sweep, only one of which was covered. */
 let failFrom = Infinity
 
+/** Which of the two wall pages to serve once the sweep is being refused — bare, or behind
+ *  the header a real page would have. */
+let wallShape = "bare"
+
+/** After this many players pages, redirect to the login host the way an expired Yahoo
+ *  session does. */
+let redirectFrom = Infinity
+
 /* ── a Yahoo to point the browser at ─────────────────────────────────────────────── */
 const asked = []
 const server = createServer((req, res) => {
@@ -241,11 +266,19 @@ const server = createServer((req, res) => {
 	if (url.pathname.endsWith("/matchup")) return send(matchupPage())
 	if (url.pathname.endsWith("/players")) {
 		playersServed++
+		/* AN EXPIRED SESSION, THE WAY YAHOO ACTUALLY ENDS ONE: a redirect to the login host,
+		   which is a different origin from the tab the sweep is running in. The request
+		   therefore stops being same-origin at the redirect and the fetch rejects outright
+		   rather than returning a page — a branch nothing else in this suite reaches. */
+		if (playersServed > redirectFrom) {
+			res.writeHead(302, { location: "https://login.yahoo.com/config/login" })
+			return res.end()
+		}
 		if (playersServed > failFrom) {
 			res.writeHead(429, { "content-type": "text/html; charset=utf-8" })
 			return res.end("<!doctype html><body>Too many requests</body>")
 		}
-		if (playersServed > serveUntil) return send(WALL)
+		if (playersServed > serveUntil) return send(wallShape === "behind-nav" ? WALLED_BEHIND_NAV : WALL)
 		return send(playersPage(url.searchParams.get("pos") ?? "C"))
 	}
 	/* `f1` as well as `b1`: a reader with a football league open is a case this suite drives,
@@ -260,7 +293,44 @@ await new Promise(r => server.listen(0, "127.0.0.1", r))
 const port = server.address().port
 
 const APP = process.env.BASE ?? "http://127.0.0.1:5299"
-const EXT = new URL("../dist-ext/chrome", import.meta.url).pathname
+
+/**
+ * THE SUITE BUILDS WHAT IT TESTS, BOTH WAYS, RATHER THAN TRUSTING WHATEVER WAS LAST BUILT.
+ *
+ * It used to load `dist-ext/chrome` and take it on faith. That is a green suite over a
+ * stale bundle whenever anybody edits extension/src and forgets the build step, which
+ * happened during the work that added these assertions — the source was right, the bundle
+ * was yesterday's, and the run said everything was fine.
+ *
+ * TWO BUILDS, and the difference between them is the point. The default is what goes to a
+ * store: the bridge reaches beanemachine.com and nothing else. The suite serves the app at
+ * 127.0.0.1, which the store build deliberately cannot see — a match pattern cannot name a
+ * port, so shipping `http://localhost/*` would let any page served from the reader's own
+ * machine ask for his Yahoo league. So the browser is given the dev build, and the store
+ * build is still made, in dist-ext, because the assertions about what each store will accept
+ * read that one.
+ */
+const buildExt = async (dir, dev) =>
+	new Promise((ok, no) => {
+		const child = spawn(process.execPath, ["extension/build.mjs"], {
+			cwd: new URL("..", import.meta.url).pathname,
+			env: { ...process.env, BM_EXT_OUT: dir, BM_EXT_DEV: dev ? "1" : "" },
+			stdio: ["ignore", "pipe", "pipe"]
+		})
+		let said = ""
+		child.stdout.on("data", d => (said += d))
+		child.stderr.on("data", d => (said += d))
+		child.on("close", code => (code === 0 ? ok(said.trim()) : no(new Error(said))))
+	})
+
+/* Store build first, because building it empties its own output directory and the dev build
+   lives inside it — inside, rather than beside, because `.gitignore` covers `dist-ext` and a
+   sibling directory would be a pile of untracked build output in every `git status` from
+   here on. */
+await buildExt("dist-ext", false)
+await buildExt("dist-ext/dev", true)
+
+const EXT = new URL("../dist-ext/dev/chrome", import.meta.url).pathname
 const profile = mkdtempSync(join(tmpdir(), "bm-ext-"))
 
 const context = await chromium.launchPersistentContext(profile, {
@@ -335,6 +405,24 @@ const hello = await app.evaluate(
 )
 t("it says hello, with a version and whether Yahoo is open", !!hello && !!hello.version, JSON.stringify(hello))
 t("and it can see the Yahoo tab", !!hello && hello.yahooOpen === true, JSON.stringify(hello))
+
+/** Asks for a hello and waits for it — the same ask the app's own hook makes on mount, and
+ *  the only way to read "is there a Yahoo tab open right now" as the app reads it. */
+const helloNow = () =>
+	app.evaluate(
+		() =>
+			new Promise(resolve => {
+				const on = e => {
+					if (e.source !== window || e.data?.from !== "beanemachine-extension") return
+					if (e.data.kind !== "hello") return
+					window.removeEventListener("message", on)
+					resolve(e.data)
+				}
+				window.addEventListener("message", on)
+				window.postMessage({ from: "beanemachine-page", id: "hello", ask: "hello" }, location.origin)
+				setTimeout(() => resolve(null), 10000)
+			})
+	)
 
 /** Asks the extension the way the app asks it, and waits for the one answer with this id. */
 const askFor = (ask, opts = {}) =>
@@ -538,6 +626,31 @@ await walled.close()
 		rowsOnly("<html><body>Yahoo has redesigned this page</body></html>") === null,
 		String(rowsOnly("<html><body>Yahoo has redesigned this page</body></html>")))
 
+	/*
+	   THE BOUNDARY THE WHOLE ARGUMENT RESTS ON.
+
+	   `parsePage` reads at most 9000 characters after each row marker and the cut keeps
+	   exactly that span, which is why the two agree BY CONSTRUCTION rather than by luck. The
+	   claim is only worth anything at the boundary, so here is a page whose rows run well
+	   past it: if the cut ever kept less than the parser reads, the men on this page would
+	   come back with their team and their ownership missing, and no test that used ordinary
+	   rows would notice.
+	*/
+	const fat = `<!doctype html><body><table>` +
+		[0, 1, 2]
+			.map(i =>
+				`<tr><td><a data-ys-playerid="${7700 + i}" title="Fat Row ${i}">Fat Row ${i}</a>` +
+					`<span class="pad">${"x".repeat(9500)}</span>` +
+					`<span class="Nowrap">MIL - SP,RP</span>` +
+					`<td class="Ta-end"><div >${20 + i}%</div></td></tr>`
+			)
+			.join("") +
+		`</table>${FOOTER}</body>`
+	t("a row longer than the parser's own reach is cut to exactly that reach, not less",
+		JSON.stringify(parsePage(fat)) === JSON.stringify(parsePage(rowsOnly(fat))) &&
+			parsePage(fat).length === 3,
+		JSON.stringify(parsePage(rowsOnly(fat)).map(p => p.rosteredPct)))
+
 	/* THE SIGN-IN WALL THAT WAS NOT THERE.
 	   The sweep's wall check used to strip tags and read the first 600 characters of a
 	   fetched page, which left the contents of the head's inline script in what it read —
@@ -671,7 +784,11 @@ await walled.close()
 	t("a team page is told from every other page by its URL alone",
 		teamIdFrom(`https://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/8`) === "8" &&
 			teamIdFrom(`https://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/settings`) === null &&
+			teamIdFrom(`https://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/draftresults`) === null &&
 			teamIdFrom(`https://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}`) === null &&
+			/* Off the same derivation `leagueIdFrom` uses, so the two cannot disagree about
+			   where in the path the league sits. */
+			teamIdFrom(`https://baseball.fantasysports.yahoo.com/2024/b1/${LEAGUE_ID}/8`) === "8" &&
 			pageKind(`https://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/draftresults`) === "league" &&
 			pageKind(`https://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/settings`) === "settings",
 		"")
@@ -780,6 +897,53 @@ await walled.close()
 		readPartial.partial === true, JSON.stringify(readPartial))
 }
 
+/* ── HIS SESSION EXPIRES HALFWAY THROUGH ─────────────────────────────────────────────
+   Yahoo does not answer a signed-out request with a page; it redirects to the login host,
+   which is a different origin from the tab the sweep is running in. The request stops being
+   same-origin at that redirect, so the fetch does not return a wall to read — it rejects,
+   which is a different branch from every other refusal in this file, and the branch a
+   reader whose session times out mid-afternoon actually takes. */
+{
+	redirectFrom = playersServed + 2
+	const expired = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	redirectFrom = Infinity
+	t("a session that expires mid-sweep keeps the positions already read",
+		expired.kind === "grabs" && expired.grabs?.length === 2,
+		`${expired.kind} ${expired.grabs?.length}`)
+	t("and tells him to check he is still signed in, rather than reporting an empty league",
+		/signed in/i.test(expired.failure?.fix ?? ""),
+		JSON.stringify(expired.failure ?? null))
+}
+
+/* ── A WALL BEHIND A HEADER ──────────────────────────────────────────────────────────
+   The refusal does not have to be the first thing on the page, and where it sits depends on
+   a layout nobody here controls. The check used to read 600 characters; this page puts the
+   wall past that and inside 2000, which is the window now. Both halves are asserted: that
+   the old window would have walked straight past it, and that the sweep stops on it. */
+{
+	t("the wall this serves really is out of the old six-hundred-character window",
+		!/request denied/i.test(WALLED_BEHIND_NAV.slice(0, 600)) &&
+			/request denied/i.test(WALLED_BEHIND_NAV.slice(0, 2000)),
+		String(WALLED_BEHIND_NAV.indexOf("Request denied")))
+
+	wallShape = "behind-nav"
+	serveUntil = playersServed + 3
+	const late = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	serveUntil = Infinity
+	wallShape = "bare"
+	t("a refusal that is not the first thing on the page is still seen as a refusal",
+		late.kind === "grabs" &&
+			late.grabs?.length === 3 &&
+			/refusing to answer/i.test(late.failure?.what ?? ""),
+		`${late.grabs?.length} grabs, ${JSON.stringify(late.failure ?? null)}`)
+	/* The expensive failure this prevents: unseen, the walled page parses to no rows, the
+	   sweep carries on, and what reaches the pool is four positions of real men and five
+	   positions of nothing — reported as the league's whole wire. */
+	t("and the sweep stops there rather than carrying on collecting empty pages",
+		late.grabs?.every(g => !!g.html) === true,
+		JSON.stringify(late.grabs?.map(g => (g.html ?? "").length)))
+}
+
 /* ── ONE POSITION IS NOT A WIRE ──────────────────────────────────────────────────────
    `poolIsPartial` calls a pool partial when fewer than two thirds of the positions it
    ASKED for came back. One of one is not partial — so a reader standing on the shortstop
@@ -803,7 +967,100 @@ await walled.close()
 	t("a single players page the reader was standing on does not become his league's wire",
 		readOne.pool === null && readOne.notes.some(n => /one position/.test(n)),
 		JSON.stringify(readOne).slice(0, 200))
+	/* And it does not cross the wire whole, either. This is the one grab that is a page of
+	   markup rather than a page of text, and it is taken from a press nobody meant as a
+	   sweep — so it gets the same cut, on the same fail-safe terms. */
+	const looseBytes = Buffer.byteLength(one.grabs?.[0]?.html ?? "", "utf8")
+	const wholeBytes = Buffer.byteLength(playersPage("SS"), "utf8")
+	console.log(`\n  bytes — the players page he was standing on: ${looseBytes} arrived, ${wholeBytes} whole\n`)
+	t("and it is cut to its rows on the way out, like a swept one",
+		looseBytes > 0 && looseBytes < wholeBytes / 4,
+		`${looseBytes} vs ${wholeBytes}`)
 	await list.close()
+}
+
+/* ── WHAT THE PAGE IS ALLOWED TO PUT IN A URL ────────────────────────────────────────
+   The league and the sport come from the app and end up interpolated into a path that is
+   fetched with the reader's own cookies. Same-origin bounds the damage — nothing can be
+   sent to another site — but a league id carrying a path is still a request for a different
+   page of Yahoo, answered as him and handed back to whatever asked. The app is a static
+   site with no server, so the realistic way this is ever abused is a script injected into a
+   page of it, which is exactly the case where the request must not be made. */
+{
+	const crooked = await askFor("pool", { leagueId: "228947/../../mail", sport: "baseball" })
+	t("a league id carrying a path is refused rather than fetched",
+		crooked.kind === "failed", JSON.stringify(crooked).slice(0, 200))
+
+	/* And a sweep costs at most nine requests however it is asked for. `positions` becomes
+	   one request each against somebody else's site, made by the READER's account, so the
+	   list is narrowed to the nine slots that exist and deduplicated before anything is
+	   fetched. */
+	const at = playersServed
+	const narrowed = await askFor("pool", {
+		leagueId: LEAGUE_ID,
+		sport: "baseball",
+		positions: ["SS", "SS", "SS", "not-a-position"]
+	})
+	t("a sweep asked for one slot three times and one that does not exist asks Yahoo once",
+		narrowed.kind === "grabs" && narrowed.grabs?.length === 1 && playersServed - at === 1,
+		`${narrowed.grabs?.length} grabs, ${playersServed - at} requests`)
+}
+
+/* ── HE CLICKS SOMETHING ELSE ON YAHOO ───────────────────────────────────────────────
+   A tab that announced itself and then went somewhere else is the commonest stale fact
+   there is: nothing announces a departure. The router used to keep what it had been told
+   until the tab closed, which meant the app went on being offered a read off a tab that is
+   now Yahoo's fantasy front page — and the read would have succeeded, handing back the front
+   page as though it were his league: the entry stayed because nothing announces a departure,
+   and the content script is alive on the front page too, so the ask would have been answered
+   with it. That last part is read off the router that was there rather than staged; this
+   suite cannot run the old one and the new one in the same browser.
+
+   The fix is that the router asks the browser which tabs are Yahoo instead of remembering,
+   and reads what each one IS out of its own URL. The same change is what survives the
+   service worker being stopped, which Chrome does after about thirty seconds idle and which
+   this harness cannot stage — Playwright attaches a debugger to the worker and that keeps it
+   alive; measured here, still one worker and the tab still found after seventy seconds. That
+   half is argued rather than proven, and the report says so. */
+{
+	for (const p of context.pages()) if (/fantasysports\.yahoo\.com/.test(p.url())) await p.close()
+	const only = await context.newPage()
+	await only.goto(yahoo, { waitUntil: "domcontentloaded" })
+	await only.waitForTimeout(500)
+	const before = await helloNow()
+	t("with one league tab open, the app is told there is something to read",
+		before?.yahooOpen === true, JSON.stringify(before))
+
+	/* Yahoo's own fantasy front page: same host, so it is still a Yahoo tab as far as any
+	   match pattern is concerned, and no league in its path at all. */
+	await only.goto("http://baseball.fantasysports.yahoo.com/", { waitUntil: "domcontentloaded" })
+	await only.waitForTimeout(600)
+	const gone = await askFor("page")
+	t("a tab that has wandered off his league is not read as though it were still on it",
+		gone.kind === "failed" && /no Yahoo fantasy page is open/.test(gone.failure?.what ?? ""),
+		JSON.stringify(gone).slice(0, 200))
+	const after = await helloNow()
+	t("and the app is told there is nothing to read, rather than offered a read that cannot work",
+		after?.yahooOpen === false, JSON.stringify(after))
+
+	await only.close()
+	const back = await context.newPage()
+	await back.goto(yahoo, { waitUntil: "domcontentloaded" })
+	await back.waitForTimeout(400)
+}
+
+/* ── THE LEAGUE ID OUT OF A URL ──────────────────────────────────────────────────────
+   The key every store in this app writes under. Getting it wrong does not fail, it writes
+   a league under a name that will never match anything again. */
+{
+	t("the league is the number after the game, not the first number in the path",
+		leagueIdFrom("https://baseball.fantasysports.yahoo.com/b1/228947/8") === "228947" &&
+			leagueIdFrom("https://baseball.fantasysports.yahoo.com/b1/228947/settings") === "228947" &&
+			/* A shape this project has never seen served, narrowed against anyway because the
+			   cost is one condition and the failure is a season id stored as a league. */
+			leagueIdFrom("https://baseball.fantasysports.yahoo.com/2024/b1/228947/8") === "228947" &&
+			leagueIdFrom("https://baseball.fantasysports.yahoo.com/") === null,
+		String(leagueIdFrom("https://baseball.fantasysports.yahoo.com/2024/b1/228947/8")))
 }
 
 /* ── YAHOO REFUSING WITH A STATUS RATHER THAN WITH A PAGE ────────────────────────────
@@ -984,6 +1241,69 @@ await walled.close()
 	await ui.close()
 }
 
+/* ── THE SAME PATH, THROTTLED HALFWAY ────────────────────────────────────────────────
+   The wire-level assertions above prove the partial answer travels. This one proves what
+   the reader is left holding: four positions of real free agents IN HIS BROWSER, written to
+   the same store a complete sweep writes to, and marked as having asked for nine — which is
+   the mark, and the only mark, that makes the board refuse to call it the exact list. Four
+   positions of real list beat none; four positions PRESENTED as the whole league is the
+   failure this is written against, and it is silent when it happens. */
+{
+	const ui = await context.newPage()
+	const uiErrs = []
+	ui.on("pageerror", e => uiErrs.push(String(e)))
+	await ui.addInitScript(c => {
+		localStorage.clear()
+		localStorage.setItem("beanemachine:config", JSON.stringify(c))
+	}, { ...cfg, active_league: KEY, leagues: { [KEY]: cfg.leagues[KEY] } })
+	await ui.goto(`${APP}#my-league`, { waitUntil: "domcontentloaded" })
+	await ui.waitForSelector("nav button", { timeout: 30000 })
+	await ui.waitForTimeout(2500)
+
+	const setup = await ui.$('button:text-is("Set up a league")')
+	if (setup) await setup.click()
+	await ui.waitForSelector(".connect", { timeout: 20000 })
+
+	/* Set just before the press: the counter does not move until the sweep starts, so this
+	   walls Yahoo at the fifth position of the sweep his press is about to begin. */
+	serveUntil = playersServed + 4
+	await ui.click(".connect .primary")
+	await ui.waitForFunction(
+		() => {
+			try {
+				return Object.keys(JSON.parse(localStorage.getItem("beanemachine:pool") ?? "{}")).length > 0
+			} catch {
+				return false
+			}
+		},
+		{ timeout: 60000 }
+	)
+	serveUntil = Infinity
+
+	const held = await ui.evaluate(async k => {
+		const { poolIsPartial } = await import("/src/client/api.ts")
+		const pool = JSON.parse(localStorage.getItem("beanemachine:pool") ?? "null")?.[k]
+		return {
+			players: pool?.players?.length ?? 0,
+			read: pool?.positionsRead?.length ?? 0,
+			asked: pool?.positionsRequested?.length ?? 0,
+			partial: pool ? poolIsPartial(pool) : null,
+			roster: JSON.parse(localStorage.getItem("beanemachine:roster") ?? "null")?.[k]?.length ?? 0
+		}
+	}, KEY)
+
+	t("a throttled sweep still puts what it read into his browser",
+		held.players === 4 * PAGE_ROWS && held.read === 4, JSON.stringify(held))
+	t("and it is stored as having asked for all nine, which is what makes it partial",
+		held.asked === 9 && held.partial === true, JSON.stringify(held))
+	/* The team was read before the sweep began, and a sweep that stopped must not cost him
+	   the half of the press that succeeded. */
+	t("and the team the same press read is not lost with it",
+		held.roster === seated.length, JSON.stringify(held))
+	t("with nothing thrown on the way", uiErrs.length === 0, uiErrs.join(" | "))
+	await ui.close()
+}
+
 /* ── WHAT EACH STORE WILL ACCEPT ─────────────────────────────────────────────────────
    The Chromium run above proves one of the two builds. Firefox cannot be driven with an
    unpacked extension from here, so what is asserted instead is the thing that actually
@@ -1024,8 +1344,174 @@ await walled.close()
 		t(`${name} reads the app's own origin, so the two halves can talk`,
 			m.content_scripts?.some(c => c.matches.includes("https://beanemachine.com/*")),
 			JSON.stringify(m.content_scripts?.map(c => c.matches)))
+		/*
+		   AND NOTHING SERVED OFF THE READER'S OWN MACHINE.
+
+		   A match pattern cannot name a port — both browsers match on host alone — so
+		   `http://localhost/*` in a shipped manifest is not "my dev server", it is every
+		   page served from this machine on every port, each of which could post a message
+		   and be answered with his team, his league's settings and whatever else his
+		   signed-in Yahoo session can reach. The capability is still buildable and the
+		   browser in this suite is running a build that has it; what is asserted here is
+		   that the build which goes to a store does not.
+		*/
+		t(`${name} does not hand the reader's league to anything on his own machine`,
+			!(m.content_scripts ?? []).some(c => c.matches.some(p => /localhost|127\.0\.0\.1/.test(p))),
+			JSON.stringify(m.content_scripts?.map(c => c.matches)))
+	}
+
+	/*
+	   THE BUILD THIS SUITE DRIVES IS NOT THE BUILD THAT SHIPS, and that is a hole unless the
+	   difference between them is nailed down. Everything above this block reads the store
+	   build's manifest; everything in the browser ran the dev build. So: the two differ in
+	   the bridge's match list and in NOTHING else, and the three bundles are byte for byte
+	   the same file. A dev build that had drifted anywhere else would take the whole suite
+	   green with it while proving nothing about what a reader installs.
+	*/
+	const dev = JSON.parse(readFileSync(new URL("../dist-ext/dev/chrome/manifest.json", import.meta.url), "utf8"))
+	t("the build this suite drives is the one with the local addresses, and the one that ships is not",
+		dev.content_scripts.some(c => c.matches.includes("http://127.0.0.1/*")) &&
+			dev.content_scripts.some(c => c.matches.includes("https://beanemachine.com/*")),
+		JSON.stringify(dev.content_scripts.map(c => c.matches)))
+
+	const withoutMatches = m => ({ ...m, content_scripts: (m.content_scripts ?? []).map(c => ({ ...c, matches: null })) })
+	t("and they are otherwise the same manifest, down to the permissions",
+		JSON.stringify(withoutMatches(dev)) === JSON.stringify(withoutMatches(chrome)),
+		JSON.stringify(withoutMatches(dev)) === JSON.stringify(withoutMatches(chrome)) ? "" : "manifests differ beyond the matches")
+
+	/* The scripts themselves carry no build flag at all — the router reads its match list
+	   back out of the manifest at runtime rather than being compiled with one — so these
+	   three files must be identical, and if they ever stop being, the browser in this suite
+	   is running code no reader will ever have. */
+	const same = ["background.js", "yahoo.js", "bridge.js"].filter(f =>
+		readFileSync(new URL(`../dist-ext/chrome/${f}`, import.meta.url)).equals(
+			readFileSync(new URL(`../dist-ext/dev/chrome/${f}`, import.meta.url))
+		)
+	)
+	t("and the code the browser ran here is byte for byte the code that ships",
+		same.length === 3, same.join(", "))
+}
+
+/* THIS RUNS BEFORE THE ORPHAN BLOCK BELOW, and the order is load-bearing: that block calls
+   `chrome.runtime.reload()`, and under `--load-extension` the extension does not come back —
+   measured, 0 service workers afterwards. Anything that needs a working reader has to be
+   above it. Placed below it, this block saw the install walkthrough instead of the button and
+   timed out waiting for a press that was never going to be offered. */
+/* ── A STRANGER, ON THE PUBLISHED BUILD, WITH NOTHING IN HIS BROWSER ─────────────────
+   The acceptance test for the whole feature, and the only one that starts where a real
+   reader starts: the built site (which strips the shipped league, so a first visit really
+   has nothing), an empty profile, and the reader added. One press has to produce a league
+   with HIS scoring in it, his team in the seats it is in, his free agents, and a board that
+   actually ranks.
+
+   It runs against the preview on :4173 when one is up and says so and skips when it is not,
+   rather than failing on somebody else's missing server — the same rule test/static.mjs
+   follows. */
+{
+	const STATIC = process.env.STATIC_BASE ?? "http://127.0.0.1:4173/"
+	const up = await fetch(STATIC)
+		.then(r => r.ok)
+		.catch(() => false)
+	if (!up) {
+		console.log(`SKIP  the published build is not being served at ${STATIC}`)
+	} else {
+		const first = await context.newPage()
+		const firstErrs = []
+		first.on("pageerror", e => firstErrs.push(String(e)))
+		await first.goto(STATIC, { waitUntil: "domcontentloaded" })
+		await first.evaluate(() => localStorage.clear())
+		await first.reload({ waitUntil: "domcontentloaded" })
+		await first.waitForSelector("nav button", { timeout: 30000 })
+		await first.waitForTimeout(2000)
+
+		t("a first visit to the built site holds no league at all",
+			await first.evaluate(() => {
+				const c = JSON.parse(localStorage.getItem("beanemachine:config") ?? "null")
+				return !c || !Object.keys(c.leagues ?? {}).length
+			}),
+			await first.evaluate(() => localStorage.getItem("beanemachine:config")?.slice(0, 120) ?? "(nothing)"))
+
+		/* The way in a stranger is actually offered: the bar at the foot of the screen. */
+		await first.waitForSelector(".dock-bar button", { timeout: 20000 })
+		await first.click(".dock-bar button")
+		await first.waitForSelector(".onboard", { timeout: 20000 })
+		/* The sheet opens on the button for a reader who has the browser reader and no team
+		   yet — and on the box for everybody else, which is what the offer line is for. Either
+		   is a pass here: what this block is about is what ONE PRESS produces, not which of
+		   the two screens he pressed it from. */
+		const offerLine = await first.$(".onboard-offer button")
+		if (offerLine) await offerLine.click()
+		await first.waitForSelector(".connect", { timeout: 20000 })
+		await first.click(".connect .primary")
+		await first.waitForFunction(
+			() => {
+				try {
+					return Object.keys(JSON.parse(localStorage.getItem("beanemachine:pool") ?? "{}")).length > 0
+				} catch {
+					return false
+				}
+			},
+			{ timeout: 90000 }
+		)
+		const made = await first.evaluate(() => {
+			const read = n => JSON.parse(localStorage.getItem(`beanemachine:${n}`) ?? "null")
+			const c = read("config")
+			const key = c?.active_league
+			const l = key ? c.leagues?.[key] : null
+			return {
+				key,
+				batting: l ? Object.keys(l.scoring?.batting ?? {}).length : 0,
+				pitching: l ? Object.keys(l.scoring?.pitching ?? {}).length : 0,
+				teams: l?.meta?.max_teams ?? null,
+				roster: key ? (read("roster")?.[key]?.length ?? 0) : 0,
+				spots: key ? (read("lineup")?.[key]?.spots?.length ?? 0) : 0,
+				pool: key ? (read("pool")?.[key]?.players?.length ?? 0) : 0
+			}
+		})
+		t("one press on a first visit makes the league his own, under his league's own key",
+			made.key === KEY, JSON.stringify(made))
+		t("with his league's scoring rather than a borrowed table",
+			made.batting === Object.keys(real.scoring.batting).length &&
+				made.pitching === Object.keys(real.scoring.pitching).length &&
+				made.teams === real.meta.max_teams,
+			JSON.stringify(made))
+		/* Nine positions of `PAGE_ROWS`, which is what Yahoo serves a page. The fixture was
+		   three a page when this block was written and is a full page now, so it is asserted
+		   as the product rather than as the literal 225 — the two drifted apart once. */
+		t("his team, in the seats it is in, and his free agents",
+			made.roster === seated.length && made.spots === seated.length &&
+				made.pool === 9 * PAGE_ROWS,
+			JSON.stringify({ ...made, want: 9 * PAGE_ROWS }))
+
+		/* And the thing all of that is for. A league read perfectly into a browser that then
+		   shows nothing is a failed read.
+
+		   The card asserted on is TONIGHT rather than the ranked board, and that is a property
+		   of the FIXTURE rather than a retreat: this suite's free agents are invented names —
+		   "C Free Agent 0" — which match nobody in the committed capture, so the board
+		   correctly ranks none of them and an empty board there is the app being right. His own
+		   team is real men out of the capture, so the lineup card is where a real answer can be
+		   asserted end to end. Measured when this was pointed at the board instead: 225 free
+		   agents in the store, 0 rows, and the app entirely correct about it. */
+		await first.goto(`${STATIC}#tonight`, { waitUntil: "domcontentloaded" })
+		await first.waitForSelector("nav button", { timeout: 30000 })
+		await first.waitForSelector(".decide", { timeout: 40000 })
+		await first.waitForTimeout(2500)
+		const card = await first.$eval(".decide", e => e.innerText)
+		t("and the card answers with his own men, out of the league it just read",
+			seated.some(({ p }) => card.includes(p.name)),
+			card.replace(/\n+/g, " | ").slice(0, 220))
+		t("and it is not the blocked card that asks him to go and set a league up",
+			(await first.$$(".decide.decide-blocked")).length === 0,
+			card.replace(/\n+/g, " | ").slice(0, 200))
+		t("with nothing thrown from the first press to the first ranked row",
+			firstErrs.length === 0, firstErrs.join(" | "))
+		await first.close()
 	}
 }
+
+
+
 
 /* ── WHEN IT GOES AWAY UNDER AN OPEN PAGE ────────────────────────────────────────────
    LAST, BECAUSE IT DESTROYS THE THING UNDER TEST. `chrome.runtime.reload()` is what the

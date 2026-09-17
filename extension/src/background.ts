@@ -12,55 +12,135 @@
  * between messages is one thing: which tab is Yahoo, and only so it can be asked.
  */
 import {
-	APP_MATCHES,
 	SPORT,
+	YAHOO_MATCHES,
 	isKnownAsk,
+	leagueIdFrom,
 	pageKind,
+	sportFrom,
 	type Ask,
-	type GrabFailure,
-	type PageKind
+	type GrabFailure
 } from "../../src/data/extension.ts"
 
-/** What a content script told us about the tab it is in, plus when it last said so. */
+/**
+ * WHERE THE APP IS, READ OUT OF THIS BUILD'S OWN MANIFEST.
+ *
+ * The router has to find an app tab to send progress lines to, and the set of pages it may
+ * send to must be exactly the set the bridge was injected into — no wider, or it is posting
+ * a message naming a fantasy league into a tab where nothing is listening, and no narrower,
+ * or the reader watches a button spin with no words under it.
+ *
+ * Taken from the manifest rather than from the shared constant it was built from, because
+ * the two builds do not carry the same list: the store build speaks to the hosted site
+ * alone, and a `BM_EXT_DEV=1` build adds the local addresses (see `APP_MATCHES` in
+ * src/data/extension.ts for why that is a build choice and not a shipped permission).
+ * Reading it back out of the manifest makes the router right in both builds by construction
+ * rather than by remembering to keep two lists in step.
+ */
+const APP_MATCHES = (chrome.runtime.getManifest().content_scripts ?? [])
+	.filter(s => (s.js ?? []).some(f => f.endsWith("bridge.js")))
+	.flatMap(s => s.matches ?? [])
+
+/**
+ * WHICH TABS ARE YAHOO IS ASKED, NOT REMEMBERED.
+ *
+ * This used to be a Map the content scripts filled in, and the Map was the only record
+ * there was. Two things are wrong with that, one of them badly:
+ *
+ *  1. IT IS IN A SERVICE WORKER'S MEMORY. Chrome stops an idle MV3 worker after about
+ *     thirty seconds and starts a fresh one for the next message — with an empty Map. Every
+ *     Yahoo tab the reader has open becomes invisible, "no Yahoo fantasy page is open" is
+ *     said with his league on the screen behind the app, and the only thing that fixes it is
+ *     reloading a tab that was never broken. Nothing about a read is slow enough to keep the
+ *     worker awake between two presses a minute apart.
+ *
+ *     NOT REPRODUCED IN test/extension.mjs, and the report says so: Playwright attaches a
+ *     debugger to the worker, which keeps it alive. Measured there — still one worker, and
+ *     the tab still found, after seventy seconds idle. So this is a fix argued from Chrome's
+ *     documented lifetime rather than from a failing test, and it is written this way
+ *     because the cost of asking is one API call and the cost of remembering is a class of
+ *     failure a test in this harness can never see.
+ *
+ *  2. IT WENT STALE IN THE OTHER DIRECTION TOO. A tab that announced itself and then
+ *     navigated somewhere that is not Yahoo stayed in the Map — nothing announces a
+ *     departure — so the app went on being told a Yahoo tab was open, offered a read, and
+ *     the read failed with "reload your Yahoo tab", about a tab that is now somebody's
+ *     email. THAT one is reproduced, and asserted.
+ *
+ * So the browser is asked, every time, and the answer is filtered by the page's own URL.
+ * `sportFrom` and `leagueIdFrom` read the sport and the league out of that URL, which is
+ * where they were always read from — the content script was only ever passing on what the
+ * URL already said.
+ *
+ * The Map that remains holds one thing per tab: when the reader was last in front of it. It
+ * is a hint about ordering and never about existence, so losing it to a sleeping worker
+ * costs the ordering of two tabs and not the feature.
+ */
+const lastSeen = new Map<number, number>()
+
+chrome.tabs.onRemoved.addListener(id => lastSeen.delete(id))
+
 interface YahooTab {
+	id: number
 	url: string
 	league: string | null
 	sport: string | null
-	kind: PageKind
-	/** When this tab last announced itself. `Date.now()`, and the ONLY ordering that
-	 *  decides which of several tabs gets read — see `pickTab`. */
+	/** Most recent evidence that this is the tab he is in front of. The stamp we were told
+	 *  about, or the browser's own `lastAccessed` (Chrome 121 and after), or merely the fact
+	 *  that it is the active tab — in that order, because the first is the freshest. */
 	at: number
 }
 
-/** Which tabs have a Yahoo fantasy page in them, learned from the content script rather
- *  than by polling the browser. The set is authoritative only in the sense that a stale
- *  entry is discovered the moment it is used — `tabs.sendMessage` to a closed tab fails,
- *  and that failure is a "no Yahoo tab" answer rather than an error. */
-const yahooTabs = new Map<number, YahooTab>()
-
-chrome.tabs.onRemoved.addListener(id => yahooTabs.delete(id))
+const openYahooTabs = (): Promise<YahooTab[]> =>
+	new Promise(resolve => {
+		chrome.tabs.query({ url: YAHOO_MATCHES }, tabs => {
+			/* `lastError` here means the query itself was refused, which would leave `tabs`
+			   undefined; an empty list is the honest answer to "which are open". */
+			void chrome.runtime.lastError
+			const out: YahooTab[] = []
+			for (const t of tabs ?? []) {
+				if (typeof t.id !== "number" || !t.url) continue
+				/* The fantasy hub and anything else without a league in its path is not a page
+				   that can be read, and offering to read it is offering nothing. */
+				if (pageKind(t.url) === "unknown") continue
+				out.push({
+					id: t.id,
+					url: t.url,
+					league: leagueIdFrom(t.url),
+					sport: sportFrom(t.url),
+					at: Math.max(
+						lastSeen.get(t.id) ?? 0,
+						(t as { lastAccessed?: number }).lastAccessed ?? 0,
+						t.active ? 1 : 0
+					)
+				})
+			}
+			resolve(out.sort((a, b) => b.at - a.at))
+		})
+	})
 
 /**
  * THE BROWSER'S OWN "HE IS LOOKING AT THIS ONE NOW".
  *
  * The content script announces again on focus and on becoming visible, which is the signal
- * that works when he switches WINDOWS. It is not the signal that works when he switches
- * TABS: measured in test/extension.mjs, bringing a background tab to the front in headless
- * Chromium fires neither `focus` nor `visibilitychange` in the page, so a reader flicking
- * between his two leagues went on having the wrong one read — the assertion for it failed
- * against the page-side signal alone, which is how this listener came to be here.
+ * that works when he switches WINDOWS. It is not enough when he switches TABS: measured in
+ * test/extension.mjs, bringing a background tab to the front and waiting six hundred
+ * milliseconds did not move which tab was chosen, so whatever headless Chromium does on a
+ * tab activation, it did not reach the page in time to count. A reader flicking between his
+ * two leagues went on having the wrong one read, and that failing assertion is how this
+ * listener came to be here.
  *
  * `chrome.tabs.onActivated` is the browser saying it, and it does not depend on a content
  * script being alive in the tab at all.
  */
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-	const known = yahooTabs.get(tabId)
-	if (known) known.at = Date.now()
+	lastSeen.set(tabId, Date.now())
 })
 
 /** A baseball tab, for "is there anything to read right now". Football does not count:
  *  offering to read a league off a football tab is an offer that ends in a refusal. */
-const anyBaseball = (): boolean => [...yahooTabs.values()].some(t => t.sport === SPORT)
+const anyBaseball = async (): Promise<boolean> =>
+	(await openYahooTabs()).some(t => t.sport === SPORT)
 
 /**
  * WHICH TAB, WHEN THERE IS MORE THAN ONE — and there usually is, because a manager with a
@@ -78,13 +158,12 @@ const anyBaseball = (): boolean => [...yahooTabs.values()].some(t => t.sport ===
  *     read that fails leaves nothing behind; this one leaves something wrong behind, which
  *     is worse, and it is the reason this rule refuses instead of preferring.
  *
- *  2. Otherwise, baseball only, most recently announced first. "Most recent" is a stamp
- *     rather than Map insertion order, which is what it used to be and which does not do
- *     what it reads as: `Map.set` on a key that already exists leaves the key where it was,
- *     so a reader who opened league A, then league B, then went back to A and reloaded got
- *     league A's tab announcing again and STILL ranked first-inserted. The tab he was
- *     looking at last was not the tab that was read. The content script now re-announces on
- *     focus and on becoming visible, so the stamp tracks the tab he is actually in front of.
+ *  2. Otherwise, baseball only, most recently in front of him first. "Most recent" is a
+ *     stamp rather than Map insertion order, which is what it used to be and which does not
+ *     do what it reads as: `Map.set` on a key that already exists leaves the key where it
+ *     was, so a reader who opened league A, then league B, then went back to A and reloaded
+ *     got league A's tab announcing again and STILL ranked first-inserted. The tab he was
+ *     looking at last was not the tab that was read.
  *
  *  3. No baseball tab at all is answered by NAME — "that tab is your football league" —
  *     rather than by "nothing is open", because a reader looking straight at a Yahoo tab
@@ -92,12 +171,12 @@ const anyBaseball = (): boolean => [...yahooTabs.values()].some(t => t.sport ===
  *
  * `want` is the league the ask named, or null for "whatever he is looking at".
  */
-const pickTab = (want: string | null): { tab: number } | { failure: GrabFailure } => {
-	const open = [...yahooTabs.entries()].sort((a, b) => b[1].at - a[1].at)
-	const baseball = open.filter(([, t]) => t.sport === SPORT)
+const pickTab = async (want: string | null): Promise<{ tab: YahooTab } | { failure: GrabFailure }> => {
+	const open = await openYahooTabs()
+	const baseball = open.filter(t => t.sport === SPORT)
 
 	if (!baseball.length) {
-		const other = open.find(([, t]) => t.sport && t.sport !== SPORT)?.[1]
+		const other = open.find(t => t.sport && t.sport !== SPORT)
 		return {
 			failure:
 				other ?
@@ -118,8 +197,8 @@ const pickTab = (want: string | null): { tab: number } | { failure: GrabFailure 
 	}
 
 	if (want) {
-		const match = baseball.find(([, t]) => t.league === want)
-		if (match) return { tab: match[0] }
+		const match = baseball.find(t => t.league === want)
+		if (match) return { tab: match }
 		return {
 			failure: {
 				step: "yahoo",
@@ -132,7 +211,7 @@ const pickTab = (want: string | null): { tab: number } | { failure: GrabFailure 
 		}
 	}
 
-	return { tab: baseball[0]![0] }
+	return { tab: baseball[0]! }
 }
 
 /**
@@ -144,10 +223,10 @@ const pickTab = (want: string | null): { tab: number } | { failure: GrabFailure 
  * so and shows him a button that opens Yahoo — a tab he can see appearing, because he
  * pressed something.
  */
-const askYahoo = (
+const askYahoo = async (
 	msg: { ask: Ask; id: string; leagueId?: string; sport?: string; positions?: string[] },
 	reply: (answer: unknown) => void
-): void => {
+): Promise<void> => {
 	/*
 	   AN ASK FROM A NEWER PAGE THAN THIS BUILD.
 
@@ -169,26 +248,29 @@ const askYahoo = (
 		return
 	}
 
-	const picked = pickTab(msg.leagueId ?? null)
+	const picked = await pickTab(msg.leagueId ?? null)
 	if ("failure" in picked) {
 		reply({ kind: "failed", failure: picked.failure })
 		return
 	}
-	const tab = picked.tab
-	const known = yahooTabs.get(tab)
+	const tab = picked.tab.id
 	chrome.tabs.sendMessage(
 		tab,
 		{
 			...msg,
-			leagueId: msg.leagueId ?? known?.league ?? undefined,
-			sport: msg.sport ?? known?.sport ?? undefined
+			/* The league and the sport of the tab that was CHOSEN, so an ask that named
+			   neither is answered about the league he is actually looking at rather than
+			   about whatever the content script works out for itself. Both come off that
+			   tab's URL, which is where they have always come from. */
+			leagueId: msg.leagueId ?? picked.tab.league ?? undefined,
+			sport: msg.sport ?? picked.tab.sport ?? undefined
 		},
 		answer => {
 			if (chrome.runtime.lastError || !answer) {
 				/* The tab is gone, or it is a Yahoo page the content script never ran in
 				   (it was open before the extension was installed, which is the common
 				   case on the very first use). Both are fixed by the same sentence. */
-				yahooTabs.delete(tab)
+				lastSeen.delete(tab)
 				reply({
 					kind: "failed",
 					failure: {
@@ -209,28 +291,21 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 	if (!msg || typeof msg.kind !== "string") return
 
 	if (msg.kind === "yahoo-here") {
-		const kind = pageKind(msg.url)
-		if (typeof sender.tab?.id === "number" && kind !== "unknown")
-			/* Replaced wholesale rather than merged, so a tab that navigated from one league
-			   to another does not keep the old league on it — and stamped, because the stamp
-			   is the whole ordering. */
-			yahooTabs.set(sender.tab.id, {
-				url: msg.url,
-				league: msg.league,
-				sport: msg.sport,
-				kind,
-				at: Date.now()
-			})
+		/* All this now carries is "he is in front of this one". What the page IS gets read
+		   out of the tab's own URL when the question is asked — see `openYahooTabs` — because
+		   a record of what a tab was when it last spoke goes stale the moment he navigates,
+		   and because the record itself does not survive the worker being stopped. */
+		if (typeof sender.tab?.id === "number") lastSeen.set(sender.tab.id, Date.now())
 		return
 	}
 
 	if (msg.kind === "status") {
-		reply({ yahooOpen: anyBaseball() })
+		void anyBaseball().then(yahooOpen => reply({ yahooOpen }))
 		return true
 	}
 
 	if (msg.kind === "ask") {
-		askYahoo(msg, reply)
+		void askYahoo(msg, reply)
 		return true
 	}
 
@@ -253,6 +328,19 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 		return
 	}
 
+	/*
+	   NOTHING SENDS THIS TODAY, and saying so is the point of the comment.
+
+	   `openYahoo` in src/client/extension.ts posts `{ ask: "page", open: url }`; the bridge
+	   forwards the ASK and drops `open`, so what arrives here is an ordinary page read and
+	   this branch is never reached. The tab the reader sees is opened by the page's own
+	   `window.open`, which works because it happens inside his click.
+
+	   Left in place rather than deleted, because wiring it up is a two-line change somebody
+	   may want — and left with this warning, because wiring it up WITHOUT removing the
+	   `window.open` gives him two tabs on the same page, which is worse than the thing it
+	   was meant to fix.
+	*/
 	if (msg.kind === "open-yahoo") {
 		void chrome.tabs.create({ url: msg.url ?? "https://baseball.fantasysports.yahoo.com/" })
 		reply({ kind: "opened" })

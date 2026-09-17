@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
 	FROM_APP,
 	isFromExtension,
+	protocolSkew,
 	type Ask,
 	type Grab,
 	type GrabFailure
@@ -36,6 +37,9 @@ export interface ExtensionState {
 	 *  read the league or to open Yahoo first. */
 	yahooOpen: boolean
 	busy: boolean
+	/** Non-null when this page and the reader in this browser are on different versions of
+	 *  the protocol. The sentence names which of the two is behind. */
+	skew: GrabFailure | null
 	/** The sweep's own words for what it is doing — "reading shortstops" — rendered
 	 *  verbatim, never a count of requests or a URL. */
 	progress: string | null
@@ -82,6 +86,9 @@ export const useExtension = (): ExtensionState => {
 	const [yahooOpen, setYahooOpen] = useState(false)
 	const [busy, setBusy] = useState(false)
 	const [progress, setProgress] = useState<string | null>(null)
+	/** Set when the two halves are speaking different versions of the protocol — see
+	 *  `protocolSkew`. Null when they agree, which is the ordinary case. */
+	const [skew, setSkew] = useState<GrabFailure | null>(null)
 	/** Which request each pending promise belongs to. A second tab, or a second press,
 	 *  must not resolve this one — and a progress line about somebody else's sweep must
 	 *  not be rendered as this one's. */
@@ -101,6 +108,12 @@ export const useExtension = (): ExtensionState => {
 				setPresent(true)
 				setVersion(msg.version)
 				setYahooOpen(msg.yahooOpen)
+				/* A HALF THAT IS BEHIND THE OTHER SAYS WHICH ONE, at hello rather than at the
+				   first thing it cannot do. The page redeploys in a minute and the extension
+				   waits on a store review, so the two WILL drift — and an older extension that
+				   still answers every ask it knows produces no failure to hang a sentence on,
+				   which is exactly the case a reader cannot diagnose for himself. */
+				setSkew(protocolSkew(msg.protocol))
 				return
 			}
 			if (msg.kind === "progress") {
@@ -188,5 +201,5 @@ export const useExtension = (): ExtensionState => {
 		window.open(url ?? "https://baseball.fantasysports.yahoo.com/", "_blank", "noopener")
 	}, [])
 
-	return { present, version, yahooOpen, busy, progress, ask, openYahoo }
+	return { present, version, yahooOpen, busy, progress, skew, ask, openYahoo }
 }

@@ -70,8 +70,10 @@ export const FROM_EXTENSION = "beanemachine-extension" as const
  * older half cannot do — not when a sentence changes, not when a bug is fixed.
  *
  *   1  the original: hello / page / league / pool, grabs and failures.
- *   2  a sweep may come back partial (`failure` alongside `grabs`); a swept page is marked
- *      as swept; the browser half refuses an ask it does not know instead of going quiet.
+ *   2  a partial sweep is TYPED rather than merely sent — `failure` alongside `grabs` was
+ *      always on the wire and never in this file; a swept page is marked as swept and
+ *      carries the list the sweep set out to get; and an ask the browser half does not know
+ *      is refused by name instead of going quiet.
  */
 export const PROTOCOL = 2
 
@@ -89,18 +91,33 @@ export const isKnownAsk = (ask: unknown): ask is Ask =>
  *
  * Written twice they drift, and the drift is invisible: the manifest injects the bridge
  * into a page the router will not send progress to, so the reader watches a button spin
- * with no words under it and nothing anywhere says why. The local entries stay in the
- * shipped build on purpose — this is a static site somebody can clone and serve, and a
- * bridge that only spoke to the hosted copy would be untestable by the person developing
- * it, which is how a bridge ends up shipped broken. Match patterns ignore the port, so one
- * line covers every dev server.
+ * with no words under it and nothing anywhere says why.
+ *
+ * ── WHY THE LOCAL ADDRESSES ARE NOT IN THE SHIPPED BUILD ANY MORE ─────────────────────
+ *
+ * They were, and the argument for it was good: this is a static site somebody can clone and
+ * serve, and a bridge that only spoke to the hosted copy would be untestable by the person
+ * developing it, which is how a bridge ends up shipped broken.
+ *
+ * But a match pattern cannot name a port — Chrome and Firefox both match on host alone — so
+ * `http://localhost/*` in a shipped manifest means ANY page served from this machine, on any
+ * port, can post a message to this extension and be answered with the reader's own Yahoo
+ * league: his team, his league's settings, and the pages his signed-in session can reach.
+ * The page does not have to be his. On a developer's machine there is usually something
+ * listening on localhost, and it is not always something he wrote.
+ *
+ * So the capability survives as a BUILD CHOICE rather than as a shipped permission. The
+ * default build — the one that goes to a store — speaks to the hosted site alone.
+ * `BM_EXT_DEV=1` adds the local addresses, and test/extension.mjs builds that way because
+ * the suite serves the app at 127.0.0.1. Nothing is lost for whoever clones this: he builds
+ * it the way the tests build it.
  */
-export const APP_MATCHES = [
-	"https://beanemachine.com/*",
-	"https://*.beanemachine.com/*",
-	"http://127.0.0.1/*",
-	"http://localhost/*"
-]
+export const APP_MATCHES = ["https://beanemachine.com/*", "https://*.beanemachine.com/*"]
+
+/** Added only by a build that asks for them. See above for why they are not the default. */
+export const DEV_MATCHES = ["http://127.0.0.1/*", "http://localhost/*"]
+
+export const appMatches = (dev: boolean): string[] => (dev ? [...APP_MATCHES, ...DEV_MATCHES] : [...APP_MATCHES])
 
 export const YAHOO_MATCHES = ["*://*.fantasysports.yahoo.com/*"]
 
@@ -306,17 +323,36 @@ export const pageKind = (url: string): PageKind => {
 	return "unknown"
 }
 
-/** The league id out of any fantasy URL, or null. The app keys a league on
- *  `yahoo:<id>` and has done since before any of this existed, so this is what makes an
- *  extension read land on the league the reader already has rather than beside it. */
-export const leagueIdFrom = (url: string): string | null => {
+/**
+ * The league id out of any fantasy URL, or null. The app keys a league on `yahoo:<id>` and
+ * has done since before any of this existed, so this is what makes a read land ON the
+ * league the reader already has rather than beside it.
+ *
+ * THE FIRST NUMBER IN THE PATH IS NOT NECESSARILY THE LEAGUE, which is what this used to
+ * take. `/b1/228947/8` is the shape every URL this project has actually seen takes, and for
+ * that shape the two rules agree. They stop agreeing the moment a number comes first —
+ * `/2024/b1/228947` would key the league as 2024 and write a season into the league store,
+ * quietly, under a name that will never match anything again.
+ *
+ * Whether Yahoo serves a URL of that shape is NOT something this project has seen; no page
+ * like it has been read, and none is asserted here. The rule is narrowed anyway because the
+ * cost is one condition and the failure it prevents is silent and permanent: the league id
+ * is the segment that follows a segment which is not a number, which is `b1` on every
+ * fantasy URL in this repository and would be `b1` there too.
+ */
+const leagueAt = (url: string): { seg: string[]; at: number } | null => {
 	try {
 		const seg = new URL(url).pathname.split("/").filter(Boolean)
-		const at = seg.findIndex(s => /^\d+$/.test(s))
-		return at === -1 ? null : seg[at]!
+		const at = seg.findIndex((s, i) => i > 0 && /^\d+$/.test(s) && !/^\d+$/.test(seg[i - 1]!))
+		return at === -1 ? null : { seg, at }
 	} catch {
 		return null
 	}
+}
+
+export const leagueIdFrom = (url: string): string | null => {
+	const found = leagueAt(url)
+	return found ? found.seg[found.at]! : null
 }
 
 /** The sport out of the host — `baseball.fantasysports.yahoo.com`. Needed because the
@@ -348,13 +384,13 @@ export const sportFrom = (url: string): string | null => {
  * `readGrabs`'s `expect` in src/data/yahoo-read.ts.
  */
 export const teamIdFrom = (url: string): string | null => {
-	try {
-		const seg = new URL(url).pathname.split("/").filter(Boolean)
-		// b1 / <leagueId> / <teamId> — both digits, and the team is the second of them
-		return seg.length >= 3 && /^\d+$/.test(seg[1]!) && /^\d+$/.test(seg[2]!) ? seg[2]! : null
-	} catch {
-		return null
-	}
+	/* The segment after the league, off the same derivation `leagueIdFrom` uses, so the two
+	   cannot disagree about where the league sits in the path. A team is digits; `settings`,
+	   `players`, `matchup` and `draftresults` all sit in the same position and are words,
+	   which is the whole test. */
+	const found = leagueAt(url)
+	const next = found ? found.seg[found.at + 1] : undefined
+	return next && /^\d+$/.test(next) ? next : null
 }
 
 /**

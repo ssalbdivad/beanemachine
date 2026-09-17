@@ -21,6 +21,7 @@ import {
 	sportFrom,
 	rowsOnly,
 	isKnownAsk,
+	SPORT,
 	type Ask,
 	type Grab,
 	type GrabFailure
@@ -86,16 +87,23 @@ const renderedText = (html: string): string =>
 
 const grabHere = (): Grab => {
 	const kind = pageKind(location.href)
+	/* HTML for the player table alone. `parsePage` reads `data-ys-playerid` and the row's
+	   `title=`, neither of which survives innerText — and the id is what makes a free agent
+	   the same man as a snapshot player rather than a name that might be two people. A
+	   roster page's HTML is ~400 KB against ~4 KB of text and would buy nothing.
+
+	   Cut to its rows on the way out, the same as a swept page and for the same reason: the
+	   reader standing on the players page is the ONE case where a whole page of markup
+	   crosses `postMessage` for a read nobody asked to be a sweep. Measured on the fixture
+	   in test/extension.mjs, which serves the 25 rows and ~90 KB footer the real page was
+	   measured to have. `rowsOnly` returns null on anything it does not recognise, and then
+	   the whole page goes over exactly as it did before. */
+	const markup = kind === "players" ? document.documentElement.outerHTML : null
 	return {
 		url: location.href,
 		kind,
 		text: document.body?.innerText ?? "",
-		/* HTML for the player table alone. `parsePage` reads `data-ys-playerid` and the
-		   row's `title=`, neither of which survives innerText — and the id is what makes a
-		   free agent the same man as a snapshot player rather than a name that might be two
-		   people. A roster page's HTML is ~400 KB against ~4 KB of text and would buy
-		   nothing. */
-		html: kind === "players" ? document.documentElement.outerHTML : undefined,
+		html: markup === null ? undefined : (rowsOnly(markup) ?? markup),
 		at: now()
 	}
 }
@@ -107,15 +115,21 @@ const grabHere = (): Grab => {
  * somewhere in its header — and on text put through `renderedText`, which is what takes
  * `login.yahoo.com` out of the inline script in the head where it would have matched.
  *
- * TWO THOUSAND CHARACTERS, not six hundred. The window has to be long enough to reach the
- * wall and short enough not to reach the ordinary page. A real page's first characters are
- * the nav — "Fantasy Baseball / My Team / League / Players" — and how much of that comes
- * first depends on a layout nobody here controls; measured on the fixture suite, the
- * settings page's own `Stat Category` heading sits 120 characters in, so the nav is short
- * there, but a real page's is not. 600 was a guess that could have put the wall out of
- * reach on a page with a fuller header. The risk of the longer window is a page that
- * legitimately says "rate limit" in its body text within 2000 characters, which is not a
- * page Yahoo serves to a manager looking at his own league.
+ * TWO THOUSAND CHARACTERS, not six hundred, AND THE TRADE IS DELIBERATE.
+ *
+ * The window has to be long enough to reach the wall and short enough not to swallow the
+ * page. 600 was a guess: a real page's first characters are the nav and the league's own
+ * name, and how much of that comes before the body is a layout nobody here controls. A wall
+ * that sits 800 characters in — behind a fuller header than the fixture's — was invisible,
+ * and test/extension.mjs now serves exactly that page and asserts both windows against it.
+ *
+ * The cost of the longer window is a false wall: a league or a team NAMED after one of
+ * these phrases appears near the top of every page, so a manager whose rivals call
+ * themselves "Request Denied" would be told Yahoo is refusing to answer. That is the right
+ * way round to be wrong. A false wall costs him a read he can retry and a sentence that is
+ * merely unhelpful; a MISSED wall is a throttle parsed as a league, written into his stores
+ * as an empty team and an empty wire, and presented as the truth — which is the single most
+ * expensive failure this feature has, and the reason the check exists at all.
  */
 const wallIn = (text: string): GrabFailure | null => {
 	const head = text.slice(0, 2000)
@@ -243,17 +257,87 @@ const sweep = async (
 	return { grabs, failure: null }
 }
 
+/**
+ * WHAT THE PAGE IS ALLOWED TO PUT IN A URL.
+ *
+ * The league and the sport arrive from the app, and both are interpolated into a path that
+ * is then fetched from inside the reader's signed-in Yahoo tab. The fetch is same-origin, so
+ * the worst case is bounded — nothing can be sent to another site — but "bounded" is not
+ * "nothing": a league id of `228947/../../somewhere-else` is a request for a different page
+ * of Yahoo, answered with the reader's own cookies, and handed back to whatever asked. The
+ * app is the only thing that can ask, and the app is a static site with no server, so the
+ * realistic way this gets abused is a script injected into a page of it.
+ *
+ * A league is digits. A sport is letters. Anything else is not narrowed or escaped, it is
+ * dropped, and the tab's own URL is used instead — which is the value that was going to be
+ * right nearly every time anyway.
+ */
+const asked = (id: string | undefined): string | null => (id && /^\d+$/.test(id) ? id : null)
+const sportAsked = (s: string | undefined): string | null => (s && /^[a-z]+$/i.test(s) ? s.toLowerCase() : null)
+
+/**
+ * THE SLOTS A SWEEP MAY ASK FOR, and no others.
+ *
+ * `positions` arrives from the app and becomes one request each, paced a quarter-second
+ * apart, against somebody else's site. A list of two hundred would be two hundred requests
+ * — and the reader, not this project, is the one whose account is making them. Narrowed to
+ * the nine slots that exist, deduplicated, and in the order the pool is built in, so the
+ * most a press can ever cost is nine requests however it is asked for.
+ */
+const POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"]
+const slotsAsked = (want: string[] | undefined): string[] => {
+	if (!want?.length) return POSITIONS
+	const kept = POSITIONS.filter(p => want.includes(p))
+	/* Nothing recognisable is treated as nothing asked for, which reads the whole wire. The
+	   alternative is a sweep that makes no requests and comes back with an empty answer and
+	   no failure — a silence, which is the thing this whole file is written to avoid. */
+	return kept.length ? kept : POSITIONS
+}
+
 /** Whether a sweep is running in THIS tab. Not stored, not shared, and gone with the page —
  *  it is a fact about what this script is doing right now, which is the only thing it is
  *  allowed to remember. See the note where it is set. */
 let sweeping = false
+
+/**
+ * EVERY WAY OUT OF THIS LISTENER ENDS IN A REPLY, INCLUDING THE ONES NOBODY THOUGHT OF.
+ *
+ * A throw inside a message listener is not a crash a reader ever sees: the reply channel
+ * simply closes, and what he gets is the app's own patience running out ninety seconds
+ * later, or — worse, now that the bridge reads `lastError` — the sentence for an extension
+ * that was switched off, about an extension that is running perfectly well and merely hit a
+ * page it did not expect.
+ *
+ * Yahoo's pages are somebody else's and change without notice, so "it did not expect" is a
+ * normal event rather than a bug that will have been fixed by then. The wrapper turns every
+ * unplanned throw into the only honest sentence available, immediately.
+ */
+const answering = (
+	body: () => boolean | void,
+	reply: (answer: unknown) => void
+): boolean | void => {
+	try {
+		return body()
+	} catch (e) {
+		reply({
+			kind: "failed",
+			failure: {
+				step: "yahoo",
+				what: "that page could not be read",
+				fix: "Open your own team page on Yahoo and try again.",
+				detail: String(e)
+			}
+		})
+		return true
+	}
+}
 
 chrome.runtime.onMessage.addListener(
 	(
 		msg: { ask: Ask; id: string; leagueId?: string; sport?: string; positions?: string[] },
 		_sender,
 		reply
-	) => {
+	) => answering(() => {
 		if (!msg || typeof msg.ask !== "string") return
 		/* An ask from a page newer than this build. The router refuses it before it gets
 		   here, but a reader can also have a newer ROUTER than content script — the router
@@ -296,8 +380,8 @@ chrome.runtime.onMessage.addListener(
 		*/
 		if (msg.ask === "league") {
 			const here = grabHere()
-			const leagueId = msg.leagueId ?? leagueIdFrom(location.href)
-			const sport = msg.sport ?? sportFrom(location.href) ?? "baseball"
+			const leagueId = asked(msg.leagueId) ?? leagueIdFrom(location.href)
+			const sport = sportAsked(msg.sport) ?? sportFrom(location.href) ?? SPORT
 			if (!leagueId) {
 				reply({ kind: "grabs", grabs: [here] })
 				return true
@@ -353,8 +437,8 @@ chrome.runtime.onMessage.addListener(
 			return true
 		}
 		if (msg.ask === "pool") {
-			const leagueId = msg.leagueId ?? leagueIdFrom(location.href)
-			const sport = msg.sport ?? sportFrom(location.href) ?? "baseball"
+			const leagueId = asked(msg.leagueId) ?? leagueIdFrom(location.href)
+			const sport = sportAsked(msg.sport) ?? sportFrom(location.href) ?? SPORT
 			if (!leagueId) {
 				reply({
 					kind: "failed",
@@ -396,7 +480,7 @@ chrome.runtime.onMessage.addListener(
 			void sweep(
 				leagueId,
 				sport,
-				msg.positions ?? ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"],
+				slotsAsked(msg.positions),
 				(say, done, total) => {
 					/* Progress goes to the background rather than back down the reply
 					   channel, which can only be used once. The app renders `say`
@@ -417,13 +501,28 @@ chrome.runtime.onMessage.addListener(
 				.then(({ grabs, failure }) => {
 					reply(failure && !grabs.length ? { kind: "failed", failure } : { kind: "grabs", grabs, failure })
 				})
+				/* A sweep that throws somewhere nobody predicted must still end in a sentence.
+				   Without this the promise rejects, `reply` is never called, and the reader
+				   watches the app's ninety-second patience run out on a read that stopped
+				   existing at the second position. */
+				.catch(e =>
+					reply({
+						kind: "failed",
+						failure: {
+							step: "pool",
+							what: "the free agents could not be read",
+							fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+							detail: String(e)
+						}
+					})
+				)
 				.finally(() => {
 					sweeping = false
 				})
 			return true
 		}
 		return false
-	}
+	}, reply)
 )
 
 /**
@@ -445,10 +544,11 @@ chrome.runtime.onMessage.addListener(
 const announce = (): void => {
 	try {
 		void chrome.runtime.sendMessage({
-			kind: "yahoo-here",
-			url: location.href,
-			league: leagueIdFrom(location.href),
-			sport: sportFrom(location.href)
+			/* Nothing but "he is here now". What this page IS gets read out of the tab's own
+			   URL by the router when a question is asked — the URL is where the league and the
+			   sport were always read from, and a copy of them kept in the router goes stale the
+			   moment he navigates and vanishes altogether when the worker is stopped. */
+			kind: "yahoo-here"
 		})
 	} catch {
 		/* The extension went away under this tab. Nothing here can fix that, and the app is

@@ -177,6 +177,17 @@ export const Connect = ({
 						your seats and who is free all come across.
 					</p>
 				}
+				{/* THE TWO HALVES BEING ON DIFFERENT VERSIONS is said here rather than at the
+				    first thing that fails, because an older reader that still answers every ask
+				    it knows never produces a failure to hang a sentence on — and that is exactly
+				    the case a reader cannot work out for himself. It sits above the button
+				    because it changes what pressing the button will do. */}
+				{ext.skew && (
+					<p className="connect-snag">
+						{ext.skew.what}
+						{ext.skew.fix ? <> &mdash; {ext.skew.fix}</> : null}
+					</p>
+				)}
 				{failure && (
 					<p className="connect-snag">
 						{failure.what}

@@ -17,7 +17,7 @@
  *   dist-ext/beanemachine-chrome.zip / -firefox.zip   what a store takes
  */
 import { build } from "vite"
-import { APP_MATCHES, YAHOO_MATCHES } from "../src/data/extension.ts"
+import { appMatches, YAHOO_MATCHES } from "../src/data/extension.ts"
 import { cp, mkdir, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
@@ -27,8 +27,24 @@ import { deflateSync } from "node:zlib"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
-const out = resolve(here, "../dist-ext")
 const run = promisify(execFile)
+
+/**
+ * TWO THINGS THIS BUILD CAN BE, AND THE DEFAULT IS THE ONE THAT SHIPS.
+ *
+ * `BM_EXT_DEV=1` adds `http://127.0.0.1/*` and `http://localhost/*` to the pages the bridge
+ * is injected into. A match pattern cannot name a port, so in a SHIPPED build those two
+ * lines mean any page served from the reader's own machine can ask this extension for his
+ * Yahoo league — which is a capability a developer wants and a reader should never be handed
+ * without asking. The argument is written out in full at `APP_MATCHES` in
+ * src/data/extension.ts.
+ *
+ * `BM_EXT_OUT` puts the result somewhere other than dist-ext, which is how test/extension.mjs
+ * builds both at once: the store build into dist-ext, where the assertions about what each
+ * store will accept read it, and a dev build beside it, which is the one the browser loads.
+ */
+const DEV = process.env.BM_EXT_DEV === "1"
+const out = resolve(here, "..", process.env.BM_EXT_OUT ?? "dist-ext")
 
 /**
  * Bumped by hand, and it is the version a READER sees in his browser's list — not the
@@ -36,8 +52,9 @@ const run = promisify(execFile)
  * which the bridge sends on every hello: "0.1.0 against 0.3.2" is not a question a page can
  * answer, and "speaks 1, needs 2" is.
  *
- * 0.2.0 is the first build whose sweep may come back partial, whose swept pages are marked
- * as swept, and which refuses an ask it does not know instead of going quiet — protocol 2.
+ * 0.2.0 is the first build that marks a swept page as swept, carries the list its sweep set
+ * out to get, and refuses an ask it does not know by name instead of going quiet — which is
+ * protocol 2.
  */
 const VERSION = "0.2.0"
 
@@ -67,7 +84,7 @@ const common = {
 	host_permissions: YAHOO_MATCHES,
 	content_scripts: [
 		{ matches: YAHOO_MATCHES, js: ["yahoo.js"], run_at: "document_idle", all_frames: false },
-		{ matches: APP_MATCHES, js: ["bridge.js"], run_at: "document_start", all_frames: false }
+		{ matches: appMatches(DEV), js: ["bridge.js"], run_at: "document_start", all_frames: false }
 	],
 	action: { default_title: "Open beanemachine" },
 	/* Both stores read this; it is also the honest floor. MV3 content scripts and
@@ -244,6 +261,11 @@ for (const browser of Object.keys(manifests)) {
 	if (made) zips.push(made)
 }
 
-console.log(`built ${Object.keys(manifests).join(" and ")} into ${out}`)
+console.log(
+	`built ${Object.keys(manifests).join(" and ")} into ${out}` +
+		(DEV ?
+			" — with the local addresses, which is a build for testing and NOT what goes to a store"
+		:	" — hosted site only, which is what goes to a store")
+)
 if (zips.length) console.log(`zipped: ${zips.map(z => z.replace(`${out}/`, "")).join(", ")}`)
 else console.log("zip not available; the folders are loadable as they are")

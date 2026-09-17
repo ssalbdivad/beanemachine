@@ -60,6 +60,17 @@ const Entry = type({
 	/** Which roster slots were swept, so "he isn't in the pool" can be told from
 	 *  "his position was never read". */
 	positionsRead: "string[]",
+	/**
+	 * Which slots the sweep ASKED for, when the reader knows.
+	 *
+	 * Optional because every pool written before the browser reader existed carries only
+	 * what came back, and `poolIsPartial` already treats an absent list as "cannot tell"
+	 * rather than as complete. With it, a sweep that asked for nine positions and was
+	 * throttled after four is refused as partial on exactly the same rule a carried file
+	 * is — which is what keeps "the exact list" meaning one thing whichever way it
+	 * arrived.
+	 */
+	"positionsRequested?": "string[]",
 	/** The reader's own account of what it got, quoted rather than re-summarised. */
 	note: "string"
 })

@@ -7,6 +7,11 @@ import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
 import { leagueGaps, tab } from "./panels.tsx"
 import { typingStore, type Box } from "./typing.ts"
+import { Connect, browserOf, takesExtension } from "./Connect.tsx"
+import { useExtension } from "./extension.ts"
+import { readGrabs } from "../data/yahoo-read.ts"
+import { pool as poolStore } from "./pool.ts"
+import type { GrabFailure } from "../data/extension.ts"
 
 /**
  * The first thing a stranger sees.
@@ -126,6 +131,24 @@ export const Onboard = ({
 }) => {
 	const [where, setWhere] = useState<Where | null>(null)
 	/*
+	  TWO MODES IN ONE CARD, never both at once.
+	
+	  The sheet is capped at `min(70vh,620px)` — 590px on a 390px phone — and this file
+	  already carries two notes about content that overflowed it: 998px of card with the
+	  third question 101px below the fold, and a finish button 646px down a 590px box. A
+	  three-step walkthrough is another ~450px, so stacking it above "Who's on your team?"
+	  would rebuild the exact defect twice recorded here. It replaces the body instead, and
+	  the way back is a line at the foot of it.
+	*/
+	const ext = useExtension()
+	const [connecting, setConnecting] = useState(false)
+	const [readFailure, setReadFailure] = useState<GrabFailure | null>(null)
+	const [receipt, setReceipt] = useState<{ league: string | null; free: number | null; at: string | null }>({
+		league: null,
+		free: null,
+		at: null
+	})
+	/*
 	  THE TWO BOXES SURVIVE THE SHEET BEING CLOSED, and they did not.
 	  
 	  This sheet is mounted by App as `{docked && <Dock>}`, and closing it with a league in
@@ -206,6 +229,94 @@ export const Onboard = ({
 	}
 
 	/**
+	 * THE ONE PRESS.
+	 *
+	 * Asks the reader's own signed-in Yahoo tab for his team page and his settings page,
+	 * turns them into a league and a roster with the parsers the paste box has always used,
+	 * and then — only if that worked — sweeps the free agents.
+	 *
+	 * THE ORDER MATTERS AND THE SECOND HALF IS CONDITIONAL. The first half is two requests
+	 * to pages of his own league and is what makes the board his. The sweep is nine, and
+	 * asking Yahoo nine times on behalf of a reader whose league we could not even read
+	 * would be asking for a throttle to punish a failure. Each half reports separately,
+	 * because "your league is in, the free agents are not" is a real state and a common one.
+	 */
+	const readLeague = async () => {
+		if (!snapshot) return
+		setReadFailure(null)
+		const answer = await ext.ask("league")
+		if (!answer.grabs?.length) {
+			setReadFailure(answer.failure ?? null)
+			return
+		}
+		const reading = readGrabs(answer.grabs, snapshot)
+		if (reading.league && reading.leagueKey) {
+			/* `onCreateLeague` is what the paste route calls, so an extension read lands in
+			   exactly the same place a pasted settings page does, with the same validation
+			   and the same provenance rules. The extension is a way of getting the page, not
+			   a second way of having a league. */
+			onCreateLeague("yahoo", reading.league)
+		}
+		const key = reading.leagueKey ?? leagueKey ?? onAdoptPreset()
+		if (reading.roster?.players.length && key) {
+			try {
+				roster.set(key, reading.roster.keys)
+				if (reading.roster.spots.length)
+					lineupStore.set(key, reading.roster.spots, reading.at ?? new Date().toISOString())
+			} catch (e) {
+				setReadFailure({
+					step: "store",
+					what: `your team could not be saved in this browser: ${(e as Error).message}`,
+					fix: "A private window usually does this, and so does a full phone."
+				})
+			}
+		}
+		setReceipt({
+			league: reading.league?.meta.league_name ?? reading.leagueId ?? null,
+			free: null,
+			at: reading.at
+		})
+		if (reading.notes.length) setNote(reading.notes.join(" "))
+
+		/* THE FREE AGENTS, second and separately. */
+		if (!reading.leagueId || !key) return
+		const swept = await ext.ask("pool", { leagueId: reading.leagueId, sport: reading.sport ?? "baseball" })
+		if (!swept.grabs?.length) {
+			setReadFailure(swept.failure ?? null)
+			return
+		}
+		const got = readGrabs(swept.grabs, snapshot)
+		if (got.pool?.players.length) {
+			try {
+				poolStore.set(key, {
+					at: got.at ?? new Date().toISOString(),
+					leagueId: reading.leagueId,
+					players: got.pool.players.map(p => ({
+						yahooId: p.yahooId,
+						name: p.name,
+						team: p.team,
+						positions: p.positions
+					})),
+					positionsRead: got.pool.positionsRead,
+					positionsRequested: got.pool.positionsRequested,
+					/* The reader's own account of where this came from, in the words the chip
+					   will print. "Carried in a file" and "read off your league in this browser"
+					   are different claims about the same list and age it differently. */
+					note: "read off your league in this browser"
+				})
+				setReceipt(r => ({ ...r, free: got.pool!.players.length, at: got.at ?? r.at }))
+			} catch (e) {
+				setReadFailure({
+					step: "store",
+					what: `the free agents could not be saved: ${(e as Error).message}`,
+					fix: null
+				})
+			}
+		}
+		if (swept.failure) setReadFailure(swept.failure)
+	}
+
+	/**
 	 * The team, and on a first visit this is the ONLY question that has to be answered.
 	 *
 	 * It used to open `if (!leagueKey || !snapshot) return` — and on a first visit
@@ -274,6 +385,34 @@ export const Onboard = ({
 				  `.onboard-cols` in src/client/app.css.
 				*/}
 				<div className="onboard-main">
+				{connecting ?
+					<Connect
+						ext={ext}
+						leagueName={receipt.league}
+						freeAgents={receipt.free}
+						readAt={receipt.at}
+						failure={readFailure}
+						onRead={() => void readLeague()}
+						onBack={() => setConnecting(false)}
+					/>
+				:	<>
+				{/*
+				  THE OTHER DOOR, offered above the question rather than instead of it.
+				
+				  A reader in a browser that takes the reader can have his league read to him in
+				  one press; a reader on a phone cannot, and must not be shown a control he
+				  cannot use or a sentence about what his device lacks. So the offer line is
+				  shown where it is true, and where it is not, the sheet is exactly what it has
+				  always been — because typing a team in is not a consolation prize, it is the
+				  route that works on every device, in a private window, and on a private league.
+				*/}
+				{takesExtension(browserOf()) && (
+					<p className="onboard-offer">
+						<button type="button" className="as-link" onClick={() => setConnecting(true)}>
+							{ext.present ? "Let it read my league from Yahoo" : "Let it read my league for me"}
+						</button>
+					</p>
+				)}
 				{/*
 				  ONE question, and it is about baseball.
 				  
@@ -487,6 +626,8 @@ export const Onboard = ({
 				{/* And the same note when there is no `read` to hang it on — a throw before the
 				    parser returned anything. */}
 				{teamNote && !read && <p className="onboard-missed">{teamNote}</p>}
+				</>
+				}
 				</div>
 
 				<div className="onboard-rest">

@@ -34,3 +34,4 @@ dist-cli/
 .*.mjs
 probe*.mjs
 *.tmp.mjs
+dist-ext

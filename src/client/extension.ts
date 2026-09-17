@@ -1,0 +1,172 @@
+import { useCallback, useEffect, useRef, useState } from "react"
+import {
+	FROM_APP,
+	isFromExtension,
+	type Ask,
+	type Grab,
+	type GrabFailure
+} from "../data/extension.ts"
+
+/**
+ * THE PAGE'S SIDE OF THE WIRE.
+ *
+ * Everything this app knows about a Yahoo league has had to be typed, pasted or carried in
+ * a file, because Yahoo sends no `access-control-allow-*` header and never will. An
+ * extension is the one way round that: its content script is inside the reader's own
+ * signed-in tab, and a second content script is inside this page, so the two halves talk
+ * across `window.postMessage` like any two scripts on one page.
+ *
+ * WHAT THIS HOOK REFUSES TO DO. It does not poll, it does not ask for anything on its own,
+ * and it does not keep what comes back — every read is started by the reader pressing
+ * something, and what comes back goes straight into the stores that already exist, stamped
+ * with when it was read. An extension that quietly refreshed a league in the background
+ * would be a second source of truth with its own age, and this app's whole argument about
+ * staleness is that there is one.
+ *
+ * PRESENCE IS READ TWICE. The extension says hello, and it also stamps an attribute on the
+ * document. The attribute is what survives the case that actually matters: a reader
+ * installs the extension with this page already open, comes back to the tab and reloads —
+ * a message sent before this hook existed is gone, an attribute is not.
+ */
+export interface ExtensionState {
+	/** The extension is in this browser and talking to this page. */
+	present: boolean
+	version: string | null
+	/** A Yahoo fantasy tab is open right now, which decides whether the button offers to
+	 *  read the league or to open Yahoo first. */
+	yahooOpen: boolean
+	busy: boolean
+	/** The sweep's own words for what it is doing — "reading shortstops" — rendered
+	 *  verbatim, never a count of requests or a URL. */
+	progress: string | null
+	ask: (
+		ask: Ask,
+		opts?: { leagueId?: string; sport?: string; positions?: string[] }
+	) => Promise<{ grabs: Grab[]; failure?: GrabFailure } | { grabs?: undefined; failure: GrabFailure }>
+	/** Opens Yahoo in a tab of its own, on the reader's press — the extension never opens
+	 *  one by itself. */
+	openYahoo: (url?: string) => void
+}
+
+/** How long to wait for an answer before saying so. A sweep is nine sequential requests
+ *  with a quarter-second between them against somebody else's site; ninety seconds is
+ *  generous enough that a slow answer is never reported as a failure, and short enough
+ *  that a dead extension does not leave a button spinning forever. */
+const PATIENCE_MS = 90_000
+
+let nextId = 0
+
+export const useExtension = (): ExtensionState => {
+	const [present, setPresent] = useState(false)
+	const [version, setVersion] = useState<string | null>(null)
+	const [yahooOpen, setYahooOpen] = useState(false)
+	const [busy, setBusy] = useState(false)
+	const [progress, setProgress] = useState<string | null>(null)
+	/** Which request each pending promise belongs to. A second tab, or a second press,
+	 *  must not resolve this one — and a progress line about somebody else's sweep must
+	 *  not be rendered as this one's. */
+	const waiting = useRef(new Map<string, (m: never) => void>())
+
+	useEffect(() => {
+		const stamped = document.documentElement.getAttribute("data-beanemachine-extension")
+		if (stamped) {
+			setPresent(true)
+			setVersion(stamped)
+		}
+		const onMessage = (event: MessageEvent): void => {
+			if (event.source !== window || event.origin !== location.origin) return
+			if (!isFromExtension(event.data)) return
+			const msg = event.data
+			if (msg.kind === "hello") {
+				setPresent(true)
+				setVersion(msg.version)
+				setYahooOpen(msg.yahooOpen)
+				return
+			}
+			if (msg.kind === "progress") {
+				if (waiting.current.has(msg.id)) setProgress(msg.say)
+				return
+			}
+			const settle = waiting.current.get(msg.id)
+			if (!settle) return
+			waiting.current.delete(msg.id)
+			settle(msg as never)
+		}
+		window.addEventListener("message", onMessage)
+		/* Asking is how a page that loaded after the extension finds out it is there: the
+		   bridge answers a hello with a hello, without anything leaving the browser. Sent
+		   once, on mount, not on a timer — the answer also arrives unasked on focus and on
+		   the extension's own load. */
+		window.postMessage({ from: FROM_APP, id: "hello", ask: "hello" as Ask }, location.origin)
+		return () => window.removeEventListener("message", onMessage)
+	}, [])
+
+	const ask = useCallback<ExtensionState["ask"]>(
+		(what, opts = {}) =>
+			new Promise(resolve => {
+				if (!present) {
+					resolve({
+						failure: {
+							step: "extension",
+							what: "nothing in this browser can read Yahoo",
+							fix: "Add the reader to this browser, or paste your league page instead."
+						}
+					})
+					return
+				}
+				const id = `bm-${++nextId}`
+				setBusy(true)
+				setProgress(null)
+				const done = (
+					answer:
+						| { kind: "grabs"; grabs: Grab[]; failure?: GrabFailure }
+						| { kind: "failed"; failure: GrabFailure }
+				): void => {
+					clearTimeout(timer)
+					setBusy(false)
+					setProgress(null)
+					/* A Yahoo tab was found or it was not, and the next press should offer the
+					   right thing without waiting for another hello. */
+					if (answer.kind === "failed" && /no Yahoo/i.test(answer.failure.what))
+						setYahooOpen(false)
+					else setYahooOpen(true)
+					resolve(
+						answer.kind === "failed" ?
+							{ failure: answer.failure }
+						:	{ grabs: answer.grabs, failure: answer.failure }
+					)
+				}
+				waiting.current.set(id, done as never)
+				const timer = setTimeout(() => {
+					waiting.current.delete(id)
+					setBusy(false)
+					setProgress(null)
+					resolve({
+						failure: {
+							step: "extension",
+							what: "the read did not come back",
+							fix: "Check your Yahoo tab is still open, then try again."
+						}
+					})
+				}, PATIENCE_MS)
+				window.postMessage(
+					{ from: FROM_APP, id, ask: what, ...opts },
+					location.origin
+				)
+			}),
+		[present]
+	)
+
+	const openYahoo = useCallback((url?: string) => {
+		window.postMessage(
+			{ from: FROM_APP, id: `bm-open-${++nextId}`, ask: "page" as Ask, open: url ?? true },
+			location.origin
+		)
+		/* The extension opens the tab, but a reader whose extension is missing or asleep
+		   must still get where he was going — so the page opens it too if nothing answers.
+		   Both landing on the same URL is harmless; neither is not. */
+		window.open(url ?? "https://baseball.fantasysports.yahoo.com/", "_blank", "noopener")
+	}, [])
+
+	return { present, version, yahooOpen, busy, progress, ask, openYahoo }
+}

@@ -54,6 +54,7 @@ import { roundTo, scoreStats } from "./points.ts"
  * 1. WHAT THE THREE ANIMALS LOOK LIKE  (2026, league 228947's scoring)
  * ================================================================================
  *
+ * `--measure` section 1 prints this table; the fits under it are its section 2.
  * Across-player medians of each per-player statistic. Minimum sample per player:
  * 20 days for hitters and relievers, 10 for starters.
  *
@@ -98,38 +99,43 @@ import { roundTo, scoreStats } from "./points.ts"
  * exactly the "one man p90 14 and the other 26" that would make a lever. It is a
  * mirage. Pool those 32 pitchers' 773 start-days, deal them back out at random
  * keeping each man's start count, and recompute: 4,000 such shuffles produce a
- * between-player dispersion of p90 of 4.46 on average against the 3.93 actually
- * observed — the real players are LESS varied than chance, p 0.86. Every band tested
- * says the same:
+ * between-player dispersion of p90 of 4.47 on average against the 3.93 actually
+ * observed — the real players are LESS varied than chance, p 0.87. Every band tested
+ * says the same, and the same shuffle scored on the standard deviation instead is the
+ * right-hand trio of columns (`node test/spread.mjs --measure`, section 5, seeded so
+ * these reproduce to the digit; another seed moves a p by about ±0.02):
  *
- *   cohort, level band     players   observed sd of p90   chance alone      p
- *   SP 15–18                  32           3.93              4.46          0.86
- *   SP 10–13                  23           4.68              4.79          0.57
- *   SP 20–24                  23           4.94              4.94          0.50
- *   hitters 5.0–6.5          139           1.73              2.17          1.00
- *   hitters 7.0–9.0          116           1.87              1.83          0.40
- *   RP 3.5–4.5                43           1.68              1.72          0.60
- *   RP 5.0–7.0                32           1.45              1.54          0.67
+ *                              ———— p90 ————     ———— sd ————
+ *   cohort, level band  players  obs  chance    p    obs  chance    p
+ *   SP 15–18               32   3.93   4.47  0.869  2.42  2.16  0.165
+ *   SP 10–13               23   4.68   4.75  0.540  2.87  2.36  0.088
+ *   SP 20–24               22   5.05   5.16  0.558  3.08  2.35  0.021
+ *   hitters 5.0–6.5       139   1.73   2.17  0.999  0.74  0.81  0.905
+ *   hitters 7.0–9.0       115   1.87   1.81  0.356  0.93  0.79  0.016
+ *   RP 3.5–4.5             43   1.68   1.71  0.582  1.15  0.91  0.013
+ *   RP 5.0–7.0             32   1.45   1.54  0.678  1.16  0.89  0.012
  *
- * Nothing survives. A measured p90 gap between two players at the same level is a
- * small-sample artefact, and that is why NO FUNCTION BELOW COMPARES TWO p90s.
+ * Not one p90 column survives. A measured p90 gap between two players at the same
+ * level is a small-sample artefact, and that is why NO FUNCTION BELOW COMPARES TWO
+ * p90s.
  *
- * The same shuffle on the standard deviation does find something, and it is small:
- * observed exceeds chance in six of the seven bands, p 0.012–0.09 individually. So
- * the sd carries a signal the p90 does not, which makes sense — a quantile spends
- * its whole sample on one order statistic and an sd uses every game.
+ * The sd does find something, and it is small: observed beats chance in six of the
+ * seven bands, at p 0.012 to 0.165 individually and nowhere commandingly. So the sd
+ * carries a signal the p90 does not, which makes sense — a quantile spends its whole
+ * sample on one order statistic and an sd uses every game.
  *
- * (b) IT REPLICATES, WEAKLY, IN TWO SEASONS. Split each player's days alternately
- * (1st, 3rd, 5th … against 2nd, 4th, 6th …, so a mid-season role change lands in
- * both halves rather than defining one), residualise each half's sd on that half's
- * own mean so only "wider than his level implies" is left, and correlate:
+ * (b) IT REPLICATES, WEAKLY, IN TWO SEASONS (`--measure` sections 3 and 7). Split
+ * each player's days alternately (1st, 3rd, 5th … against 2nd, 4th, 6th …, so a
+ * mid-season role change lands in both halves rather than defining one), residualise
+ * each half's sd on that half's own mean so only "wider than his level implies" is
+ * left, and correlate:
  *
  *   cohort    2025 half-to-half r        2026 half-to-half r
- *   hitters     0.208 (p < 0.001)          0.172 (p < 0.001)
- *   SP          0.174 (p 0.049)            0.130 (p 0.135 on the F test)
- *   RP          0.144 (p 0.063)            0.124 (p 0.139 on the F test)
+ *   hitters     0.208 (n 491, p < 0.001)   0.172 (n 468, p < 0.001)
+ *   SP          0.174 (n 129, p 0.049)     0.130 (n 126, p 0.149)
+ *   RP          0.144 (n 167, p 0.063)     0.124 (n 146, p 0.136)
  *
- * Six of six cohort-seasons positive (sign test p 0.016), no single one of them
+ * Six of six cohort-seasons positive (one-sided sign test, p 0.016), no single one of them
  * commanding. Spearman-Brown to a whole season: reliability 0.22–0.34. Which is
  * where `RELIABILITY_K` below comes from, and it is why a measured spread is shrunk
  * here rather than used as measured.
@@ -137,17 +143,18 @@ import { roundTo, scoreStats } from "./points.ts"
  * Across seasons rather than within one, the same residual correlates 0.200 for
  * hitters (n 391, p < 0.001) and 0.323 for relievers (n 97, p 0.001) — and −0.228
  * for starters (n 80, p 0.042), which is NOT evidence that wide starters become
- * narrow ones. That sign is unstable: it goes to −0.172 at a 20-start minimum and
- * −0.178 at 25, −0.188 by Spearman, and turns POSITIVE (+0.226) if the level is
- * controlled as sd/mean instead of by regression. A coefficient whose sign depends
+ * narrow ones. That sign is unstable in both directions it can be pushed: it melts
+ * to −0.172 at a 20-start minimum (p 0.197) and −0.178 at 25 (p 0.268), reads −0.188
+ * by Spearman (p 0.095), and turns POSITIVE, +0.226 (p 0.044), if the level is
+ * controlled as sd/mean rather than by regression. A coefficient whose sign depends
  * on the control is a coefficient with nothing in it. The honest statement is that
  * for starters there is no year-to-year spread signal here in either direction.
  *
- * (c) THE ONLY TEST THAT MATTERS COMES BACK NULL. Rank players on half A by how much
- * wider they are than their level implies; then, on the half that ranking never saw,
- * count the days that actually cleared a bar. Both seasons pooled, level held fixed
- * by splitting each cohort into six bins of half-A level and taking terciles inside
- * each bin:
+ * (c) THE ONLY TEST THAT MATTERS COMES BACK NULL (`--measure` section 6). Rank
+ * players on half A by how much wider they are than their level implies; then, on the
+ * half that ranking never saw, count the days that actually cleared a bar. Both
+ * seasons pooled, level held fixed by splitting each cohort into six bins of half-A
+ * level and taking terciles inside each bin:
  *
  *   bar: a day of 10+ points        widest third   narrowest third   difference
  *   hitters (29,582 days)              21.03%           22.02%        −0.99pp  p 0.038
@@ -170,22 +177,49 @@ import { roundTo, scoreStats } from "./points.ts"
  * has paid too much. At the 20-point bar, which is what a 40-point deficit over two
  * days actually demands, there is nothing anywhere.
  *
- * It is NOT the save. A save is 8 points in this league and arrives in a lump, so
- * the obvious explanation for a wide reliever is that he is the closer. He is not:
- * the widest third of relievers averages FEWER saves-plus-holds than the narrowest
- * (14.0 against 15.0 in 2026, 15.9 against 17.1 in 2025).
+ * It is NOT the save (`--measure` section 8). A save is 8 points in this league and
+ * arrives in a lump, so the obvious explanation for a wide reliever is that he is the
+ * closer. He is not: the widest third of relievers averages FEWER saves-plus-holds
+ * than the narrowest (14.0 against 15.0 in 2026, 15.9 against 17.1 in 2025).
+ *
+ * (d) AND THE MODULE'S OWN OUTPUT BARELY BEATS KNOWING NOTHING ABOUT THE PLAYER
+ * (`--measure` section 9). Three ways to guess what a player's spread will be in the
+ * half of his season you have not seen: `LEVEL_FIT` alone, which knows his cohort and
+ * his level and nothing else about him; his raw measured spread from the half you
+ * have; and `shrunkSd`, which is the first pulled toward the second. Root mean
+ * squared error, both seasons, players with at least five games in each half:
+ *
+ *   cohort   players   level fit only   raw measured sd   shrunkSd
+ *   hitters     959         1.395            1.647          1.392
+ *   SP          255         3.357            4.322          3.315
+ *   RP          313         1.328            1.735          1.311
+ *
+ * Read the middle column first. USING A PLAYER'S OWN MEASURED SPREAD IS WORSE THAN
+ * IGNORING HIM ENTIRELY — 18% worse for hitters, 29% for starters, 31% for relievers.
+ * And `shrunkSd`, which is this module's headline number, beats the player-blind fit
+ * by 0.2%, 1.3% and 1.3%. That is the whole value added by measuring an individual,
+ * and it is almost nothing.
+ *
+ * It is stated here rather than buried because it is the strongest argument against
+ * the thing this file does. The defence is narrow and it is the honest one: those
+ * margins are positive in all three cohorts; `shrunkSd` always lies BETWEEN the two
+ * columns either side of it, because `reliability` is a weight in [0, 1], so it can
+ * never be the worst of the three; and a caller who wants a player's spread and has
+ * no such module will reach for the raw sd, which is the column that actively loses.
+ * If this file did not exist, the naive thing would be the wrong thing.
  *
  * ================================================================================
  * WHAT THAT LICENSES, AND WHAT IT FORBIDS
  * ================================================================================
  *
- * Licensed: saying how wide a cohort is (section 1 is measured, large-sample and
- * not in dispute); saying how wide ONE player has been, with the error bar; saying
- * that two particular players' measured spreads differ by more than their sampling
- * error, when they do.
+ * Licensed: saying how wide a COHORT is (section 1 is measured, large-sample and not
+ * in dispute, and it is the only part of this file with real force); saying how wide
+ * one player HAS BEEN, with the error bar beside it; saying that two particular
+ * players' measured spreads differ by more than their sampling error, when they do.
  *
  * Forbidden, and the module is shaped so it cannot be done by accident: reordering a
- * board by spread, comparing two p90s, or treating a measured spread as a forecast.
+ * board by spread, comparing two p90s, or treating a measured spread as a forecast of
+ * the next one — section 2(d) is what a forecast off this data actually costs.
  * `spreadOf` returns no score and nothing here consumes a board, a bscore or a
  * ranking; `separates` is the only comparison offered and it is deliberately about
  * the MEASUREMENTS rather than about the players.
@@ -211,8 +245,9 @@ export const START_SHARE = 0.8
  * Fewest appearances before a summary is returned at all.
  *
  * 10, and the reason is the p90 rather than the sd. At n = 10 the 90th percentile by
- * the interpolation below is the 9th of 10 sorted values — one game, wearing the name
- * of a quantile — and at n = 5 it is a blend of the top two. The sd survives smaller
+ * the interpolation below sits at (10 − 1) × 0.9 = 8.1 — a tenth of the way from the
+ * 9th sorted value to the 10th, so it is two games wearing the name of a quantile, and
+ * at n = 5 it is 40% of the way from the 4th to the 5th. The sd survives smaller
  * samples better but is not worth reporting alone. Below this `spreadOf` returns
  * null rather than a summary nobody should read; callers that need the arithmetic on
  * a shorter run (the fixture assertions in test/spread.mjs) pass `minimum`

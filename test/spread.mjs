@@ -224,6 +224,23 @@ t("RELIABILITY_K is large enough that no real season reaches half signal",
 t("a full hitter season is 40% signal and a full starter season 28%, as the comment says",
 	near(140 / (140 + RELIABILITY_K.hitters), 0.4, 0.005) &&
 		near(30 / (30 + RELIABILITY_K.SP), 0.275, 0.005))
+// the structural guarantee the module's own defence rests on: a shrunk spread is a
+// weighted blend, so it is never outside the pair it blends, and it can therefore
+// never be the worst of the three estimators in --measure section 9
+t("shrunkSd always lies between the level fit and the raw measurement",
+	[3, 10, 40, 200].every(n => {
+		const many = Array.from({ length: n }, (_, i) => ({ gamesPlayed: 1, runs: i % 4, homeRuns: i % 7 === 0 ? 1 : 0 }))
+		const x = spreadOf(many, BAT, "hitting", { minimum: 3 })
+		return x.shrunkSd >= Math.min(x.expected, x.sd) - 0.011 &&
+			x.shrunkSd <= Math.max(x.expected, x.sd) + 0.011
+	}))
+t("and it moves toward the measurement as the sample grows",
+	(() => {
+		const line = i => ({ gamesPlayed: 1, runs: i % 4, homeRuns: i % 7 === 0 ? 1 : 0 })
+		const small = spreadOf(Array.from({ length: 14 }, (_, i) => line(i)), BAT, "hitting")
+		const large = spreadOf(Array.from({ length: 280 }, (_, i) => line(i)), BAT, "hitting")
+		return Math.abs(large.shrunkSd - large.sd) < Math.abs(small.shrunkSd - small.sd)
+	})())
 t("the bootstrap sampling constants bracket the Gaussian 0.707 rather than assuming it",
 	SAMPLING_ERROR.hitters > 0.707 && SAMPLING_ERROR.SP < 0.707)
 t("COHORT_SHAPE keeps its quantiles in order for every cohort",
@@ -307,6 +324,22 @@ if (process.argv.includes("--measure")) {
 		return x.reduce((s, v, i) => s + (v - mx) * (y[i] - my), 0) /
 			Math.sqrt(x.reduce((s, v) => s + (v - mx) ** 2, 0) * y.reduce((s, v) => s + (v - my) ** 2, 0))
 	}
+	// Abramowitz & Stegun 7.1.26, good to 1.5e-7 — enough to say whether a p is 0.04
+	// or 0.13, which is the only resolution any claim in spread.ts rests on
+	const erf = x => {
+		const tt = 1 / (1 + 0.3275911 * Math.abs(x))
+		const y = 1 - (((((1.061405429 * tt - 1.453152027) * tt + 1.421413741) * tt -
+			0.284496736) * tt + 0.254829592) * tt) * Math.exp(-x * x)
+		return x >= 0 ? y : -y
+	}
+	const twoSided = z => 1 - erf(Math.abs(z) / Math.SQRT2)
+	/** Fisher z, the standard test of a correlation against zero. */
+	const pCorr = (r, n) => twoSided(0.5 * Math.log((1 + r) / (1 - r)) * Math.sqrt(n - 3))
+	/** Two independent proportions, pooled-variance z. */
+	const pProp = (c1, n1, c2, n2) => {
+		const p1 = c1 / n1, p2 = c2 / n2, pp = (c1 + c2) / (n1 + n2)
+		return twoSided((p1 - p2) / Math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2)))
+	}
 	const season = async year => {
 		const by = new Map()
 		let rows = 0, doubles = 0
@@ -318,7 +351,7 @@ if (process.argv.includes("--measure")) {
 					if ((pl.stats.gamesPlayed ?? 0) > 1) doubles++
 					const key = `${pl.id}:${group}`
 					const held = by.get(key) ?? by.set(key, {
-						name: pl.name, group, lines: [], played: 0, started: 0
+						id: pl.id, name: pl.name, group, lines: [], played: 0, started: 0
 					}).get(key)
 					held.lines.push(pl.stats)
 					held.played += pl.stats.gamesPlayed ?? 0
@@ -382,7 +415,8 @@ if (process.argv.includes("--measure")) {
 			const full = 2 * rHalf / (1 + rHalf)
 			const k = nHalf * 2 * (1 - full) / full
 			ks.push(k)
-			console.log(`   ${c.padEnd(8)} ${year}: half-to-half r ${rHalf.toFixed(3)} at ${nHalf} per half` +
+			console.log(`   ${c.padEnd(8)} ${year}: half-to-half r ${rHalf.toFixed(3)} ` +
+				`(n ${g.length}, p ${pCorr(rHalf, g.length).toFixed(3)}) at ${nHalf} per half` +
 				` → full-sample reliability ${full.toFixed(3)} → k ${k.toFixed(0)}`)
 		}
 		console.log(`   ${c.padEnd(8)} k averaged over the two seasons: ${mean(ks).toFixed(0)}` +
@@ -416,7 +450,7 @@ if (process.argv.includes("--measure")) {
 	// statistic is any wider than a shuffle produces. Seeded, so the p-values below
 	// reproduce to the digit; another seed moves them by about ±0.02.
 	console.log("\n5. THE NULL — 4,000 shuffles per band, players kept at their own game counts")
-	console.log("   band               players     p90: obs  chance     p       sd: obs  chance     p")
+	console.log("   band               players   days     p90: obs  chance     p       sd: obs  chance     p")
 	for (const [c, lo, hi] of [["SP", 15, 18], ["SP", 10, 13], ["SP", 20, 24],
 		["hitters", 5, 6.5], ["hitters", 7, 9], ["RP", 3.5, 4.5], ["RP", 5, 7]]) {
 		const band = corpus[2026].filter(r => r.cohort === c && r.n >= MIN[c] && r.mean >= lo && r.mean < hi)
@@ -450,12 +484,162 @@ if (process.argv.includes("--measure")) {
 			return `${obs[stat].toFixed(2).padStart(9)} ${q(nulls[stat], 0.5).toFixed(2).padStart(7)} ` +
 				`${((ge[stat] + 1) / 4001).toFixed(3).padStart(6)}`
 		}
-		console.log(`   ${`${c} ${lo}–${hi}`.padEnd(18)} ${String(band.length).padStart(5)}  ${cell("p90")}  ${cell("sd")}`)
+		console.log(`   ${`${c} ${lo}–${hi}`.padEnd(18)} ${String(band.length).padStart(5)} ` +
+			`${String(pool.length).padStart(6)}  ${cell("p90")}  ${cell("sd")}`)
 	}
 	console.log("\n   The p90 columns are the null result this module is built around: not one")
 	console.log("   band beats chance, which is why no function in spread.ts compares two p90s.")
 	console.log("   The sd columns are the weak signal it does admit — over chance in six of")
 	console.log("   the seven bands, and never by much.")
+
+	// ----------------------------------------------------------------------
+	// 6. THE DECISION TEST. Everything above is about whether a spread can be
+	// MEASURED. This is about whether measuring it changes what a manager should
+	// do, which is a different and harder question, and it is the one that comes
+	// back null. Rank on half A; count on the half the ranking never saw.
+	// ----------------------------------------------------------------------
+	console.log("\n6. OUT-OF-SAMPLE: does the wider man clear an absolute bar more often?")
+	console.log("   Level held fixed by six bins of half-A mean, terciles of level-free sd inside each.")
+	for (const BAR of [10, 20]) {
+		console.log(`   bar: a day of ${BAR}+ points`)
+		for (const c of ["hitters", "SP", "RP"]) {
+			const rows = []
+			for (const year of [2025, 2026]) {
+				const g = corpus[year].filter(r => r.cohort === c && r.n >= (c === "SP" ? 16 : 30))
+				const A = g.map(r => r.pts.filter((_, i) => i % 2 === 0))
+				const B = g.map(r => r.pts.filter((_, i) => i % 2 === 1))
+				const aMean = A.map(mean)
+				const res = resid(A.map(sd), aMean)
+				for (let i = 0; i < g.length; i++)
+					rows.push({ lvl: aMean[i], res: res[i], bMean: mean(B[i]),
+						clear: B[i].filter(v => v >= BAR).length, days: B[i].length })
+			}
+			rows.sort((a, b) => a.lvl - b.lvl)
+			const BINS = 6, per = Math.floor(rows.length / BINS)
+			let wc = 0, wd = 0, nc = 0, nd = 0
+			const wideB = [], narrowB = [], binRate = []
+			for (let b = 0; b < BINS; b++) {
+				const bin = rows.slice(b * per, b === BINS - 1 ? rows.length : (b + 1) * per)
+				const byRes = [...bin].sort((x, y) => x.res - y.res)
+				const third = Math.floor(byRes.length / 3)
+				for (const r of byRes.slice(-third)) { wc += r.clear; wd += r.days; wideB.push(r.bMean) }
+				for (const r of byRes.slice(0, third)) { nc += r.clear; nd += r.days; narrowB.push(r.bMean) }
+				binRate.push([mean(bin.map(r => r.lvl)),
+					bin.reduce((s2, r) => s2 + r.clear, 0) / bin.reduce((s2, r) => s2 + r.days, 0)])
+			}
+			// what a point of LEVEL is worth on the same bar, so the two levers are
+			// quoted in the same currency
+			const slope = fit(binRate.map(r => r[1]), binRate.map(r => r[0])).b
+			const gap = wc / wd - nc / nd
+			console.log(`     ${c.padEnd(8)} widest third ${(100 * wc / wd).toFixed(2)}% vs narrowest ` +
+				`${(100 * nc / nd).toFixed(2)}% → ${(100 * gap >= 0 ? "+" : "")}${(100 * gap).toFixed(2)}pp ` +
+				`(p ${pProp(wc, wd, nc, nd).toExponential(1)}, ${wd + nd} days); ` +
+				`one point of level is worth ${(100 * slope).toFixed(2)}pp, so the whole gap is ` +
+				`${(gap / slope).toFixed(2)} points of projection`)
+			if (BAR === 10)
+				console.log(`     ${" ".padEnd(8)} and the two thirds are NOT level out of sample: ` +
+					`${(mean(wideB) - mean(narrowB) >= 0 ? "+" : "")}${(mean(wideB) - mean(narrowB)).toFixed(2)} ` +
+					`pts/day to the widest third in half B, which is level wearing a disguise`)
+		}
+	}
+
+	// ----------------------------------------------------------------------
+	// 7. ACROSS SEASONS, and the reason spread.ts claims nothing for starters.
+	// ----------------------------------------------------------------------
+	console.log("\n7. 2025 → 2026, the same player, level removed from each season")
+	for (const c of ["hitters", "SP", "RP"]) {
+		const minN = c === "SP" ? 15 : 25
+		// keyed by MLBAM id, never by name: two players really do share a name, and a
+		// name key silently pairs one man's 2025 with another man's 2026
+		const keyed = new Map(corpus[2026].map(r => [`${r.id}:${r.group}`, r]))
+		const pairs = corpus[2025].flatMap(a => {
+			const b = keyed.get(`${a.id}:${a.group}`)
+			return b && a.cohort === c && b.cohort === c && a.n >= minN && b.n >= minN ? [[a, b]] : []
+		})
+		const A = pairs.map(x => x[0]), B = pairs.map(x => x[1]), n = pairs.length
+		const rSd = corr(resid(A.map(r => r.sd), A.map(r => r.mean)), resid(B.map(r => r.sd), B.map(r => r.mean)))
+		const rCv = corr(A.map(r => r.sd / r.mean), B.map(r => r.sd / r.mean))
+		console.log(`   ${c.padEnd(8)} n ${String(n).padStart(4)}: level r ` +
+			`${corr(A.map(r => r.mean), B.map(r => r.mean)).toFixed(3)};  ` +
+			`level-free sd r ${rSd.toFixed(3)} (p ${pCorr(rSd, n).toFixed(3)});  ` +
+			`sd/mean r ${rCv.toFixed(3)} (p ${pCorr(rCv, n).toFixed(3)})`)
+	}
+	console.log("   For starters the two controls disagree in SIGN, which is the finding:")
+	console.log("   a coefficient that flips when the level control changes has nothing in it.")
+	// and it also melts as the minimum start count rises, which is the other half of
+	// the argument that there is nothing there rather than something inverted
+	const rank = a => {
+		const idx = a.map((v, i) => [v, i]).sort((x, y) => x[0] - y[0])
+		const out = new Array(a.length)
+		for (let i = 0; i < idx.length;) {
+			let j = i
+			while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++
+			const avg = (i + j) / 2 + 1
+			for (let k2 = i; k2 <= j; k2++) out[idx[k2][1]] = avg
+			i = j + 1
+		}
+		return out
+	}
+	const keyed26 = new Map(corpus[2026].map(r => [`${r.id}:${r.group}`, r]))
+	for (const minN of [15, 20, 25]) {
+		const pairs = corpus[2025].flatMap(a => {
+			const b = keyed26.get(`${a.id}:${a.group}`)
+			return b && a.cohort === "SP" && b.cohort === "SP" && a.n >= minN && b.n >= minN ? [[a, b]] : []
+		})
+		const A = pairs.map(x => x[0]), B = pairs.map(x => x[1]), n = pairs.length
+		const rLin = corr(resid(A.map(r => r.sd), A.map(r => r.mean)), resid(B.map(r => r.sd), B.map(r => r.mean)))
+		const rRank = corr(rank(A.map(r => r.sd)), rank(B.map(r => r.sd)))
+		const rCv = corr(A.map(r => r.sd / r.mean), B.map(r => r.sd / r.mean))
+		console.log(`   SP minimum ${minN} starts (n ${n}): regression control ${rLin.toFixed(3)} ` +
+			`(p ${pCorr(rLin, n).toFixed(3)}), Spearman ${rRank.toFixed(3)} (p ${pCorr(rRank, n).toFixed(3)}), ` +
+			`sd/mean ${rCv.toFixed(3)} (p ${pCorr(rCv, n).toFixed(3)})`)
+	}
+
+	// Is a wide reliever simply the closer? A save is 8 points in this league and
+	// arrives in a lump, so it is the obvious confound and it is not the answer.
+	console.log("\n8. THE SAVE IS NOT THE EXPLANATION for wide relievers")
+	for (const year of [2025, 2026]) {
+		const g = corpus[year].filter(r => r.cohort === "RP" && r.n >= 30)
+		const A = g.map(r => r.pts.filter((_, i) => i % 2 === 0))
+		const res = resid(A.map(sd), A.map(mean))
+		const order = res.map((v, i) => [v, i]).sort((x, y) => x[0] - y[0])
+		const third = Math.floor(g.length / 3)
+		const lumps = idxs => mean(idxs.map(i =>
+			g[i].lines.reduce((s2, l) => s2 + (l.saves ?? 0) + (l.holds ?? 0), 0)))
+		console.log(`   ${year}: widest third averages ${lumps(order.slice(-third).map(o => o[1])).toFixed(1)} ` +
+			`saves+holds, narrowest third ${lumps(order.slice(0, third).map(o => o[1])).toFixed(1)}`)
+	}
+
+	// ----------------------------------------------------------------------
+	// 9. DOES THE MODULE'S OWN OUTPUT EARN ITS PLACE? Three ways to guess a
+	// player's half-B sd from half A: the cohort fit alone (level, no player), his
+	// raw measured half-A sd, and `shrunkSd` — the fit pulled toward the measurement
+	// by `reliability`. Root mean squared error on the half A never saw. If shrinking
+	// did not beat both ends, `Spread.shrunkSd` would have no reason to exist.
+	// ----------------------------------------------------------------------
+	console.log("\n9. PREDICTING THE OTHER HALF'S SD — rmse, lower is better")
+	console.log("   cohort   players   level fit only   raw measured sd   shrunk (the module)")
+	for (const c of ["hitters", "SP", "RP"]) {
+		const err = { fit: 0, raw: 0, shrunk: 0 }
+		let n = 0
+		for (const year of [2025, 2026])
+			for (const r of corpus[year].filter(x => x.cohort === c && x.n >= (c === "SP" ? 16 : 30))) {
+				const A = r.pts.filter((_, i) => i % 2 === 0)
+				const B = r.pts.filter((_, i) => i % 2 === 1)
+				if (A.length < 5 || B.length < 5) continue
+				const aMean = mean(A), aSd = sd(A), bSd = sd(B)
+				const expected = LEVEL_FIT[c].intercept + LEVEL_FIT[c].slope * aMean
+				const rel = A.length / (A.length + RELIABILITY_K[c])
+				err.fit += (expected - bSd) ** 2
+				err.raw += (aSd - bSd) ** 2
+				err.shrunk += (expected + (aSd - expected) * rel - bSd) ** 2
+				n++
+			}
+		const rmse = k => Math.sqrt(err[k] / n).toFixed(3)
+		console.log(`   ${c.padEnd(8)} ${String(n).padStart(6)}  ${rmse("fit").padStart(14)} ` +
+			`${rmse("raw").padStart(17)} ${rmse("shrunk").padStart(21)}`)
+	}
+
 }
 
 process.exit(fail === 0 ? 0 : 1)

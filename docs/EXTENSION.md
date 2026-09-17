@@ -222,9 +222,13 @@ scripts on one page do, and one source file works in both browsers.
 
 The cost of that choice, stated plainly because it is the thing a store reviewer will ask
 about: **any script running on an origin the bridge matches can ask the extension to read
-the reader's Yahoo pages.** Those origins are `https://beanemachine.com`,
-`https://*.beanemachine.com`, `http://localhost` and `http://127.0.0.1` — and `localhost`
-is the one that deserves the sentence, because anything the reader runs locally is on it.
+the reader's Yahoo pages.** Those origins are `https://beanemachine.com` and
+`https://*.beanemachine.com` in the build that ships. They USED to include
+`http://localhost` and `http://127.0.0.1`, and that is why this paragraph is here: a match
+pattern cannot name a port, so those two meant any page served from the reader's own machine
+on any port — and on a developer's machine there is usually something listening that he did
+not write. They survive as `BM_EXT_DEV=1`, which is how `test/extension.mjs` builds the copy
+it drives, and are not in the store build.
 Three checks narrow it as far as this design can: `event.source !== window` rejects
 anything from an iframe, `event.origin !== location.origin` rejects another window posting
 in, and `all_frames: false` means an iframe embedded in the app's own page never gets the
@@ -343,7 +347,7 @@ at the point they bite:
 - **The hello race in §2**, which timed out the suite before it was understood.
 
 **Count, measured 2026-09-17 at 15:25 by static count of the `t(…)` call sites in
-`test/extension.mjs`: 39 assertions — 36 call sites, three of which sit inside a
+`test/extension.mjs`: 109 assertions — 105 call sites, several of which sit inside a
 two-iteration loop over the two built manifests.** It was 38 at 15:04, from 35 sites; the
 suite was being added to during the session this was written, so re-derive rather than
 quote:
@@ -367,7 +371,7 @@ one position at a time; `count=0` on every one of them, which is the bug that hi
 throttle; then the reader's own path through the setup sheet into the stores; then the two
 manifests.
 
-**Last measured green — `passed 39, failed 0` — on 2026-09-17 at 15:35, half an hour after
+**Last measured green — `passed 109, failed 0` — on 2026-09-17 at 17:56, two hours after
 the same command reported 20 of 38 with the run aborted. See §8 for both, and for what the
 suite cannot prove however green it is.**
 
@@ -428,7 +432,7 @@ and must be rewritten before submission.
 > whichever one he plays in. No other Yahoo property is matched: mail, finance, news,
 > search and photos are all on different hosts, and none of them is in this pattern.
 
-### Content script on `beanemachine.com` (and `localhost`)
+### Content script on `beanemachine.com`
 
 > The extension has to hand what it read to the web page that uses it, and the page
 > cannot be given a fixed extension id to talk to: Firefox has never implemented
@@ -436,9 +440,10 @@ and must be rewritten before submission.
 > different id on every machine. So a second content script runs on the app's own origin
 > and relays messages between the page and the extension by `window.postMessage`. It
 > reads nothing from that page, changes nothing on it beyond one attribute saying the
-> extension is installed, and stores nothing. `localhost` and `127.0.0.1` are included
-> because the app is a static site that a developer runs locally; without them the
-> extension cannot be tested against the app at all.
+> extension is installed, and stores nothing. It matches beanemachine.com alone: the local
+> addresses a developer needs are a build flag (`BM_EXT_DEV=1`) rather than a shipped
+> permission, because a match pattern cannot name a port and shipping `localhost` would let
+> anything at all on the reader's own machine ask for his league.
 
 ### Remote code
 
@@ -543,7 +548,7 @@ nothing in this directory can assert one exists. `src/client/Connect.tsx` links 
 browser's store search page, which is what a reader who did not clone this repository
 follows.
 
-**The suite was green at 2026-09-17 15:35: `passed 39, failed 0`**, from `node
+**The suite was green at 2026-09-17 17:56: `passed 109, failed 0`**, from `node
 extension/build.mjs && node --experimental-strip-types test/extension.mjs` with the dev
 server on 127.0.0.1:5299. `npx tsc --noEmit` was clean in the same minute.
 

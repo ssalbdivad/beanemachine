@@ -20,6 +20,13 @@ import { opponentStore } from "./opponent.ts"
  * It is one read now, held where both screens can see it. That is the whole reason this
  * module exists, and the gap below is what the second screen gets for free out of it.
  *
+ * WHAT THE DUPLICATE ACTUALLY COST, measured rather than borrowed. The first version of this
+ * comment quoted "15.6 KB of the 38 KB", which is the price of a ONE-DAY read and the wrong
+ * measurement for a period: this window is seven days, not one. Measured on 2026-09-17 with
+ * `curl -H 'Accept-Encoding: gzip'` over 2026-09-10..16, the two sides of the ball come to
+ * 14,199 and 6,642 bytes. The request that has gone is the pitching one — 6.6 KB today, and
+ * it grows every day of the period, because the second caller asked for pitchers alone.
+ *
  * WHAT THIS IS NOT. It is not the score. Yahoo pays only the men in a lineup, and this page
  * can see neither his past lineups nor any of his opponent's — so both figures count every
  * man each side HOLDS. That makes the comparison fair in the one way available to it, and

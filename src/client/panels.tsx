@@ -925,9 +925,15 @@ export const WaysIn = ({
 					*/}
 					{extensionHere() && (
 						<Fragment2 term="Fastest">
+							{/* "Nothing leaves this browser" was looser than the policy it summarises,
+							    and this is the place a reader chooses a route in. The press really
+							    does ask Yahoo for pages — his own league's, from his own signed-in
+							    tab, which is the whole point — and what is true is that none of it
+							    reaches this site or any other. */}
 							Your own browser reads your league &mdash; your scoring, your seats, who is
-							free and who you are playing &mdash; from the Yahoo page you have open.
-							Nothing is typed and nothing leaves this browser.
+							free and who you are playing &mdash; off Yahoo, from the tab you are
+							already signed into. Nothing is typed, and none of it goes to this site or
+							anywhere else.
 							{onOpenSetup && (
 								<p style={{ margin: "var(--sp-2) 0 0" }}>
 									<button className="primary" onClick={onOpenSetup}>

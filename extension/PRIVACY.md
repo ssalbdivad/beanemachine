@@ -48,9 +48,14 @@ footer, adverts, everything around the table — is thrown away before anything 
 over. (`rowsOnly`, applied in `src/yahoo.ts`.)
 
 **Which of your open tabs has Yahoo in it**, so a request from the website can be sent to
-the right tab. This is a list of tab numbers held in memory while your browser is running.
-It is not written anywhere and it is gone when the browser closes. (`yahooTabs` in
-`src/background.ts`.)
+the right tab. Your browser is asked for that list at the moment it is needed, rather than a
+list being kept — nothing about your tabs is stored between one request and the next.
+
+One thing is remembered, and it is worth saying plainly rather than leaving it to be
+discovered: when you switch tabs, the add-on notes the number of the tab you switched to and
+the time, so that when you have two leagues open it can tell which one you were last looking
+at. It is the tab's number and a timestamp — not its address, not its contents — it is held
+in memory only, and it goes when your browser closes. (`lastSeen` in `src/background.ts`.)
 
 **Which of your open tabs are beanemachine.com**, so that a progress line ("reading
 shortstops") reaches the page that asked for it, and so that the toolbar button can put
@@ -78,10 +83,14 @@ is installed, so the page can stop telling you to install it. (`src/bridge.ts`.)
 It does not read your Yahoo password, and it never sees one. It uses the session your
 browser already has, the same way the rest of your tabs do.
 
-It does not read the score of your matchup. The page shows one; it is deliberately not
-taken, because the people who wrote this have never seen that page and a number read off a
-page nobody has seen is a number that would be printed with confidence and no idea whether
-it was right.
+**Your matchup page is read, and the score on it is never used.** Being exact about this,
+because an earlier version of this page said the score was "not taken" and that was not true
+of the code: the add-on hands over that page's text like any other, and the score is in it.
+What happens to it is nothing — the website takes the player NAMES out of that page and
+discards the rest, and no screen anywhere prints a score. The reason is that the people who
+wrote this have never seen a real matchup page, and a number read off a page nobody has seen
+would be printed with confidence and no idea whether it was the score, the projection, or
+last week's.
 
 ---
 
@@ -144,19 +153,22 @@ sent.
 covers the whole of Yahoo's fantasy site because Yahoo puts each sport on its own
 subdomain and your league is on whichever one you play in.
 
-**beanemachine.com, `localhost` and `127.0.0.1`** — because what was read has to be handed
-to the page that uses it, and a web page has no other way to talk to an add-on that works
-in both Chrome and Firefox. The local addresses are included so that somebody running the
-site on their own machine can use and test it; they are not a way in for anybody else's
-website.
+**beanemachine.com** — because what was read has to be handed to the page that uses it, and
+a web page has no other way to talk to an add-on that works in both Chrome and Firefox.
+
+This page used to say `localhost` and `127.0.0.1` were included too, so that somebody
+running the site on their own machine could use it. They were, and they are not any more: a
+permission cannot name a port, so allowing `localhost` allows ANY page served from your own
+machine, on any port, to ask this add-on for your Yahoo league — and on a developer's
+machine there is usually something listening that he did not write. The capability survives
+as a build somebody testing the site makes for himself; it is not in the one you install.
 
 There is no storage permission, no `<all_urls>`, no `webRequest`, no cookie permission and
 no scripting permission.
 
 **Something worth knowing rather than glossing over:** because the way a web page talks to
 an add-on is by posting a message into its own page, any script running on
-beanemachine.com — or on `localhost` in your own browser — can ask it to read your Yahoo
-fantasy pages. It cannot reach anything else: the add-on's own reach is Yahoo's fantasy
+beanemachine.com can ask it to read your Yahoo fantasy pages. It cannot reach anything else: the add-on's own reach is Yahoo's fantasy
 host and nothing wider, so your Yahoo account, mail and everything else stay out of it. A
 message from an embedded frame is refused, and a message from another window is refused.
 

@@ -84,8 +84,11 @@ npm run dev:web                 # the app on :5299, which the suite drives
 npm run test:ext                # node --experimental-strip-types test/extension.mjs
 ```
 
-**39 assertions** against the real unpacked build in a real browser — counted 2026-09-17
-at 15:25 from the `t(…)` call sites in `test/extension.mjs`: 36 sites, three of them
+**109 assertions** against the real unpacked build in a real browser — the number the
+suite printed on 2026-09-17 at 17:56 (`passed 109, failed 0`). It was 39 earlier the same
+day, before a hardening pass; a count in prose goes stale the moment somebody adds a case,
+so take the run's own total over this sentence. The `t(…)` call sites in `test/extension.mjs`:
+105 of them, several
 inside a two-iteration loop over the two built manifests. The suite is grown regularly and
 that total was 38 the same afternoon, so take it from a run rather than from here. Yahoo
 is served by a local fixture server

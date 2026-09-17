@@ -57,8 +57,10 @@ const base = {
 // ONE pass. Its own bars are semantics A; the rows carry `points`, which no bar touches.
 const rated = rateAll({ ...base, available: r => onWireId(r.player.id) })
 const noWire = rateAll(base)
-// proof that the projection is bar-independent: same men, same points, either call
-const pointsSame = rated.every((r, i) => r.player.id === noWire[i]?.player.id ? true : true)
+/* The proof that the projection is bar-independent is the id-matched comparison below.
+   A line here read `rated.every((r, i) => r.player.id === noWire[i]?.player.id ? true : true)`
+   — a ternary whose branches are both `true`, so it could not fail and proved nothing. The
+   two calls also sort differently, by bscore, which is why the real check matches on id. */
 const byId = new Map(noWire.map(r => [`${r.player.id}:${r.player.group}`, r]))
 let pointMismatch = 0
 for (const r of rated) {

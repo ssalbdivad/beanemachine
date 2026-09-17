@@ -1217,6 +1217,49 @@ const swap = (start, sit, startSlot, gain) => ({
        "from 0 to 0" would pass a regex for the words and tell the reader nothing. */
     t("and it quotes both sides of the fall, so the sentence carries the fact",
       loud.notes.some(n => /from 20 to 0 projected innings/.test(n)), JSON.stringify(loud.notes))
+
+    /*
+     * AND WHERE THE CALLER HAS THE OTHER HALF, THE PLANNER DOES THE SUBTRACTION.
+     *
+     * The note above ends "worth checking against what you have already thrown", which is
+     * the app handing a reader a sum it cannot finish. The Tonight card CAN: it reads the
+     * innings actually thrown inside the league's own scoring period off MLB's day-by-day
+     * record, and it rates over that same period rather than over a fortnight. Both facts
+     * are stated by the caller — never inferred — because a plan rated over a fortnight
+     * against a weekly floor is a comparison that looks arithmetically fine and is wrong:
+     * 25 innings clears a 20-a-week floor over two weeks and misses it badly in fact.
+     *
+     * Two sentences, because there are two answers and they mean opposite things. Both are
+     * asserted, and so is the arithmetic in them.
+     */
+    const short = planSwaps({
+      ...swapArmForBat,
+      limits: { movesPerPeriod: null, inningsPerPeriod: 20, inningsBanked: 6, windowIsPeriod: true }
+    })
+    t("with the innings already thrown in hand, the note lands the sum rather than deferring it",
+      short.notes.some(n => /that lands at 6 against your league's 20/.test(n)),
+      JSON.stringify(short.notes))
+    t("and says what falling short of the floor actually costs him",
+      short.notes.some(n => /forfeits the pitching side of your week/.test(n)),
+      JSON.stringify(short.notes))
+    const clear = planSwaps({
+      ...swapArmForBat,
+      limits: { movesPerPeriod: null, inningsPerPeriod: 20, inningsBanked: 34, windowIsPeriod: true }
+    })
+    t("and a reader who has already cleared the floor is told so, rather than warned",
+      clear.notes.some(n => /with 34 already thrown that still lands at 34 against your league's 20/.test(n)) &&
+        !clear.notes.some(n => /forfeits/.test(n)),
+      JSON.stringify(clear.notes))
+    /* The fortnight case: same numbers, caller says its window is NOT the period, and the
+       planner must fall back to the sentence that makes no claim about the level. */
+    const wrongWindow = planSwaps({
+      ...swapArmForBat,
+      limits: { movesPerPeriod: null, inningsPerPeriod: 20, inningsBanked: 6, windowIsPeriod: false }
+    })
+    t("a plan rated over the wrong window never tests against the floor",
+      wrongWindow.notes.some(n => /worth checking against what you have already thrown/.test(n)) &&
+        !wrongWindow.notes.some(n => /lands at/.test(n)),
+      JSON.stringify(wrongWindow.notes))
   }
 }
 

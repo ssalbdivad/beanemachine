@@ -165,7 +165,29 @@ export interface PlanInput {
 	 * no innings floor — never as zero. Absent altogether is the same thing, which is what
 	 * keeps every caller written before this unchanged.
 	 */
-	limits?: { movesPerPeriod: number | null; inningsPerPeriod: number | null }
+	limits?: {
+		movesPerPeriod: number | null
+		inningsPerPeriod: number | null
+		/**
+		 * INNINGS ALREADY THROWN IN THIS SCORING PERIOD, and whether this plan's window is
+		 * that period.
+		 *
+		 * The note below used to end "worth checking against what you have already thrown",
+		 * which is the app handing a reader a subtraction it could do itself. It could not,
+		 * for two reasons, and both are gone now: nothing read the innings already thrown,
+		 * and nothing could say whether the window the plan was rated over was the scoring
+		 * period at all. The Tonight card rates over `resolvePeriod`'s own window and reads
+		 * the banked innings from MLB's day-by-day record, so for that caller both are
+		 * known — and where they are not, the note stays the sentence it was.
+		 *
+		 * `windowIsPeriod` is stated by the caller rather than inferred, because a plan
+		 * rated over a fortnight and a league that scores by the week are a comparison that
+		 * looks arithmetically fine and is wrong in fact: 25 innings clears a 20-a-week
+		 * floor over a fortnight and misses it badly.
+		 */
+		inningsBanked?: number | null
+		windowIsPeriod?: boolean
+	}
 }
 
 /**
@@ -1365,7 +1387,33 @@ export const planSwaps = (
 	if (floor !== null && floor !== undefined && moves.length) {
 		const before = seatedInnings(input.rated, openingStarters)
 		const after = seatedInnings(input.rated, planLineup({ ...input, roster }).starters)
-		if (after < before)
+		const banked = input.limits?.inningsBanked
+		const comparable =
+			input.limits?.windowIsPeriod === true && typeof banked === "number" && banked >= 0
+		if (after < before && comparable) {
+			/*
+			   THE SUBTRACTION, DONE, because the caller has both halves of it.
+			
+			   Thrown plus projected against the floor is the only form of this a reader can
+			   act on, and it is a different sentence depending on which side of the floor it
+			   lands: a plan that leaves him short is a reason not to make it, and a plan that
+			   leaves him clear is worth saying so he stops worrying about a rule he has
+			   already met. Both are stated as PROJECTED, because the second half of the sum
+			   is a projection and calling it anything else would be the app promising innings
+			   its own pitchers have not thrown.
+			*/
+			const lands = r2(banked! + after)
+			notes.push(
+				lands < floor ?
+					`${moves.length === 1 ? "this move takes" : `these ${moves.length} moves take`} the ` +
+						`arms in your lineup from ${before} to ${after} projected innings, and you have ` +
+						`thrown ${banked} — that lands at ${lands} against your league's ${floor}, which ` +
+						`forfeits the pitching side of your week`
+				:	`${moves.length === 1 ? "this move takes" : `these ${moves.length} moves take`} the ` +
+					`arms in your lineup from ${before} to ${after} projected innings; with ${banked} ` +
+					`already thrown that still lands at ${lands} against your league's ${floor}`
+			)
+		} else if (after < before)
 			notes.push(
 				`${moves.length === 1 ? "this move takes" : `these ${moves.length} moves take`} the ` +
 					`arms in your lineup from ${before} to ${after} projected innings over this ` +

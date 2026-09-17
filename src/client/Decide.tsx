@@ -1012,72 +1012,15 @@ export const Decide = ({
 		return keep
 	}, [snapshot, league, seats, wireTest, injuries])
 
-	const plan = useMemo(() => {
-		if (!rated || !league || !seats?.spots.length) return null
-		const input: PlanInput = {
-			// `team` is optional on the stored seat and required on the planner's, and
-			// the difference is real: a seat read with no club beside it is a seat whose
-			// club we do not know, not one with no club.
-			roster: seats.spots.map(sp => ({ ...sp, team: sp.team ?? null })),
-			rated: rated.rows,
-			// a read beats an estimate, always; the estimate is only reached when nothing
-			// has read this league's wire — see `estimatedWire`
-			availableNames: new Set(candidates.map(p => normalizeName(p.name))),
-			available: candidates.map(p => ({ name: p.name, positions: p.positions })),
-			shape: {
-				slots: league.roster.slots,
-				slot_order: league.roster.slot_order,
-				slot_accepts: league.roster.slot_accepts
-			},
-			options: DEFAULTS,
-			/*
-			  THE LEAGUE'S OWN LIMITS, rather than this app's defaults alone.
-			
-			  `DEFAULTS.maxMoves` is 2 a week, and the comment on it says plainly that the
-			  number is inherited rather than established. A league that allows six is not
-			  served by two, and — the half that actually costs a reader something — a league
-			  that allows ONE was being offered two, which is a plan he cannot carry out. The
-			  planner takes the lower of the two and says which one bit.
-			
-			  This card already read both numbers for its own display (the innings floor line
-			  and the move-cap clause) and then let the planner work from the default, so the
-			  screen was quoting his league's rule beside advice that ignored it.
-			*/
-			limits: leagueLimits(league)
-		}
-		return { lineup: planLineup(input), swaps: planSwaps(input, 60, keepForSeason) }
-	}, [rated, league, seats, candidates, keepForSeason])
-	const lineup = plan?.lineup ?? null
-
-	/**
-	 * The two per-period rules the league states, and what his own staff does against
-	 * the innings one.
-	 *
-	 * The floor is a QUANTITY problem before it is a quality one, and the app has
-	 * only ever stated the rule. Projecting his own rostered pitchers against it is
-	 * the half that answers anything — and it is the half that says whether dropping
-	 * a pitcher is safe.
-	 */
-	/**
-	 * INNINGS ALREADY BANKED, which is the half of the innings floor this card has never had.
-	 *
-	 * Counted for every pitcher the reader holds NOW, whatever seat each was in at the time,
-	 * because that is the most this page can know: nothing records which men were active on
-	 * the third of the period, and the honest unit is therefore the men rather than the
-	 * seats. The sentence on screen says so. A man added yesterday brings the innings he
-	 * threw before he was yours, which is the one direction this can be wrong in, and it is
-	 * a direction the reader can see and correct for.
-	 */
 	/*
-	 * `periodStart`, NOT `start`, and reading the wrong one killed this feature outright.
-	 *
-	 * `resolvePeriod` sets `start = today > periodStart ? today : periodStart` for every period
-	 * kind, because `start` is where a forward-looking rating accrues FROM. So this read today's
-	 * date, asked for the window today..yesterday, got the inverted-range refusal, and fell
-	 * through to `banked = 0` on every day in every league — the card printed "your pitchers have
-	 * thrown 0 in it so far" for a staff that had thrown forty innings. `periodStart` was added to
-	 * `ResolvedPeriod` in the same commit FOR this question and then not used by it.
-	 */
+	  MOVED ABOVE THE PLAN, because the plan now uses it.
+	
+	  `banked` is the innings this reader's pitchers have actually thrown inside the league's
+	  own scoring period, from MLB's day-by-day record. It sat below the planner and was
+	  rendered on the card; the planner's innings note meanwhile ended "worth checking against
+	  what you have already thrown", which is the app handing a reader a subtraction it had
+	  the other half of two hundred lines away.
+	*/
 	const periodStart = rated?.period.periodStart ?? null
 	const thrown = usePeriodActuals(
 		typeof snapshot?.season === "number" ? snapshot.season : null,
@@ -1161,6 +1104,87 @@ export const Decide = ({
 		return Number((outs / 3).toFixed(1))
 	}, [thrown.lines, ownedIds, periodStart])
 
+
+	const plan = useMemo(() => {
+		if (!rated || !league || !seats?.spots.length) return null
+		const input: PlanInput = {
+			// `team` is optional on the stored seat and required on the planner's, and
+			// the difference is real: a seat read with no club beside it is a seat whose
+			// club we do not know, not one with no club.
+			roster: seats.spots.map(sp => ({ ...sp, team: sp.team ?? null })),
+			rated: rated.rows,
+			// a read beats an estimate, always; the estimate is only reached when nothing
+			// has read this league's wire — see `estimatedWire`
+			availableNames: new Set(candidates.map(p => normalizeName(p.name))),
+			available: candidates.map(p => ({ name: p.name, positions: p.positions })),
+			shape: {
+				slots: league.roster.slots,
+				slot_order: league.roster.slot_order,
+				slot_accepts: league.roster.slot_accepts
+			},
+			options: DEFAULTS,
+			/*
+			  THE LEAGUE'S OWN LIMITS, rather than this app's defaults alone.
+			
+			  `DEFAULTS.maxMoves` is 2 a week, and the comment on it says plainly that the
+			  number is inherited rather than established. A league that allows six is not
+			  served by two, and — the half that actually costs a reader something — a league
+			  that allows ONE was being offered two, which is a plan he cannot carry out. The
+			  planner takes the lower of the two and says which one bit.
+			
+			  This card already read both numbers for its own display (the innings floor line
+			  and the move-cap clause) and then let the planner work from the default, so the
+			  screen was quoting his league's rule beside advice that ignored it.
+			*/
+			limits: {
+				...leagueLimits(league),
+				/*
+				  BOTH HALVES OF THE INNINGS SUM, which only this caller has.
+				
+				  `banked` is what his pitchers have actually thrown inside the league's own
+				  scoring period, read from MLB's day-by-day record. `windowIsPeriod` is stated
+				  rather than inferred and is true HERE because this card rates over
+				  `resolvePeriod`'s own window — the board rates over a fortnight and must never
+				  claim the same thing, which is why the planner asks rather than assumes: 25
+				  innings clears a 20-a-week floor on the arithmetic and misses it badly in fact.
+				*/
+				inningsBanked: banked,
+				windowIsPeriod: true
+			}
+		}
+		return { lineup: planLineup(input), swaps: planSwaps(input, 60, keepForSeason) }
+	}, [rated, league, seats, candidates, keepForSeason, banked])
+	const lineup = plan?.lineup ?? null
+
+	/**
+	 * The two per-period rules the league states, and what his own staff does against
+	 * the innings one.
+	 *
+	 * The floor is a QUANTITY problem before it is a quality one, and the app has
+	 * only ever stated the rule. Projecting his own rostered pitchers against it is
+	 * the half that answers anything — and it is the half that says whether dropping
+	 * a pitcher is safe.
+	 */
+	/**
+	 * INNINGS ALREADY BANKED, which is the half of the innings floor this card has never had.
+	 *
+	 * Counted for every pitcher the reader holds NOW, whatever seat each was in at the time,
+	 * because that is the most this page can know: nothing records which men were active on
+	 * the third of the period, and the honest unit is therefore the men rather than the
+	 * seats. The sentence on screen says so. A man added yesterday brings the innings he
+	 * threw before he was yours, which is the one direction this can be wrong in, and it is
+	 * a direction the reader can see and correct for.
+	 */
+	/*
+	 * `periodStart`, NOT `start`, and reading the wrong one killed this feature outright.
+	 *
+	 * `resolvePeriod` sets `start = today > periodStart ? today : periodStart` for every period
+	 * kind, because `start` is where a forward-looking rating accrues FROM. So this read today's
+	 * date, asked for the window today..yesterday, got the inverted-range refusal, and fell
+	 * through to `banked = 0` on every day in every league — the card printed "your pitchers have
+	 * thrown 0 in it so far" for a staff that had thrown forty innings. `periodStart` was added to
+	 * `ResolvedPeriod` in the same commit FOR this question and then not used by it.
+	 */
 	const rules = useMemo(() => {
 		const raw = ((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
 			?.raw_settings ?? {}) as Record<string, string>

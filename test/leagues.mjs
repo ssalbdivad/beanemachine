@@ -755,20 +755,51 @@ const espnPeriod = deriveEspnPeriod(espnSettings.settings)
 t("ESPN's own settings give a matchup period of seven days",
   espnPeriod.period.kind === "matchup" && espnPeriod.period.days === 7,
   JSON.stringify(espnPeriod.period))
+/*
+   THIS USED TO REQUIRE THE FIELD NAMES `matchupPeriodLength 1` and `25 matchup-period units`.
+   The requirement was right — the source must record how the answer was arrived at, not just
+   the answer — and the VOCABULARY was wrong: this string is printed under "Read from:" on My
+   league (src/client/App.tsx), where a reader has no way of knowing what a matchupPeriodLength
+   is. Both numbers are still required below, in the words he can check against his own league.
+*/
 t("and the source records how that was arrived at, not just the answer",
-  /matchupPeriodLength 1/.test(espnPeriod.period.source ?? "") &&
-    /25 matchup-period units/.test(espnPeriod.period.source ?? ""),
+  /each matchup runs 1 week/.test(espnPeriod.period.source ?? "") &&
+    /25 of them in the season/.test(espnPeriod.period.source ?? "") &&
+    /7 days/.test(espnPeriod.period.source ?? ""),
   espnPeriod.period.source ?? "")
+t("…in a reader's words, since it is printed on a screen he reads",
+  !/matchupPeriod|scoringPeriodId|scheduleSettings/.test(espnPeriod.period.source ?? ""),
+  espnPeriod.period.source ?? "")
+/*
+   WHAT THIS ASSERTION USED TO SAY, AND WHY IT SAYS SOMETHING ELSE NOW.
+   
+   It required the review line to contain the literal `lineup_lock`. Two things changed and
+   neither weakens it. First, `lineup_lock` is a field name, and `needs_review` is PRINTED on
+   My league — the app's rule is that nothing a reader sees talks about the software, so the
+   sentence now names the thing rather than the field. Second, ESPN does in fact state the
+   lock, in `rosterSettings.lineupLocktimeType`, and the import reads it; this fixture is a
+   TRIMMED capture that carries only name/size/rosterSettings.lineupSlotCounts/scheduleSettings/
+   scoringSettings, so it exercises the case where a league states nothing — which is still a
+   case that must stay null and say so. The stated-lock cases are asserted in test/espn.mjs
+   against both values ESPN is known to use.
+*/
 t("what ESPN does not state is left null and named",
   espnPeriod.period.starts_on === null && espnPeriod.period.lineup_lock === null &&
     espnPeriod.needsReview.some(x => /Monday/.test(x)) &&
-    espnPeriod.needsReview.some(x => /lineup_lock/.test(x)),
-  espnPeriod.needsReview.join(" | ").slice(0, 160))
+    espnPeriod.needsReview.some(x => /carried no lineup lock/.test(x)),
+  espnPeriod.needsReview.join(" | ").slice(0, 200))
+t("and the review a reader reads names no field of this app's own",
+  espnPeriod.needsReview.every(x => !/lineup_lock|scoring_period|starts_on/.test(x)),
+  espnPeriod.needsReview.join(" | ").slice(0, 200))
 
 // a shape this has never seen is refused rather than read as a week
 const odd = deriveEspnPeriod({ scheduleSettings: { matchupPeriodLength: 1, matchupPeriods: { 1: [1] } } })
 t("a schedule this cannot read yields no period rather than a guess",
-  odd.period.kind === null && odd.needsReview.some(x => /rolling window/.test(x)),
+  /* "rolling window" until the sentence was rewritten out of field names; the fallback is
+     specifically a rolling SEVEN DAYS — src/engine/period.ts `rolling()`, whose own `basis`
+     string says "a rolling seven days". A review line that said "two weeks" was written here
+     first and this assertion is what caught it. */
+  odd.period.kind === null && odd.needsReview.some(x => /rolling seven days/.test(x)),
   odd.needsReview.join(" | "))
 t("and so does a payload with no scheduleSettings at all",
   deriveEspnPeriod({}).period.kind === null)

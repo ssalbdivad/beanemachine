@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
-import { deriveTradeDeadline } from "../import.ts"
+import { leagueTradeDeadline } from "../import.ts"
 import { isReserveSlot, rosterCounts } from "../engine/bscore.ts"
 
 type Num = (value: number) => void
@@ -765,7 +765,8 @@ export type View = "board" | "wire" | "trade"
 /**
  * Whether this league still takes trades.
  *
- * Yahoo prints "Trade End Date" and the import already harvests it. The app ships a
+ * Yahoo prints "Trade End Date" and ESPN states `tradeSettings.deadlineDate` as an epoch;
+ * the import harvests both and `leagueTradeDeadline` reads whichever this league has. The app ships a
  * 1,132-line trade evaluator and had never read it, so on 2026-09-08 it was still
  * offering to price deals for a league whose trade window shut on 2026-08-06 — a
  * surface answering a question the reader is not allowed to ask, which is worse
@@ -780,9 +781,10 @@ export const tradesClosed = (
 	league: League | null,
 	today: string
 ): { closed: boolean; on: string | null } => {
-	const raw = ((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
-		?.raw_settings ?? {}) as Record<string, string>
-	const on = deriveTradeDeadline(raw).date
+	/* Whichever platform the league came from — Yahoo prints a row, ESPN states an epoch, and
+	   `leagueTradeDeadline` is where the two meet. This used to read the Yahoo row directly,
+	   so an ESPN league's deadline was invisible to this check no matter what ESPN said. */
+	const on = leagueTradeDeadline(league).date
 	return { closed: !!on && today > on, on }
 }
 

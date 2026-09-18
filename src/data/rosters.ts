@@ -1,5 +1,6 @@
 import { agentHeaders, readableInBrowser } from "../import.ts"
 import { parseRoster, type RosterEntry } from "./yahoo-pool.ts"
+import { espnSeason } from "./espn.ts"
 
 /**
  * Your team, read off whichever platform your league lives on.
@@ -275,8 +276,15 @@ export const fetchTeamRoster = async (opts: {
 	const { platform, leagueId, teamId } = opts
 	try {
 		if (platform === "yahoo") return await yahoo(leagueId, teamId, opts.sport ?? "baseball")
-		if (platform === "espn")
-			return await espn(leagueId, teamId, opts.sport ?? "flb", opts.season ?? new Date().getFullYear())
+		if (platform === "espn") {
+			/* ASKED, NOT ASSUMED. The calendar year and ESPN's own season agree from April to
+			   December; in January, February and most of March ESPN is still serving last
+			   season, and a roster URL built with the wrong one 404s in a way that reads to the
+			   reader as "your league is gone". `espnSeason` caches its one request and falls
+			   back to the calendar year, so the offline case is no worse than it was. */
+			const season = opts.season ?? (await espnSeason(fetch, agentHeaders(UA))).season
+			return await espn(leagueId, teamId, opts.sport ?? "flb", season)
+		}
 		// A league imported before Sleeper was cut can still be in a browser's storage,
 		// so the platform is still answered — with the finding, not with a reader.
 		if (platform === "sleeper")

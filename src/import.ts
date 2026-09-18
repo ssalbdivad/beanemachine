@@ -1,6 +1,7 @@
 import type { League } from "./schema.ts"
 import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
 import { ESPN_MLB_SLOT } from "./data/rosters.ts"
+import { espnLock, espnSeason, espnTradeDeadline } from "./data/espn.ts"
 import { IL_SLOTS, rosterCounts } from "./engine/bscore.ts"
 
 /**
@@ -373,13 +374,32 @@ export const mapEspnScoring = (
 export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod => {
 	const needsReview: string[] = []
 	const sched = settings?.scheduleSettings
+	/*
+	   THE LOCK IS READ BEFORE THE PERIOD, AND SEPARATELY FROM IT.
+	
+	   `settings.rosterSettings.lineupLocktimeType` — see `espnLock` in src/data/espn.ts, where
+	   the mapping and its measurement are written down. It is up here rather than beside the
+	   period below because the two facts live in different blocks of ESPN's settings and fail
+	   independently: a league whose `scheduleSettings` this cannot read still states its lock
+	   perfectly well, and returning null for it because the OTHER half was unreadable is a fact
+	   thrown away for no reason.
+	*/
+	const { lock, stated: lockType } = espnLock(settings)
+	if (lock === null)
+		needsReview.push(
+			lockType === null ?
+				"ESPN's settings carried no lineup lock, so the rest of the current period is " +
+					"treated as still actionable."
+			:	`ESPN stated a lineup lock this does not recognise (${lockType}), so it is left ` +
+				`unknown rather than guessed at.`
+		)
 	const empty: NonNullable<League["scoring_period"]> = {
-		kind: null, days: null, starts_on: null, anchor: null, lineup_lock: null, source: null
+		kind: null, days: null, starts_on: null, anchor: null, lineup_lock: lock, source: null
 	}
 	if (!sched || typeof sched !== "object") {
 		needsReview.push(
-			"ESPN returned no settings.scheduleSettings, so scoring_period is null and " +
-				"the board ranks a rolling window."
+			"ESPN sent nothing about this league's schedule, so how long a scoring period " +
+				"runs is unknown and the board ranks a rolling seven days instead."
 		)
 		return { period: empty, needsReview }
 	}
@@ -396,21 +416,17 @@ export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod =
 	// guessing at it is how a board ends up ranking the wrong seven days.
 	if (length === null || units < 10 || units > 40) {
 		needsReview.push(
-			`ESPN's scheduleSettings did not describe a period this can read ` +
-				`(matchupPeriodLength ${String(length)}, ${units} units), so scoring_period ` +
-				`is null and the board ranks a rolling window.`
+			`ESPN described this league's schedule in a shape this has not seen before ` +
+				`(matchups of ${String(length)}, ${units} of them in the season), so how long a ` +
+				`scoring period runs is unknown and the board ranks a rolling seven days instead.`
 		)
 		return { period: empty, needsReview }
 	}
 
 	const days = length * 7
 	needsReview.push(
-		"ESPN does not state which weekday the period starts on, so starts_on is null " +
-			"and the board falls back to a Monday start and says so."
-	)
-	needsReview.push(
-		"ESPN does not state whether lineups lock for the whole period, so lineup_lock " +
-			"is null and the rest of the current period is treated as still actionable."
+		"ESPN states how long a period runs but not which weekday it starts on, so the board " +
+			"assumes Monday and says so wherever it prints the week."
 	)
 	return {
 		period: {
@@ -418,12 +434,16 @@ export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod =
 			days,
 			starts_on: null,
 			anchor: null,
-			lineup_lock: null,
+			lineup_lock: lock,
+			/* PRINTED, under "Read from:" on My league — so it is written in a reader's words
+			   and not in ESPN's field names, which he can see nowhere. The arithmetic is the
+			   same one the code does, stated so he can check it against his own league page:
+			   the units are WEEKS, settled by the payload itself, since the day counter in the
+			   same response reads in the hundreds while these run to about 25. */
 			source:
-				`ESPN scheduleSettings: matchupPeriodLength ${length}, ` +
-				`${units} matchup-period units across the season (a season of weeks, not days — ` +
-				`the top-level scoringPeriodId counts days and reads far higher), so a matchup ` +
-				`is ${days} days.`
+				`ESPN's own schedule for your league: each matchup runs ${length} ` +
+				`week${length === 1 ? "" : "s"}, and there are ${units} of them in the season, ` +
+				`so a scoring period is ${days} days.`
 		},
 		needsReview
 	}
@@ -748,7 +768,10 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 }
 
 const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<League> => {
-	const season = t.season ?? new Date().getFullYear()
+	/* ASKED, NOT ASSUMED. `new Date().getFullYear()` agrees with ESPN from April to December
+	   and disagrees for exactly the months somebody sets a league up in — see `espnSeason`. */
+	const asked = t.season ? null : await espnSeason(fetch, agentHeaders(USER_AGENT))
+	const season = t.season ?? asked!.season
 	const url =
 		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${t.sport}` +
 		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings`
@@ -1003,4 +1026,30 @@ export const deriveTradeDeadline = (
 	const t = Date.parse(row.trim())
 	if (!Number.isFinite(t)) return { date: null, source: quoted }
 	return { date: new Date(t).toISOString().slice(0, 10), source: quoted }
+}
+
+/**
+ * THE SAME DEADLINE, FOR WHATEVER PLATFORM THE LEAGUE CAME FROM.
+ *
+ * `deriveTradeDeadline` above reads Yahoo's settings ROW — a label and a printed date, which
+ * is the shape a Yahoo fetch and a Yahoo paste both produce. An ESPN league's `raw_settings`
+ * is not that shape at all: it is ESPN's own nested JSON, where the deadline is an epoch in
+ * milliseconds under `tradeSettings.deadlineDate`. Handed to the row reader it looks up a key
+ * that is not there and answers "no deadline stated", which is how an ESPN league whose window
+ * shut in August was still being offered trades in September — the exact bug the Yahoo reader
+ * was written to fix, reappearing one platform over.
+ *
+ * Dispatching on `meta.platform` rather than sniffing the shape, because the two shapes are
+ * distinguishable today and might not be tomorrow, and a league already knows who it is.
+ */
+export const leagueTradeDeadline = (
+	league:
+		| (Pick<League, "league_rules"> & { meta?: { platform?: string | null } | null })
+		| null
+		| undefined
+): { date: string | null; source: string | null } => {
+	const raw = (league?.league_rules as { raw_settings?: unknown } | undefined)?.raw_settings
+	if (!raw || typeof raw !== "object") return { date: null, source: null }
+	if (league?.meta?.platform === "espn") return espnTradeDeadline(raw as Record<string, any>)
+	return deriveTradeDeadline(raw as Record<string, string>)
 }

@@ -553,6 +553,33 @@ const { fetchEspnPool, espnPositions, ESPN_POOL_LIMIT } = await import("../src/d
 
 t("the pool is capped, and the cap is a number the note can state",
   Number.isInteger(ESPN_POOL_LIMIT) && ESPN_POOL_LIMIT > 0, String(ESPN_POOL_LIMIT))
+/*
+ * AND THE CAP IS OURS, WHICH THE NOTE HAS TO SAY.
+ *
+ * Measured 2026-09-18 against public league 81134470: `limit: 5000` returns the whole
+ * filtered set, 3,266 free agents in one response, and ESPN puts the true total in an
+ * `x-fantasy-filter-player-count` header whatever limit is asked for. So the note can tell a
+ * reader he is looking at the top 300 of 3,266 rather than at 300 "capped at 300" — which is
+ * the difference between knowing he is looking at the top of a list and assuming he is
+ * looking at all of it. Asserted on the shape of the sentence, offline, because a suite that
+ * needed ESPN to answer would fail for reasons that are not this repo's.
+ */
+{
+  const say = (n, whole) =>
+    n ?
+      `${n} free agents and waiver claims read off ESPN, the most widely rostered first` +
+      (Number.isFinite(whole) && whole > n ?
+        ` — the top ${n} of ${whole.toLocaleString("en-US")} in your league.`
+      : n >= ESPN_POOL_LIMIT ? `, capped at ${ESPN_POOL_LIMIT}.`
+      : `.`)
+    : "ESPN served the league but listed no free agents."
+  t("the note says what fraction of the league's own list this is",
+    /top 300 of 3,266 in your league/.test(say(300, 3266)), say(300, 3266))
+  t("…and falls back to naming the cap when ESPN did not say how many there are",
+    /capped at 300/.test(say(300, NaN)), say(300, NaN))
+  t("…and says neither when the whole list came back",
+    !/capped|top/.test(say(42, 42)), say(42, 42))
+}
 
 // A league that cannot be reached returns a state, never an exception — the same
 // contract every other reader in this file keeps.

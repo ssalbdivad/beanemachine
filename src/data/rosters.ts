@@ -332,6 +332,16 @@ export const fetchTeamRoster = async (opts: {
  * Sorted by ESPN's own `percentOwned` descending and capped, because the list is
  * every unrostered player in baseball and the ranking only needs the ones anybody
  * would take. The cap is reported in the note rather than applied silently.
+ *
+ * THE CAP IS OURS, NOT ESPN'S, and the note used to read as though it were a limit of the
+ * endpoint. Measured 2026-09-18: `limit: 5000` returns the whole filtered set — 3,266 free
+ * agents in one response — and ESPN puts the true total in an `x-fantasy-filter-player-count`
+ * response header whatever limit is asked for. So the note can say "300 of 3,266 free agents"
+ * rather than "300, capped at 300", which is the difference between a reader knowing he is
+ * looking at the top of a list and assuming he is looking at all of it.
+ *
+ * A bare `limit` is a 400 unless a sort travels with it — also measured — which is why the
+ * two are written together here and must stay together.
  */
 export const ESPN_POOL_LIMIT = 300
 
@@ -360,6 +370,8 @@ export const fetchEspnPool = async (
 				positionsRead: [],
 				note: `ESPN returned HTTP ${res.status} for that league's player list.`
 			}
+		/* ESPN's own count of everything the filter matched, before the limit was applied. */
+		const wholeList = Number(res.headers.get("x-fantasy-filter-player-count"))
 		const data = (await res.json().catch(() => null)) as { players?: any[] } | null
 		const rows = Array.isArray(data?.players) ? data!.players : []
 		const players: RosterEntry[] = []
@@ -382,7 +394,11 @@ export const fetchEspnPool = async (
 			note:
 				players.length ?
 					`${players.length} free agents and waiver claims read off ESPN, the most ` +
-					`widely rostered first${players.length >= ESPN_POOL_LIMIT ? `, capped at ${ESPN_POOL_LIMIT}` : ""}.`
+					`widely rostered first` +
+					(Number.isFinite(wholeList) && wholeList > players.length ?
+						` — the top ${players.length} of ${wholeList.toLocaleString("en-US")} in your league.`
+					: players.length >= ESPN_POOL_LIMIT ? `, capped at ${ESPN_POOL_LIMIT}.`
+					: `.`)
 				:	"ESPN served the league but listed no free agents."
 		}
 	} catch (e) {

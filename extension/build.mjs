@@ -81,9 +81,24 @@ if (out === resolve(here, "..") || out === resolve(here))
 const VERSION = "0.2.0"
 
 const NAME = "beanemachine — read my Yahoo league"
+
+/**
+ * 132 CHARACTERS, BECAUSE CHROME REJECTS 133.
+ *
+ * `description` has a hard limit in the Chrome Web Store and the one here was 178 — measured
+ * on the built manifest — which fails submission rather than being quietly truncated. Firefox
+ * has no such limit, and one description for both is worth more than 46 characters: two would
+ * be two things to keep true.
+ *
+ * What was cut is the clause that repeats the other two. It read: "Reads your own Yahoo
+ * fantasy baseball league — your team, your league's scoring and who is free — and hands it to
+ * beanemachine.com in this browser. Nothing is sent anywhere else." The list of what it reads
+ * is on the store page and in PRIVACY.md at length; what a reader cannot get anywhere else in
+ * one line is WHOSE league it reads, WHERE the data goes, and that it goes nowhere else.
+ */
 const DESCRIPTION =
-	"Reads your own Yahoo fantasy baseball league — your team, your league's scoring and " +
-	"who is free — and hands it to beanemachine.com in this browser. Nothing is sent anywhere else."
+	"Reads your own Yahoo fantasy baseball league and hands it to beanemachine.com in this " +
+	"browser. Nothing is sent anywhere else."
 
 /*
    WHERE THE APP LIVES and where Yahoo lives are imported rather than written here, because
@@ -140,7 +155,37 @@ const manifests = {
 				   are only GRANTED at install from 127 — before that they sit ungranted and
 				   the reader has to find a checkbox nobody told him about. 128 is the ESR,
 				   which is what a cautious install actually runs. */
-				strict_min_version: "128.0"
+				strict_min_version: "128.0",
+				/**
+				 * WITHOUT THIS, MOZILLA WILL NOT TAKE THE SUBMISSION AT ALL.
+				 *
+				 * Since 3 November 2025 a new add-on that does not declare what it collects is
+				 * refused at signing with a message saying why. This build has never been
+				 * submitted, so it is new.
+				 *
+				 * `none` is the honest answer, and it is the one this project's own PRIVACY.md
+				 * already makes: Mozilla defines the data transmission that triggers disclosure
+				 * as data "collected, used, transferred, shared, or handled outside of the
+				 * add-on or the local browser", and nothing here leaves the local browser —
+				 * Yahoo's page to the add-on to the app's own page to that page's own storage,
+				 * all inside the reader's browser, all gone when he uninstalls.
+				 *
+				 * THE ONE AMBIGUITY, recorded because whoever submits this will meet it: the
+				 * app's page is a different ORIGIN from the add-on, and a reviewer taking a
+				 * stricter reading could call that "outside the add-on" even though it never
+				 * leaves the browser. The definition reads as a union — inside the browser is a
+				 * safe harbour whichever page holds it — and no Mozilla text carves out an
+				 * exception for a local cross-origin handoff. The conservative alternative is
+				 * `["websiteContent"]`, which costs nothing but a scarier consent screen and
+				 * would contradict PRIVACY.md's own account of where the data goes. Declaring
+				 * `none` is therefore the accurate answer AND the one consistent with the
+				 * document a reviewer is pointed at; the alternative is written down here so
+				 * that changing it is a decision rather than a discovery.
+				 *
+				 * `required` must be present; `none` may only appear alone, and never in
+				 * `optional`.
+				 */
+				data_collection_permissions: { required: ["none"] }
 			}
 		}
 	}

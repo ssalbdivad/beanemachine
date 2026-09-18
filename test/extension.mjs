@@ -1349,6 +1349,21 @@ await walled.close()
 	/* 128 rather than 109. MV3 has been available since 109, but host permissions are only
 	   GRANTED at install from 127 — before that they sit ungranted with nothing telling the
 	   reader why nothing works. 128 is the ESR, which is what a cautious install runs. */
+	/*
+	   AND MOZILLA WILL NOT TAKE A NEW ADD-ON WITHOUT THIS SINCE 3 NOVEMBER 2025.
+	
+	   A new submission that does not declare what it collects is refused at signing. `none` is
+	   the honest declaration and the one PRIVACY.md already makes — nothing here leaves the
+	   local browser — and it may only ever appear alone. Asserted rather than trusted because
+	   its absence is not visible in anything the add-on DOES; it shows up once, at the upload.
+	*/
+	t("Firefox is told what the add-on collects, which it now refuses a submission without",
+		JSON.stringify(firefox.browser_specific_settings?.gecko?.data_collection_permissions) ===
+			JSON.stringify({ required: ["none"] }),
+		JSON.stringify(firefox.browser_specific_settings?.gecko?.data_collection_permissions))
+	t("…and Chrome is not sent a key that means nothing to it",
+		chrome.browser_specific_settings === undefined,
+		JSON.stringify(chrome.browser_specific_settings))
 	t("and a floor where host permissions are actually granted at install",
 		Number.parseInt(firefox.browser_specific_settings?.gecko?.strict_min_version ?? "0", 10) >= 127,
 		firefox.browser_specific_settings?.gecko?.strict_min_version)
@@ -1372,7 +1387,18 @@ await walled.close()
 		/* A permission nobody uses is a permission somebody has to justify — to a store
 		   reviewer and to a reader reading the install prompt. Nothing is stored, so
 		   `storage` is not asked for. */
-		t(`${name} asks for no storage, because it keeps nothing`,
+		/*
+	   THE STORE'S OWN LIMITS, checked here because the alternative is finding out at submission.
+	
+	   Chrome's `description` has a hard 132-character limit and rejects a longer one rather
+	   than truncating it; this manifest carried 178 for as long as it has existed, and nobody
+	   would have known until the first upload. One description serves both browsers, so the
+	   limit is asserted on both.
+	*/
+	t(`${name} has a description the Chrome Web Store will accept`,
+		typeof m.description === "string" && m.description.length > 0 && m.description.length <= 132,
+		`${m.description?.length} chars`)
+	t(`${name} asks for no storage, because it keeps nothing`,
 			!(m.permissions ?? []).includes("storage"), JSON.stringify(m.permissions))
 		t(`${name} reads the app's own origin, so the two halves can talk`,
 			m.content_scripts?.some(c => c.matches.includes("https://beanemachine.com/*")),

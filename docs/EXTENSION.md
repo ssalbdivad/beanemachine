@@ -588,16 +588,34 @@ read the count in §6 as a pass count.
 
 Naming these is the deliverable; none of them is acquired here.
 
-- **Firefox will reject the submission outright.** Since **2025-11-03**, every *new*
-  extension submitted to addons.mozilla.org must declare
-  `browser_specific_settings.gecko.data_collection_permissions` or be refused at signing.
-  The Firefox manifest written by `extension/build.mjs` does not have the key. What it
-  needs, given the extension transmits nothing to a server, is
-  `{"required": ["websiteContent"]}` — the extension does read website content and hand it
-  to a website, so `["none"]` would be false — or `["none"]` only if Mozilla's reading of
-  "collect or transmit" excludes passing content to another page in the same browser,
-  which is a question for the reviewer and not one to guess at in a manifest. This is a
-  one-key change in `extension/build.mjs`, which is outside this task's file list.
+- ~~**Firefox will reject the submission outright.**~~ **Done, 2026-09-18.** Since
+  **2025-11-03** every *new* extension submitted to addons.mozilla.org must declare
+  `browser_specific_settings.gecko.data_collection_permissions` or be refused at signing,
+  and the manifest did not have the key. It declares `{"required": ["none"]}` now.
+
+  The category was the load-bearing question and this entry used to answer it the other
+  way, so the reasoning is recorded rather than the conclusion alone. Mozilla defines the
+  data transmission that triggers disclosure as data "collected, used, transferred,
+  shared, or handled **outside of the add-on or the local browser**" (add-on policies,
+  §6). Nothing here leaves the local browser: Yahoo's page to the add-on to the app's own
+  page to that page's own storage, all inside the reader's browser, all gone when he
+  uninstalls. `none` is therefore the accurate declaration and the only one consistent
+  with `extension/PRIVACY.md`, which a reviewer is pointed at and which says the same
+  thing at length.
+
+  The ambiguity, kept because whoever submits this will meet it: the app's page is a
+  different ORIGIN, and a stricter reading could call that "outside the add-on" even
+  though it never leaves the browser. The definition reads as a union — inside the browser
+  is a safe harbour whichever page holds it — and no Mozilla text carves out an exception
+  for a local cross-origin handoff. The conservative alternative is `["websiteContent"]`,
+  which costs nothing but a scarier consent screen and would contradict PRIVACY.md. It is
+  written into the manifest's own comment so that changing it is a decision rather than a
+  discovery.
+- ~~**Chrome will reject the manifest's description.**~~ **Done, 2026-09-18.** Chrome's
+  `description` has a hard 132-character limit and refuses a longer one rather than
+  truncating it. This manifest carried 178 for as long as it had existed, and nothing
+  would have said so until the first upload. It is 125 now, and both builds are asserted
+  against the limit in `test/extension.mjs`.
 - **A privacy policy at a URL.** Both stores require one for a listing that reads page
   content. `extension/PRIVACY.md` is written and true of the code; it is a file in a repo,
   not a URL, and Chrome's Privacy practices tab wants a link.
@@ -611,9 +629,11 @@ Naming these is the deliverable; none of them is acquired here.
   transparent columns before ink on row 64. The corners are rounded (alpha 0 at (0,0)) but
   the edges are not padded. `extension/build.mjs` draws it and is outside this task's file
   list.
-- **A packaged zip.** `extension/build.mjs` zips only if `/usr/bin/zip` exists; it does not
-  on this machine (checked 2026-09-17), so the build printed "zip not available" and both
-  stores take a zip. Install `zip`, or package the folders another way.
+- ~~**A packaged zip.**~~ **Done, 2026-09-18.** The build shelled out to `/usr/bin/zip`,
+  which does not exist on this machine, so it printed "zip not available" and produced
+  none. It writes the archive itself now — stored entries, a fixed timestamp so two builds
+  of the same source are the same bytes — and copies both into `public/`, because the site
+  has to hand the add-on over while no store has it.
 - **A Chrome Web Store developer account**, which needs a Google account and a one-time
   registration fee. Chrome's own registration page does not state the amount; check the
   dashboard.

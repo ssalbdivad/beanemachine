@@ -108,6 +108,27 @@ export const applyLineup = async (
 	options: { dryRun: boolean } = { dryRun: true }
 ): Promise<ActionResult[]> => {
 	const results: ActionResult[] = []
+	/*
+	   WHAT THIS DOES NOT DO, REPORTED RATHER THAN DROPPED.
+	
+	   A lineup plan holds swaps, sits and shifts. This function reads `plan.swaps` and nothing
+	   else, so a plan with a swap AND a seat shift had its swap applied, its shift silently
+	   skipped, and came back reporting only successes — a lineup left in a state the planner
+	   never proposed, described as the state it did. And a plan with no swaps at all returned
+	   an empty list, which the caller printed as "the lineup already matches the plan".
+	
+	   These are not applied here because moving a man between seats is a different gesture on
+	   Yahoo's page from swapping two, and this project does not write a gesture it has not
+	   measured. What it can do is say so, as unverified actions, which is the shape the caller
+	   already prints and the README already promises: "an action that cannot be confirmed is
+	   reported as unconfirmed rather than as success".
+	*/
+	for (const shift of plan.shifts)
+		results.push({
+			action: `move ${shift.name} from ${shift.from} to ${shift.to}`,
+			verified: false,
+			detail: "this run does not move men between seats — make this one on Yahoo yourself"
+		})
 	if (!plan.swaps.length) return results
 
 	const before = await readBack()

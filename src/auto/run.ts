@@ -284,8 +284,36 @@ console.log("\nABOUT TO CHANGE YOUR TEAM")
 for (const s of result.lineup.swaps)
 	console.log(`  start ${s.start} at ${s.startSlot}, sitting ${s.sit ?? "nobody"}`)
 if (!result.lineup.swaps.length) {
-	console.log("  nothing — the lineup already matches the plan.")
-	process.exit(0)
+	/*
+	   "ALREADY MATCHES THE PLAN" WAS SAID ABOUT PLANS IT DOES NOT MATCH.
+	
+	   A lineup plan holds three kinds of change — swaps, sits and shifts — and only swaps are
+	   ones this run knows how to make on Yahoo. It gated on swaps alone, so a plan whose only
+	   changes were a sit and a seat shift printed "1 change(s)" a few lines above and then
+	   "nothing — the lineup already matches the plan" here, and exited 0. The README's own
+	   contract for 0 is "the plan below is the whole picture"; it was not, and a reader who
+	   trusts the exit code leaves an injured man in his lineup.
+	
+	   Two different endings now. Nothing to do at all is still 0 and still says so. Changes
+	   this run cannot make are named, counted, and exit 1 — "Billy was blind" in the README's
+	   words is the closest of the three to "he could not do it", and the one thing that must
+	   never happen is that this looks like success.
+	*/
+	const manual = [
+		...result.lineup.sits.map(x => `sit ${x.name}${x.why ? ` — ${x.why}` : ""}`),
+		...result.lineup.shifts.map(x => `move ${x.name} from ${x.from} to ${x.to}`)
+	]
+	if (!manual.length) {
+		console.log("  nothing — the lineup already matches the plan.")
+		process.exit(0)
+	}
+	console.log(
+		`  nothing this run can do for you. The plan's ${manual.length} change(s) are seat ` +
+			`moves and sits, which it does not make on Yahoo:`
+	)
+	for (const m of manual) console.log(`    ${m}`)
+	console.log("  Make those on Yahoo yourself — your lineup is unchanged.")
+	process.exit(1)
 }
 
 const writing = await openSession(!flag("headed"))

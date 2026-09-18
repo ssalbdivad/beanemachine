@@ -538,6 +538,41 @@ t("every withheld capability says why",
   permits({ execute: false, allowDrops: false }).reasons.length > 0 &&
     permits({ execute: true, allowDrops: false }).reasons.length > 0)
 
+/*
+ * WHAT THE RUN CANNOT DO IS SAID, NOT DROPPED.
+ *
+ * A lineup plan holds swaps, sits and seat shifts, and `applyLineup` reads swaps alone. So a
+ * plan with a swap AND a shift had its swap applied, its shift silently skipped, and came
+ * back reporting only successes — a lineup left in a state the planner never proposed,
+ * described as the state it did. A plan with no swaps at all came back empty, which the run
+ * printed as "the lineup already matches the plan" before exiting 0, whose documented meaning
+ * is "the plan below is the whole picture".
+ *
+ * Shifts are not applied because moving a man between seats is a different gesture on Yahoo's
+ * page from swapping two, and this project does not write a gesture it has not measured. They
+ * are reported as unconfirmed, which is the shape README already promises for anything that
+ * cannot be verified.
+ */
+{
+  const { applyLineup } = await import("../src/auto/execute.ts")
+  const read = async () => [{ name: "Deb Bag", slot: "1B" }]
+  const shiftOnly = await applyLineup(
+    null,
+    { swaps: [], sits: [], shifts: [{ name: "Deb Bag", from: "1B", to: "Util" }] },
+    read
+  )
+  t("a plan of seat moves does not come back as an empty list of actions",
+    shiftOnly.length === 1, JSON.stringify(shiftOnly))
+  t("…and the one action it carries is reported as NOT done",
+    shiftOnly[0].verified === false && /does not move men between seats/.test(shiftOnly[0].detail),
+    JSON.stringify(shiftOnly[0]))
+  t("…naming the man and both seats, so it can be done by hand",
+    /Deb Bag/.test(shiftOnly[0].action) && /1B/.test(shiftOnly[0].action) && /Util/.test(shiftOnly[0].action),
+    shiftOnly[0].action)
+  const nothing = await applyLineup(null, { swaps: [], sits: [], shifts: [] }, read)
+  t("and a plan with nothing in it really is nothing", nothing.length === 0)
+}
+
 // idempotence is decided from the world, not from a record of what we did — a run
 // that half-applied and died leaves no such record
 t("a seat already filled correctly is not re-applied",

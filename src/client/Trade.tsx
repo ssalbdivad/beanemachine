@@ -1858,6 +1858,25 @@ const LineupCard = ({
 					</p>
 				)}
 				<div className="lineup-holes">
+					{/*
+					  A SHORT LIST IS NOT A HOLE, and this said it was.
+					
+					  "Nobody at all can play there" belongs to a slot no rated man is eligible at —
+					  structural, and rare. When the league's own free-agent list simply runs out
+					  before the seats do, the men who ARE on it are named in the rows directly
+					  above, and that sentence was printed underneath them.
+					*/}
+					{lineup.short.length > 0 && (
+						<ul className="notes warn">
+							{[...new Set(lineup.short)].map(slot => (
+								<li className="hole" key={`short-${slot}`}>
+									{lineup.short.filter(h => h === slot).length}× {slot}: your league&rsquo;s
+									free-agent list has nobody left who can play there, so the seat is worth
+									nothing until somebody is.
+								</li>
+							))}
+						</ul>
+					)}
 					{lineup.holes.length ?
 						<ul className="notes warn">
 							{[...new Set(lineup.holes)].map(slot => (
@@ -1867,6 +1886,7 @@ const LineupCard = ({
 								</li>
 							))}
 						</ul>
+					: lineup.short.length ? null
 					:	/* "the ones you leave empty are priced at what a free man would be worth" was
 					     the old second half of this sentence, and without the league's wire it was
 					     the same unbacked claim the rows were making: the body it prices them at is

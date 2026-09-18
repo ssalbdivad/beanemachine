@@ -234,6 +234,16 @@ export interface Lineup {
 	 *  eligible at all; it can also mean the only eligible men project below zero,
 	 *  which an empty seat beats. */
 	holes: string[]
+	/**
+	 * Slots whose seats outran the league's own free-agent list.
+	 *
+	 * A different fact from a hole, and it was being reported as one. A hole is "nobody in the
+	 * pool is eligible at this slot at all", which is structural and rare; this is "your
+	 * league's list has two men who can play here and you have three seats", which is an
+	 * ordinary Tuesday and which the card was describing as "nobody at all can play there"
+	 * directly under two rows naming free men at that slot.
+	 */
+	short: string[]
 	/** Roster rows with no projection. They cannot be started, and saying so is the
 	 *  point — ranking them at zero next to real players would be a quiet lie. */
 	unprojectable: Rated[]
@@ -400,15 +410,33 @@ export const startingLineup = (
 		)
 
 	const spots = activeSlots(league)
-	const holder = seat(
-		startable,
-		spots.map(slot => replacement?.get(slot) ?? 0),
-		spots
-	)
+	/*
+	   WHAT EACH SEAT COSTS TO LEAVE EMPTY, seat by seat rather than slot by slot.
+	
+	   The matching decides which of the reader's men to start by weighing each against what
+	   the seat would be worth without him. Handed one number per SLOT — the best free man at
+	   it — every seat of a three-seat slot was charged that same best man's price, so a man
+	   worth more than the third-best free agent and less than the first was benched, marked
+	   "under the wire", and priced at nothing in a trade that gave him away.
+	
+	   With the ranked list, the k-th seat of a slot is weighed against the k-th man, which is
+	   what the lineup below is priced at and what the card prints. Without one, the flat bar
+	   is the only thing known and this is exactly what it was.
+	*/
+	const seatsSoFar = new Map<string, number>()
+	const barPerSeat = spots.map(slot => {
+		const k = seatsSoFar.get(slot) ?? 0
+		seatsSoFar.set(slot, k + 1)
+		const list = ranked?.get(slot)
+		if (!list) return replacement?.get(slot) ?? 0
+		return list[k]?.points ?? 0
+	})
+	const holder = seat(startable, barPerSeat, spots)
 	const filled = spots.map((_, i) => startable[holder[i]!] ?? null)
 	const taken = new Set(filled.filter(r => r !== null).map(keyOf))
 
 	const holes: string[] = []
+	const short: string[] = []
 	/**
 	 * THE FREE MEN ALREADY SEATED, ACROSS EVERY SLOT — not a cursor per slot.
 	 *
@@ -441,11 +469,11 @@ export const startingLineup = (
 					source: "replacement",
 					free: man
 				}
-			/* The list ran out before the seats did. That is a real and sayable fact — the wire
-			   has nobody else who can play here — and it is a different one from "nobody is
-			   eligible at this slot at all", which is what an absent bar means. Both land in
-			   `holes`, and the card's own sentence is written from the count either way. */
-			holes.push(slot)
+			/* The list ran out before the seats did — a real and sayable fact, and NOT the one
+			   `holes` carries. An absent bar means nobody in the pool is eligible at this slot at
+			   all; this means his league's list is shorter than his seats. Reported apart, because
+			   the card says a different sentence about each and said the wrong one about this. */
+			short.push(slot)
 			return { slot, player: null, points: 0, source: "empty", free: null }
 		}
 		const bar = replacement?.get(slot)
@@ -473,6 +501,7 @@ export const startingLineup = (
 				})
 			: [],
 		holes,
+		short,
 		unprojectable
 	}
 }

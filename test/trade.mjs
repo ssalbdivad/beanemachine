@@ -480,9 +480,16 @@ if (weakC && strongC) {
   t("…and the points on a seat are that man's points",
     each.starters.slice(0, 3).every(s => s.points === s.free?.points),
     JSON.stringify(each.starters.map(s => [s.points, s.free?.points])))
-  t("the seat the list cannot reach is a hole, not another copy of the last man",
-    each.starters[3].source === "empty" && each.starters[3].points === 0 && each.holes.includes("P"),
+  /* A SHORT LIST IS NOT A HOLE. "Nobody at all can play there" belongs to a slot no rated man
+     is eligible at; when the league's own list simply runs out before the seats do, the men
+     who ARE on it are named in the rows above, and that sentence was printed underneath
+     them. */
+  t("the seat the list cannot reach is empty, not another copy of the last man",
+    each.starters[3].source === "empty" && each.starters[3].points === 0,
     JSON.stringify(each.starters[3]))
+  t("…and is reported as a list that ran out rather than a slot nobody can play",
+    each.short.includes("P") && !each.holes.includes("P"),
+    JSON.stringify({ short: each.short, holes: each.holes }))
   /*
      AND HE CANNOT FILL TWO DIFFERENT SLOTS EITHER.
      

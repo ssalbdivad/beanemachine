@@ -104,6 +104,40 @@ t("the published seed carries no league at all",
 t("but it still carries the presets and the stat list, which are nobody's league",
   Object.keys(seed.platform_templates).length > 0 && seed.stat_keys.batting.length > 0,
   Object.keys(seed.platform_templates).join(","))
+
+/*
+ * ── THE FILE THE WALKTHROUGH OFFERS, ON THE SITE THAT OFFERS IT ─────────────────
+ *
+ * Step 1 of the install walkthrough used to send every reader to a store search page. On
+ * 2026-09-18 the Chrome Web Store answered "It looks like there aren't any search results
+ * for your search" and Mozilla's API 404'd the add-on id, so the first thing a desktop
+ * reader was offered was the one thing he could not have, with nothing on the screen saying
+ * so.
+ *
+ * The route that works is the site handing him the file. That makes the download part of
+ * the published build, so it is asserted here like any other published asset: a link to a
+ * file that is not there is the same defect as the store link it replaced, and it fails the
+ * same way — silently, on somebody else's machine.
+ *
+ * `extension/build.mjs` writes these into `public/`, which Vite ships verbatim; `npm run
+ * build` runs that step first for exactly this reason.
+ */
+for (const which of ["chrome", "firefox"]) {
+  const got = await p.evaluate(async ([base, which]) => {
+    const r = await fetch(new URL(`beanemachine-${which}.zip`, base).href)
+    const buf = await r.arrayBuffer()
+    const head = new Uint8Array(buf.slice(0, 4))
+    return { ok: r.ok, status: r.status, bytes: buf.byteLength, head: [...head] }
+  }, [BASE, which])
+  t(`the published site really serves the ${which} add-on`, got.ok, JSON.stringify(got))
+  /* "PK\x03\x04" — a real archive rather than an SPA fallback serving index.html, which is
+     what a missing file looks like on this host and would pass a status check. */
+  t(`…and what comes back is an archive, not the app's own index page`,
+    got.head[0] === 0x50 && got.head[1] === 0x4b && got.head[2] === 3 && got.head[3] === 4,
+    JSON.stringify(got.head))
+  t(`…of a plausible size for a built add-on`, got.bytes > 10_000 && got.bytes < 2_000_000,
+    String(got.bytes))
+}
 /*
  * ── THE STATCAST ROWS ARE NOT ON THE FIRST PAINT ────────────────────────────────
  *

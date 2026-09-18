@@ -35,3 +35,7 @@ dist-cli/
 probe*.mjs
 *.tmp.mjs
 dist-ext
+
+# Built by extension/build.mjs and copied here so the site can hand it to a reader.
+# A build artifact in the tree is a build artifact that goes stale.
+public/beanemachine-*.zip

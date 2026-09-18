@@ -23,11 +23,11 @@ import { appMatches } from "../src/data/extension.ts"
    that silently does nothing, and the failure is invisible because the extension installs
    perfectly and simply never runs anywhere. See `needsReader` in src/data/platforms.ts. */
 import { readerMatches } from "../src/data/platforms.ts"
-import { cp, mkdir, rm, writeFile } from "node:fs/promises"
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { dirname, resolve } from "node:path"
+import { basename, dirname, resolve } from "node:path"
 import { deflateSync } from "node:zlib"
 import { fileURLToPath } from "node:url"
 
@@ -256,10 +256,85 @@ for (const [browser, manifest] of Object.entries(manifests)) {
 	)
 }
 
+/**
+ * A ZIP, WRITTEN HERE, BECAUSE `/usr/bin/zip` IS NOT EVERYWHERE.
+ *
+ * This shelled out to `zip` and returned null when the binary was absent — which is the case
+ * on the machine this project is developed on, so the zips were built in CI and nowhere else,
+ * and nothing that depended on them could be tested before it shipped. That was tolerable
+ * while the zips were only a convenience for a store upload. It stopped being tolerable when
+ * the site started handing the file to readers: a download link whose file is built by a
+ * binary that may not exist is a 404 waiting for the one machine that lacks it.
+ *
+ * The format is the small one: one local header per file, stored (no compression — these are
+ * four small text files and a pair of icons, and DEFLATE would save a few kilobytes at the
+ * cost of a second implementation to get wrong), a central directory, an end record. CRC-32
+ * is the same table the PNG writer above already needs, which is the reason this is thirty
+ * lines rather than a dependency.
+ */
+const dosTime = () => {
+	/* A fixed timestamp rather than the clock: two builds of the same source should produce
+	   the same bytes, so a reader can tell a rebuild from a change. 1 Jan 2020, 00:00. */
+	return { time: 0, date: ((2020 - 1980) << 9) | (1 << 5) | 1 }
+}
+
+const zipOf = async (dir, names) => {
+	const { time, date } = dosTime()
+	const locals = []
+	const central = []
+	let at = 0
+	for (const name of names) {
+		const body = await readFile(resolve(dir, name))
+		const crc = crc32(body)
+		const nameBuf = Buffer.from(name, "utf8")
+		const local = Buffer.alloc(30)
+		local.writeUInt32LE(0x04034b50, 0)
+		local.writeUInt16LE(20, 4) // version needed
+		local.writeUInt16LE(0, 6) // flags
+		local.writeUInt16LE(0, 8) // stored
+		local.writeUInt16LE(time, 10)
+		local.writeUInt16LE(date, 12)
+		local.writeUInt32LE(crc, 14)
+		local.writeUInt32LE(body.length, 18)
+		local.writeUInt32LE(body.length, 22)
+		local.writeUInt16LE(nameBuf.length, 26)
+		local.writeUInt16LE(0, 28)
+		locals.push(local, nameBuf, body)
+
+		const dirent = Buffer.alloc(46)
+		dirent.writeUInt32LE(0x02014b50, 0)
+		dirent.writeUInt16LE(20, 4) // version made by
+		dirent.writeUInt16LE(20, 6) // version needed
+		dirent.writeUInt16LE(0, 8)
+		dirent.writeUInt16LE(0, 10) // stored
+		dirent.writeUInt16LE(time, 12)
+		dirent.writeUInt16LE(date, 14)
+		dirent.writeUInt32LE(crc, 16)
+		dirent.writeUInt32LE(body.length, 20)
+		dirent.writeUInt32LE(body.length, 24)
+		dirent.writeUInt16LE(nameBuf.length, 28)
+		dirent.writeUInt32LE(at, 42)
+		central.push(dirent, nameBuf)
+		at += 30 + nameBuf.length + body.length
+	}
+	const dirBytes = Buffer.concat(central)
+	const end = Buffer.alloc(22)
+	end.writeUInt32LE(0x06054b50, 0)
+	end.writeUInt16LE(names.length, 8)
+	end.writeUInt16LE(names.length, 10)
+	end.writeUInt32LE(dirBytes.length, 12)
+	end.writeUInt32LE(at, 16)
+	return Buffer.concat([...locals, dirBytes, end])
+}
+
 const zip = async browser => {
-	if (!existsSync("/usr/bin/zip")) return null
+	const dir = resolve(out, browser)
 	const file = resolve(out, `beanemachine-${browser}.zip`)
-	await run("zip", ["-qr", file, "."], { cwd: resolve(out, browser) })
+	/* Named rather than walked, so a file nobody meant to ship cannot arrive in the download
+	   by having been left in the folder. Every one of these is written a few lines above. */
+	const names = ["manifest.json", "background.js", "yahoo.js", "bridge.js", "README.txt",
+		"icon-16.png", "icon-48.png", "icon-128.png"].filter(n => existsSync(resolve(dir, n)))
+	await writeFile(file, await zipOf(dir, names))
 	return file
 }
 
@@ -269,6 +344,31 @@ for (const browser of Object.keys(manifests)) {
 	if (made) zips.push(made)
 }
 
+/*
+   THE SITE HAS TO BE ABLE TO HAND IT OVER, because no store has it yet.
+
+   The walkthrough's first step used to point at a store search page. Rendered on
+   2026-09-18, the Chrome Web Store returned "It looks like there aren't any search results
+   for your search", and the add-on id is a 404 on Mozilla's own API — so the topmost offer
+   in the onboarding sheet led every reader to an empty page, with nothing on the screen
+   saying so.
+   
+   Until a listing exists, the honest route is the one a developer already uses: download the
+   folder and load it. That only works if the site serves the file, so the store build's zips
+   are copied into `public/`, which Vite ships verbatim. They are gitignored — a build
+   artifact in the tree is a build artifact that goes stale — and test/static.mjs asserts the
+   published site actually serves them, because a download link that 404s is the same defect
+   as the store link it replaces.
+   
+   The DEV build never does this: what a reader downloads must be the build that speaks to
+   beanemachine.com alone, never the one carrying local addresses.
+*/
+if (!DEV && zips.length) {
+	const web = resolve(here, "..", "public")
+	for (const made of zips) await copyFile(made, resolve(web, basename(made)))
+	console.log(`copied ${zips.length} zip(s) into public/, which is what the site hands out`)
+}
+
 console.log(
 	`built ${Object.keys(manifests).join(" and ")} into ${out}` +
 		(DEV ?
@@ -276,4 +376,4 @@ console.log(
 		:	" — hosted site only, which is what goes to a store")
 )
 if (zips.length) console.log(`zipped: ${zips.map(z => z.replace(`${out}/`, "")).join(", ")}`)
-else console.log("zip not available; the folders are loadable as they are")
+else console.log("no zip was written, which should not happen — the folders are loadable as they are")

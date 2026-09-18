@@ -184,7 +184,23 @@ export const readGrabs = (
 
 	const settings = grabs.find(g => g.kind === "settings")
 	if (settings) {
-		const { league, read } = leagueFromPastedSettings(settings.text, "yahoo", today)
+		/*
+		   NOT A PASTE, AND THE BOARD SHOULD STOP SAYING IT IS.
+		
+		   This is the same parser the paste box uses, on text nobody typed: the reader's own
+		   browser fetched this page from his signed-in Yahoo tab and the grab carries the URL
+		   it fetched. Handed over as an anonymous string, the league came back with
+		   `verified: false` and a review line beginning "Nothing fetched that page" — so the
+		   masthead's trust chip read "not from your league" on a board built from a clean
+		   extension read, while the sheet above it said what league it had just read.
+		
+		   The method sentence is in the reader's words rather than this project's: what he did
+		   was press a button and let his browser read his own league.
+		*/
+		const { league, read } = leagueFromPastedSettings(settings.text, "yahoo", today, {
+			url: settings.url,
+			method: `read off your own league page in this browser on ${today}`
+		})
 		out.league = league
 		if (!league)
 			notes.push(

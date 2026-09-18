@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { leagueFromPastedSettings } from "../data/paste-settings.ts"
@@ -210,7 +210,54 @@ export const Onboard = ({
 
 	/** Everything the sheet still wants. The lock is the one that decides whether Tonight
 	 *  is a list of changes or a plan for the period, so it is what "done" means here. */
-	const answered = !!league?.scoring_period?.lineup_lock
+	/*
+	   WHAT "ANSWERED" MEANT, AND WHAT IT MEANS NOW.
+	
+	   It was `!!league?.scoring_period?.lineup_lock` — the third question, "can you change
+	   your lineup every day?", which was REMOVED from this sheet (see the note where it used
+	   to be). Nothing set that field afterwards on the ordinary first visit, so the condition
+	   was permanently false and the finish was never pinned: measured at 390x844 immediately
+	   after "That's my team", the team-count chips sat at y=850, six pixels under the fold,
+	   and "Show me tonight" 172px under that, with nothing scrolling and nothing pinned. A
+	   condition that outlives the question it was about is worse than no condition, because it
+	   reads as deliberate.
+	
+	   The last question left is the team count, and it is PRE-FILLED — ten, Yahoo's own
+	   default, said on the screen to be a guess. So "answered" is now about the reader rather
+	   than about the data: once he has touched it there is nothing left below the button, and
+	   pinning it is what the note below argues for.
+	*/
+	const [teamsAnswered, setTeamsAnswered] = useState(false)
+	const answered = teamsAnswered
+
+	/*
+	   THE MOMENT A LEAGUE APPEARS, THE REST OF THE SHEET IS BELOW THE FOLD.
+	
+	   Pressing "That's my team" replaces the question he answered with two things he has not
+	   seen: the team count, and the button that ends setup. Measured at 390x844 they land at
+	   y=850 and y=1016 against an 844px screen — six pixels and 172 pixels under — and the
+	   sheet does not move. The page behind it scrolls normally and the sheet's own scrollbar
+	   is a phone's, which is to say invisible, so there is nothing on screen to suggest that
+	   anything follows. One wheel gesture reveals both, which is the whole distance between
+	   this working and not.
+	
+	   So the sheet brings them to him, once, on the transition. `block: "nearest"` scrolls the
+	   least that will do — a reader on a desktop where both are already visible sees nothing
+	   move, which is the correct amount of movement.
+	*/
+	const rest = useRef<HTMLDivElement | null>(null)
+	const had = useRef(false)
+	useEffect(() => {
+		if (!league) {
+			had.current = false
+			return
+		}
+		if (had.current) return
+		had.current = true
+		/* Not smooth: this is orientation, not decoration, and `prefers-reduced-motion` is a
+		   request not to animate rather than a request not to arrive. */
+		rest.current?.scrollIntoView({ block: "nearest" })
+	}, [league])
 	const gaps = league ? leagueGaps(league) : []
 	const missing = gaps.filter(g => g.have === null)
 	const ready = !!league && missing.length === 0
@@ -474,8 +521,19 @@ export const Onboard = ({
 				*/}
 				{takesExtension(browserOf()) && (
 					<p className="onboard-offer">
+						{/*
+						  IT SAYS YAHOO BEFORE HE PRESSES IT, AND IT DID NOT.
+						
+						  This read "Let it read my league for me" until he had already installed the
+						  add-on, and the word Yahoo first appeared in step 3 of the walkthrough —
+						  272px below the line he pressed. An ESPN reader could therefore install an
+						  add-on called "beanemachine — read my Yahoo league" before anything on this
+						  screen told him it is Yahoo only, which costs him an install and this
+						  project a store review it can never make good on. The offer names what it
+						  reads, in both states.
+						*/}
 						<button type="button" className="as-link" onClick={() => setConnecting(true)}>
-							{ext.present ? "Let it read my league from Yahoo" : "Let it read my league for me"}
+							{ext.present ? "Let it read my Yahoo league" : "Let it read my Yahoo league for me"}
 						</button>
 					</p>
 				)}
@@ -696,7 +754,7 @@ export const Onboard = ({
 				}
 				</div>
 
-				<div className="onboard-rest">
+				<div className="onboard-rest" ref={rest}>
 				{/*
 				  The second question, and the only other one. It changes who counts as a
 				  good pickup more than anything else does: the bar every player is measured
@@ -715,7 +773,10 @@ export const Onboard = ({
 									type="button"
 									className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
 									aria-pressed={league.meta.max_teams === n}
-									onClick={() => onTeamCount(n)}
+									onClick={() => {
+										setTeamsAnswered(true)
+										onTeamCount(n)
+									}}
 								>
 									{n}
 								</button>

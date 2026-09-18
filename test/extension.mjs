@@ -1502,11 +1502,30 @@ await walled.close()
 				teams: l?.meta?.max_teams ?? null,
 				roster: key ? (read("roster")?.[key]?.length ?? 0) : 0,
 				spots: key ? (read("lineup")?.[key]?.spots?.length ?? 0) : 0,
-				pool: key ? (read("pool")?.[key]?.players?.length ?? 0) : 0
+				pool: key ? (read("pool")?.[key]?.players?.length ?? 0) : 0,
+				verified: l?.provenance?.verified ?? null,
+				sources: l?.provenance?.sources ?? [],
+				method: l?.provenance?.method ?? "",
+				saysUnfetched: (l?.needs_review ?? []).some(r => /Nothing fetched/.test(r))
 			}
 		})
 		t("one press on a first visit makes the league his own, under his league's own key",
-			made.key === KEY, JSON.stringify(made))
+			made.key === KEY, JSON.stringify({ ...made, sources: made.sources.length }))
+		/*
+		   AND THE BOARD STOPS CALLING IT HEARSAY.
+		
+		   The settings page is parsed by the same function the paste box uses, which stamps
+		   `verified: false` and a review line reading "Nothing fetched that page" — so the
+		   masthead's own trust chip said "not from your league" about a league this browser had
+		   just fetched, with the URL in hand. The reader did the hard thing and the board told
+		   him it did not count.
+		*/
+		t("and the league it read is vouched for, because this browser fetched the page",
+			made.verified === true, JSON.stringify({ verified: made.verified, method: made.method }))
+		t("…naming the settings page it read, which is what makes that checkable",
+			made.sources.some(u => /\/settings/.test(u)), JSON.stringify(made.sources))
+		t("…and nothing anywhere tells him nothing fetched it",
+			made.saysUnfetched === false, JSON.stringify(made.method))
 		t("with his league's scoring rather than a borrowed table",
 			made.batting === Object.keys(real.scoring.batting).length &&
 				made.pitching === Object.keys(real.scoring.pitching).length &&

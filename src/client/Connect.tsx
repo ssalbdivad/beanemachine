@@ -104,6 +104,37 @@ export const Tick = (): React.ReactElement => (
 	</svg>
 )
 
+/**
+ * WHETHER A STORE ACTUALLY HAS IT, which is a fact about the world and not about this code.
+ *
+ * Step 1 of this walkthrough sent every reader to a store search page. Rendered on
+ * 2026-09-18: the Chrome Web Store answered "It looks like there aren't any search results
+ * for your search", and Mozilla's own API 404s the add-on id. So the topmost offer in the
+ * onboarding sheet — the first thing a desktop reader is shown, 181px above the box where he
+ * could have typed his team in — led him to an empty page, and no line anywhere said so.
+ *
+ * Until a listing exists the route is the one that actually works: the site hands him the
+ * file and his browser loads it. That is more steps and it is honest, which is the trade this
+ * project makes everywhere else.
+ *
+ * FLIP THIS WHEN THE LISTINGS ARE LIVE, and check `STORE.at` still points at the listing
+ * rather than at a search for it — a search page is what produced this bug.
+ */
+export const IN_STORE = false
+
+/** What the site hands out while no store does. Written by extension/build.mjs into
+ *  `public/`, which Vite ships verbatim; test/static.mjs asserts the published site really
+ *  serves them, because a download link that 404s is the same defect as the store link it
+ *  replaces. */
+export const DOWNLOAD: Record<Browser, string | null> = {
+	chrome: "/beanemachine-chrome.zip",
+	edge: "/beanemachine-chrome.zip",
+	firefox: "/beanemachine-firefox.zip",
+	"firefox-android": null,
+	safari: null,
+	none: null
+}
+
 /** Where each browser's own page for this lives. Named once here so a step and its button
  *  cannot drift apart, and so a browser nobody has shipped to yet has an obvious null. */
 export const STORE: Record<Browser, { at: string | null; press: string; then: string }> = {
@@ -152,6 +183,8 @@ export const Connect = ({
 	browser?: Browser
 }): React.ReactElement => {
 	const store = STORE[browser]
+	const download = DOWNLOAD[browser]
+	const firefoxish = browser === "firefox" || browser === "firefox-android"
 	/* Once it is there, the steps are history: a reader who has installed it does not need
 	   to be told how, and a screen that keeps showing him is a screen that has not noticed
 	   he did the thing it asked. */
@@ -218,7 +251,7 @@ export const Connect = ({
 	if (!takesExtension(browser))
 		return (
 			<div className="connect">
-				<h2>On a computer, it can read your league</h2>
+				<h2>On a computer, it can read your Yahoo league</h2>
 				<p className="sub">
 					{browser === "safari" ?
 						"Not in this browser yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."
@@ -234,7 +267,7 @@ export const Connect = ({
 
 	return (
 		<div className="connect">
-			<h2>Let it read my league</h2>
+			<h2>Let it read my Yahoo league</h2>
 			{/* Two lines, not four. Measured at 390x844: the card came to 623px inside a sheet
 			    capped at 591px, so the third step and the way back were below the fold — the
 			    exact defect this file's own header warns about, arriving in the file that warns
@@ -243,7 +276,93 @@ export const Connect = ({
 			<p className="sub">
 				It reads your league in your own browser. Nothing is sent anywhere else.
 			</p>
+			{!IN_STORE && (
+				/* SAID FIRST, because it changes what every step below is. He is about to be asked
+				   to do something more fiddly than pressing Add, and being told why is the
+				   difference between a walkthrough and a runaround. */
+				<p className="connect-note">
+					It is not in the {firefoxish ? "Firefox add-ons site" : "Chrome Web Store"} yet, so
+					it comes from here instead. Four steps, about a minute.
+				</p>
+			)}
 			<ol className="steps">
+				{!IN_STORE && download ?
+					<>
+						<li className="step">
+							<span className="step-n">1</span>
+							<div className="step-body">
+								<p className="step-say">Download it, then unzip the file.</p>
+								<p>
+									<a className="chip-btn" href={download} download>
+										Download it
+									</a>
+								</p>
+								<p className="step-aside">
+									{firefoxish ?
+										"Firefox takes the zip as it is — no unzipping needed."
+									:	"Double-click the downloaded file. It becomes a folder of the same name."}
+								</p>
+							</div>
+						</li>
+						<li className="step">
+							<span className="step-n">2</span>
+							<div className="step-body">
+								<p className="step-say">
+									Type this into your address bar and press enter.
+								</p>
+								{/* A browser will not let a page link to its own settings, so this is
+								    text he copies rather than a button he presses — and it says so,
+								    because a reader who tries to click it and nothing happens has been
+								    told by the screen that the screen is broken. */}
+								<span className="step-point">
+									<Arrow label={`pointing at the address ${firefoxish ? "about:debugging" : "chrome://extensions"}`} />
+									<span className="step-target step-address">
+										{firefoxish ? "about:debugging#/runtime/this-firefox" : "chrome://extensions"}
+									</span>
+								</span>
+								<p className="step-aside">
+									{firefoxish ?
+										"Nothing here can open that page for you — browsers only let you type it."
+									:	"Then turn on Developer mode, the switch at the top right."}
+								</p>
+							</div>
+						</li>
+						<li className="step">
+							<span className="step-n">3</span>
+							<div className="step-body">
+								<p className="step-say">
+									Press <b>{firefoxish ? "Load Temporary Add-on" : "Load unpacked"}</b> and choose
+									{firefoxish ? " the file you downloaded" : " the folder you unzipped"}.
+								</p>
+								<span className="step-point">
+									<Arrow label={`pointing at the words ${firefoxish ? "Load Temporary Add-on" : "Load unpacked"}`} />
+									<span className="step-target" aria-hidden="true">
+										{firefoxish ? "Load Temporary Add-on…" : "Load unpacked"}
+									</span>
+								</span>
+								{firefoxish && (
+									/* NOT A FOOTNOTE. A temporary add-on is gone when Firefox closes, and a
+									   reader who finds it missing tomorrow will think it broke. */
+									<p className="step-aside step-warn">
+										Firefox drops it when you quit, so it has to be loaded again next time.
+										On Chrome it stays.
+									</p>
+								)}
+							</div>
+						</li>
+						<li className="step">
+							<span className="step-n">4</span>
+							<div className="step-body">
+								<p className="step-say">Open your Yahoo team once, then come back here.</p>
+								<p>
+									<button type="button" className="chip-btn" onClick={() => ext.openYahoo()}>
+										Open Yahoo
+									</button>
+								</p>
+							</div>
+						</li>
+					</>
+				:	<>
 				<li className="step">
 					<span className="step-n">1</span>
 					<div className="step-body">
@@ -290,6 +409,8 @@ export const Connect = ({
 						</p>
 					</div>
 				</li>
+					</>
+				}
 			</ol>
 			<p className="sub connect-watch">
 				This page notices the moment it is added &mdash; nothing to press here.

@@ -7,7 +7,7 @@
     "dev": "nub run dev:api & vite",
     "dev:api": "nub watch src/server.ts",
     "dev:web": "vite",
-    "build": "vite build",
+    "build": "npm run build:ext && vite build",
     "build:ext": "node extension/build.mjs",
     "preview": "vite preview",
     "start": "nub src/server.ts",

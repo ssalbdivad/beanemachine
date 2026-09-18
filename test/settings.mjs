@@ -243,5 +243,48 @@ const text = asPasted(real)
     JSON.stringify(Object.keys(trailing.pitching)))
 }
 
+/*
+ * A PAGE THE BROWSER FETCHED IS NOT A PAGE SOMEBODY TYPED.
+ *
+ * `leagueFromPastedSettings` is the paste parser and its provenance says so: verified false,
+ * and a review line beginning "Nothing fetched that page". Right for a paste, and wrong for
+ * the one caller that is not one — the browser reader fetches the settings page from the
+ * reader's own signed-in tab and has the URL it fetched. Left unsaid, the masthead's trust
+ * chip read "not from your league" on a board built from a clean extension read.
+ *
+ * The flag is never set inside the parser: a caller that can prove where the text came from
+ * passes the proof, and every caller that cannot keeps the old sentence.
+ */
+{
+  const url = "https://baseball.fantasysports.yahoo.com/b1/228947/settings"
+  const { league: fetched } = leagueFromPastedSettings(text, "yahoo", "2026-09-18", {
+    url,
+    method: "read off your own league page in this browser on 2026-09-18"
+  })
+  t("a fetched settings page is vouched for", fetched.provenance.verified === true)
+  t("…and names the page it was read from, which is what makes that checkable",
+    JSON.stringify(fetched.provenance.sources) === JSON.stringify([url]),
+    JSON.stringify(fetched.provenance.sources))
+  t("…and does not tell the reader nothing fetched it",
+    !fetched.needs_review.some(r => /Nothing fetched/.test(r)),
+    JSON.stringify(fetched.needs_review))
+  t("…in a method sentence about what he did, not about this app's parsers",
+    /in this browser/.test(fetched.provenance.method) && !/paste/.test(fetched.provenance.method),
+    fetched.provenance.method)
+
+  const { league: pasted } = leagueFromPastedSettings(text, "yahoo", "2026-09-18")
+  t("and a paste is still a paste", pasted.provenance.verified === false)
+  t("…and still says nothing fetched it",
+    pasted.needs_review.some(r => /Nothing fetched/.test(r)))
+  t("…and still carries no source, because there is none to carry",
+    pasted.provenance.sources.length === 0)
+  /* Everything else about the two is identical — this is a claim about where the text came
+     from, never about what it said. */
+  t("the league itself is the same league either way",
+    JSON.stringify(fetched.scoring) === JSON.stringify(pasted.scoring) &&
+      JSON.stringify(fetched.roster) === JSON.stringify(pasted.roster),
+    JSON.stringify(fetched.scoring))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

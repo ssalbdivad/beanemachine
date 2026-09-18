@@ -1674,6 +1674,18 @@ main#main:focus{outline:none}
 	text-underline-offset: 2px;
 	cursor: pointer;
 }
+/* The line under a step: what to expect, what it will not do, what it costs. Quieter than
+   the instruction it follows, because a reader following steps reads the bold line and comes
+   back for this one only when something is not as he expected. */
+.step-aside { margin: var(--sp-2) 0 0; font-size: var(--fs-2); color: var(--muted) }
+/* The one aside that must not be skimmed: a Firefox temporary add-on is gone when Firefox
+   quits, and a reader who finds it missing tomorrow will think it broke. */
+.step-warn { color: var(--flag) }
+/* An address he TYPES. Monospaced and selectable — unlike `.step-target`, which is a picture
+   of a button and is aria-hidden, this is text he has to be able to copy, so it keeps its
+   text selection and is not hidden from a screen reader. */
+.step-address { font-family: var(--mono); user-select: all; color: var(--ink) }
+.connect-note { margin: 0 0 var(--sp-3); color: var(--muted); font-size: var(--fs-2) }
 /* The arrow and the words it points at, on one line, arrow first — its head is at the
    bottom right, so an arrow drawn after the words ends in empty space. Measured at 390px:
    the head landed 40px clear of the facsimile before this. */

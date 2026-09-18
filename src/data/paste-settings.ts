@@ -227,10 +227,36 @@ import { deriveScoringPeriod, deriveSlotAccepts } from "../import.ts"
 import { rosterCounts } from "../engine/bscore.ts"
 
 
+/**
+ * WHERE THE TEXT CAME FROM, when it did not come from a person's clipboard.
+ *
+ * This function is the paste parser and its provenance has always said so: `verified: false`,
+ * with the reasoning that a paste is text a person handed over and nothing here can tell a
+ * real settings page from an invented one. That is exactly right for a paste, and exactly
+ * wrong for the one caller that is not one.
+ *
+ * The browser reader FETCHED the page, from the reader's own signed-in tab, and has the URL
+ * it fetched. It is the same evidence an import has. Left unsaid, the masthead's own trust
+ * chip read "not from your league" on a board built from a clean extension read — measured
+ * on 2026-09-18, with the sheet directly above it saying "Last read Yahoo H2H-Pts 228947 —
+ * 225 free agents". The chip is the app's only trust signal and it was lying in the
+ * direction that costs a reader his confidence in the thing he just did.
+ *
+ * So the caller that can prove where the text came from says so, and every caller that
+ * cannot keeps the old sentence by default. The flag is never set from inside this file.
+ */
+export interface TextSource {
+	/** The page this text was read off, which is what makes the claim checkable. */
+	url: string
+	/** In the reader's words, for `provenance.method`. */
+	method: string
+}
+
 export const leagueFromPastedSettings = (
 	text: string,
 	platform: "yahoo" | "espn" | "custom",
-	today: string = new Date().toISOString().slice(0, 10)
+	today: string = new Date().toISOString().slice(0, 10),
+	from: TextSource | null = null
 ): { league: League | null; read: PastedLeague } => {
 	const read = leagueFromSettingsText(text)
 	// Scoring is the one thing nothing else can stand in for: without it every
@@ -249,11 +275,15 @@ export const leagueFromPastedSettings = (
 			"Which positions can fill each seat was worked out from the seat names. The " +
 				"settings page never says it outright, so check it if a lineup looks wrong."
 		)
-	needsReview.push(
-		`These values were read off a settings page you pasted on ${today}. Nothing ` +
-			`fetched that page, so beanemachine can't vouch for it — check anything that ` +
-			`looks wrong in League setup.`
-	)
+	/* The same sentence, and only for the reader it is true of. A reader whose browser went
+	   and got the page is not "nothing fetched that page", and telling him so on his own
+	   league's screen is the app calling its own best evidence hearsay. */
+	if (!from)
+		needsReview.push(
+			`These values were read off a settings page you pasted on ${today}. Nothing ` +
+				`fetched that page, so beanemachine can't vouch for it — check anything that ` +
+				`looks wrong in League setup.`
+		)
 	for (const gap of read.missing) needsReview.push(`The paste carried no ${gap}.`)
 
 	/**
@@ -304,12 +334,22 @@ export const leagueFromPastedSettings = (
 			eligibility: null,
 			scoring_period: period,
 			league_rules: { raw_settings: read.settings },
-			provenance: {
-				fetched_at: today,
-				sources: [],
-				method: `paste: the league's own settings page, pasted on ${today}`,
-				verified: false
-			},
+			provenance:
+				from ?
+					{
+						fetched_at: today,
+						sources: [from.url],
+						method: from.method,
+						/* The page was fetched and the URL is in `sources`, which is the whole of
+						   what this flag has ever claimed. */
+						verified: true
+					}
+				:	{
+						fetched_at: today,
+						sources: [],
+						method: `paste: the league's own settings page, pasted on ${today}`,
+						verified: false
+					},
 			needs_review: needsReview
 		},
 		read

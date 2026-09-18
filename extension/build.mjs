@@ -251,10 +251,23 @@ const chunk = (type, data) => {
 const GROUND = [27, 58, 43]
 const INK = [244, 241, 232]
 
-const iconPng = size => {
+/**
+ * @param size   the PNG's own edge, in pixels
+ * @param inset  the fraction of that edge left transparent on every side
+ *
+ * CHROME WANTS THE 128 PADDED AND THE OTHERS NOT. Its store guidance asks for 96x96 of artwork
+ * centred in a 128x128 canvas — a sixteenth of the edge, transparent, on each side — because
+ * the store draws its own frame around it and a full-bleed icon collides with it. The 16 and
+ * the 48 are used in the toolbar and the extensions list, where padding would just make a
+ * small icon smaller. Measured on the previous build: alpha 255 at (0, 64), zero transparent
+ * columns before ink on row 64, which is the full-bleed shape Chrome asks you not to send.
+ */
+const iconPng = (size, inset = 0) => {
 	const px = (x, y) => {
-		const u = (x + 0.5) / size
-		const v = (y + 0.5) / size
+		const span = 1 - inset * 2
+		const u = ((x + 0.5) / size - inset) / span
+		const v = ((y + 0.5) / size - inset) / span
+		if (u < 0 || u > 1 || v < 0 || v > 1) return [0, 0, 0, 0]
 		// a rounded square, so it does not read as a screenshot of a page
 		const r = 0.18
 		const dx = Math.max(r - u, 0, u - (1 - r))
@@ -305,7 +318,9 @@ for (const [browser, manifest] of Object.entries(manifests)) {
 	for (const f of ["background.js", "yahoo.js", "bridge.js"])
 		await cp(resolve(out, "js", f), resolve(dir, f))
 	await writeFile(resolve(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
-	for (const size of [16, 48, 128]) await writeFile(resolve(dir, `icon-${size}.png`), iconPng(size))
+	/* 1/16th of the edge on the 128 alone — Chrome's store frames that one. See `iconPng`. */
+	for (const size of [16, 48, 128])
+		await writeFile(resolve(dir, `icon-${size}.png`), iconPng(size, size === 128 ? 1 / 16 : 0))
 	await writeFile(
 		resolve(dir, "README.txt"),
 		`beanemachine ${VERSION} (${browser})\n\n` +
@@ -386,6 +401,59 @@ const zipOf = async (dir, names) => {
 	return Buffer.concat([...locals, dirBytes, end])
 }
 
+/**
+ * THE 440x280 PROMOTIONAL TILE CHROME ASKS FOR, drawn rather than acquired.
+ *
+ * It is required for a listing and there was none in this repository. Drawn from the same two
+ * colours and the same mascot the icons use, because a tile that does not look like the icon
+ * beside it reads as somebody else's add-on — and drawn procedurally for the reason the icons
+ * are: an image nobody can regenerate is an image that goes stale the first time the mark
+ * changes.
+ *
+ * No text on it. Chrome overlays the add-on's name and summary on its own store furniture, and
+ * a tile carrying a second copy of the name is the commonest reason one is rejected for being
+ * cluttered.
+ */
+const promoPng = (w, h) => {
+	const px = (x, y) => {
+		const u = (x + 0.5) / h
+		const v = (y + 0.5) / h
+		/* The mascot, left of centre, at the size the tile can hold. */
+		const cx = (w / h) * 0.34
+		const eye = (ex, ey) => Math.hypot(u - ex, v - ey) < 0.075
+		if (eye(cx - 0.09, 0.42) || eye(cx + 0.09, 0.42)) return [...INK, 255]
+		const smile = Math.hypot(u - cx, (v - 0.54) * 0.85)
+		if (smile > 0.17 && smile < 0.23 && v > 0.58) return [...INK, 255]
+		/* A seam of ink down the right third, so the tile has a shape at thumbnail size. */
+		const seam = (w / h) * 0.62
+		if (Math.abs(u - seam) < 0.006) return [...INK, 255]
+		return [...GROUND, 255]
+	}
+	const raw = Buffer.alloc(h * (w * 4 + 1))
+	let at = 0
+	for (let y = 0; y < h; y++) {
+		raw[at++] = 0
+		for (let x = 0; x < w; x++) {
+			const [r, g, b, a] = px(x, y)
+			raw[at++] = r
+			raw[at++] = g
+			raw[at++] = b
+			raw[at++] = a
+		}
+	}
+	const ihdr = Buffer.alloc(13)
+	ihdr.writeUInt32BE(w, 0)
+	ihdr.writeUInt32BE(h, 4)
+	ihdr[8] = 8
+	ihdr[9] = 6
+	return Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		chunk("IHDR", ihdr),
+		chunk("IDAT", deflateSync(raw)),
+		chunk("IEND", Buffer.alloc(0))
+	])
+}
+
 const zip = async browser => {
 	const dir = resolve(out, browser)
 	const file = resolve(out, `beanemachine-${browser}.zip`)
@@ -422,6 +490,12 @@ for (const browser of Object.keys(manifests)) {
    The DEV build never does this: what a reader downloads must be the build that speaks to
    beanemachine.com alone, never the one carrying local addresses.
 */
+/* The listing's own artwork, beside the zips a store takes. Not in `public/`: it belongs to a
+   submission, not to the site. */
+if (!DEV) {
+	await writeFile(resolve(out, "promo-440x280.png"), promoPng(440, 280))
+	console.log("promo tile: dist-ext/promo-440x280.png")
+}
 if (!DEV && zips.length) {
 	const web = resolve(here, "..", "public")
 	for (const made of zips) await copyFile(made, resolve(web, basename(made)))

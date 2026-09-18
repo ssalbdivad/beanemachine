@@ -996,8 +996,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 					<div className="paste-roster read-yahoo">
 						<h3>Read it from Yahoo</h3>
 						<p className="sub">
-							Open your team on Yahoo in another tab, then press this. Your seats, your
-							league&rsquo;s scoring and who is free all come across.
+							Open your team on Yahoo in another tab, then press <b>Read my league</b>.
 						</p>
 						<p>
 							<button

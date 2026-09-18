@@ -2518,6 +2518,33 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
 
 /*
  * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE PRIVACY POLICY IS A PAGE, BECAUSE A STORE WILL NOT TAKE A FILE PATH.
+ *
+ * Both stores require a policy at a URL before a listing can be submitted, and this project's
+ * was a Markdown file in a repository — beanemachine.com/privacy was a 404. It is rendered from
+ * `extension/PRIVACY.md` at build time so the document the add-on ships beside and the page the
+ * listing links to are the same text: this project has already had two sentences drift in that
+ * exact document, and both times the sentence had stopped being true of the code.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const priv = await b.newPage({ viewport: { width: 1100, height: 900 } })
+  const res = await priv.goto(new URL("privacy/", BASE).href, { waitUntil: "domcontentloaded" })
+  t("the published site serves a privacy policy at its own URL", res?.status() === 200, String(res?.status()))
+  const text = await priv.$eval("main", e => e.innerText)
+  t("…which is the add-on's own policy, not a stub",
+    /what it reads/i.test(text) && /fantasysports\.yahoo\.com/.test(text), text.slice(0, 160))
+  t("…rendered, with no Markdown left in it",
+    !/\*\*|^#{1,6}\s/m.test(text), (text.match(/.*(\*\*|^#).*/m) ?? [""])[0].slice(0, 120))
+  /* It works without the app: a reviewer opening it should not need the bundle to run, and a
+     policy that renders only after 200KB of JavaScript is a policy that can fail to render. */
+  t("…and it is a static page, not the app",
+    (await priv.locator("nav button").count()) === 0 && (await priv.locator("h1").count()) === 1)
+  await priv.close()
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
  * THE AGE OF THE DATA FITS ON A PHONE.
  *
  * The chip row scrolls sideways at phone width by design, and the capture's age is the last

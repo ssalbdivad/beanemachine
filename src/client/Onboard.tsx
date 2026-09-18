@@ -796,7 +796,20 @@ export const Onboard = ({
 				  default for baseball and is what the shipped values came from — a guess,
 				  and said to be one.
 				*/}
-				{league && (
+				{/*
+				  ASKED ONLY WHEN HIS LEAGUE HAS NOT ALREADY SAID.
+				
+				  Yahoo prints "Max Teams" on the settings page and ESPN states `size`, so a league
+				  that arrived by a read, an import or a paste already carries the number — and
+				  this asked anyway, with ten preselected, on a league whose own page says ten.
+				  Asking a reader for something he has just handed over is the app admitting it
+				  did not look.
+				
+				  A PRESET is the case that must still ask: its ten is borrowed from somebody
+				  else's league, which is exactly what the sheet exists to replace, and
+				  `provenance.method` is where that is recorded.
+				*/}
+				{league && (league.meta.max_teams === null || league.provenance.method.startsWith("preset:")) && (
 					<div className="onboard-teams">
 						<h3>How many teams are in your league?</h3>
 						<div className="chips">

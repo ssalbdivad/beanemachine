@@ -222,9 +222,12 @@ export const Connect = ({
 						{freeAgents !== null ? <> &mdash; {freeAgents} free agents</> : null}
 						{readAt ? <> &mdash; {ago(readAt)}</> : null}.
 					</p>
-				:	<p className="sub">
-						Open your team on Yahoo in another tab, then press the button. Your scoring,
-						your seats and who is free all come across.
+				:	/* NAMED, because "press the button" is a sentence written by somebody who can
+				     see the screen. There are two buttons under it — Read my league and Open
+				     Yahoo — and a reader following step 4 arrives here looking for the one he was
+				     promised. */
+					<p className="sub">
+						Open your team on Yahoo in another tab, then press <b>Read my league</b>.
 					</p>
 				}
 				{/* THE TWO HALVES BEING ON DIFFERENT VERSIONS is said here rather than at the
@@ -422,8 +425,8 @@ export const Connect = ({
 							<span className="step-n">4</span>
 							<div className="step-body">
 								<p className="step-say">
-									Open your Yahoo team in a tab and leave it open, then come back to this
-									one.
+									Open your Yahoo team in a tab and leave it open, then come back here and
+									press <b>Read my league</b>.
 								</p>
 								<p>
 									<button type="button" className="chip-btn" onClick={() => ext.openYahoo()}>
@@ -486,8 +489,8 @@ export const Connect = ({
 			{/* WHAT HAPPENS NEXT, and what to do when nothing does. A walkthrough that ends
 			    without saying how you know it worked leaves a reader pressing things. */}
 			<p className="sub connect-watch">
-				This turns into a <b>Read my league</b> button as soon as it is added. If it has
-				not after a few seconds, reload the page.
+				This box turns into that button as soon as it is added. If it has not after a few
+				seconds, reload the page.
 			</p>
 			<p className="connect-back">
 				<button type="button" className="as-link" onClick={onBack}>

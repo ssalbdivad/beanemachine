@@ -410,6 +410,10 @@ export const deriveEspnPeriod = (
 	 *  settings payload — every test of this before the window was derivable, and any stored
 	 *  league re-read from `raw_settings` — still gets what it always got. */
 	status?: Record<string, any> | null,
+	/** `schedule[]` from `view=mMatchupScore`, which is where ESPN states which days each
+	 *  matchup covers. Without it there is no window to read and the league's stated length is
+	 *  used with its Monday assumption declared. */
+	schedule?: unknown,
 	/** The season's first regular-season game day, ISO, which is ESPN's scoring period 1.
 	 *  Null where it could not be read; the derivation is then skipped rather than guessed. */
 	openingDay?: string | null
@@ -486,7 +490,7 @@ export const deriveEspnPeriod = (
 	   known to have started a period on, and the length is the CURRENT matchup's — which is
 	   how a two-week playoff round stops being reported as one week.
 	*/
-	const window = espnMatchupDays(status, sched, openingDay ?? null)
+	const window = espnMatchupDays(status, schedule, openingDay ?? null)
 	if (window) {
 		const WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const
 		return {
@@ -903,7 +907,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	   the same fact. */
 	const url =
 		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${t.sport}` +
-		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings&view=mTeam&view=mStatus`
+		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings&view=mTeam&view=mStatus&view=mMatchupScore`
 
 	/*
 	   THE SEASON JUST GONE, AND THEN THE RIGHT SENTENCE FOR EACH WAY THIS FAILS.
@@ -1017,6 +1021,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	const { period: espnPeriod, needsReview: periodReview } = deriveEspnPeriod(
 		settings,
 		data.status,
+		data.schedule,
 		openingDay
 	)
 	/* A points league does not carry an innings floor and ESPN's nearest field is a

@@ -409,17 +409,30 @@ export const startingLineup = (
 	const taken = new Set(filled.filter(r => r !== null).map(keyOf))
 
 	const holes: string[] = []
-	/** How many seats at each slot have already been covered off the wire, so the next one
-	 *  takes the next man rather than the same one again. */
-	const usedFree = new Map<string, number>()
+	/**
+	 * THE FREE MEN ALREADY SEATED, ACROSS EVERY SLOT — not a cursor per slot.
+	 *
+	 * The first version of this counted seats at each slot and took the nth man from that
+	 * slot's list, which fixed the double count WITHIN a slot and left the one across slots
+	 * untouched: `wireBySlot` builds each slot's list independently, so a man eligible at OF
+	 * and Util is in both, and on this app's own shipped league every batter is in two lists
+	 * (Util accepts them all) and every pitcher is in two (P accepts SP and RP).
+	 *
+	 * Measured on the dev server before this: `OF 100.7 Pete Crow-Armstrong` and `Util 100.7
+	 * Pete Crow-Armstrong`, `SP 69.5 Chris Sale` and `P 69.5 Chris Sale` — the same name
+	 * printed in two rows, which is the exact sentence the earlier fix was written against, and
+	 * 237 points of a 1,344-point lineup that were three men counted twice.
+	 *
+	 * One set of men, then, spent once each in the order the seats are filled.
+	 */
+	const seatedFree = new Set<string>()
 	const starters: Start[] = spots.map((slot, index) => {
 		const player = filled[index]
 		if (player) return { slot, player, points: player.points, source: "roster" }
 		const list = ranked?.get(slot)
 		if (list) {
-			const k = usedFree.get(slot) ?? 0
-			usedFree.set(slot, k + 1)
-			const man = list[k]
+			const man = list.find(r => !seatedFree.has(keyOf(r)))
+			if (man) seatedFree.add(keyOf(man))
 			if (man)
 				return {
 					slot,

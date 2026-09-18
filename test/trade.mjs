@@ -483,6 +483,34 @@ if (weakC && strongC) {
   t("the seat the list cannot reach is a hole, not another copy of the last man",
     each.starters[3].source === "empty" && each.starters[3].points === 0 && each.holes.includes("P"),
     JSON.stringify(each.starters[3]))
+  /*
+     AND HE CANNOT FILL TWO DIFFERENT SLOTS EITHER.
+     
+     `wireBySlot` builds each slot's list independently, so a man eligible at OF and Util is in
+     both — and on this app's own shipped league every batter is (Util accepts them all) and
+     every pitcher is (P accepts SP and RP). A cursor per slot fixed the double count within a
+     slot and left this one: measured on the dev server, `OF 100.7 Pete Crow-Armstrong` and
+     `Util 100.7 Pete Crow-Armstrong` in the same lineup.
+  */
+  {
+    const both = [rate(911, "Both Ways", 50), rate(912, "Also Both", 10)]
+    for (const r of both) r.slots = ["OF", "Util"]
+    const two = { ...league, roster: { ...league.roster, slots: { OF: 1, Util: 1 } } }
+    const names = new Set(both.map(x => x.player.name))
+    const test = r => names.has(r.player.name)
+    const line = startingLineup(
+      two,
+      [],
+      replacementBySlot(two, both, 10, test),
+      replacementPlayerBySlot(two, both, 10, test)
+    )
+    t("a man eligible at two slots is seated at one of them, not both",
+      new Set(line.starters.map(s => s.free?.player.id)).size === line.starters.length,
+      JSON.stringify(line.starters.map(s => [s.slot, s.free?.player.name, s.points])))
+    t("…so the lineup is the two men it has, not one man twice",
+      line.points === 60, `${line.points} from ${JSON.stringify(line.starters.map(s => s.points))}`)
+  }
+
   /* WITHOUT A WIRE nothing changes: the estimate regime knows one body per slot and says so,
      and every caller that passes no ranked list gets exactly what it always got. */
   t("and a caller with no ranked list is unchanged",

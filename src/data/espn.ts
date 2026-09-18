@@ -386,69 +386,65 @@ export const espnInningsMinimum = (
 const plus = (iso: string, n: number): string =>
 	new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
 
-/** The Monday on or before a date. `getUTCDay` is 0 for Sunday, so Monday is 1. */
-const mondayOnOrBefore = (iso: string): string => {
-	const day = new Date(`${iso}T00:00:00Z`).getUTCDay()
-	return plus(iso, -((day + 6) % 7))
-}
-
 /**
- * THE DAYS THE READER'S CURRENT MATCHUP ACTUALLY RUNS OVER.
+ * THE DAYS THE READER'S CURRENT MATCHUP ACTUALLY RUNS OVER, AS ESPN STATES THEM.
  *
- * ESPN states its schedule in SCORING PERIODS, which in baseball are calendar days counted
- * from the season's first regular-season game — measured on two seasons and exact in both:
- * for 2021, `finalScoringPeriod` 186 against an opening day of 2021-04-01 lands on
- * 2021-10-03, which is the day that season ended; for 2026, period 177 was the current one on
- * 2026-09-17 against an opening day of 2026-03-25.
+ * ── WHAT THIS DID FIRST, AND WHY IT WAS WRONG ─────────────────────────────────────────
  *
- * What the app needed and did not have is the START of the current matchup. Without it an
- * imported ESPN league fell back to "assume Monday", and during the playoffs to a seven-day
- * window over a fortnight-long round — so every figure computed across the period, on both
- * sides of the matchup, was half the matchup he was playing.
+ * It inferred the window: week one is the Monday on or before the league's first scoring
+ * period, every matchup unit is seven days from there, and the current matchup's units come
+ * from `scheduleSettings.matchupPeriods`. Two of those are false. ESPN's unit 1 runs from
+ * opening day to the SECOND Sunday — 11 days in 2021, 12 in 2026 — and the unit containing
+ * the All-Star break runs 14. Measured against ESPN's own schedule for league 81134470's 2021
+ * season, the inference was wrong for 13 of the 22 matchups that were played, 12 of them with
+ * no overlap at all; and for a league that existed from opening day, where nothing cancels,
+ * every matchup was wrong and the playoff round was two weeks early.
  *
- * THE DERIVATION, and every field in it is stated by the league rather than guessed:
+ * It looked right in testing for the worst possible reason: that league joined on scoring
+ * period 12, which put the anchor a week late, and the +7 happened to cancel the All-Star +7
+ * for every matchup AFTER the break. Both of the spot checks written for it landed in the
+ * cancelling half.
  *
- *   dateOf(n)      = opening day + (n - 1) days
- *   weekOneMonday  = the Monday on or before dateOf(status.firstScoringPeriod)
- *   units          = settings.scheduleSettings.matchupPeriods[status.currentMatchupPeriod]
- *   start          = weekOneMonday + (units[0] - 1) * 7, never before the league's first day
- *   end            = start + (units.length * 7) - 1, never after the league's last day
+ * ── WHAT IT DOES NOW ──────────────────────────────────────────────────────────────────
  *
- * `matchupPeriods` is what makes the playoffs come out right: a regular-season matchup lists
- * one unit and a playoff round lists two, so the span falls out of the league's own map
- * rather than out of a rule about playoffs. Checked against league 81134470's 2021 season,
- * whose matchup 23 lists units [24, 25] and runs 2021-09-20 to 2021-10-03.
+ * It reads. `view=mMatchupScore` returns a `schedule[]` in which each side carries
+ * `pointsByScoringPeriod`, keyed by the scoring periods that matchup accrued over — which is
+ * ESPN stating, rather than this app inferring, which days the matchup covers. The smallest
+ * and largest key across both sides are its first and last day, and `dateOf` turns them into
+ * dates. Verified on that league: matchup 2 → 12..18 → 2021-04-12 to 04-18; matchup 13 →
+ * 89..95 → 06-28 to 07-04; matchup 23 → 173..186 → 09-20 to 10-03.
  *
- * Returns null the moment any part of it is missing, because half a derivation here is a
- * window that looks authoritative and is not the reader's.
+ * A matchup that has not accrued anything yet carries no keys, and that is null rather than a
+ * guess — the caller then falls back to the league's stated length with its Monday assumption
+ * declared, which is a worse answer that says it is one.
  */
 export const espnMatchupDays = (
 	status: Record<string, any> | null | undefined,
-	sched: Record<string, any> | null | undefined,
+	/** `schedule[]` from `view=mMatchupScore`. */
+	schedule: unknown,
 	/** The season's first regular-season game day, ISO. Scoring period 1. */
 	openingDay: string | null
 ): { start: string; end: string; days: number; matchup: number } | null => {
 	if (!openingDay || !/^\d{4}-\d{2}-\d{2}$/.test(openingDay)) return null
-	const first = Number(status?.firstScoringPeriod)
 	const current = Number(status?.currentMatchupPeriod)
-	const final = Number(status?.finalScoringPeriod)
-	if (!Number.isInteger(first) || first < 1) return null
 	if (!Number.isInteger(current) || current < 1) return null
-	const units = (sched?.matchupPeriods as Record<string, unknown> | undefined)?.[String(current)]
-	const list =
-		Array.isArray(units) ? units.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
-	if (!list.length) return null
+	if (!Array.isArray(schedule)) return null
 
-	const dateOf = (n: number): string => plus(openingDay, n - 1)
-	const leagueStart = dateOf(first)
-	const leagueEnd = Number.isInteger(final) && final > 0 ? dateOf(final) : null
-	const weekOne = mondayOnOrBefore(leagueStart)
-	let start = plus(weekOne, (Math.min(...list) - 1) * 7)
-	if (start < leagueStart) start = leagueStart
-	let end = plus(plus(weekOne, (Math.max(...list) - 1) * 7), 6)
-	if (leagueEnd && end > leagueEnd) end = leagueEnd
-	if (end < start) return null
-	const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1
+	const periods: number[] = []
+	for (const game of schedule as Record<string, any>[]) {
+		if (Number(game?.matchupPeriodId) !== current) continue
+		for (const side of [game?.home, game?.away])
+			for (const key of Object.keys(side?.pointsByScoringPeriod ?? {})) {
+				const n = Number(key)
+				if (Number.isInteger(n) && n > 0) periods.push(n)
+			}
+	}
+	if (!periods.length) return null
+
+	const start = plus(openingDay, Math.min(...periods) - 1)
+	const end = plus(openingDay, Math.max(...periods) - 1)
+	const days =
+		Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1
 	return { start, end, days, matchup: current }
 }
 

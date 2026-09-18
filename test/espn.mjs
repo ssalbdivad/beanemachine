@@ -282,38 +282,75 @@ const t = (n, ok, x = "") => {
 /* ── the days his current matchup actually runs over ──────────────────────────────────── */
 {
 	/*
-	   MEASURED AGAINST A REAL LEAGUE'S REAL SEASON.
+	   ESPN STATES THIS, AND THIS FILE USED TO INFER IT.
 	
-	   League 81134470, 2021: `firstScoringPeriod` 12, `finalScoringPeriod` 186,
-	   `currentMatchupPeriod` 23, and `matchupPeriods` ending {"22":[22,23],"23":[24,25]} — all
-	   read off ESPN on 2026-09-18. MLB's own schedule puts the 2021 opener on 2021-04-01, and
-	   period 186 counted from there lands on 2021-10-03, which is the day that season ended.
-	   That agreement is what makes "a scoring period is a calendar day from opening day"
-	   a measurement rather than an assumption.
+	   The inference was: week one is the Monday on or before the league's first scoring
+	   period, every matchup unit is seven days from there. ESPN's unit 1 runs opening day to
+	   the SECOND Sunday — 11 days in 2021, 12 in 2026 — and the unit containing the All-Star
+	   break runs 14. Measured against ESPN's own schedule for league 81134470's 2021 season,
+	   the inference was wrong for 13 of the 22 matchups played, 12 of them with no overlap at
+	   all, and for a league that existed from opening day every single one was wrong.
+	
+	   It passed its own tests for the worst possible reason: that league joined on scoring
+	   period 12, which put the anchor a week late, and the +7 cancelled the All-Star +7 for
+	   every matchup after the break — where both spot checks happened to live.
+	
+	   The ranges below are ESPN's own, read off `pointsByScoringPeriod` on 2026-09-18, and the
+	   dates are `2021-04-01 + (n - 1)`: matchup 2 is 12..18, matchup 13 is 89..95, matchup 20
+	   is 145..151, matchup 23 is 173..186.
 	*/
-	const status = { firstScoringPeriod: 12, currentMatchupPeriod: 23, finalScoringPeriod: 186 }
-	const sched = { matchupPeriods: { 20: [20], 21: [21], 22: [22, 23], 23: [24, 25] } }
-	const playoff = espnMatchupDays(status, sched, "2021-04-01")
-	t("a two-week playoff round comes back as a fortnight, on its own dates",
+	const sched = (mp, first, last) => [
+		{
+			matchupPeriodId: mp,
+			home: { pointsByScoringPeriod: Object.fromEntries(
+				Array.from({ length: last - first + 1 }, (_, i) => [String(first + i), 1])
+			) },
+			away: { pointsByScoringPeriod: { [String(first)]: 1, [String(last)]: 1 } }
+		}
+	]
+	const at = (mp, first, last) =>
+		espnMatchupDays({ currentMatchupPeriod: mp }, sched(mp, first, last), "2021-04-01")
+
+	const early = at(2, 12, 18)
+	t("a matchup before the All-Star break is the week ESPN says it is",
+		early.start === "2021-04-12" && early.end === "2021-04-18" && early.days === 7,
+		JSON.stringify(early))
+	const mid = at(13, 89, 95)
+	t("…and so is one in the middle of the season",
+		mid.start === "2021-06-28" && mid.end === "2021-07-04", JSON.stringify(mid))
+	const late = at(20, 145, 151)
+	t("…and one in August", late.start === "2021-08-23" && late.end === "2021-08-29", JSON.stringify(late))
+	const playoff = at(23, 173, 186)
+	t("and a two-week playoff round is a fortnight, on its own dates",
 		playoff.start === "2021-09-20" && playoff.end === "2021-10-03" && playoff.days === 14,
 		JSON.stringify(playoff))
-	const regular = espnMatchupDays({ ...status, currentMatchupPeriod: 20 }, sched, "2021-04-01")
-	t("and a regular-season matchup is the Monday-to-Sunday week it is",
-		regular.start === "2021-08-23" && regular.end === "2021-08-29" && regular.days === 7,
-		JSON.stringify(regular))
-	/* The last round is clipped to the day the league's own season ends rather than running
-	   into October on a calendar nobody plays. */
-	t("the last round stops where the league's season does",
-		playoff.end === "2021-10-03", playoff.end)
 
-	/* Every part is required, and a missing one is null rather than half a window: a window
-	   that looks authoritative and is not the reader's is worse than no window. */
-	t("no opening day, no window", espnMatchupDays(status, sched, null) === null)
-	t("no status, no window", espnMatchupDays(null, sched, "2021-04-01") === null)
-	t("a matchup this league's map does not name gives nothing",
-		espnMatchupDays({ ...status, currentMatchupPeriod: 99 }, sched, "2021-04-01") === null)
+	/* THE CASE THE INFERENCE GOT WRONG IN EVERY LEAGUE: one that existed from opening day, so
+	   nothing cancels. Read rather than inferred, the answer does not depend on when the league
+	   joined at all — the same schedule gives the same window. */
+	const joinedLater = espnMatchupDays(
+		{ currentMatchupPeriod: 2, firstScoringPeriod: 12 },
+		sched(2, 12, 18),
+		"2021-04-01"
+	)
+	const fromTheStart = espnMatchupDays(
+		{ currentMatchupPeriod: 2, firstScoringPeriod: 1 },
+		sched(2, 12, 18),
+		"2021-04-01"
+	)
+	t("when the league joined does not move the window, because the window is read",
+		JSON.stringify(joinedLater) === JSON.stringify(fromTheStart), JSON.stringify([joinedLater, fromTheStart]))
+
+	/* Every part is required, and a matchup that has accrued nothing yet is null rather than
+	   half a window: a window that looks authoritative and is not the reader's is worse than
+	   the league's stated length with its assumption declared. */
+	t("no opening day, no window", at(2, 12, 18) !== null && espnMatchupDays({ currentMatchupPeriod: 2 }, sched(2, 12, 18), null) === null)
+	t("no status, no window", espnMatchupDays(null, sched(2, 12, 18), "2021-04-01") === null)
+	t("no schedule, no window", espnMatchupDays({ currentMatchupPeriod: 2 }, null, "2021-04-01") === null)
+	t("a matchup that has scored nothing yet is null, not a guess",
+		espnMatchupDays({ currentMatchupPeriod: 9 }, sched(2, 12, 18), "2021-04-01") === null)
 	t("and nonsense for an opening day gives nothing",
-		espnMatchupDays(status, sched, "not a date") === null)
+		espnMatchupDays({ currentMatchupPeriod: 2 }, sched(2, 12, 18), "not a date") === null)
 }
 
 /* ── and the window reaches the league ────────────────────────────────────────────────── */
@@ -328,7 +365,14 @@ const t = (n, ok, x = "") => {
 		rosterSettings: { lineupLocktimeType: "INDIVIDUAL_GAME" }
 	}
 	const status = { firstScoringPeriod: 12, currentMatchupPeriod: 23, finalScoringPeriod: 186 }
-	const got = deriveEspnPeriod(settings, status, "2021-04-01")
+	const schedule = [
+		{
+			matchupPeriodId: 23,
+			home: { pointsByScoringPeriod: { 173: 1, 186: 1 } },
+			away: { pointsByScoringPeriod: { 174: 1, 185: 1 } }
+		}
+	]
+	const got = deriveEspnPeriod(settings, status, schedule, "2021-04-01")
 	t("an imported league carries the window it is actually playing",
 		got.period.days === 14 && got.period.anchor === "2021-09-20", JSON.stringify(got.period))
 	t("…with a start weekday read off that date rather than assumed",
@@ -338,11 +382,14 @@ const t = (n, ok, x = "") => {
 	t("…and warns that this round is longer than the league's usual week",
 		got.needsReview.some(r => /14 days rather than your league's usual 7/.test(r)),
 		JSON.stringify(got.needsReview))
-	t("…in a sentence that says what to do about it",
-		got.needsReview.some(r => /Read your league again/.test(r)), JSON.stringify(got.needsReview))
 
 	/* A REGULAR WEEK SAYS NOTHING EXTRA, because there is nothing to say. */
-	const week = deriveEspnPeriod(settings, { ...status, currentMatchupPeriod: 20 }, "2021-04-01")
+	const week = deriveEspnPeriod(
+		settings,
+		{ ...status, currentMatchupPeriod: 20 },
+		[{ matchupPeriodId: 20, home: { pointsByScoringPeriod: { 145: 1, 151: 1 } } }],
+		"2021-04-01"
+	)
 	t("a regular-season week is seven days and carries no warning",
 		week.period.days === 7 && !week.needsReview.some(r => /rather than your league's usual/.test(r)),
 		JSON.stringify(week.period))
@@ -350,7 +397,7 @@ const t = (n, ok, x = "") => {
 	/* AND A CALLER WITH NEITHER gets exactly what it got before: the league in the abstract,
 	   with the Monday assumption stated. */
 	const abstract = deriveEspnPeriod(settings)
-	t("a caller with no status falls back to the league's usual length",
+	t("a caller with no schedule falls back to the league's usual length",
 		abstract.period.days === 7 && abstract.period.anchor === null, JSON.stringify(abstract.period))
 	t("…and says it is assuming a Monday start, because it is",
 		abstract.needsReview.some(r => /assumes Monday/.test(r)), JSON.stringify(abstract.needsReview))

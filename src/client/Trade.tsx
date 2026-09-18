@@ -684,7 +684,11 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 	 *  it, and there is simply nothing to score it with. The five specific reasons
 	 *  are in `unpriceable` below, where there is room for them. */
 	const unrateable = mine.filter(r => !r.rateable).length
-	const lineup = startingLineup(league, mine, bars)
+	/* The ranked men as well as the bar, so each uncovered seat is priced at — and names — its
+	   OWN free agent. `barMen` is `replacementPlayerBySlot`'s answer and is only a real ranking
+	   when a wire was read; in the estimate regime it holds one man per slot, which is what the
+	   rows below say it is. */
+	const lineup = startingLineup(league, mine, bars, gettable ? barMen : null)
 	/** Who your lineup actually starts. The Verdict already reduces over this to
 	 *  say a departing bench man cost nothing; the deal side says it beforehand,
 	 *  which is when it can change the offer you build. */
@@ -1649,12 +1653,23 @@ const LineupCard = ({
 				    Util spots — a lineup no league would accept. */}
 				<div className="lineup">
 					{lineup.starters.map((s, i) => {
-						const nth = lineup.starters.slice(0, i).filter(x => x.slot === s.slot).length
-						/* The whole list, not just this seat's man, because a seat with nobody
-						   left on it and a seat with nobody free at the slot AT ALL are two
-						   different sentences and only the count can tell them apart. */
+						/*
+						   THE MAN THE SEAT IS PRICED AT, from the seat itself.
+						
+						   This counted the seat's ordinal among ALL seats of its slot — including
+						   the ones the reader's own players fill — and looked that ordinal up in
+						   the ranked list, while the POINTS beside it came from a single bar per
+						   slot. So the name and the number were two different people: measured on
+						   a roster leaving three pitching seats open, the fourth P row printed one
+						   man's name against another man's 36.5.
+						
+						   `startingLineup` now assigns each uncovered seat its own man, in order,
+						   and hands him back on the seat. Name and number come off the same row by
+						   construction, and the estimate regime — which knows one body per slot —
+						   still says so in the hedge below.
+						*/
 						const free = barMen?.get(s.slot)
-						const bar = free?.[nth]
+						const bar = s.free ?? (wireRead ? null : free?.[0])
 						return (
 						<div className={`lineup-row ${SOURCE_CLASS[s.source]}`} key={`${s.slot}-${i}`}>
 							<span className="code">{s.slot}</span>
@@ -1698,27 +1713,25 @@ const LineupCard = ({
 												:	freeness(bar.rosteredPct, cut)
 											: wireRead ?
 												/*
-												 * Measured 2026-09-12 and WRONG when first written, which is the
-												 * reason for the split: this branch said "priced at what the best one
-												 * on it is worth" for every uncovered seat, and pasting a sixty-man
-												 * free-agent list with no relievers in it put that sentence on four
-												 * seats priced at 0.0 — there was no best one. `replacementBySlot`
-												 * sets a slot with nothing free at it to zero rather than dropping
-												 * it, deliberately (see its own note: bare-at-catcher is a different
-												 * and commoner fact than nobody-in-baseball-is-eligible), so the
-												 * card has to be able to say both.
+												 * WHAT THIS BRANCH USED TO SAY, AND WHY IT NO LONGER CAN.
 												 *
-												 * The non-empty case is the engine's arithmetic said plainly: one bar
-												 * per SLOT, applied to every seat of it, so a second seat really is
-												 * priced at the man already counted in the first. That is worth
-												 * saying out loud rather than leaving a reader to assume the list
-												 * had a second body in it.
+												 * It read: "priced at the best free {slot} on your league's list, who
+												 * is already counted in a seat above". That was the engine's
+												 * arithmetic said plainly — one bar per SLOT applied to every seat of
+												 * it, so a second uncovered seat really was priced at the man already
+												 * counted in the first, and the card admitted the double count rather
+												 * than hiding it.
+												 *
+												 * The arithmetic changed. Each uncovered seat now takes the NEXT man
+												 * on the list, and a seat with nobody left for it is a hole rather
+												 * than a second helping of the same body — so a seat that reaches
+												 * this branch with a wire read and no man is a seat whose slot has
+												 * nobody free at it at all, which is the one sentence left to say.
+												 * The old one is quoted here because a double count that stopped
+												 * being admitted would look like a defect that had been hidden.
 												 */
-												free?.length ?
-													`priced at the best free ${s.slot} on your league's list, who is ` +
-													`already counted in a seat above`
-												:	`nobody on your league's free-agent list can play ${s.slot}, so ` +
-													`this seat is worth nothing until somebody can`
+												`nobody on your league's free-agent list can play ${s.slot}, so ` +
+												`this seat is worth nothing until somebody can`
 											:	`priced at what a free ${s.slot} would be worth, with nobody ` +
 												`named for the seat`}
 										</span>

@@ -195,6 +195,23 @@ export interface Start {
 	 *  `empty` means not even a bar is known for the slot, so it really is worth
 	 *  nothing. */
 	source: "roster" | "replacement" | "empty"
+	/**
+	 * THE MAN THIS PARTICULAR SEAT IS PRICED AT, where one is known.
+	 *
+	 * Every empty seat at a slot used to be priced at the SAME body — the best free man there
+	 * — because the bar was one number per slot. A league with three uncovered pitching seats
+	 * therefore counted one free agent three times, in the lineup total and in every trade
+	 * delta read off it, and a man can only be added once.
+	 *
+	 * The card had the ranked list and paired it with that single number by seat index, so it
+	 * printed the second man's NAME beside the best man's POINTS. The name and the number come
+	 * off the same row now: `points` is this man's points, and this man is who the seat is
+	 * priced at.
+	 *
+	 * Null where the caller gave no ranked list — the estimate regime, which knows one body per
+	 * slot and says so — and absent where the seat is filled by the reader's own player.
+	 */
+	free?: Rated | null
 }
 
 export interface Lineup {
@@ -351,7 +368,18 @@ const seat = (startable: Rated[], bar: number[], spots: string[]): Int32Array =>
 export const startingLineup = (
 	league: League,
 	roster: Rated[],
-	replacement: Map<string, number> | null
+	replacement: Map<string, number> | null,
+	/**
+	 * The free men at each slot, best first — `replacementPlayerBySlot`'s own answer.
+	 *
+	 * With it, the k-th uncovered seat at a slot is priced at the k-th man and named after
+	 * him, and a slot whose list runs out before its seats do is a HOLE: the wire really has
+	 * nobody else there, and pricing that seat at the last man again would be counting one
+	 * body twice. Without it, every uncovered seat is priced at the slot's single bar, which
+	 * is what this did for every caller and is the honest answer in the estimate regime, where
+	 * only one body per slot is known at all.
+	 */
+	ranked?: Map<string, Rated[]> | null
 ): Lineup => {
 	const unprojectable = roster.filter(r => !r.rateable)
 	// deterministic: the same roster must produce the same lineup whatever order it
@@ -381,9 +409,32 @@ export const startingLineup = (
 	const taken = new Set(filled.filter(r => r !== null).map(keyOf))
 
 	const holes: string[] = []
+	/** How many seats at each slot have already been covered off the wire, so the next one
+	 *  takes the next man rather than the same one again. */
+	const usedFree = new Map<string, number>()
 	const starters: Start[] = spots.map((slot, index) => {
 		const player = filled[index]
 		if (player) return { slot, player, points: player.points, source: "roster" }
+		const list = ranked?.get(slot)
+		if (list) {
+			const k = usedFree.get(slot) ?? 0
+			usedFree.set(slot, k + 1)
+			const man = list[k]
+			if (man)
+				return {
+					slot,
+					player: null,
+					points: Number(man.points.toFixed(2)),
+					source: "replacement",
+					free: man
+				}
+			/* The list ran out before the seats did. That is a real and sayable fact — the wire
+			   has nobody else who can play here — and it is a different one from "nobody is
+			   eligible at this slot at all", which is what an absent bar means. Both land in
+			   `holes`, and the card's own sentence is written from the count either way. */
+			holes.push(slot)
+			return { slot, player: null, points: 0, source: "empty", free: null }
+		}
 		const bar = replacement?.get(slot)
 		if (bar === undefined) {
 			holes.push(slot)
@@ -523,9 +574,14 @@ export const evaluateTrade = (proposal: TradeProposal): TradeVerdict => {
 
 	const after = [...roster.filter(r => !leaving.has(keyOf(r))), ...incoming]
 	const bars = replacementBySlot(league, pool, teams, proposal.gettable)
+	/* THE RANKED LIST, so a slot with two uncovered seats is priced at two different men. With
+	   one number per slot the same free agent was counted once per seat — in the lineup total
+	   and therefore in every delta this function returns — and a man can only be added once.
+	   Only meaningful when a wire was read: the estimate regime knows one body per slot. */
+	const ranked = proposal.gettable ? replacementPlayerBySlot(league, pool, teams, proposal.gettable) : null
 	const lineups = {
-		before: startingLineup(league, roster, bars),
-		after: startingLineup(league, after, bars)
+		before: startingLineup(league, roster, bars, ranked),
+		after: startingLineup(league, after, bars, ranked)
 	}
 	for (const r of [...lineups.before.unprojectable, ...lineups.after.unprojectable])
 		missing.push(`${r.player.name} has no projection, so he can start nowhere`)
@@ -617,13 +673,33 @@ const explain = (
 	)
 	const priced = opened.map(s => `${s.slot} (${s.points} pts)`).join(" and ")
 	const short = departing - proposal.in.length
+	/*
+	   "OFF THE WIRE" AND "FREELY AVAILABLE" ARE CLAIMS, and this made them whether or not a
+	   wire had been read.
+	
+	   With no free-agent list, the bar is the (teams x seats)-th best player in the whole of
+	   baseball — a SIMULATION of who would be left, which `replacementBySlot`'s own note is
+	   careful to call an estimate and which the lineup card beside this hedges player by
+	   player. On the shipped league the Util bar is a man rostered in 99% of leagues, and this
+	   sentence called him "a freely available Util". The card four inches above said, about
+	   the same seat, "priced at what a free Util would be worth, with nobody named for the
+	   seat" — two sentences about one number, and only one of them was true.
+	*/
 	if (opened.length)
 		parts.push(
-			opened.length > 1
-				? `The spots that open are priced off the wire — ${priced} — because nobody you ` +
-					`still own is worth seating there.`
-				: `The spot that opens is priced at a freely available ${priced}, because nobody ` +
-					`you still own is worth seating there.`
+			proposal.gettable ?
+				opened.length > 1 ?
+					`The spots that open are priced off your league's own free-agent list — ` +
+					`${priced} — because nobody you still own is worth seating there.`
+				:	`The spot that opens is priced at a free ${priced} off your league's own list, ` +
+					`because nobody you still own is worth seating there.`
+			: opened.length > 1 ?
+				`The spots that open — ${priced} — are priced at what a replacement would be ` +
+				`worth, estimated rather than read off your league's list, because nobody you ` +
+				`still own is worth seating there.`
+			:	`The spot that opens is priced at what a replacement ${priced} would be worth, ` +
+				`estimated rather than read off your league's list, because nobody you still ` +
+				`own is worth seating there.`
 		)
 	else if (short > 0)
 		parts.push(

@@ -164,8 +164,16 @@ t("and the spot it opens is covered at the league's replacement level",
 t("the 2-for-1 delta is the arithmetic of the three players and the bar",
 	Math.abs(twoForOne.delta - (incomingOF.points + bars.get("OF") - outA.points - outB.points)) < 0.02,
 	`${twoForOne.delta}`)
+/* THIS REQUIRED THE WORDS "freely available", and those words were a claim this evaluation
+   cannot make: with no free-agent list the bar is the (teams x seats)-th best player in the
+   whole of baseball, an estimate of who would be left rather than a man anybody has checked is
+   free. On the shipped league that man is rostered in 99% of leagues. What must still be said
+   — and is — is WHERE the missing body's points came from, and now how sure that is. */
 t("the explanation says where the missing body came from",
-	/freely available/.test(twoForOne.explanation), twoForOne.explanation)
+	/priced at what a replacement/.test(twoForOne.explanation), twoForOne.explanation)
+t("…and says the price is an estimate rather than a man off his league's list",
+	/estimated rather than read off your league's list/.test(twoForOne.explanation),
+	twoForOne.explanation)
 console.log(`      → ${twoForOne.explanation}`)
 
 // Bench depth counts for exactly as much as it changes what can be started: with a
@@ -210,7 +218,7 @@ t("and it does not leave you a body short, because nobody left",
 const noArms = draft(spots.filter(s => !["SP", "RP", "P"].includes(s)))
 const armless = evaluate(noArms, [noArms.find(r => r.slots[0] === "C")], [])
 t("the spot named as opening is the one that actually opened",
-	/freely available C \(/.test(armless.explanation) && !/available P /.test(armless.explanation),
+	/replacement C \(/.test(armless.explanation) && !/ P \(/.test(armless.explanation),
 	armless.explanation)
 t("an empty roster is holes, not zeroes, when no bar exists",
 	startingLineup(league, [], null).starters.every(s => s.source === "empty") &&
@@ -425,6 +433,60 @@ if (weakC && strongC) {
   const bare = replacementBySlot(league, pool, teams, () => false)
   t("a slot with nothing free is priced at zero rather than reported as a hole",
     bare.get("OF") === 0 && bare.has("C"), JSON.stringify([...bare]).slice(0, 80))
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * ONE FREE AGENT CANNOT FILL THREE SEATS.
+ *
+ * The replacement bar is one number per SLOT — the best free man there — and every uncovered
+ * seat at that slot was priced at it. A roster leaving three pitching seats open therefore
+ * counted one free agent three times, in the lineup total and in every trade delta read off
+ * it, and a man can only be added once.
+ *
+ * With the ranked list, the k-th uncovered seat takes the k-th man, and a seat with nobody
+ * left for it is a hole rather than a second helping of the same body — which is a true and
+ * sayable fact: the wire really has nobody else who can play there.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
+  /* Three men who can only play P, at three different prices, and a slot of four seats. */
+  const rate = (id, name, points) => ({
+    player: { id, name, group: "pitching" },
+    points,
+    rateable: true,
+    slots: ["P", "SP"],
+    bscore: points,
+    rosteredPct: 3
+  })
+  const free = [rate(901, "Best Arm", 40), rate(902, "Next Arm", 30), rate(903, "Third Arm", 20)]
+  const names = new Set(free.map(f => f.player.name))
+  const gettable = r => names.has(r.player.name)
+  const shape = { ...league, roster: { ...league.roster, slots: { P: 4 } } }
+
+  const bars = replacementBySlot(shape, free, 10, gettable)
+  const ranked = replacementPlayerBySlot(shape, free, 10, gettable)
+  const flat = startingLineup(shape, [], bars)
+  const each = startingLineup(shape, [], bars, ranked)
+
+  t("priced one-per-slot, four empty seats are four helpings of the same man",
+    flat.points === 160, String(flat.points))
+  t("priced one-per-seat, they are the three men who exist and nothing for the fourth",
+    each.points === 90, String(each.points))
+  t("…and each seat names the man it is priced at, in order",
+    each.starters.slice(0, 3).map(s => s.free?.player.name).join(",") === "Best Arm,Next Arm,Third Arm",
+    JSON.stringify(each.starters.map(s => s.free?.player.name ?? null)))
+  t("…and the points on a seat are that man's points",
+    each.starters.slice(0, 3).every(s => s.points === s.free?.points),
+    JSON.stringify(each.starters.map(s => [s.points, s.free?.points])))
+  t("the seat the list cannot reach is a hole, not another copy of the last man",
+    each.starters[3].source === "empty" && each.starters[3].points === 0 && each.holes.includes("P"),
+    JSON.stringify(each.starters[3]))
+  /* WITHOUT A WIRE nothing changes: the estimate regime knows one body per slot and says so,
+     and every caller that passes no ranked list gets exactly what it always got. */
+  t("and a caller with no ranked list is unchanged",
+    JSON.stringify(startingLineup(shape, [], bars).points) === JSON.stringify(flat.points))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

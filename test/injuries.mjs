@@ -232,5 +232,45 @@ t("the URL pins sportId=1, without which the rows are minor-league noise",
     error !== null && Date.now() - t0 < 3000, String(error))
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE DAY THE PATCH STOPS REACHING THE CAPTURE.
+ *
+ * The injured list on the card is the capture's, patched with every move MLB has reported
+ * since — and the patch looks back a fortnight at most, measured from NOW. Once the capture
+ * is older than that, the window starts AFTER it: every placement and return in between is
+ * invisible, and the capture's own entry stays authoritative for men who have since moved.
+ * That is the failure this file's own header is written against — starting a man the box
+ * score already contradicted.
+ *
+ * It arrives on a DATE with no change to any code. The shipped capture is 2026-09-08T19:17Z
+ * and the fortnight runs out on 2026-09-21, so this is asserted against a clock rather than
+ * waited for.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const { uncoveredDaysOf } = await import("../src/client/useInjuries.ts")
+  const captured = "2026-09-08T19:17:37Z"
+  const at = d => Date.parse(`${d}T20:00:00Z`)
+  t("while the window still reaches the capture, there is nothing to say",
+    uncoveredDaysOf(captured, at("2026-09-18")) === 0 &&
+      uncoveredDaysOf(captured, at("2026-09-21")) === 0,
+    `${uncoveredDaysOf(captured, at("2026-09-18"))} / ${uncoveredDaysOf(captured, at("2026-09-21"))}`)
+  t("the day after the fortnight runs out, one day is uncovered",
+    uncoveredDaysOf(captured, at("2026-09-22")) === 1, String(uncoveredDaysOf(captured, at("2026-09-22"))))
+  t("and it grows a day at a time from there",
+    uncoveredDaysOf(captured, at("2026-09-25")) === 4 &&
+      uncoveredDaysOf(captured, at("2026-10-08")) === 17,
+    `${uncoveredDaysOf(captured, at("2026-09-25"))} / ${uncoveredDaysOf(captured, at("2026-10-08"))}`)
+  /* A few hours past the boundary is not a day of blindness, and a capture with no timestamp
+     at all cannot be measured against — both are zero, which prints nothing. */
+  t("a few hours over the line is not reported as a day",
+    uncoveredDaysOf(captured, Date.parse("2026-09-22T01:00:00Z")) === 0,
+    String(uncoveredDaysOf(captured, Date.parse("2026-09-22T01:00:00Z"))))
+  t("and a capture with no timestamp says nothing rather than something",
+    uncoveredDaysOf(undefined, at("2026-10-08")) === 0 &&
+      uncoveredDaysOf("not a date", at("2026-10-08")) === 0)
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

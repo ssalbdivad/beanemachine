@@ -119,7 +119,11 @@ export const Decide = ({
 	 * the capture as it stands", which is the honest fallback rather than a blank.
 	 */
 	const captured = useMemo(() => (snapshot ? hydrate(snapshot).injuries : null), [snapshot])
-	const { merged: liveInjuries, error: injuryError } = useInjuries(captured, snapshot?.capturedAt)
+	const {
+		merged: liveInjuries,
+		error: injuryError,
+		uncoveredDays: injuryGap
+	} = useInjuries(captured, snapshot?.capturedAt)
 	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
 
 	/**
@@ -1875,6 +1879,27 @@ export const Decide = ({
 									"lineups are"
 								:	"injured list is"}{" "}
 								from the capture, {freshness(snapshot?.capturedAt, Date.now()).label}
+							</span>
+						)}
+						{/*
+						  A GAP THE LIVE READ CANNOT REACH, which arrives on a date rather than on a
+						  change to any code.
+						
+						  The injured list here is the capture's, patched with every move MLB has
+						  reported since — and that patch looks back a fortnight at most. Once the
+						  capture is older than that, the patch starts AFTER it, and every placement
+						  and return in between is invisible while the capture's own entry stays
+						  authoritative. That is the failure this card is most written against:
+						  starting a man the box score already contradicted.
+						
+						  Said in days, because days is what he can weigh, and said only while it is
+						  true — the ordinary case is that the two overlap and there is nothing here.
+						*/}
+						{!injuryError && injuryGap > 0 && (
+							<span className="decide-stale">
+								{injuryGap} {injuryGap === 1 ? "day" : "days"} of injury news between
+								this capture and what MLB still reports could not be read, so a man
+								placed on the list in that window may still look available
 							</span>
 						)}
 					</h3>

@@ -25,10 +25,49 @@ export interface InjuryState {
 	moves: Moves | null
 	error: string | null
 	loading: boolean
+	/**
+	 * DAYS BETWEEN THE CAPTURE AND THE START OF THE WINDOW, when the window no longer reaches
+	 * back to it. Zero — the ordinary case — means the two overlap and the merge is complete.
+	 *
+	 * The lookback is capped at a fortnight, and the cap is measured from NOW: when a capture
+	 * is older than that, the transactions window begins AFTER the capture and every move in
+	 * between is invisible. The capture's own injury entries then stay authoritative for men
+	 * who have since moved, which is the exact failure this file's header is written against —
+	 * recommending a man the box score already contradicted.
+	 *
+	 * It arrives on a DATE with no code change: the shipped capture is 2026-09-08 and the
+	 * fortnight runs out on 2026-09-21. The header already said the page should say so; this
+	 * is the number it says it with.
+	 */
+	uncoveredDays: number
 }
 
 const DAY = 86_400_000
 const MAX_LOOKBACK_DAYS = 14
+
+/**
+ * HOW MANY DAYS OF MOVES NEITHER SOURCE COVERS.
+ *
+ * The window starts a day before the capture so a move made on the morning of the capture is
+ * picked up, and it is floored at a fortnight ago because a transactions feed cannot fix a
+ * capture older than that. When the floor overtakes the capture, the two stop meeting: the
+ * patch begins after the capture ends, and every placement and return in the gap is invisible
+ * while the capture's own entry stays authoritative.
+ *
+ * Rounded DOWN, so a few hours of overlap is never reported as a day of blindness, and zero
+ * whenever the window still bridges — which is the ordinary case and the one that must print
+ * nothing at all.
+ *
+ * Exported and pure because it arrives on a DATE rather than on a change to any code — the
+ * shipped capture is 2026-09-08 and the fortnight runs out on 2026-09-21 — and a thing that
+ * changes by itself has to be assertable without waiting for it.
+ */
+export const uncoveredDaysOf = (capturedAt: string | undefined, now: number): number => {
+	const from = capturedAt ? Date.parse(capturedAt) : NaN
+	if (!Number.isFinite(from)) return 0
+	const floor = now - MAX_LOOKBACK_DAYS * DAY
+	return floor > from - DAY ? Math.max(0, Math.floor((floor - (from - DAY)) / DAY)) : 0
+}
 
 /**
  * One request per window per page load, however many components ask.
@@ -60,18 +99,20 @@ export const useInjuries = (
 		merged: null,
 		moves: null,
 		error: null,
-		loading: true
+		loading: true,
+		uncoveredDays: 0
 	})
 
 	// The window is derived from the capture's own timestamp, so a fresh snapshot
 	// asks for a day and a stale one asks for a fortnight. Keyed on the DATE rather
 	// than the instant so this does not re-fire on every render.
+	const from = capturedAt ? Date.parse(capturedAt) : NaN
+	const floor = Date.now() - MAX_LOOKBACK_DAYS * DAY
 	const since = (() => {
-		const from = capturedAt ? Date.parse(capturedAt) : NaN
-		const floor = Date.now() - MAX_LOOKBACK_DAYS * DAY
 		const start = Number.isFinite(from) ? Math.max(from - DAY, floor) : floor
 		return localDate(new Date(start))
 	})()
+	const uncoveredDays = uncoveredDaysOf(capturedAt, Date.now())
 	const until = localDate(new Date(Date.now() + DAY))
 
 	useEffect(() => {
@@ -83,7 +124,8 @@ export const useInjuries = (
 				merged: error ? null : withMoves(captured, moves),
 				moves: error ? null : moves,
 				error,
-				loading: false
+				loading: false,
+				uncoveredDays
 			})
 		})
 		return () => {
@@ -93,7 +135,7 @@ export const useInjuries = (
 		// the request depends on the WINDOW, and the merge is done against whatever
 		// map was current when the answer arrived.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [since, until, !!captured])
+	}, [since, until, !!captured, uncoveredDays])
 
 	return state
 }

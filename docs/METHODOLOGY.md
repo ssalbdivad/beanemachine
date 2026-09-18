@@ -285,8 +285,16 @@ agreed with the structure: 7 days won for hitters, 21 for pitchers, and no
 single window won for both.
 
 This is also the single largest source of accuracy in the whole model — worth
-roughly 20% relative Spearman over the naive baseline, more than every other idea
-combined.
+**17.7% relative Spearman on hitters and 13.9% on pitchers** over the naive
+baseline, more than every other idea combined.
+
+It said "roughly 20%" here until 2026-09-18, and §6.5 of this same document has
+carried the measured pair since 2026-09-11. `model.json`'s own retraction names the
+error: 20 "rounds the hitting figure up and overstates the pitching one by 44%".
+The correction reached `model.json` and `src/engine/project.ts` and missed the two
+places in the one document a reader is actually pointed at — which is the worst
+place for it to have survived, and is why the pair is now written out rather than
+rounded into one number.
 
 `model.json` used to state that twice. Beside `blend` it carried
 `recentForm.volumeWeight: 0.75`, annotated with exactly the claim above — and it
@@ -1624,7 +1632,7 @@ Each was implemented in full, measured, and then either shipped or left off.
 
 | idea | verdict | evidence |
 |---|---|---|
-| playing-time blend of recent vs season | **shipped** | largest single gain, ~20% relative Spearman |
+| playing-time blend of recent vs season | **shipped** | largest single gain, +17.7% hitters / +13.9% pitchers relative Spearman (§6.5; "~20%" until 2026-09-18) |
 | value over replacement | **shipped** | without it the model loses 80 of 111 weeks to itself, z -4.65 |
 | multi-window recency (last series counts double) | **shipped** | 40/50 hitting folds |
 | recent-rate blend, pitchers | **shipped** at 0.15 | 41/50 folds |

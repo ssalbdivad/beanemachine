@@ -735,12 +735,16 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 * committed capture's own wire, the number of men who out-project the whole-pool bar is
 		 * 0 to 2 per slot (mean 0.7). In a simulated ten-team league over 111 weeks of
 		 * 2021-2025 the weekly median is 0 to 5 (mean 1.8). This league's own `count` is 1.8
-		 * seats per slot. Today's line walks 10 to 40.
+		 * seats per slot. The line this replaced walked 10 to 40 — `teams x count` — and that
+		 * sentence stood here as "today's line" for a day after the line below stopped being it.
 		 *
-		 * AND IT IS WORTH POINTS, which is the part that decides it. Against the shipped rule,
-		 * over 20 configurations of field composition and move budget, each 111 paired weeks:
-		 * 19 of 20 favour walking `count`, mean +28.0 points a week, significant in 13, and it
-		 * wins 78 of 100 season-comparisons. At the shipped two moves a week against a mixed
+		 * AND IT IS WORTH POINTS, which is the part that decides it. Against the rule this
+		 * REPLACED — `teams x count` walked down the wire — over 20 configurations of field
+		 * composition and move budget, each 111 paired weeks: 19 of 20 favour walking `count`,
+		 * mean +28.0 points a week, significant in 13, and it wins 78 of 100
+		 * season-comparisons. (The `own - depth` row of grid.txt. "Against the shipped rule"
+		 * stood here while `count` WAS the shipped rule, which made the sentence claim the
+		 * engine had been measured against itself.) At the shipped two moves a week against a mixed
 		 * field it is 62W-44L, +21.1/wk, z +1.75, p 0.080 — suggestive there, and significant
 		 * at three moves (79W-26L, +58.7/wk, p below the resolution the run prints — its own
 		 * line in data/results/wire-depth/grid.txt reads `p0.000`, and quoting a rounder
@@ -748,9 +752,13 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		 * question is inside the noise; about 23 decisions a season cannot separate any of it.
 		 *
 		 * THE OTHER CANDIDATE WAS MEASURED AND REJECTED. "A known wire means replacement is its
-		 * BEST man" loses to the shipped rule in 16 of 20 (mean -8.7/wk) and degenerates: under
-		 * it no man on the wire can score above zero, so "who should I add" becomes a tie at
-		 * 0.00 broken arbitrarily — six men tied on the committed capture.
+		 * BEST man" loses to the rule that ships here in 20 of 20 configurations, mean
+		 * -36.7 points a week, significant in 13 of them and winning 15 of 100 seasons — the
+		 * `best - own` row. The figures quoted here before were `best - depth`, its margin
+		 * against the RETIRED rule (4 positive of 20, mean -8.7/wk), which understated the
+		 * rejection fourfold and measured it against a line the engine no longer walks. It also
+		 * degenerates: under it no man on the wire can score above zero, so "who should I add"
+		 * becomes a tie at 0.00 broken arbitrarily — six men tied on the committed capture.
 		 *
 		 * BOTH FALLBACK POOLS KEEP THE OLD DEPTH, and that is deliberate rather than timid: a
 		 * slot the sweep never reached, and a slot whose wire came back empty, are drawn from
@@ -968,14 +976,20 @@ export const withMarketEdge = (
  * the 611 men it prices at or below this league's 35% cut — and passed as
  * `available`:
  *
- *  · THE REPLACEMENT BAR BARELY MOVES. Seven of the ten startable slots land on the
- *    same number to the cent. The three that move are all on the pitching side and
- *    all move down by about a point over a fortnight: SP 40.02 → 39.74, RP
- *    37.97 → 37.00, P 36.98 → 35.34.
- *  · THE BOARD BARELY MOVES. The top 20 is the same 20 men both ways; the first
- *    reordering is at row 3, where a 1.64-point move at P lifts Chris Sale past Pete
- *    Crow-Armstrong. The list of men you could add is the same 540 names in the same
- *    order down to row 6.
+ *  · THE FIGURES BELOW WERE TAKEN AT THE OLD DEPTH, and are restated rather than
+ *    left standing. They read: seven of ten bars identical to the cent, three moving
+ *    by about a point, the top 20 the same 20 men, first reordering at row 3 on a
+ *    1.64-point move. All four were measured on 2026-09-17, hours before the
+ *    replacement depth on a real wire changed from `teams x count` to `count` — see
+ *    the docblock on that line — and a shallower bar on the real list moves the two
+ *    answers further apart.
+ *  · WHAT IT IS AT THE SHIPPED DEPTH: most bars still land close, the largest move is
+ *    7.60, and the top 20 overlaps 16 of 20. Those are the figures test/engine.mjs
+ *    asserts, which is what keeps them from going stale again — the assertions are the
+ *    measurement, and running the suite re-derives them.
+ *  · WHICH IS NOT THE ESTIMATE GETTING WORSE. It is the real list finally being read
+ *    at the right depth, and it makes the estimate matter MORE than this block used to
+ *    say: the bar it stands in for is further from the truth than 1.64 points.
  *  · WHAT DOES MOVE IS WHO IS SHOWN. The estimate calls 1,010 of 1,248 rateable men
  *    gettable; the real list calls 540. All 470 of the difference are men Yahoo never
  *    priced at all, which the estimate treats as probably free — see

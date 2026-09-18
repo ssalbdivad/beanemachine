@@ -304,7 +304,15 @@ export const projectedPointsStrategy = makeBscoreStrategy("projected-points")
 /**
  * bscore as the app actually defines it: points above the replacement at the
  * player's slot. Ranking a waiver decision by raw points ignores the thing the
- * metric exists for, and over 68 weeks it costs 269 points and six weekly wins.
+ * metric exists for.
+ *
+ * It used to say "over 68 weeks it costs 269 points and six weekly wins", and no
+ * run in `data/results/` has a 68-week corpus — every stored season set is 111
+ * paired weeks over 2021-2025 — so that figure cannot be re-derived from anything
+ * this repo keeps. docs/METHODOLOGY.md says so of the same number, and two other
+ * copies of it have already been retired for the same reason. `projectedPointsStrategy`
+ * above is the control that answers the question, and re-running it is how the cost
+ * gets a figure again.
  */
 export const bscoreStrategy: Strategy = {
 	name: "bscore",

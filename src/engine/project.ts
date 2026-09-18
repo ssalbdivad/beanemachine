@@ -90,11 +90,25 @@ export interface ProjectOptions {
 	/**
 	 * Weight on the Statcast expected-stats adjustment.
 	 *
-	 * Defaults to 0, because a leak-free backtest over four folds said so. At a
-	 * 14-day horizon the xwOBA blend was consistently neutral-to-slightly-negative
-	 * against a naive baseline, and every parameter sweep ranked qualityWeight 0
-	 * first. The mechanism is still exposed and the numbers are still shown in the
-	 * UI — but it does not silently move a recommendation on evidence it failed.
+	 * Defaults to 0, and the reason written here was the WRONG ONE — retracted in
+	 * docs/METHODOLOGY.md §7.1 and still quoted in this docblock until 2026-09-18.
+	 *
+	 * What it said: "a leak-free backtest over four folds said so … every parameter
+	 * sweep ranked qualityWeight 0 first". Those sweeps read their expected stats
+	 * from Savant's `custom` leaderboard with `start_dt`/`end_dt`, which that
+	 * endpoint accepts and ignores, so every fold held a FINISHED-SEASON xwOBA
+	 * including the window being predicted. METHODOLOGY's own word for those runs is
+	 * "void", and this docblock was calling the same corpus leak-free — the one
+	 * adjective the retraction exists to deny.
+	 *
+	 * The live reason is the question re-asked on point-in-time data: 111 paired
+	 * weeks, six formulations, every one of them negative on points, the least-bad
+	 * tying 49 of them, and four different winners across five seasons. Stored under
+	 * data/results/ and re-derivable with `node src/backtest/verdict.ts
+	 * --statcast=point-in-time`.
+	 *
+	 * The mechanism is still exposed and the numbers are still shown in the UI — but
+	 * it does not silently move a recommendation on evidence it failed.
 	 */
 	qualityWeight?: number
 	/** Volume per team game over the recent window, if known. */
@@ -269,11 +283,19 @@ export const SHORT_WINDOW_WEIGHTS: Record<"hitting" | "pitching", Record<number,
  * How far the blended recent estimate pulls the season-long rate.
  *
  * 0.5, decided by playing whole seasons rather than by ranking correlation. On a
- * 14-day ranking 0.75 measured about 0.003 higher — inside the noise band — but
- * across 2023-2025 of actual weekly roster decisions 0.5 is worth roughly 1,500
- * points and lifts the weekly win rate against a season-to-date manager from
- * 41/68 to 48/68. Heavy recency catches role changes, which a correlation
- * rewards; it also chases week-to-week noise, which a season punishes.
+ * 14-day ranking 0.75 measured about 0.003 higher — inside the noise band — and on
+ * whole seasons of actual weekly roster decisions 0.5 won. Heavy recency catches
+ * role changes, which a correlation rewards; it also chases week-to-week noise,
+ * which a season punishes.
+ *
+ * WHAT THIS USED TO QUOTE, and why it no longer does: "across 2023-2025 … roughly
+ * 1,500 points … from 41/68 to 48/68". No run in `data/results/` has a 68-week
+ * corpus — every stored season set is 111 paired weeks over 2021-2025 — so that
+ * figure cannot be re-derived from anything this repo keeps, which is this
+ * project's own test for whether a number may be stated. docs/METHODOLOGY.md says
+ * the same of it in so many words, and `movesAllowed` in src/auto/plan.ts deleted
+ * its own copy of the same 68-week claim for the same reason. The DECISION stands;
+ * the unverifiable arithmetic behind it does not get to stand with it.
  */
 export const RECENT_BLEND_WEIGHT = MODEL.recentForm.blend
 

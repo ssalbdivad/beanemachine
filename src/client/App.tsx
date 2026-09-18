@@ -158,6 +158,9 @@ export const App = () => {
 	 * from the toolbar opens the sheet immediately, because that reader asked for it.
 	 */
 	const [setupOpen, setSetupOpen] = useState(false)
+	/** Set when another screen asked for the install walkthrough, cleared when the sheet
+	 *  closes so the next press opens it again rather than being swallowed. */
+	const [connectNow, setConnectNow] = useState(false)
 	/**
 	 * BACK GOES BACK, and this is the shape that works.
 	 *
@@ -226,7 +229,13 @@ export const App = () => {
 				}
 			}
 			if (next.view !== undefined) setView(next.view)
-			if (next.sheet !== undefined) setSetupOpen(next.sheet)
+			if (next.sheet !== undefined) {
+				setSetupOpen(next.sheet)
+				/* Cleared when the sheet closes, so pressing "Set that up" again opens the
+				   walkthrough again rather than being swallowed by a flag still set from
+				   last time. */
+				if (!next.sheet) setConnectNow(false)
+			}
 			try {
 				/* The URL carries the SCREEN and not the sheet. A sheet is a thing a reader
 				   opened over the page he is on, not a place — sharing "the setup sheet on
@@ -1238,6 +1247,13 @@ export const App = () => {
 							leagueKey={key}
 							error={snapshotError}
 							say={show}
+							/* The walkthrough lives in the setup sheet; this opens the sheet on it
+							   rather than copying it onto a second screen. */
+							onConnect={() => {
+								setConnectNow(true)
+								setOnboarding(true)
+								go({ sheet: true })
+							}}
 						/>
 					</div>
 					{league && key ?
@@ -1387,6 +1403,7 @@ export const App = () => {
 					}
 				>
 <Onboard
+					openConnect={connectNow}
 					snapshot={snapshot}
 					leagueKey={key}
 					league={league ?? null}

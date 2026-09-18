@@ -7,6 +7,15 @@ import { readFileSync } from "node:fs"
 // a delta that does not equal after minus before is the one failure that would
 // make every recommendation on the page a lie.
 import { chromium, firefox } from "playwright-core"
+
+/** The paste box moved behind a fold on 2026-09-18: the browser reader leads that screen now
+ *  and the manual routes are the fallback under it. Playwright cannot fill a control inside a
+ *  closed `<details>`, so every caller opens it first — the assertions below are unchanged in
+ *  what they claim, only in what they have to press to reach it. */
+const openPasteFold = async pg => {
+	const fold = pg.locator("details.paste-team-fold")
+	if (await fold.count()) await fold.evaluate(d => { d.open = true })
+}
 /**
  * :5173 was the default here, and it is the one port on this machine that must never
  * be tested against: another project's dev server owns it. A bare `node test/trade-ui.mjs`
@@ -813,6 +822,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		 * every mention of Ctrl sits inside a clause saying "on a computer" — because either
 		 * one alone still passes on the version this replaced.
 		 */
+		await openPasteFold(page)
 		const steps = await page.$$eval(".paste-how li", n =>
 			n.map(e => e.innerText.replace(/\s+/g, " ").trim())
 		)
@@ -853,6 +863,8 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 				const pull = document.querySelector(".pull-roster")
 				return !pull || !!(paste.compareDocumentPosition(pull) & Node.DOCUMENT_POSITION_FOLLOWING)
 			}), "the fragile route is listed first")
+
+		await openPasteFold(page)
 
 		await page.fill("[data-ctl=paste-roster]", text)
 		await page.click(".paste-roster button")
@@ -903,6 +915,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			}), "nothing reached the pool store")
 
 		// nonsense in, nothing out — and a sentence rather than a silent no-op
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", "Standings Scores Sign in Terms Privacy")
 		await page.click(".paste-roster button")
 		await page.waitForTimeout(600)
@@ -949,7 +962,9 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
 	await page.waitForSelector(".views button", { timeout: 30000 })
 	if (await toScreen(page, SCREEN.setup)) {
+		await openPasteFold(page)
 		await page.waitForSelector("[data-ctl=paste-roster]", { timeout: 30000 })
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", text)
 		await page.click(".paste-roster button:text-is('Read that')")
 		await page.waitForSelector(".lineup-total", { timeout: 15000 })
@@ -1126,6 +1141,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	await page.waitForSelector(".views button", { timeout: 30000 })
 	if (await toScreen(page, SCREEN.setup)) {
 		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", withSeats)
 		await page.click(".paste-roster button")
 		await page.waitForSelector(".paste-note", { timeout: 15000 })
@@ -1135,6 +1151,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 
 		// the same names again with no slot column — which is what typing four names
 		// into this box gives you, and the box says to do exactly that
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", bats.map(x => x.name).join("\n"))
 		await page.click(".paste-roster button")
 		await page.waitForTimeout(600)
@@ -1143,6 +1160,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			reread.roster === bats.length && reread.seats === 0, JSON.stringify(reread))
 
 		// and put them back, so Clear team is tested against a team that HAS seats
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", withSeats)
 		await page.click(".paste-roster button")
 		await page.waitForTimeout(600)
@@ -1203,6 +1221,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			.filter(x => x.group === "hitting")
 			.sort((a, b) => (b.stats?.plateAppearances ?? 0) - (a.stats?.plateAppearances ?? 0))
 			.slice(0, 6)
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", bats.map(x => `${x.name} ${x.team ?? ""}`).join("\n"))
 		await page.click(".paste-roster button")
 		await page.waitForSelector(".paste-note", { timeout: 15000 })
@@ -1284,6 +1303,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	await page.waitForSelector(".views button", { timeout: 30000 })
 	if (await toScreen(page, SCREEN.setup)) {
 		await page.waitForSelector(".paste-roster", { timeout: 30000 })
+		await openPasteFold(page)
 		await page.fill("[data-ctl=paste-roster]", text)
 		await page.click(".paste-roster button")
 		await page.waitForSelector(".paste-note", { timeout: 15000 })

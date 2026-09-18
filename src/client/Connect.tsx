@@ -286,11 +286,7 @@ export const Connect = ({
 			<div className="connect">
 				<h2>On a computer, it can read your Yahoo league</h2>
 				<p className="sub">
-					{browser === "safari" ?
-						"Not in this browser yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."
-					: browser === "firefox-android" ?
-						"Firefox on a phone can only add it from Mozilla’s add-ons site, and it is not there yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."
-					:	"Phones don’t take the reader yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."}
+					{"In Chrome or Firefox on a computer, it reads your league off Yahoo for you. Here, typing your team in takes about a minute."}
 				</p>
 				<p className="onboard-go">
 					<button type="button" className="primary" onClick={onBack}>
@@ -325,10 +321,7 @@ export const Connect = ({
 				/* SAID FIRST, because it changes what every step below is. He is about to be asked
 				   to do something more fiddly than pressing Add, and being told why is the
 				   difference between a walkthrough and a runaround. */
-				<p className="connect-note">
-					It is not in the {firefoxish ? "Firefox add-ons site" : "Chrome Web Store"} yet, so
-					it comes from here instead. Four steps, about a minute.
-				</p>
+				<p className="connect-note">Four steps, about a minute.</p>
 			)}
 			<ol className="steps">
 				{!IN_STORE && download ?
@@ -340,7 +333,9 @@ export const Connect = ({
 								    under it told a Firefox reader not to — two instructions, one line
 								    apart, in opposite directions. Firefox takes the zip as it is. */}
 								<p className="step-say">
-									{firefoxish ? "Download it." : "Download it, then unzip the file."}
+									{firefoxish ?
+										"Press this. Your browser saves a file."
+									:	"Press this, then open the file it saves."}
 								</p>
 								<p>
 									<a className="chip-btn" href={download} download>
@@ -349,12 +344,16 @@ export const Connect = ({
 								</p>
 								<p className="step-aside">
 									{firefoxish ?
-										"Firefox takes the zip as it is — nothing to unzip."
+										"Leave it where it lands — usually your Downloads. You do not need to open it."
 									:	/* "Double-click and it becomes a folder" is a Mac sentence. Windows
 									     opens a zip as a window you can look into and Load unpacked will
 									     not take it, so the instruction has to be the one that works on
-									     both: get a real folder out of it, however this machine does that. */
-										"Unzip it — on a Mac, double-click it; on Windows, right-click and Extract All. You want the folder it produces, not the zip."}
+									     both: get a real folder out of it, however this machine does that.
+									
+									     And it says where the file went, because "open the file it saves"
+									     is an instruction a reader cannot follow if he does not know where
+									     to look, which is the commonest place to lose somebody. */
+										"It lands in your Downloads. On a Mac, double-click it and a folder appears beside it. On Windows, right-click it, choose Extract All, then Extract. You want that folder in the next steps — not the file you downloaded."}
 								</p>
 							</div>
 						</li>
@@ -367,7 +366,8 @@ export const Connect = ({
 								    browser's settings. He would come back to a page that had never seen
 								    the install and a walkthrough still asking him to do it. */}
 								<p className="step-say">
-									Open a new tab, type this in the address bar and press enter.
+									Open a new tab and type this where the web address goes, then press
+									enter.
 								</p>
 								{/* A browser will not let a page link to its own settings, so this is
 								    text he copies rather than a button he presses — and it says so,
@@ -384,8 +384,8 @@ export const Connect = ({
 								</span>
 								<p className="step-aside">
 									{firefoxish ?
-										"Nothing here can open that page for you — browsers only let you type it."
-									:	"Then turn on Developer mode, the switch at the top right."}
+										""
+									:	"Then turn on the switch at the top right labelled Developer mode. Three buttons appear."}
 								</p>
 							</div>
 						</li>
@@ -393,8 +393,9 @@ export const Connect = ({
 							<span className="step-n">3</span>
 							<div className="step-body">
 								<p className="step-say">
-									Press <b>{firefoxish ? "Load Temporary Add-on" : "Load unpacked"}</b> and choose
-									{firefoxish ? " the file you downloaded" : " the folder you unzipped"}.
+									Press <b>{firefoxish ? "Load Temporary Add-on" : "Load unpacked"}</b>, then
+									choose {firefoxish ? "the file you just downloaded" : "the folder from step 1"}
+									{" "}and press {firefoxish ? "Open" : "Select"}.
 								</p>
 								<span className="step-point">
 									<Arrow label={`pointing at the words ${firefoxish ? "Load Temporary Add-on" : "Load unpacked"}`} />
@@ -402,12 +403,17 @@ export const Connect = ({
 										{firefoxish ? "Load Temporary Add-on…" : "Load unpacked"}
 									</span>
 								</span>
+								<p className="step-aside">
+									{firefoxish ?
+										"It appears in the list on that page straight away."
+									:	"It appears in the list with its name and a little robot. If your browser asks whether to keep it, say yes."}
+								</p>
 								{firefoxish && (
 									/* NOT A FOOTNOTE. A temporary add-on is gone when Firefox closes, and a
 									   reader who finds it missing tomorrow will think it broke. */
 									<p className="step-aside step-warn">
-										Firefox drops it when you quit, so it has to be loaded again next time.
-										On Chrome it stays.
+										Firefox forgets it when you quit, so you would do this again next time.
+										Chrome keeps it for good — worth using Chrome for this if you have it.
 									</p>
 								)}
 							</div>
@@ -415,7 +421,10 @@ export const Connect = ({
 						<li className="step">
 							<span className="step-n">4</span>
 							<div className="step-body">
-								<p className="step-say">Open your Yahoo team once, then come back here.</p>
+								<p className="step-say">
+									Open your Yahoo team in a tab and leave it open, then come back to this
+									one.
+								</p>
 								<p>
 									<button type="button" className="chip-btn" onClick={() => ext.openYahoo()}>
 										Open Yahoo
@@ -474,8 +483,11 @@ export const Connect = ({
 					</>
 				}
 			</ol>
+			{/* WHAT HAPPENS NEXT, and what to do when nothing does. A walkthrough that ends
+			    without saying how you know it worked leaves a reader pressing things. */}
 			<p className="sub connect-watch">
-				This page notices the moment it is added &mdash; nothing to press here.
+				This turns into a <b>Read my league</b> button as soon as it is added. If it has
+				not after a few seconds, reload the page.
 			</p>
 			<p className="connect-back">
 				<button type="button" className="as-link" onClick={onBack}>

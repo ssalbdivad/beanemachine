@@ -754,8 +754,13 @@ t("with Yahoo among the answers once it is opened",
   (await p.$$eval(".onboard .chip-btn", n => n.map(e => e.textContent))).join(" | "))
 await p.click('.onboard .chip-btn:text-is("Yahoo")')
 const firstScreen = await p.$eval(".onboard", e => e.innerText)
+/* THE THIRD TERM WAS `/private/`, and it matched a sentence that explained why the paste
+   route exists — that it reaches private leagues, which no website can. That sentence is gone
+   with every other piece of copy on these screens that argued its own case. The claim this
+   assertion is for is unchanged and is the other two terms: the page to open is named, and
+   the box to put it in is on the same screen. */
 t("a Yahoo user is given a route they can finish, on the screen where they are stuck",
-  /settings/i.test(firstScreen) && /paste/i.test(firstScreen) && /private/i.test(firstScreen),
+  /settings/i.test(firstScreen) && /paste/i.test(firstScreen),
   firstScreen.slice(0, 260))
 // The one thing that must not be said: that a browser can read a Yahoo league.
 t("and it does not offer Yahoo a URL import a browser cannot perform",
@@ -1500,6 +1505,14 @@ t("a reload comes back to the screen the address bar names, not to the default o
 // gone: the team panel is the TOP half of Setup, above the league editor. Named
 // rather than matched, because `go` already holds the one place a label lives.
 await go("My league")
+/* THE MANUAL ROUTES MOVED BEHIND A FOLD on 2026-09-18: the browser reader leads that screen
+   and the paste, the platform read and the team-number box are the fallback under it. This
+   block's claims are unchanged — what the ESPN read does, what it stores, what it names — so
+   it opens the fold and goes on asserting them. */
+await p.evaluate(() => {
+  const fold = document.querySelector("details.paste-team-fold")
+  if (fold) fold.open = true
+})
 await p.waitForSelector(".pull-roster", { timeout: 15000 })
 // Located by what it says rather than by `.primary`, which it no longer is. That
 // class was removed deliberately: this route works when the platform allows it and
@@ -1510,6 +1523,8 @@ await p.waitForSelector(".pull-roster", { timeout: 15000 })
 const readButton = p.locator(".pull-roster button", { hasText: /Read my roster/ })
 t("the roster card offers to read from ESPN, naming the platform the league is on",
   /Read my roster from ESPN/.test((await readButton.textContent()) ?? ""))
+/* Still above it, and both now sit inside the same fold under the reader — the order
+   within it is what this asserts and is unchanged. */
 t("and the paste route, which no platform can switch off, is offered above it",
   await p.evaluate(() => {
     const paste = document.querySelector(".paste-roster")
@@ -1520,7 +1535,10 @@ t("and the paste route, which no platform can switch off, is offered above it",
 await readButton.click()
 // the note is the reader's own, and it only appears once the fetch has come back
 await p.waitForFunction(
-  () => !/^This league|^Only publicly/.test(document.querySelector(".pull-roster .sub")?.textContent ?? ""),
+  () => {
+    const said = document.querySelector(".pull-roster .sub")?.textContent ?? ""
+    return said.trim().length > 0 && !/^This league/.test(said)
+  },
   null, { timeout: 45000 }).catch(() => {})
 const pullNote = await p.locator(".pull-roster .sub").textContent()
 // 25 is not a round number picked to pass: it is what team 1 of this league holds,

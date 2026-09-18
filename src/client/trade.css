@@ -206,6 +206,12 @@
 /* The paste route — see `readPaste` in Trade.tsx. It leads because it is the only
    way in that another company cannot switch off. */
 .paste-roster{display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-3) 0}
+/* The offer to set the reader up, where there is no reader yet. Shaped like the paste block
+   beside it and deliberately not named like it — the suites address the paste box by class,
+   and a second block answering to that name is a test pressing the wrong button. */
+.connect-offer{display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-3) 0}
+.connect-offer h3{margin:0;font-size:var(--fs-1)}
+.connect-offer p{margin:0;max-width:70ch}
 .paste-roster h3{margin:0;font-size:var(--fs-1)}
 .paste-roster p{margin:0;max-width:70ch}
 .paste-roster textarea{
@@ -242,17 +248,19 @@
    Both follow `.period-fold` in app.css: the heading stays a heading, the summary
    carries the number or the reason, and the marker sits with the text because the
    card already has a gutter. */
-.lineup-fold,.paste-wire-fold{margin-top:0}
-.lineup-fold>summary,.paste-wire-fold>summary{
+.lineup-fold,.paste-wire-fold,.paste-team-fold{margin-top:0}
+.lineup-fold>summary,.paste-wire-fold>summary,.paste-team-fold>summary{
   cursor:pointer;list-style:none;display:flex;align-items:baseline;
   gap:var(--sp-2) var(--sp-3);flex-wrap:wrap;
 }
 .lineup-fold>summary::-webkit-details-marker,
-.paste-wire-fold>summary::-webkit-details-marker{display:none}
-.lineup-fold>summary::after,.paste-wire-fold>summary::after{
+.paste-wire-fold>summary::-webkit-details-marker,
+.paste-team-fold>summary::-webkit-details-marker{display:none}
+.lineup-fold>summary::after,.paste-wire-fold>summary::after,.paste-team-fold>summary::after{
   content:"\25B8";color:var(--faint);font-size:var(--fs-2);
 }
-.lineup-fold[open]>summary::after,.paste-wire-fold[open]>summary::after{content:"\25BE"}
+.lineup-fold[open]>summary::after,.paste-wire-fold[open]>summary::after,
+.paste-team-fold[open]>summary::after{content:"\25BE"}
 /* app.css tracks every `summary` in the same uppercase-mono rule as the section
    heads, so a sentence inside one came out shouting. The heading and the big number
    keep that treatment; the prose beside them reads as prose. */
@@ -270,7 +278,7 @@
 /* 44px of thumb, the way app.css gives it to every other control on a phone — its
    list of summaries names the ones that existed when it was written. */
 @media(max-width:640px){
-  .lineup-fold>summary,.paste-wire-fold>summary{min-height:44px;align-items:center}
+  .lineup-fold>summary,.paste-wire-fold>summary,.paste-team-fold>summary{min-height:44px;align-items:center}
 }
 
 /* The folded heading keeps the face it had as a card heading.

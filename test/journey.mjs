@@ -42,6 +42,15 @@
 // because the errors that matter are the ones a second view triggers in the
 // first one.
 import { chromium, firefox } from "playwright-core"
+
+/** The paste box moved behind a fold on 2026-09-18: the browser reader leads that screen now
+ *  and the manual routes are the fallback under it. Playwright cannot fill a control inside a
+ *  closed `<details>`, so every caller opens it first — the assertions below are unchanged in
+ *  what they claim, only in what they have to press to reach it. */
+const openPasteFold = async pg => {
+	const fold = pg.locator("details.paste-team-fold")
+	if (await fold.count()) await fold.evaluate(d => { d.open = true })
+}
 /*
  * 5299, not 5173.
  *
@@ -819,7 +828,9 @@ const mine = await page.$$eval(".board-row", r => r.slice(0, 14).map(row => ({
  */
 at("a pasted roster page is read into this browser")
 await tab(LEAGUE)
+await openPasteFold(page)
 await page.waitForSelector("[data-ctl=paste-roster]", { timeout: 30000 })
+await openPasteFold(page)
 await page.fill("[data-ctl=paste-roster]",
 	`Fantasy Baseball My Team\nPos\tPlayer\tAction\n` +
 		mine.map(m => `${m.slot}\t${m.name} - ${m.slot}\tAdd/Drop`).join("\n"))
@@ -1465,6 +1476,7 @@ clean("over the whole journey")
       .join("\n")
   })
   await live.click('.views button:has-text("My league")')
+  await openPasteFold(live)
   await live.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
   await live.fill('textarea[data-ctl="paste-roster"]', team)
   await live.click('.paste-roster button:text-is("Read that")')

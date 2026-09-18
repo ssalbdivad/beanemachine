@@ -15,6 +15,7 @@ import { slotsFor, type OwnershipCut } from "../engine/bscore.ts"
 import { localDate } from "../data/today.ts"
 import { extensionHere, useExtension } from "./extension.ts"
 import { readLeagueHere } from "./read-yahoo.ts"
+import { browserOf, takesExtension } from "./Connect.tsx"
 import { stored } from "./stores.ts"
 import "./trade.css"
 import { tab, tradesClosed } from "./panels.tsx"
@@ -99,6 +100,16 @@ export interface TradeProps {
 	/** Snapshot load failure, passed straight through the way `Board` takes it. */
 	error: string | null
 	/**
+	 * TAKE HIM TO THE INSTALL WALKTHROUGH, from the screen his team is on.
+	 *
+	 * The reader block below renders only once the add-on is present, so a reader who has a
+	 * league and has not installed it was told nothing about it HERE — on the one screen where
+	 * his team lives — and was offered instead the server-side read, which needs an API this
+	 * build may not have and which Yahoo refuses for a private league. The walkthrough lives in
+	 * the setup sheet and stays there; this opens it on that step rather than copying it.
+	 */
+	onConnect?: () => void
+	/**
 	 * SAY WHAT JUST HAPPENED, for the reader who cannot see the row vanish.
 	 *
 	 * Removing a player from this screen changed a store and said nothing: no toast, no live
@@ -113,7 +124,7 @@ export interface TradeProps {
 	 *  page used to answer it too, worse, and the two could disagree. */
 }
 
-export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) => {
+export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: TradeProps) => {
 	/* The browser reader, when there is one. See src/client/read-yahoo.ts — the same two
 	   asks the setup sheet makes, so a league read from this screen and a league read from
 	   that one cannot come out different. */
@@ -900,9 +911,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 				    — it is where the scoring comes FROM. The claim is true of the two cards
 				    this screen derives, so it says those. */}
 				<p className="sub">
-					Who you own in {league.meta.league_name ?? leagueKey}. Read it off the platform
-					or add men by name; either way it is saved in this browser, per league, and
-					your starting lineup and every trade verdict are priced against it.
+					Who you own in {league.meta.league_name ?? leagueKey}. Saved in this browser.
 				</p>
 				{storeError && (
 					<div className="trade-store-error">
@@ -957,6 +966,37 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 				  selecting a page first. The boxes stay open below, not folded, because a reader
 				  who came to this screen came to paste something.
 				*/}
+				{/*
+				  AND THE OFFER WHERE THERE IS NO READER YET.
+				
+				  Everything below is gated on the add-on being present, so the screen a reader
+				  with a league actually stands on said nothing at all about the route that works
+				  best on it. What it offered instead was the server-side read — which needs an
+				  API this build may not have, and which Yahoo refuses for a private league, which
+				  is most leagues. One line, above the paste boxes for the same reason the reader
+				  block is: it is the press that costs him least.
+				*/}
+				{!extensionHere() &&
+					takesExtension(browserOf()) &&
+					league?.meta.platform === "yahoo" &&
+					onConnect && (
+						/* NOT `paste-roster`: this is not a paste box, and the suites address the
+						   paste box by that class — `.paste-roster button` is how the journey
+						   presses "Read that". A block that looks like one and answers to its name
+						   is how a test ends up pressing the wrong button. */
+						<div className="connect-offer">
+							<h3>Read my league from Yahoo</h3>
+							<p className="sub">
+								Your team, your scoring and who is free, in one press. About a minute to set
+								up.
+							</p>
+							<p>
+								<button type="button" className="primary" onClick={onConnect}>
+									Set that up
+								</button>
+							</p>
+						</div>
+					)}
 				{extensionHere() && league?.meta.platform === "yahoo" && (
 					<div className="paste-roster read-yahoo">
 						<h3>Read it from Yahoo</h3>
@@ -1015,8 +1055,19 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 						)}
 					</div>
 				)}
-				<div className="paste-roster">
-					<h3>Paste your roster</h3>
+				{/*
+				  THE PASTE, FOLDED, BECAUSE IT IS THE FALLBACK NOW.
+				
+				  It is the route that works on a phone, in a private window, on a league nobody
+				  can read, and on every platform this app does not read itself — so it does not
+				  go away. What it stops doing is competing: three steps, a four-row box and a
+				  button stood between the reader and everything below, on a screen whose first
+				  offer is one press.
+				*/}
+				<details className="paste-roster paste-team-fold">
+					<summary>
+						<h3>Or type your team in</h3>
+					</summary>
 					{/* Named steps, and the actual keystrokes. "Select the page" assumes the
 					    reader knows to select-all, which is the step people miss — and the page
 					    to open has a different name on every platform, so all four are said. */}
@@ -1060,12 +1111,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 					    CLEARS the stored seats rather than keeping the previous team's. Its own
 					    note already says which of the two happened; this sentence was promising
 					    the good case before the reader had pasted anything. */}
-					<p className="sub">
-						Extra columns, adverts and menus do no harm — only the names are read. It
-						works on a private league, and where the page you copied shows the seat each
-						man is in, that comes too — which is what lets {tab("board")} show the
-						changes to make rather than a whole lineup to set.
-					</p>
+
 					<textarea
 						data-ctl="paste-roster"
 						value={pasted}
@@ -1078,7 +1124,54 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 						Read that
 					</button>
 					{pasteNote && <p className="sub paste-note">{pasteNote}</p>}
-				</div>
+				{leagueId && (
+					<div className="pull-roster">
+						{/* The league says which team is yours only when its URL carried one.
+						    Where it did not, ASK — hiding the button left every ESPN user whose
+						    URL had no `teamId=` with no way to reach this at all. */}
+						{!teamId && (
+							<label className="ctl">
+								<span>Your team number in this league</span>
+								<input
+									type="text"
+									data-ctl="read-team-id"
+									value={teamEntry}
+									placeholder="8"
+									onChange={e => setTeamEntry(e.currentTarget.value)}
+								/>
+							</label>
+						)}
+						{/* No longer `primary`. This route works when the platform allows it and
+						    stops when it does not — on 2026-09-09 Yahoo answered a sweep with a
+						    sixth of the wire, then nothing, then "Request denied" — and a button
+						    styled as the main way in was making a promise this app cannot keep.
+						    The paste above it is the one that always works. */}
+						<button
+							type="button"
+							disabled={pulling || !readTeamId}
+							onClick={() => void pullRoster()}
+						>
+							{pulling ?
+								"Reading…"
+							: owned.length ?
+								`Re-read my roster from ${platformName}`
+							:	`Read my roster from ${platformName}`}
+						</button>
+						<span className="sub">
+							{pullNote ??
+								(!readTeamId ?
+									`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
+									`number to read it.`
+								:	/* The caveat that used to stand here explained which leagues this route
+									   can reach and what the platform may do about it — three sentences of
+									   why, on a button whose outcome is one press away. What a reader needs
+									   before pressing is nothing; what he needs after is the failure, which
+									   `pullNote` above already carries in the platform's own terms. */
+									"")}
+						</span>
+					</div>
+				)}
+				</details>
 				{/* The other half, and the one that turns an estimate into a fact. Without it
 				    "who is available" is inferred from how widely a man is rostered across all
 				    of Yahoo; with it, it is his league's own list. */}
@@ -1125,56 +1218,6 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 						{wireNote && <p className="sub paste-note">{wireNote}</p>}
 					</details>
 				</div>
-				{leagueId && (
-					<div className="pull-roster">
-						{/* The league says which team is yours only when its URL carried one.
-						    Where it did not, ASK — hiding the button left every ESPN user whose
-						    URL had no `teamId=` with no way to reach this at all. */}
-						{!teamId && (
-							<label className="ctl">
-								<span>Your team number in this league</span>
-								<input
-									type="text"
-									data-ctl="read-team-id"
-									value={teamEntry}
-									placeholder="8"
-									onChange={e => setTeamEntry(e.currentTarget.value)}
-								/>
-							</label>
-						)}
-						{/* No longer `primary`. This route works when the platform allows it and
-						    stops when it does not — on 2026-09-09 Yahoo answered a sweep with a
-						    sixth of the wire, then nothing, then "Request denied" — and a button
-						    styled as the main way in was making a promise this app cannot keep.
-						    The paste above it is the one that always works. */}
-						<button
-							type="button"
-							disabled={pulling || !readTeamId}
-							onClick={() => void pullRoster()}
-						>
-							{pulling ?
-								"Reading…"
-							: owned.length ?
-								`Re-read my roster from ${platformName}`
-							:	`Read my roster from ${platformName}`}
-						</button>
-						<span className="sub">
-							{pullNote ??
-								(!readTeamId ?
-									`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
-									`number to read it.`
-								:	// "that always works" was the old ending. A paste is not rate-limited
-									// and nobody can switch it off, which is the real claim; whether it
-									// finds anybody still depends on the text — `rosterFromPaste` answers
-									// "No players found in that" often enough to have its own sentence. So
-									// the guarantee is narrowed to the part that is one.
-									"Only publicly-viewable leagues can be read this way, and the platform " +
-									"can refuse or throttle it at any time — Yahoo does. If it fails or comes " +
-									"back short, paste instead: nobody can switch that off, and it reaches " +
-									"private leagues too.")}
-						</span>
-					</div>
-				)}
 				<div className="trade-search">
 					<label className="ctl grow">
 						<span>Or add a player you own</span>

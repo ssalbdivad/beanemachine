@@ -2724,6 +2724,13 @@ await phone.close()
     return rows.join("\n")
   })
   await dm.click('.views button:has-text("My league")')
+  /* The manual routes moved behind a fold on 2026-09-18 — the browser reader leads that
+     screen now — and Playwright cannot fill a control inside a closed `<details>`. What this
+     block asserts is unchanged; it opens the fold to reach the box. */
+  await dm.evaluate(() => {
+    const fold = document.querySelector("details.paste-team-fold")
+    if (fold) fold.open = true
+  })
   await dm.waitForSelector('textarea[data-ctl="paste-roster"]', { timeout: 20000 })
   await dm.fill('textarea[data-ctl="paste-roster"]', roster)
   /* Scoped to the roster box's own card. There are two `.paste-roster` panels on

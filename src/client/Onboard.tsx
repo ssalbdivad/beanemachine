@@ -93,6 +93,7 @@ export const Onboard = ({
 	leagueKey,
 	league,
 	canImport,
+	openConnect = false,
 	onCreateLeague,
 	onAdoptPreset,
 	onTeamCount,
@@ -110,6 +111,10 @@ export const Onboard = ({
 	/** Whether a league can be read from wherever this page is running: true with a
 	 *  server behind it, and on the static build true for ESPN alone. */
 	canImport: boolean
+	/** Another screen asked for the install walkthrough rather than the paste box — see
+	 *  `onConnect` in src/client/Trade.tsx, which is the screen a reader with a league is
+	 *  standing on and the one place the reader was never offered. */
+	openConnect?: boolean
 	onCreateLeague: (platform: Where, league: League) => void
 	/** Turns the preview the reader is looking at into a real league in this browser,
 	 *  and returns its key. Called at the moment he first writes something of his own:
@@ -168,6 +173,13 @@ export const Onboard = ({
 			return false
 		}
 	})
+	/* Opened straight onto the walkthrough when another screen asked for it — see `onConnect`
+	   in src/client/Trade.tsx. An effect rather than the initialiser above, because this sheet
+	   is mounted once and hidden while closed (closing it must not discard what he typed), so
+	   a lazy initial value would only ever be read at app start. */
+	useEffect(() => {
+		if (openConnect) setConnecting(true)
+	}, [openConnect])
 	const [readFailure, setReadFailure] = useState<GrabFailure | null>(null)
 	const [receipt, setReceipt] = useState<{ league: string | null; free: number | null; at: string | null }>({
 		league: null,
@@ -580,10 +592,7 @@ export const Onboard = ({
 				    The roster LIST rather than the whole page, deliberately: pasting a whole team
 				    page pulls in the news and trending modules, which is how two men nobody owns
 				    ended up on a test roster. */}
-				<p className="sub">
-					Paste your roster list straight off your team page &mdash; extra columns and
-					times do no harm. Or type them in, one to a line, first and last name.
-				</p>
+				<p className="sub">Paste your roster page, or type the names one to a line.</p>
 				<textarea
 					data-ctl="onboard-team"
 					value={team}
@@ -878,21 +887,7 @@ export const Onboard = ({
 							    it never will — and it is false of a reader whose own browser is doing
 							    the reading from inside his own signed-in tab. Saying the old sentence
 							    to him would be claiming an absence the app has filled. */}
-							{where === "yahoo" && (
-								<p className="sub">
-									{extensionHere() ?
-										<>
-											Your browser reads your league itself now &mdash; copying the page
-											still works and needs nothing installed.
-										</>
-									:	<>
-											No website can read your Yahoo league &mdash; not this one, not
-											anyone. Copying your own page works, private leagues included, and
-											so does letting your own browser read it for you.
-										</>
-									}
-								</p>
-							)}
+
 							{where === "espn" && (
 								/*
 								  AN ESPN READER'S BEST ROUTE WAS HIS FOURTH CLICK AND OFF SCREEN.

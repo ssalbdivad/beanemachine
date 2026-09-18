@@ -1391,6 +1391,36 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	})
 	t("and it comes before the paste box rather than under it",
 		order && order.url < order.paste, JSON.stringify(order))
+	/*
+	   AND THE SCREEN HIS TEAM IS ON OFFERS THE READER, which it never did.
+	
+	   Everything about the browser reader on My league renders only once the add-on is present,
+	   so a reader who has a league and has not installed it was told nothing about it there —
+	   and was offered instead the server-side read, which needs an API this build may not have
+	   and which Yahoo refuses for a private league. The walkthrough stays in one place; this is
+	   the door to it.
+	*/
+	{
+		const lp = await browser.newPage({ viewport: { width: 1280, height: 1000 } })
+		await stubSlate(lp)
+		await lp.goto(BASE, { waitUntil: "domcontentloaded" })
+		await lp.waitForSelector("nav button", { timeout: 30000 })
+		await lp.waitForTimeout(1500)
+		await lp.click("nav button:nth-child(3)")
+		await lp.waitForTimeout(1500)
+		const offered = await lp.$(".connect-offer button")
+		t("the screen his team is on offers to set the reader up",
+			!!offered, (await lp.$eval("main", e => e.innerText)).slice(0, 200))
+		if (offered) {
+			await offered.click()
+			await lp.waitForTimeout(800)
+			t("…and pressing it opens the walkthrough rather than a second copy of it",
+				(await lp.locator(".dock-sheet .connect .step").count()) >= 4,
+				`${await lp.locator(".dock-sheet .connect .step").count()} steps`)
+		}
+		await lp.close()
+	}
+
 	/* A Yahoo reader must not be shown an address box at all: no website can read a Yahoo
 	   league from its URL, and offering one would be the app claiming a capability it does not
 	   have on the one screen that exists to explain that it does not. */
@@ -1444,8 +1474,12 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 		await offer.click()
 		await ap.waitForSelector(".connect", { timeout: 10000 })
 		const say = await ap.$eval(".connect", e => e.innerText)
-		t("and is told where it can be added from, and that it is not there yet",
-			/add-ons site/i.test(say) && /not there yet/i.test(say), say.slice(0, 300))
+		/* THIS REQUIRED THE EXPLANATION — "Mozilla's add-ons site", "not there yet" — and the
+		   explanation is gone on purpose: no screen in this app argues its own case any more.
+		   What a reader on a phone needs is the thing he can do, which is the claim now. */
+		t("and is told what to do instead of why he cannot",
+			/Chrome or Firefox on a computer/i.test(say) && !/not there yet|add-ons site/i.test(say),
+			say.slice(0, 300))
 		t("…and is offered no steps he cannot carry out",
 			(await ap.locator(".connect .step").count()) === 0,
 			`${await ap.locator(".connect .step").count()} steps`)

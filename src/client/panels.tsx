@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
-import { leagueTradeDeadline } from "../import.ts"
+import { tradeWindow } from "../import.ts"
 import { isReserveSlot, rosterCounts } from "../engine/bscore.ts"
 
 type Num = (value: number) => void
@@ -779,13 +779,19 @@ export type View = "board" | "wire" | "trade"
  */
 export const tradesClosed = (
 	league: League | null,
-	today: string
+	today: string,
+	/** Now, for a league that stated an HOUR rather than a day. ESPN does: its deadline is an
+	 *  instant, usually noon Eastern, and comparing days alone kept the trade screens up for
+	 *  the rest of that day — offering to price deals the league had already stopped taking.
+	 *  Defaulted rather than required, because every caller that has a date has a clock too. */
+	now: number = Date.now()
 ): { closed: boolean; on: string | null } => {
 	/* Whichever platform the league came from — Yahoo prints a row, ESPN states an epoch, and
 	   `leagueTradeDeadline` is where the two meet. This used to read the Yahoo row directly,
 	   so an ESPN league's deadline was invisible to this check no matter what ESPN said. */
-	const on = leagueTradeDeadline(league).date
-	return { closed: !!on && today > on, on }
+	/* The rule itself is in src/import.ts, where the node suites can reach it — see
+	   `tradeWindow`. What stays here is the screen's account of why it is asked. */
+	return tradeWindow(league, today, now)
 }
 
 /**

@@ -146,17 +146,32 @@ const ET = new Intl.DateTimeFormat("en-CA", {
 
 export const espnTradeDeadline = (
 	settings: Record<string, any> | null | undefined
-): { date: string | null; source: string | null } => {
+): {
+	date: string | null
+	source: string | null
+	/** The INSTANT ESPN stated, in epoch milliseconds, where it stated one.
+	 *
+	 *  A deadline is a moment and a date is a day, and a day is what the rest of this app
+	 *  compares against — so on the deadline day itself the trade screens stayed up for the
+	 *  hours after it had passed, offering to price deals the league would no longer take.
+	 *  Carried so a caller with a clock can be exact; the date remains for the callers and
+	 *  the stores that only have one. */
+	at: number | null
+} => {
 	const raw = settings?.tradeSettings?.deadlineDate
 	if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0)
-		return { date: null, source: null }
+		return { date: null, source: null, at: null }
 	/* A plausibility window, for the same reason the season has one: a number too small is
 	   seconds and a number too large is something else, and either one read as milliseconds is
 	   a deadline nobody stated. 2000-01-01 to 2100-01-01. */
 	if (raw < 946_684_800_000 || raw > 4_102_444_800_000)
-		return { date: null, source: `ESPN's trade deadline was ${raw}, which is not a date this reads` }
+		return {
+			date: null,
+			at: null,
+			source: `ESPN's trade deadline was ${raw}, which is not a date this reads`
+		}
 	const date = ET.format(new Date(raw))
-	return { date, source: `ESPN states a trade deadline of ${date} (Eastern)` }
+	return { date, at: raw, source: `ESPN states a trade deadline of ${date} (Eastern)` }
 }
 
 /* ── what kind of league it is ────────────────────────────────────────────────────────── */

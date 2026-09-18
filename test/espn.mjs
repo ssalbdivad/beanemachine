@@ -26,6 +26,7 @@ import {
 	deriveEspnPeriod,
 	leagueLimits,
 	leagueTradeDeadline,
+	tradeWindow,
 	deriveTradeDeadline
 } from "../src/import.ts"
 
@@ -90,6 +91,34 @@ const t = (n, ok, x = "") => {
 		noSchedule.needsReview.some(r => /nothing about this league's schedule/.test(r)),
 		noSchedule.needsReview.join(" | "))
 
+	/*
+	   THE PLAYOFF MATCHUPS ARE LONGER AND THIS STORES ONE NUMBER.
+	
+	   ESPN states two lengths — `matchupPeriodLength` for the regular season and
+	   `playoffMatchupPeriodLength` for the rounds at the end, 2 on its own template. In
+	   September that is not a detail: a reader in a two-week round shown a one-week window has
+	   every figure computed over half the matchup he is playing. Which matchup today falls in
+	   needs a calendar this import does not fetch, so the number stays the regular-season one
+	   and he is told the part he can act on.
+	*/
+	const withPlayoffs = deriveEspnPeriod({
+		scheduleSettings: {
+			matchupPeriodLength: 1,
+			playoffMatchupPeriodLength: 2,
+			matchupPeriods: { 1: [1], 21: [21], 22: [22, 23] }
+		}
+	})
+	t("a league whose playoff matchups run longer is told so, in days",
+		withPlayoffs.needsReview.some(r => /playoff matchups run 14 days/.test(r)),
+		JSON.stringify(withPlayoffs.needsReview))
+	t("…and the stored length is still the regular season's, which is right nine weeks in ten",
+		withPlayoffs.period.days === 7, String(withPlayoffs.period.days))
+	const noPlayoffDiff = deriveEspnPeriod({
+		scheduleSettings: { matchupPeriodLength: 1, playoffMatchupPeriodLength: 1, matchupPeriods: { 1: [1], 21: [21] } }
+	})
+	t("a league whose playoff matchups are the same length says nothing about them",
+		!noPlayoffDiff.needsReview.some(r => /playoff/.test(r)), JSON.stringify(noPlayoffDiff.needsReview))
+
 	const silent = deriveEspnPeriod({ scheduleSettings: { matchupPeriodLength: 1, matchupPeriods: { 1: [1], 21: [21] } } })
 	t("a league that states no lock is left unknown and says so",
 		silent.period.lineup_lock === null &&
@@ -126,6 +155,38 @@ const t = (n, ok, x = "") => {
 
 	t("-1 is no deadline, not a date", espnTradeDeadline({ tradeSettings: { deadlineDate: -1 } }).date === null)
 	t("0 is no deadline", espnTradeDeadline({ tradeSettings: { deadlineDate: 0 } }).date === null)
+	/*
+	   A DEADLINE IS A MOMENT AND A DATE IS A DAY.
+	
+	   ESPN's is an instant — noon Eastern on the template — and the app compared days, so on the
+	   deadline day itself the trade screens stayed up for the afternoon and evening, offering to
+	   price deals the league had already stopped taking. The instant is carried for a caller
+	   with a clock; the date stays for the callers and the stores that only have one.
+	*/
+	t("the instant ESPN stated is carried, not only the day it falls on",
+		real.at === 1786723200000, String(real.at))
+	{
+		const league = {
+			meta: { platform: "espn" },
+			league_rules: { raw_settings: { tradeSettings: { deadlineDate: 1786723200000 } } }
+		}
+		const noon = 1786723200000
+		t("an hour before the stated deadline the window is open",
+			tradeWindow(league, "2026-08-14", noon - 3_600_000).closed === false)
+		t("an hour after it, on the same day, it is shut",
+			tradeWindow(league, "2026-08-14", noon + 3_600_000).closed === true)
+		t("…and the day it shut is still the day a screen prints",
+			tradeWindow(league, "2026-08-14", noon + 3_600_000).on === "2026-08-14")
+		/* Yahoo prints a date and no hour, so there is no instant to compare and a league that
+		   stated a day is open for all of it. */
+		const yahoo = {
+			meta: { platform: "yahoo" },
+			league_rules: { raw_settings: { "Trade End Date": "August 6, 2026" } }
+		}
+		t("a league that stated only a day is open for the whole of that day",
+			tradeWindow(yahoo, "2026-08-06").closed === false &&
+				tradeWindow(yahoo, "2026-08-07").closed === true)
+	}
 	t("a missing block is no deadline", espnTradeDeadline({}).date === null)
 	t("and no deadline quotes nothing, because there is nothing to quote",
 		espnTradeDeadline({}).source === null)

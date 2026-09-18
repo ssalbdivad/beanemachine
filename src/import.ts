@@ -466,6 +466,30 @@ export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod =
 		"ESPN states how long a period runs but not which weekday it starts on, so the board " +
 			"assumes Monday and says so wherever it prints the week."
 	)
+	/*
+	   AND THE PLAYOFF MATCHUPS ARE LONGER, which this stores one number for.
+	
+	   `scoring_period.days` is one length for the whole season, and ESPN states two:
+	   `matchupPeriodLength` for the regular season and `playoffMatchupPeriodLength` for the
+	   rounds at the end, which on the template is 2 — a fortnight. In September that is not a
+	   detail: a reader in a two-week playoff round is shown a one-week window, so every figure
+	   computed over it — what his men have scored, what his opponent's have, how many days are
+	   left — is half of the matchup he is actually playing.
+	
+	   Working out WHICH matchup today falls in needs the calendar, and ESPN publishes the
+	   scoring-period-to-date mapping on a different endpoint this import does not fetch. So the
+	   number stays the regular-season one, which is right for about nine tenths of the season,
+	   and the reader is told the one thing he can act on: that his playoff weeks are longer than
+	   the window this is using.
+	*/
+	const playoff =
+		typeof sched.playoffMatchupPeriodLength === "number" ? sched.playoffMatchupPeriodLength : null
+	if (playoff !== null && playoff > length)
+		needsReview.push(
+			`Your league's playoff matchups run ${playoff * 7} days rather than ${days}. This uses ` +
+				`the regular-season length all season, so during the playoffs the week it shows you ` +
+				`is the first half of the matchup you are playing.`
+		)
 	return {
 		period: {
 			kind: "matchup",
@@ -1248,9 +1272,38 @@ export const leagueTradeDeadline = (
 		| (Pick<League, "league_rules"> & { meta?: { platform?: string | null } | null })
 		| null
 		| undefined
-): { date: string | null; source: string | null } => {
+): { date: string | null; source: string | null; at?: number | null } => {
 	const raw = (league?.league_rules as { raw_settings?: unknown } | undefined)?.raw_settings
-	if (!raw || typeof raw !== "object") return { date: null, source: null }
+	if (!raw || typeof raw !== "object") return { date: null, source: null, at: null }
 	if (league?.meta?.platform === "espn") return espnTradeDeadline(raw as Record<string, any>)
+	/* Yahoo prints a DATE and no hour, so there is no instant to carry and none is invented:
+	   a league that stated a day is closed at the end of that day, which is what
+	   `tradeWindow` does with it. */
 	return deriveTradeDeadline(raw as Record<string, string>)
+}
+
+/**
+ * WHETHER THIS LEAGUE STILL TAKES TRADES, right now.
+ *
+ * Lives here rather than on the screen that asks, because it is a fact about the league's
+ * rules and because a rule in a .tsx file cannot be tested by the node suites — which is how
+ * the hour below went unasserted in the first place.
+ *
+ * A DEADLINE IS A MOMENT AND A DATE IS A DAY. ESPN states an instant, usually noon Eastern;
+ * comparing days alone kept the trade screens up for the rest of that day, offering to price
+ * deals the league had already stopped taking. Where a league stated only a day — which is
+ * every Yahoo league, because Yahoo prints "August 6, 2026" and no hour — it is open for the
+ * whole of that day, which is the most that can be claimed from what it said.
+ */
+export const tradeWindow = (
+	league:
+		| (Pick<League, "league_rules"> & { meta?: { platform?: string | null } | null })
+		| null
+		| undefined,
+	today: string,
+	now: number = Date.now()
+): { closed: boolean; on: string | null } => {
+	const stated = leagueTradeDeadline(league)
+	if (stated.at) return { closed: now > stated.at, on: stated.date }
+	return { closed: !!stated.date && today > stated.date, on: stated.date }
 }

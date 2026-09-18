@@ -8,8 +8,13 @@
  *   NOWIRE  the (teams x seats)-th man walked down the WHOLE POOL — the simulation the
  *           app uses when it cannot see your league.
  *   A       given a wire, the same depth walked down the WIRE, clamped to its last man.
- *           This is what src/engine/bscore.ts ships today.
- *   B       given a wire, the wire's BEST man. The open question.
+ *           What shipped until 2026-09-17, kept because the grid that beat it is quoted
+ *           against it.
+ *   B       given a wire, the wire's BEST man. The question that was open when this was
+ *           written; it lost.
+ *   OWN     given a wire, the reader's OWN seats at that slot walked down it — because a wire
+ *           is the whole pool with the other nine rosters already removed, so walking
+ *           `teams x seats` takes them out twice. This is what src/engine/bscore.ts ships.
  */
 import { readFileSync } from "node:fs"
 import { rateAll, ownershipCut, isReserveSlot } from "../../engine/bscore.ts"
@@ -122,7 +127,13 @@ console.log(
 )
 
 console.log("\nREPLACEMENT BARS (projected points over the committed fortnight)")
-console.log("  slot   depth   pool@slot  wire@slot     NOWIRE         A (ships)      B (best free)    OWN (count deep)")
+/* The column labels say which rule SHIPS, and this one said A. It was true when the harness
+   was written and stopped being true on 2026-09-17, when `own` won 19 of 20 configurations at
+   a mean of +28.0 points a week and the engine was changed — the cross-check twenty lines
+   above already checks the rebuilt bars against `own` for that reason, so the header was
+   contradicting the code directly under it. A stale label on a measurement is the same defect
+   as a stale sentence on a screen: somebody reads the wrong column and quotes it. */
+console.log("  slot   depth   pool@slot  wire@slot     NOWIRE       A (teams x count)  B (best free)    OWN (ships)")
 for (const slot of slots) {
 	const count = league.roster.slots[slot]!
 	const all = rated.filter(r => r.rateable && r.slots.includes(slot))

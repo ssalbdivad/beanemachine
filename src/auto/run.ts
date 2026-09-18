@@ -108,22 +108,24 @@ if (!saved.ok) stop(saved.failure)
 
 const snapshot = readJson("data/snapshot.json", "snapshot", "run: node src/refresh.ts") as Snapshot
 const h = hydrate(snapshot)
-const rated = withUndervaluation(
-	rateAll({
-		league: league,
-		players: h.players,
-		underlying: h.underlying,
-		injuries: h.injuries,
-		teamGamesPlayed: h.teamGamesPlayed,
-		gamesByTeam: h.gamesByTeam,
-		opponentsByTeam: h.opponentsByTeam,
-		recentVolumeByWindow: h.recentVolumeByWindow,
-		recentStats: h.recentStats,
-		teams
-	})
-)
-console.log(`read: ${rated.length} players rated from the snapshot`)
 
+/*
+   THE WIRE IS READ BEFORE THE RANKING, AND IT USED TO BE READ AFTER IT.
+
+   `rateAll` prices every man against a REPLACEMENT BAR — what the best available man at the
+   same seat would give this league — and it takes the league's own free-agent list to compute
+   it. Handed nothing, it walks down the whole of baseball instead, which is the right answer
+   for a page that cannot see a wire and the wrong one for a run that is about to fetch it.
+
+   This ranked first and fetched the wire fifteen lines later, then used it for one thing only:
+   filtering candidate names. So the autonomous run priced every add against the best man in
+   baseball while the card on the reader's screen priced the same add against the best man
+   actually free in his league — two answers to the same question from one codebase, and the
+   worse one was the one that acted on its own.
+
+   `Decide.tsx` has passed both of these since the wire landed; this is the same pair, in the
+   same order, so the two cannot disagree.
+*/
 const pool = await fetchAvailable(leagueId)
 // Yahoo answers a throttled or signed-out request with an empty page rather than
 // an error, so nine empty pages means we could not see the wire — not that the
@@ -136,6 +138,34 @@ if (!pool.positionsRead.length)
 	})
 const availableNames = new Set(pool.players.map(p => normalizeName(p.name)))
 console.log(`read: ${pool.players.length} free agents across ${pool.positionsRead.join(", ")}`)
+
+const rated = withUndervaluation(
+	rateAll({
+		league: league,
+		players: h.players,
+		underlying: h.underlying,
+		injuries: h.injuries,
+		teamGamesPlayed: h.teamGamesPlayed,
+		gamesByTeam: h.gamesByTeam,
+		opponentsByTeam: h.opponentsByTeam,
+		recentVolumeByWindow: h.recentVolumeByWindow,
+		recentStats: h.recentStats,
+		teams,
+		/* The league's own wire, as a test any rated man can be put to — the same shape
+		   `wireTest` takes in src/client/Decide.tsx, by normalised name because a name is all
+		   a Yahoo players page gives that both sides share. */
+		available: r => availableNames.has(normalizeName(r.player.name)),
+		/* WHICH SEATS THAT LIST CAN SPEAK FOR. A sweep that read four positions knows nothing
+		   about the other five, and a bar of zero at a seat nobody was read for says "anybody
+		   is free here", which is the most expensive number this function produces. See
+		   `slotsCoveredBy`. */
+		availablePositions: pool.positionsRead
+	})
+)
+console.log(
+	`read: ${rated.length} players rated from the snapshot, against the ` +
+		`${pool.players.length} men actually free in this league`
+)
 
 const session = await openSession(!flag("headed"))
 if (!session.ok) stop(session.failure)

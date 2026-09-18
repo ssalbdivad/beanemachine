@@ -2370,9 +2370,25 @@ export const Decide = ({
 									})()}
 							</>
 						:	<>
+								{/*
+								  IT ONLY POINTS AT LAST NIGHT WHEN THERE IS SOMETHING THERE.
+								
+								  The opponent control lives behind "Who are you playing?" on that card,
+								  which renders only once his own men have scored something over the
+								  league's period — `periodTotal !== null` in Recap.tsx. A reader on his
+								  first evening, who has entered a team and has no period behind him yet,
+								  was sent to a screen with no such control on it to do a thing it does not
+								  offer. Where it is not there, the sentence stops at what this card can
+								  say about itself.
+								*/}
 								Nothing here is playing for or against a lead &mdash; it does not know your
-								league&rsquo;s scoreboard, and how your week stands is on <b>Last night</b>,
-								against an opponent you tell it about.
+								league&rsquo;s scoreboard
+								{matchup.mine !== null ?
+									<>
+										, and how your week stands is on <b>Last night</b>, against an opponent
+										you tell it about.
+									</>
+								:	"."}
 							</>
 						}
 					</p>

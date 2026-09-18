@@ -628,5 +628,108 @@ t("and a league that seats nobody there is not told he is eligible there",
     [...withoutSs].join(","))
 }
 
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * NINE PAGES THAT ARE ALL THE SAME PAGE.
+ *
+ * The sweep asks for one position at a time by putting `pos=` in the URL, and everything
+ * downstream trusts that Yahoo honoured it. If Yahoo ever stops — a redesign, a parameter
+ * renamed, a filter quietly dropped — nine requests come back with the same 25 men and the
+ * URLs still say C, 1B, 2B, 3B, SS, OF, Util, SP, RP.
+ *
+ * Measured before the check existed: 25 players, nine positions read, `poolIsPartial` false,
+ * no note. The board then tells a reader nobody at all is free at eight of nine positions,
+ * with total confidence, off a ninth of his wire — which is precisely the failure
+ * `poolIsPartial` was written for, arriving through the one door it could not see. The other
+ * reader already guards this shape (`pageKey === prevPage` in src/data/yahoo-pool.ts); the
+ * extension's path did not.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const { readGrabs } = await import("../src/data/yahoo-read.ts")
+  const { poolIsPartial } = await import("../src/client/api.ts")
+  const SWEPT = ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"]
+
+  /** A players row in the shape `parsePage` reads: the id and the name are attributes, and
+   *  the eligibility is the "TEAM - POS,POS" span, which is what the second check reads. */
+  const row = (id, name, pos) =>
+    `<tr><td><a href="/players/${id}" data-ys-playerid="${id}" class="name" title="${name}">${name}</a>` +
+    `<span class="Nowrap">MIL - ${pos}</span>` +
+    `<td class="Alt Ta-end"><div >984.40</div></td>` +
+    `<td class="Ta-end Nowrap Bdrend"><div >41%</div></td></tr>`
+
+  const page = (rows) => `<!doctype html><body><table>${rows.join("")}</table></body>`
+  const grab = (pos, html) => ({
+    url: `https://baseball.fantasysports.yahoo.com/b1/228947/players?status=A&pos=${pos}&count=0`,
+    kind: "players",
+    html,
+    text: "",
+    at: "2026-09-18T06:00:00.000Z",
+    swept: true,
+    asked: SWEPT
+  })
+
+  const snapshot = { players: [] }
+
+  /* THE FAILURE: the same 25 catchers served for every position. */
+  const sameRows = Array.from({ length: 25 }, (_, i) => row(5000 + i, `Backstop ${i}`, "C"))
+  const same = readGrabs(SWEPT.map(pos => grab(pos, page(sameRows))), snapshot)
+  t("nine identical pages are not nine positions read",
+    same.pool.positionsRead.length === 1, JSON.stringify(same.pool.positionsRead))
+  t("…and the men on them are kept, because they are real free agents whatever page they came on",
+    same.pool.players.length === 25, String(same.pool.players.length))
+  t("…and the pool is refused as partial, which is what the board reads",
+    poolIsPartial({ positionsRead: same.pool.positionsRead, positionsRequested: same.pool.positionsRequested }),
+    JSON.stringify({ read: same.pool.positionsRead, asked: same.pool.positionsRequested }))
+  t("…and it says so in a sentence, naming the positions rather than counting them",
+    same.notes.some(n => /same list/.test(n) && /1B/.test(n)), JSON.stringify(same.notes))
+
+  /* A REAL SWEEP is unharmed: each position brings men of that position. */
+  const honest = readGrabs(
+    SWEPT.map((pos, k) =>
+      grab(pos, page(Array.from({ length: 25 }, (_, i) => row(6000 + k * 100 + i, `${pos} Free ${i}`, pos))))
+    ),
+    snapshot
+  )
+  t("a sweep that really was nine positions still reads as nine",
+    honest.pool.positionsRead.length === 9, JSON.stringify(honest.pool.positionsRead))
+  t("…with all nine pages' men in it and nothing said about it",
+    honest.pool.players.length === 225 && !honest.notes.some(n => /same list/.test(n)),
+    `${honest.pool.players.length} men, notes ${JSON.stringify(honest.notes)}`)
+
+  /* THE COINCIDENCE THAT IS NOT A BUG. In a deep league a position can genuinely have three
+     free agents who are the same three men as another position's — two catchers who also
+     qualify at first base, say. Refusing that would refuse a true answer, so the identical-set
+     check has a floor of ten rows and this stays a complete read. */
+  const few = [row(7001, "Both Ways", "C,1B"), row(7002, "Also Both", "C,1B"), row(7003, "Third", "C,1B")]
+  const deep = readGrabs(
+    [grab("C", page(few)), grab("1B", page(few))],
+    snapshot
+  )
+  t("two positions that genuinely share their only three free agents are both read",
+    deep.pool.positionsRead.length === 2, JSON.stringify(deep.pool.positionsRead))
+
+  /* THE OTHER CHECK, on its own: a page served for SP whose rows are all catchers. The id
+     sets differ, so the first check cannot see it; the rows' own eligibility can. */
+  const mislabelled = readGrabs(
+    [
+      grab("C", page(Array.from({ length: 25 }, (_, i) => row(8000 + i, `Catcher ${i}`, "C")))),
+      grab("SP", page(Array.from({ length: 25 }, (_, i) => row(8100 + i, `Catcher ${100 + i}`, "C"))))
+    ],
+    snapshot
+  )
+  t("a page of catchers served for the starters is not the starters",
+    mislabelled.pool.positionsRead.includes("C") && !mislabelled.pool.positionsRead.includes("SP"),
+    JSON.stringify(mislabelled.pool.positionsRead))
+  /* Util accepts everybody, so the same page under `pos=Util` is not evidence of anything. */
+  const util = readGrabs(
+    [grab("Util", page(Array.from({ length: 25 }, (_, i) => row(8200 + i, `Catcher ${i}`, "C"))))],
+    snapshot
+  )
+  t("and Util is exempt, because Util accepts every position by definition",
+    util.pool.positionsRead.includes("Util"), JSON.stringify(util.pool.positionsRead))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

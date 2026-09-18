@@ -55,6 +55,61 @@ const asPasted = (league) => {
 
 const text = asPasted(real)
 
+/*
+ * A COLUMN YAHOO DID NOT USED TO PRINT, AND THE INVERTED TABLE IT PRODUCED.
+ *
+ * The parser reads a stat's value from the cell after its label, and falls back to the NEXT
+ * LINE when a copy has flattened the table — one cell per line — which is a shape a real
+ * paste genuinely takes. It could not tell that from a column inserted between label and
+ * value, and `asNumber` strips every non-digit from whatever it is handed. So a page shaped
+ * `Home Runs (HR)\tmodified\t4` read `modified` as no number, looked at the line below, and
+ * priced home runs at the strikeout's −1.
+ *
+ * Measured before the guard: batting `{"HR":-1}`, pitching `{"W":1,"K":-1}`, `missing` empty
+ * — a complete, confident read of a scoring table in which home runs cost a point. Every
+ * projection, ranking, start/sit and trade verdict in this app is priced off that table.
+ *
+ * Both halves are asserted: the wrong value is not taken, AND the stat that could not be
+ * priced is named. A stat read as absent is scored as 0, which is a claim about his league,
+ * and the app is not allowed to make it silently.
+ */
+{
+  const inserted = asPasted(real)
+    .split("\n")
+    .map(l => (l.startsWith("Home Runs (HR)") ? "Home Runs (HR)\tmodified\t4" : l))
+    .join("\n")
+  const read = leagueFromSettingsText(inserted)
+  t("a stat whose value moved out of the second cell does not take the NEXT stat's value",
+    read.batting.HR !== real.scoring.pitching.K, JSON.stringify(read.batting))
+  t("…and is not priced at all rather than priced wrong",
+    read.batting.HR === undefined, JSON.stringify(read.batting))
+  t("…and the stat it could not price is named, with the page's own code",
+    read.missing.some(m => /HR/.test(m)), JSON.stringify(read.missing))
+  t("…in words that fit the sentence the setup sheet prints them in",
+    read.missing.some(m => /^point values? for /.test(m)), JSON.stringify(read.missing))
+  /* The rest of the table is unharmed: this is a guard on one row, not a refusal of the page. */
+  t("and every other stat is read exactly as it was",
+    Object.keys(real.scoring.batting).filter(c => c !== "HR")
+      .every(c => read.batting[c] === real.scoring.batting[c]) &&
+      JSON.stringify(read.pitching) === JSON.stringify(real.scoring.pitching),
+    JSON.stringify(read.batting))
+
+  /* AND THE CASE THE LOOKAHEAD EXISTS FOR still works, which is the whole reason it is a
+     guard rather than a deletion: a genuinely flattened copy puts the value on its own line
+     below the label, and that line carries no stat code. */
+  const flat = asPasted(real)
+    .split("\n")
+    .map(l => (/\(([A-Z0-9]{1,4})\)\t/.test(l) ? l.replace("\t", "\n") : l))
+    .join("\n")
+  const flatRead = leagueFromSettingsText(flat)
+  t("a flattened copy — label on one line, value on the next — still reads every stat",
+    JSON.stringify(flatRead.batting) === JSON.stringify(real.scoring.batting) &&
+      JSON.stringify(flatRead.pitching) === JSON.stringify(real.scoring.pitching),
+    JSON.stringify(flatRead.batting) + JSON.stringify(flatRead.pitching))
+  t("…and names nothing as unpriced, because nothing was",
+    !flatRead.missing.some(m => /point value/.test(m)), JSON.stringify(flatRead.missing))
+}
+
 // ── the round trip ─────────────────────────────────────────────────────────────
 {
   const { league, read } = leagueFromPastedSettings(text, "yahoo", "2026-09-09")

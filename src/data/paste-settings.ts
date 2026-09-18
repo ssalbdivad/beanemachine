@@ -70,6 +70,20 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 
 	const batting: Record<string, number> = {}
 	const pitching: Record<string, number> = {}
+	/**
+	 * STAT CODES THE PAGE LISTED AND THIS COULD NOT PRICE.
+	 *
+	 * `missing` used to be four whole-category absences — no batting scoring, no pitching
+	 * scoring, no roster positions, no team count — and nothing counted ROWS. So a page that
+	 * yielded eight of a reader's nine batting stats reported them as a complete batting
+	 * table, and the ninth was scored as zero for the rest of the season. A league that pays
+	 * 4 for a home run and reads it as absent under-ranks every power hitter on the board,
+	 * permanently and quietly, and the reader's only symptom is that the advice feels off.
+	 *
+	 * A stat read as absent is scored as 0, which is a CLAIM about his league. This is the
+	 * list that stops the app making it silently.
+	 */
+	const unpriced: string[] = []
 	const settings: Record<string, string> = {}
 	let side: Record<string, number> | null = null
 
@@ -95,13 +109,36 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 		const code = STAT_CODE.exec(label)?.[1]?.toUpperCase()
 
 		if (side && code && !NOT_A_STAT.has(code)) {
-			// same line, or the next one when the copy flattened the table
-			const value = asNumber(parts[1]) ?? asNumber(lines[i + 1])
+			/*
+			   SAME LINE, OR THE NEXT ONE — BUT ONLY IF THE NEXT ONE IS NOT A STAT ITSELF.
+			
+			   The lookahead is for the genuine flatten: a copy that puts the label on one line
+			   and its value on the next. It could not tell that case from a column inserted
+			   between label and value, and `asNumber` strips every non-digit from whatever it is
+			   handed — so `Home Runs (HR)\tmodified\t4` read `modified` as no number, looked
+			   ahead to `Strikeouts (K)\tmodified\t-1`, and PRICED HOME RUNS AT −1. Measured on
+			   this project's own settings fixture with one cell inserted: batting came back
+			   `{"HR":-1}`, and `missing` came back empty, so the app reported a complete read of
+			   a scoring table in which home runs cost a point.
+			
+			   Every projection, every ranking, every start/sit and every trade verdict is priced
+			   off this table. Being wrong here is not a degraded answer, it is an inverted one,
+			   and nothing on any screen contradicts it. So the borrow is refused whenever the
+			   line below carries a stat code of its own — that line is the next STAT, not this
+			   stat's value — and the stat is recorded as one the page listed and this could not
+			   price, which is the second half of the fix below.
+			*/
+			const below = lines[i + 1]
+			const belowIsAStat = below !== undefined && STAT_CODE.test(cells(below)[0] ?? "")
+			const value = asNumber(parts[1]) ?? (belowIsAStat ? null : asNumber(below))
 			if (value !== null) {
 				side[code] = value
 				if (parts.length < 2) i++
 				continue
 			}
+			/* Listed on the page, inside a stat table, and not priced. Named rather than
+			   dropped — see `unpriced` below. */
+			if (!unpriced.includes(code)) unpriced.push(code)
 		}
 
 		/*
@@ -153,6 +190,13 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 	}
 
 	const missing: string[] = []
+	if (unpriced.length)
+		/* Phrased to fit the two sentences that print this list — "It carried no ___" on the
+		   setup sheet and "Not on that page: ___" in the read's own notes. The codes are the
+		   page's own, in its own brackets, so he can find the rows this could not read. */
+		missing.push(
+			`point value${unpriced.length > 1 ? "s" : ""} for ${unpriced.join(", ")}`
+		)
 	if (!Object.keys(batting).length) missing.push("batting scoring")
 	if (!Object.keys(pitching).length) missing.push("pitching scoring")
 	if (!slots) missing.push("roster positions")

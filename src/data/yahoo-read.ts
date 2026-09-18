@@ -332,17 +332,73 @@ export const readGrabs = (
 		const seen = new Set<string>()
 		const rows: PoolEntry[] = []
 		const positionsRead: string[] = []
+		/*
+		   A PAGE THAT CAME BACK IS NOT THE SAME THING AS THE PAGE THAT WAS ASKED FOR.
+		
+		   A position used to count as read the moment its page carried any rows at all. That
+		   is the right test for a page Yahoo refused and the wrong one for a page Yahoo served
+		   without honouring `pos=` — and the second is a shape `fetchOwnership` already guards
+		   against (`pageKey === prevPage` in src/data/yahoo-pool.ts), because it has happened
+		   on the other reader.
+		
+		   Fed nine grabs whose URLs said `pos=C … pos=RP` and whose HTML was the same 25 rows,
+		   this reported 25 players, nine positions read, nothing partial and no note: the
+		   board would then tell a reader nobody is free at eight of nine positions, with total
+		   confidence, off a ninth of his wire. `poolIsPartial` is written for exactly that
+		   failure and cannot see it, because the count it checks was the one being faked.
+		
+		   Two checks, and both are about the page rather than about the men:
+		
+		     THE SAME ROWS TWICE. An id set identical to another position's, with at least ten
+		     rows in it. The floor matters: in a deep league a position can genuinely have three
+		     free agents who are the same three men as another position's, and refusing that
+		     would refuse a true answer. Twenty-five identical ids across two positions is not a
+		     coincidence, it is an unfiltered page.
+		
+		     ROWS THAT ARE NOT OF THE POSITION ASKED FOR. Each row carries its own eligibility,
+		     so a page asked for SP whose rows mostly do not say SP was not filtered. Util is
+		     skipped, because Util accepts everybody by definition, and so is a page whose rows
+		     carry no eligibility at all — an absent column is not evidence of anything.
+		
+		   The men themselves are KEPT either way. They are real free agents whatever page they
+		   arrived on, and throwing them away would turn a mislabelled read into an empty one.
+		   What is refused is the CLAIM that the position was read.
+		*/
+		const idsPerPosition = new Map<string, string>()
+		const unfiltered: string[] = []
 		for (const g of players) {
 			const got = parsePage(g.html!)
 			const pos = posOf(g.url)
 			if (!got.length) continue
-			if (pos && !positionsRead.includes(pos)) positionsRead.push(pos)
+			const ids = got.map(p => p.yahooId).sort().join(",")
+			let honoured = true
+			if (pos) {
+				for (const [other, otherIds] of idsPerPosition)
+					if (other !== pos && otherIds === ids && got.length >= 10) honoured = false
+				const named = got.filter(p => p.positions.length)
+				if (honoured && pos !== "Util" && named.length >= got.length / 2) {
+					const ofPos = named.filter(p => p.positions.includes(pos)).length
+					if (ofPos < named.length / 2) honoured = false
+				}
+				idsPerPosition.set(pos, ids)
+				if (honoured) {
+					if (!positionsRead.includes(pos)) positionsRead.push(pos)
+				} else if (!unfiltered.includes(pos)) unfiltered.push(pos)
+			}
 			for (const p of got)
 				if (!seen.has(p.yahooId)) {
 					seen.add(p.yahooId)
 					rows.push(p)
 				}
 		}
+		if (unfiltered.length)
+			/* Named, not counted, and phrased as what it means for his list rather than as what
+			   the page did: the consequence he can act on is that the list is short at those
+			   positions, and that pressing again is the thing to do. */
+			notes.push(
+				`Yahoo sent the same list for ${unfiltered.join(", ")} as for another position, so ` +
+					`those were not counted as read and the free agents may be short there.`
+			)
 		/*
 		   WHAT WAS ASKED FOR COMES FROM THE SWEEP, NOT FROM WHAT ARRIVED.
 

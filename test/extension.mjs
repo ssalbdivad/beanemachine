@@ -142,10 +142,19 @@ const PAGE_ROWS = 25
 
 /** A player-table row in Yahoo's shape — from test/ownership.mjs, including the second
  *  id-bearing link with no title and the AccuWeather tooltip that once broke the parser. */
-const row = (id, name, pct) =>
+/*
+   `pos` IS NOT DECORATION EITHER. Every row used to read "MIL - SP,RP" whatever page it was
+   on, which is a shape no real players page has: Yahoo's `pos=C` page lists catchers, and the
+   eligibility in the row says so. The reader now checks exactly that — a page whose rows are
+   mostly not of the position that was asked for was not filtered — so a fixture that always
+   says SP,RP is a fixture that asserts the opposite of the page it stands in for. Every
+   caller passes the position the page was served for; the one row built by hand further down
+   keeps its own, and says why there.
+*/
+const row = (id, name, pct, pos = "SP,RP") =>
 	`<tr><td><a href="/players/${id}" data-ys-playerid="${id}" class="name" title="${name}">${name}</a>` +
 	`<span data-ys-playerid="${id}" class="note"></span>` +
-	`<span class="Nowrap">MIL - SP,RP</span>${TOOLTIP}` +
+	`<span class="Nowrap">MIL - ${pos}</span>${TOOLTIP}` +
 	`<td class="Alt Ta-end"><div >984.40</div></td>` +
 	`<td class="Ta-end Nowrap Bdrend"><div >${pct}%</div></td>` +
 	`<td class="Alt Ta-end"><div >155.0</div></td></tr>`
@@ -198,7 +207,7 @@ const playersPage = pos => {
 	const base = 9000 + (["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"].indexOf(pos) + 1) * 100
 	return (
 		`<!doctype html><meta charset="utf-8"><title>Players</title>${HEAD_SCRIPT}<body><table>` +
-		Array.from({ length: PAGE_ROWS }, (_, i) => row(base + i, `${pos} Free Agent ${i}`, 12 + i)).join("") +
+		Array.from({ length: PAGE_ROWS }, (_, i) => row(base + i, `${pos} Free Agent ${i}`, 12 + i, pos)).join("") +
 		`</table>${FOOTER}</body>`
 	)
 }

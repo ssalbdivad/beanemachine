@@ -937,10 +937,17 @@ export const App = () => {
 								if (!id) return
 								const got = await refreshPool(ext, snapshot, key, id)
 								stored()
+								/* The sweep's own account of itself, appended rather than dropped. A read
+								   that got 225 men and refused one position as another position's list
+								   has two things to say, and the second one is the one that explains
+								   the board's gap — see `notes` on `PoolRead`. */
 								show(
-									got.added !== null ?
-										`Read ${got.added} free agents off your league.`
-									:	`${got.failure?.what ?? "That could not be read"}${got.failure?.fix ? ` — ${got.failure.fix}` : ""}`
+									[
+										got.added !== null ?
+											`Read ${got.added} free agents off your league.`
+										:	`${got.failure?.what ?? "That could not be read"}${got.failure?.fix ? ` — ${got.failure.fix}` : ""}`,
+										...got.notes
+									].join(" ")
 								)
 							})
 					:	null

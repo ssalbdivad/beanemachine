@@ -262,6 +262,12 @@ let wallShape = "bare"
  *  session does. */
 let redirectFrom = Infinity
 
+/** After this many players pages, ACCEPT the request and never answer it — a wifi drop
+ *  mid-sweep, a laptop waking from sleep, or Yahoo hanging. The socket is held open and the
+ *  handle kept so the block that uses it can let go afterwards. */
+let stallFrom = Infinity
+const stalled = []
+
 /* ── a Yahoo to point the browser at ─────────────────────────────────────────────── */
 const asked = []
 const server = createServer((req, res) => {
@@ -279,6 +285,11 @@ const server = createServer((req, res) => {
 		   which is a different origin from the tab the sweep is running in. The request
 		   therefore stops being same-origin at the redirect and the fetch rejects outright
 		   rather than returning a page — a branch nothing else in this suite reaches. */
+		if (playersServed > stallFrom) {
+			/* No writeHead, no end: the connection is accepted and nothing is ever sent. */
+			stalled.push(res)
+			return
+		}
 		if (playersServed > redirectFrom) {
 			res.writeHead(302, { location: "https://login.yahoo.com/config/login" })
 			return res.end()
@@ -1624,11 +1635,23 @@ await walled.close()
 	t("twenty presses at once do not become twenty presses' worth of requests",
 		made <= 6, `${made} requests to Yahoo from 20 simultaneous presses`)
 	t("and every press that was refused came back with a sentence rather than a silence",
-		burst.every(b => b.kind === "grabs" || (b.kind === "failed" && b.failure?.what)),
+		burst.every(b => (b.kind === "grabs" && (b.grabs?.length ?? 0) > 0) || (b.kind === "failed" && b.failure?.what)),
 		JSON.stringify(burst.map(b => b.kind)))
-	const refused = burst.filter(b => b.kind === "failed").map(b => b.failure)
+	/*
+	   A REFUSAL IS NOT AN EMPTY ANSWER, and it used to be one.
+	
+	   The page the reader is standing on was read from the DOM and cost nobody a request, so a
+	   press whose EXTRA fetching is refused still has his team page in hand. Replying
+	   `kind: "failed"` threw it away — and the app's caller treats that as "nothing came back",
+	   so a reader pressing twice got less than a reader pressing once. What is refused is the
+	   fetching; the answer still carries the page and the sentence together.
+	*/
+	const refused = burst.map(b => b.failure).filter(Boolean)
 	t("nineteen of the twenty are refused",
 		refused.length >= 19, `${refused.length} refused of 20`)
+	t("…and every one of them still hands back the page he is standing on",
+		burst.filter(b => b.failure).every(b => (b.grabs?.length ?? 0) > 0),
+		JSON.stringify(burst.filter(b => b.failure).map(b => b.grabs?.length)))
 	t("…and the refusal says what to do about it, in seconds, with no word about this app",
 		refused.every(f => /wait|try again/i.test(`${f.what} ${f.fix}`)) &&
 			refused.every(f => !/mutex|allowance|ceiling|protocol/i.test(`${f.what} ${f.fix}`)),
@@ -1674,6 +1697,51 @@ await walled.close()
 		fresh.kind === "grabs" && fresh.grabs?.length > 0,
 		JSON.stringify({ kind: fresh.kind, grabs: fresh.grabs?.length }))
 	await gate.close()
+}
+
+/* ── A PAGE THAT NEVER ANSWERS ───────────────────────────────────────────────────────
+   
+   `fetch` has no timeout, so a server that accepts a connection and then sends nothing leaves
+   the promise pending until the operating system gives up — minutes, sometimes hours. The
+   one-at-a-time gate is released in a `finally`, and a `finally` under a promise that never
+   settles never runs: measured against this fixture before `getPage` existed, the gate stayed
+   claimed and every later press of EITHER button was refused with "your free agents are being
+   read right now — it takes a few seconds", for the life of the tab. False in both halves, and
+   the file's own note beside the gate calls this failure worse than the burst it was added to
+   stop.
+   
+   Twenty seconds a page now bounds it. This block asserts the two things that follow: the
+   stalled read ENDS, and the tab is usable afterwards. */
+{
+	const hung = await context.newPage()
+	await hung.goto(yahoo, { waitUntil: "domcontentloaded" })
+	await app.waitForTimeout(400)
+	const before = Date.now()
+	stallFrom = 0
+	const answer = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	const took = Date.now() - before
+	stallFrom = Infinity
+	/* Let the held sockets go, so the fixture's server can close at the end of the run. */
+	for (const res of stalled.splice(0)) {
+		try {
+			res.destroy()
+		} catch {
+			/* already gone */
+		}
+	}
+	t("a page that never answers ends the read rather than hanging on it",
+		answer.kind === "failed" || answer.kind === "grabs", JSON.stringify(answer).slice(0, 160))
+	t("…inside the app's own patience, not the operating system's",
+		took < 60_000, `${Math.round(took / 1000)}s`)
+	t("…and says so in a sentence rather than going quiet",
+		answer.kind !== "failed" || !!answer.failure?.what, JSON.stringify(answer).slice(0, 200))
+
+	/* THE POINT OF THE WHOLE BLOCK: the tab still works. */
+	const after = await askFor("league")
+	t("and the next press works, because the gate was given back",
+		after.kind === "grabs" && after.grabs?.length > 0,
+		JSON.stringify({ kind: after.kind, grabs: after.grabs?.length, failure: after.failure?.what }))
+	await hung.close()
 }
 
 /* ── WHAT A SIGNED-IN PAGE'S OWN SCRIPTS NEVER GET TO DO ─────────────────────────────

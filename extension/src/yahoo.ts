@@ -61,6 +61,41 @@ const samePath = (absolute: string): string => {
 }
 
 /**
+ * ONE REQUEST, WITH AN END TO IT.
+ *
+ * `fetch` has no timeout. A server that accepts a connection and then sends nothing leaves the
+ * promise pending until the operating system's keepalive gives up, which is minutes and can be
+ * hours — and a request that never settles is a `finally` that never runs.
+ *
+ * That is not a theoretical shape: it is a wifi drop mid-sweep, a laptop waking from sleep, or
+ * Yahoo hanging. Reproduced against the suite's own fake Yahoo by holding one players response
+ * open: the gate stayed claimed, and every later press of EITHER button was refused with "your
+ * free agents are being read right now — it takes a few seconds", which is false in both
+ * halves, for the life of the tab. The file's own note beside the gate says a gate that is not
+ * released is an extension that has quietly stopped working; this is what it was warning about.
+ *
+ * Twenty seconds per page. A Yahoo page that has not begun to answer in twenty seconds is not
+ * about to — the sweep's whole nine pages take about three — and the app's own patience is
+ * ninety, so nine pages each taking the full twenty would still report a failure rather than
+ * hang. The abort surfaces as a rejected fetch, which both callers already turn into a
+ * sentence.
+ */
+const PAGE_MS = 20_000
+const getPage = async (url: string): Promise<Response> => {
+	const stop = new AbortController()
+	const bell = setTimeout(() => stop.abort(), PAGE_MS)
+	try {
+		/* Same-origin, from inside the reader's own signed-in tab, so his cookies go with it
+		   exactly as they would if he clicked the link himself. `credentials` is spelled out
+		   rather than left to the default because the default differs between the two browsers
+		   this has to work in. */
+		return await fetch(samePath(url), { credentials: "include", signal: stop.signal })
+	} finally {
+		clearTimeout(bell)
+	}
+}
+
+/**
  * A FETCHED PAGE, REDUCED TO WHAT A BROWSER WOULD HAVE SHOWN.
  *
  * Tags are stripped HERE rather than in the app so the 400 KB never crosses the wire, and
@@ -223,16 +258,12 @@ const sweep = async (
 		say(`reading ${spoken[pos] ?? pos}`, i, positions.length)
 		const url = plan[i]!.url
 		try {
-			/* Same-origin, from inside the reader's own signed-in tab, so his cookies go
-			   with it exactly as they would if he clicked the link himself. `credentials`
-			   is spelled out rather than left to the default because the default differs
-			   between the two browsers this has to work in.
-
-			   Counted against this tab's per-minute ceiling as it is spent rather than reserved
+			/* Counted against this tab's per-minute ceiling as it is spent rather than reserved
 			   up front, so a sweep that stops at position four leaves five requests' worth of
-			   room behind it instead of holding them until the window rolls. */
+			   room behind it instead of holding them until the window rolls. `getPage` is where
+			   the request and its deadline live. */
 			spend()
-			const res = await fetch(samePath(url), { credentials: "include" })
+			const res = await getPage(url)
 			if (!res.ok)
 				return {
 					grabs,
@@ -377,6 +408,25 @@ const slotsAsked = (want: string[] | undefined): string[] => {
  * remember — see PRIVACY.md, where that is a promise rather than an implementation note.
  */
 let reading: null | "league" | "pool" = null
+/**
+ * WHEN THE CURRENT READ CLAIMED THE GATE, so a read that cannot end cannot hold it.
+ *
+ * `getPage` bounds each request, which bounds a sweep at nine pages of twenty seconds plus its
+ * own pacing — about three minutes in the worst case anybody has ever seen, against three
+ * seconds in the ordinary one. This is the backstop under that: a claim older than four
+ * minutes is treated as abandoned and the next press takes the gate.
+ *
+ * Belt and braces on purpose. The failure it guards against is the one the gate's own note
+ * calls worse than the burst — an extension that has quietly stopped working — and the cost of
+ * being wrong here is two overlapping reads, once, which the per-minute ceiling still bounds.
+ */
+let readingSince = 0
+const STUCK_MS = 240_000
+const gateHeld = (): boolean => reading !== null && Date.now() - readingSince < STUCK_MS
+const claim = (what: "league" | "pool"): void => {
+	reading = what
+	readingSince = Date.now()
+}
 const WINDOW = 60_000
 /* Five full sweeps in a minute. A reader pressing every button on the screen as fast as he
    can read them does not come near it — a sweep paces itself at a quarter-second a position
@@ -422,7 +472,13 @@ const alreadyBusy = (step: "pool" | "league"): { kind: "failed"; failure: GrabFa
 			reading === "pool" ?
 				"your free agents are being read right now"
 			:	"your league is being read right now",
-		fix: "Wait for that to finish — it takes a few seconds — and it will be here."
+		/* The second sentence is the one that matters when this is wrong. A read that is
+		   genuinely stuck says "a few seconds" for as long as it is stuck, and the reader has no
+		   way to know which of the two he is looking at — so he is given the action that fixes
+		   the stuck case and costs nothing in the ordinary one. */
+		fix:
+			"Wait for that to finish — it takes a few seconds. If it stays stuck, reload your " +
+			"Yahoo tab and press again."
 	}
 })
 
@@ -549,22 +605,31 @@ chrome.runtime.onMessage.addListener(
 			   either way — `here` was read from the DOM and cost nobody a request — so a refusal
 			   here is never an empty answer; it is the same read without the extra pages.
 			*/
-			if (reading) {
-				reply(alreadyBusy("league"))
+			/*
+			   A REFUSAL STILL HANDS BACK THE PAGE HE IS STANDING ON.
+			
+			   `here` was read from the DOM and cost nobody a request, and the comment above says
+			   so — and these two branches replied `failed`, which throws it away. A reader whose
+			   second press was refused got nothing at all from a read that had his team page in
+			   hand, and the app's own caller treats `kind: "failed"` as "nothing came back".
+			   What is refused is the extra fetching, not the read.
+			*/
+			if (gateHeld()) {
+				reply({ kind: "grabs", grabs: [here], failure: alreadyBusy("league").failure })
 				return true
 			}
 			const hold = waitFor(plan.length)
 			if (hold > 0) {
-				reply(askedTooHard("league", hold))
+				reply({ kind: "grabs", grabs: [here], failure: askedTooHard("league", hold).failure })
 				return true
 			}
-			reading = "league"
+			claim("league")
 			/** A page fetched from the reader's own signed-in tab, as the text a browser would
 			 *  have rendered — see `renderedText`. Empty string when Yahoo would not serve it,
 			 *  which the caller treats as "not read" rather than as "empty". */
 			const asText = async (url: string): Promise<string> => {
 				spend()
-				const res = await fetch(samePath(url), { credentials: "include" })
+				const res = await getPage(url)
 				if (!res.ok) return ""
 				return renderedText(await res.text())
 			}
@@ -635,7 +700,7 @@ chrome.runtime.onMessage.addListener(
 			   is about to be given anyway, and a sentence he can read is better than a spinner
 			   that is secretly two spinners.
 			*/
-			if (reading) {
+			if (gateHeld()) {
 				reply(alreadyBusy("pool"))
 				return true
 			}
@@ -656,7 +721,7 @@ chrome.runtime.onMessage.addListener(
 				reply(askedTooHard("pool", hold))
 				return true
 			}
-			reading = "pool"
+			claim("pool")
 			void sweep(
 				leagueId,
 				sport,

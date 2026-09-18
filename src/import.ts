@@ -454,6 +454,13 @@ export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod =
 		return { period: empty, needsReview }
 	}
 
+	/* What ESPN says the season holds, where it says it. `matchupPeriodCount` is the league's
+	   own count of matchups; `units` above is the largest id in its period map, which includes
+	   the playoff rounds and is a unit test rather than a count. */
+	const stated =
+		typeof sched.matchupPeriodCount === "number" && sched.matchupPeriodCount > 0 ?
+			sched.matchupPeriodCount
+		:	null
 	const days = length * 7
 	needsReview.push(
 		"ESPN states how long a period runs but not which weekday it starts on, so the board " +
@@ -471,10 +478,19 @@ export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod =
 			   same one the code does, stated so he can check it against his own league page:
 			   the units are WEEKS, settled by the payload itself, since the day counter in the
 			   same response reads in the hundreds while these run to about 25. */
+			/*
+			   AND THE COUNT IS THE LEAGUE'S OWN, not the highest number in its schedule.
+			
+			   `units` is the largest value in `matchupPeriods`, which is what settles the UNIT
+			   (weeks, not days) and is not the number of matchups: it counts the playoff rounds
+			   too, so a league ESPN says plays 21 matchups was told it plays 25. The sentence is
+			   printed under "Read from:" on My league, where a reader can compare it with his own
+			   league page and find it wrong.
+			*/
 			source:
 				`ESPN's own schedule for your league: each matchup runs ${length} ` +
-				`week${length === 1 ? "" : "s"}, and there are ${units} of them in the season, ` +
-				`so a scoring period is ${days} days.`
+				`week${length === 1 ? "" : "s"}, and there are ${stated ?? units} of them in the ` +
+				`season, so a scoring period is ${days} days.`
 		},
 		needsReview
 	}
@@ -824,7 +840,21 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	const get = (yr: number) =>
 		fetch(url.replace(/seasons\/\d+/, `seasons/${yr}`), { headers: agentHeaders(USER_AGENT) })
 	let res = await get(season)
-	if (res.status === 404) res = await get(season - 1)
+	/*
+	   AND THE YEAR THIS ACTUALLY READ, which is not always the year it asked for.
+	
+	   The retry exists because a public league 404s for a season it never played, and between
+	   seasons that is the ordinary case. What was recorded afterwards was the year it PLANNED
+	   to read: an import that fell back to 2021 came back stamped 2026, with a `sources` URL
+	   that 404s, and `meta.season` is what every later read is made with — the free-agent pool,
+	   the actuals, the roster. So the league said one year and every request about it asked for
+	   another, and nothing on any screen mentioned it.
+	*/
+	let read = season
+	if (res.status === 404) {
+		res = await get(season - 1)
+		if (res.ok) read = season - 1
+	}
 	if (!res.ok) {
 		throw new ImportError(
 			res.status === 401 || res.status === 403 ?
@@ -926,7 +956,8 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 					(data.teams as any[] | undefined)?.find(x => String(x?.id) === String(t.teamId))
 						?.name) ||
 				null,
-			season,
+			/* The year READ, not the year asked for — see the retry above. */
+			season: read,
 			scoring_type: scoringSettings.scoringType ?? null,
 			/* ESPN states this about itself, and the app has a field for it that only the Yahoo
 			   side ever set. It is the difference between "we could not read your league" and
@@ -979,11 +1010,17 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 		league_rules: { raw_settings: settings },
 		provenance: {
 			fetched_at: today(),
-			sources: [url],
+			sources: [url.replace(/seasons\/\d+/, `seasons/${read}`)],
 			method: "ESPN v3 mSettings API",
 			verified: false
 		},
 		needs_review: [
+			...(read !== season ?
+				[
+					`ESPN has no ${season} season for this league, so its ${read} season was read ` +
+						`instead. Everything below is that year's.`
+				]
+			:	[]),
 			...(inningsNote ? [inningsNote] : []),
 			...(t.teamId ? []
 			:	[

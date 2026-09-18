@@ -59,8 +59,9 @@ in memory only, and it goes when your browser closes. (`lastSeen` in `src/backgr
 
 **Which of your open tabs are beanemachine.com**, so that a progress line ("reading
 shortstops") reaches the page that asked for it, and so that the toolbar button can put
-you back on that page. It asks the browser for tabs matching beanemachine.com and the two
-local addresses, and the browser answers with those and no others — it does not look
+you back on that page. It asks the browser for tabs matching beanemachine.com — and, in a
+build made for developing the add-on and not in the one you installed, two local addresses
+as well — and the browser answers with those and no others — it does not look
 through your open tabs itself. (`chrome.tabs.query({ url: APP_MATCHES })`, twice, in
 `src/background.ts`. An earlier version of this file disclosed that the add-on examined
 the address of every open tab in order to skip the Yahoo ones; that is what the code did,

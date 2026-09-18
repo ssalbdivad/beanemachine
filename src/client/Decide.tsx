@@ -2279,17 +2279,42 @@ export const Decide = ({
 										   worth four and an out recorded is worth one: below that the two
 										   halves are telling a reader the same thing. */
 										if (worse < 10) return null
+										/*
+										   AND ONLY WHEN THERE IS A HOLE TO NAME.
+										
+										   These are two GAPS, not two totals: a positive half means his men
+										   out-scored his opponent's men on that side of the ball. Without
+										   this line the sentence picked the SMALLER of the two gaps
+										   whatever its sign, so a reader ahead on both halves was told
+										   "the gap is in your arms" about arms that were thirty points to
+										   the good — a confident instruction to go and fix something that
+										   is not broken, printed beside a number that is correct.
+										
+										   Reproduced in a browser: +92.1 bats, +26.1 arms, total +118.2,
+										   and the card named the arms. The case the sentence was written
+										   for — a reader behind on one half — is untouched, because the
+										   smaller of two gaps is negative exactly when there is a half to
+										   name.
+										*/
+										if (Math.min(hitting, pitching) >= 0) return null
 										const behindAt = hitting < pitching ? "bats" : "arms"
 										const side = hitting < pitching ? hitting : pitching
 										const other = hitting < pitching ? pitching : hitting
 										const otherName = hitting < pitching ? "arms" : "bats"
+										/*
+										   BOTH NUMBERS ARE MARGINS AGAINST HIS OPPONENT, and the first
+										   version printed them as bare signed figures — "+12 there
+										   against +45" — which reads as two scores. They are neither
+										   side's points: each is his men minus his opponent's men on
+										   that half of the ball, which is the same comparison the total
+										   above it makes, said twice.
+										*/
 										return (
 											<>
 												{" "}
-												The gap is in your <b>{behindAt}</b>: {side >= 0 ? "+" : ""}
-												{side} there against {other >= 0 ? "+" : ""}
-												{other} from your {otherName}, on the same count of every man
-												held.
+												The gap is in your <b>{behindAt}</b>: they are{" "}
+												{Math.abs(side)} behind his, while your {otherName} are{" "}
+												{Math.abs(other)} {other >= 0 ? "ahead of" : "behind"} his.
 											</>
 										)
 									})()}

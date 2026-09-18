@@ -52,7 +52,21 @@ const DEV = process.env.BM_EXT_DEV === "1"
 
 /** Every host a content script reads, from the platform records themselves. */
 const READS = readerMatches(DEV)
-const out = resolve(here, "..", process.env.BM_EXT_OUT ?? "dist-ext")
+/*
+   AND IT IS NEVER THE REPOSITORY ITSELF.
+   
+   The first thing this script does is `rm -rf` its output directory. `BM_EXT_OUT=""` resolves
+   to the repository root, and an empty environment variable is a normal accident — a shell
+   variable that was never set, a CI step whose input was blank. That is a deleted working
+   tree, in the first line of a build.
+*/
+const asked = process.env.BM_EXT_OUT?.trim()
+const out = resolve(here, "..", asked || "dist-ext")
+if (out === resolve(here, "..") || out === resolve(here))
+	throw new Error(
+		`BM_EXT_OUT must name a directory of its own; "${process.env.BM_EXT_OUT}" resolves to ` +
+			`${out}, which is this project itself and is about to be deleted.`
+	)
 
 /**
  * Bumped by hand, and it is the version a READER sees in his browser's list — not the

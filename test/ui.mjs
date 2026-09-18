@@ -1331,6 +1331,135 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await bp.close()
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * AN ESPN READER'S BEST ROUTE, WHERE HE CAN SEE IT.
+ *
+ * ESPN publishes a public league's settings to any web page that asks — `readableInBrowser`
+ * is true for ESPN alone, because lm-api-reads sends the CORS header Yahoo never will — so
+ * his whole setup is one address, with nothing to copy and nothing to install. The address
+ * box sat BELOW a paste box and a three-step Ctrl+A instruction he does not need: measured on
+ * the published build at 390x844, 36px under the fold, four clicks in.
+ *
+ * What is asserted is the ORDER and the count: his route comes before the paste, and there is
+ * exactly one address box on the screen rather than two.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const ep = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	await stubSlate(ep)
+	/* A stranger's first visit: the served seed carries a league on the dev server and none on
+	   the published build, and the dock — the only way into the sheet with no league — is
+	   present exactly when there is none. Stubbed rather than navigated around, the same way
+	   test/board.mjs reaches this screen. */
+	await ep.route("**/scoring.json", async route => {
+		const j = await (await route.fetch()).json()
+		j.leagues = {}
+		j.active_league = null
+		await route.fulfill({ json: j })
+	})
+	await ep.goto(BASE, { waitUntil: "domcontentloaded" })
+	await ep.waitForSelector("nav button")
+	await ep.waitForTimeout(1200)
+	/* The bar, not the toolbar: this page has no league, so the dock is the only way in and
+	   `openDock`'s desktop branch (which waits for the toolbar) never resolves here. */
+	await ep.waitForSelector(".dock-bar button", { timeout: 30000 })
+	if ((await ep.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
+		await ep.click(".dock-bar button")
+	await ep.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
+	await ep.click("summary:has-text('My league scores differently')")
+	await ep.click(".onboard-where button:has-text('ESPN')")
+	await ep.waitForSelector(".onboard-first", { timeout: 10000 })
+	const say = await ep.$eval(".onboard-first", e => e.innerText)
+	t("an ESPN reader is told his league can be read straight from its address",
+		/hands a public league straight over/.test(say), say.slice(0, 200))
+	/* The private case is the reason the paste stays underneath rather than being hidden, and
+	   it is the one thing about ESPN this app genuinely cannot do. */
+	t("…and that a private one answers nobody, this app included",
+		/private league answers nobody/i.test(say), say)
+	t("there is one address box on that screen, not two",
+		(await ep.locator(".onboard-url").count()) === 1,
+		String(await ep.locator(".onboard-url").count()))
+	const order = await ep.evaluate(() => {
+		const url = document.querySelector(".onboard-url")
+		const paste = document.querySelector('textarea[data-ctl="paste-settings"]')
+		if (!url || !paste) return null
+		return {
+			url: Math.round(url.getBoundingClientRect().top),
+			paste: Math.round(paste.getBoundingClientRect().top)
+		}
+	})
+	t("and it comes before the paste box rather than under it",
+		order && order.url < order.paste, JSON.stringify(order))
+	/* A Yahoo reader must not be shown an address box at all: no website can read a Yahoo
+	   league from its URL, and offering one would be the app claiming a capability it does not
+	   have on the one screen that exists to explain that it does not. */
+	await ep.click(".onboard-where button:has-text('Yahoo')")
+	await ep.waitForTimeout(300)
+	t("a Yahoo reader is offered no address box, because no website can read his league",
+		(await ep.locator(".onboard-url").count()) === 0 &&
+			(await ep.locator(".onboard-first").count()) === 0,
+		`${await ep.locator(".onboard-url").count()} url boxes`)
+	await ep.close()
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * A BROWSER THAT TAKES THE READER AND HAS NO WAY TO GET IT.
+ *
+ * Firefox for Android can run this perfectly well — from Mozilla's add-ons site, which is the
+ * only route it has: there is no about:debugging on a phone and no folder to point at. With no
+ * listing yet, that reader has no install route at all, and he was shown the store walkthrough
+ * with the note "it is not in the add-ons site yet, so it comes from here instead" directly
+ * above a button sending him to a SEARCH of that site, which returns two add-ons that are not
+ * this one. Three false things at once, on one screen.
+ *
+ * Driven by user agent, because that is the only input the branch reads.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const ctx = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+		userAgent:
+			"Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0"
+	})
+	const ap = await ctx.newPage()
+	await stubSlate(ap)
+	await ap.route("**/scoring.json", async route => {
+		const j = await (await route.fetch()).json()
+		j.leagues = {}
+		j.active_league = null
+		await route.fulfill({ json: j })
+	})
+	await ap.goto(BASE, { waitUntil: "domcontentloaded" })
+	await ap.waitForSelector("nav button")
+	await ap.waitForTimeout(1200)
+	await ap.waitForSelector(".dock-bar button", { timeout: 30000 })
+	if ((await ap.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
+		await ap.click(".dock-bar button")
+	await ap.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
+	const offer = await ap.$(".onboard-offer button")
+	t("a Firefox phone is still offered the reader, because the browser can run it", !!offer)
+	if (offer) {
+		await offer.click()
+		await ap.waitForSelector(".connect", { timeout: 10000 })
+		const say = await ap.$eval(".connect", e => e.innerText)
+		t("and is told where it can be added from, and that it is not there yet",
+			/add-ons site/i.test(say) && /not there yet/i.test(say), say.slice(0, 300))
+		t("…and is offered no steps he cannot carry out",
+			(await ap.locator(".connect .step").count()) === 0,
+			`${await ap.locator(".connect .step").count()} steps`)
+		/* The worst of the three: a link to a store search for an add-on the store does not
+		   have, under a sentence saying it is not in that store. */
+		t("…and no link into a store that does not have it",
+			(await ap.locator('.connect a[href*="addons.mozilla.org"]').count()) === 0)
+		t("…and the route that does work on his phone is the one he is given",
+			/typing your team in/i.test(say), say.slice(0, 300))
+	}
+	await ap.close()
+	await ctx.close()
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

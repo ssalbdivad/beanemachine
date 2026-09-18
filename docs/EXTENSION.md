@@ -421,7 +421,8 @@ the calls are `sendMessage` ×2, `query` ×2, `create` ×2, `update` ×1, `onRem
 at 15:30).
 
 Both `chrome.tabs.query` calls pass `{ url: APP_MATCHES }` — the browser returns only tabs
-matching beanemachine.com and the two local addresses, and the extension never enumerates
+matching beanemachine.com — plus the two local addresses in a `BM_EXT_DEV=1` build, and in
+that build only — and the extension never enumerates
 the rest. That is worth knowing because it has not always been true: the progress branch
 used to call `chrome.tabs.query({})` and filter with `!/fantasysports\.yahoo\.com/`, which
 meant reading the URL of every open tab and posting a message naming a fantasy position

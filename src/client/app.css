@@ -984,6 +984,12 @@ kbd{
 
 .onboard-alts{margin-top:var(--sp-4)}
 .onboard-alts dl{margin-top:var(--sp-3)}
+/* The route that actually works for this platform, set above the one that works for every
+   platform. The rule under it separates "this is your way in" from "and here is the fallback",
+   which is the whole reason it is a block rather than one more paragraph in the flow. */
+.onboard-first{padding:0 0 var(--sp-3);margin:0 0 var(--sp-3);border-bottom:1px solid var(--rule)}
+.onboard-first .sub{margin:0 0 var(--sp-2)}
+.onboard-first .sub:last-child{margin:var(--sp-2) 0 0}
 .onboard-url{display:flex;gap:var(--sp-2);margin-top:var(--sp-2);flex-wrap:wrap}
 .onboard-url input{flex:1 1 220px;min-width:0}
 

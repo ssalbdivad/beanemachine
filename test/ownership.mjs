@@ -722,6 +722,14 @@ t("and a league that seats nobody there is not told he is eligible there",
   t("a page of catchers served for the starters is not the starters",
     mislabelled.pool.positionsRead.includes("C") && !mislabelled.pool.positionsRead.includes("SP"),
     JSON.stringify(mislabelled.pool.positionsRead))
+  /* AND THE SENTENCE IS ABOUT WHAT HAPPENED. "Yahoo sent the same list for SP as for another
+     position" is a claim about two pages, and these two pages are different pages — the men
+     are simply the wrong men. Said wrong, it sends a reader looking for a duplicate that does
+     not exist. */
+  t("…and is said to be what it is, rather than called a duplicate",
+    mislabelled.notes.some(n => /came back holding mostly other positions/.test(n)) &&
+      !mislabelled.notes.some(n => /same list/.test(n)),
+    JSON.stringify(mislabelled.notes))
   /* Util accepts everybody, so the same page under `pos=Util` is not evidence of anything. */
   const util = readGrabs(
     [grab("Util", page(Array.from({ length: 25 }, (_, i) => row(8200 + i, `Catcher ${i}`, "C"))))],

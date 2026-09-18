@@ -763,11 +763,17 @@ t("ESPN's own settings give a matchup period of seven days",
    league (src/client/App.tsx), where a reader has no way of knowing what a matchupPeriodLength
    is. Both numbers are still required below, in the words he can check against his own league.
 */
+/* THE COUNT WAS 25 AND THE LEAGUE SAYS 21. 25 is the largest id in `matchupPeriods` — which
+   is what settles the UNIT, weeks rather than days, and counts the two playoff rounds as well.
+   `matchupPeriodCount` is the league's own count of matchups, and this sentence is printed
+   under "Read from:" where a reader can compare it with his league page and find it wrong. */
 t("and the source records how that was arrived at, not just the answer",
   /each matchup runs 1 week/.test(espnPeriod.period.source ?? "") &&
-    /25 of them in the season/.test(espnPeriod.period.source ?? "") &&
+    /21 of them in the season/.test(espnPeriod.period.source ?? "") &&
     /7 days/.test(espnPeriod.period.source ?? ""),
   espnPeriod.period.source ?? "")
+t("…and quotes the league's own count rather than the largest id in its schedule",
+  !/25 of them/.test(espnPeriod.period.source ?? ""), espnPeriod.period.source ?? "")
 t("…in a reader's words, since it is printed on a screen he reads",
   !/matchupPeriod|scoringPeriodId|scheduleSettings/.test(espnPeriod.period.source ?? ""),
   espnPeriod.period.source ?? "")

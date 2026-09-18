@@ -32,6 +32,17 @@ export const STALE_POOL_HOURS = 24
 export interface PoolRead {
 	added: number | null
 	failure: GrabFailure | null
+	/**
+	 * WHAT THE READ ITSELF HAS TO SAY, which this used to drop on the floor.
+	 *
+	 * `readGrabs` writes a sentence whenever a page came back as something other than what was
+	 * asked for — Yahoo serving the same list for two positions is the case it was added for —
+	 * and both callers here took `got.pool` and threw `got.notes` away. So the app knew exactly
+	 * why a position had been refused and the only sentence that reached the reader was the
+	 * downstream one saying it never came back: the wrong half of the truth, with the right
+	 * half computed and discarded one function away.
+	 */
+	notes: string[]
 }
 
 /**
@@ -51,11 +62,12 @@ export const refreshPool = async (
 	sport = "baseball"
 ): Promise<PoolRead> => {
 	const swept = await ext.ask("pool", { leagueId, sport })
-	if (!swept.grabs?.length) return { added: null, failure: swept.failure ?? null }
+	if (!swept.grabs?.length) return { added: null, failure: swept.failure ?? null, notes: [] }
 	const got = readGrabs(swept.grabs, snapshot)
 	if (!got.pool?.players.length)
 		return {
 			added: null,
+			notes: got.notes,
 			failure:
 				swept.failure ?? {
 					step: "pool",
@@ -83,6 +95,7 @@ export const refreshPool = async (
 	} catch (e) {
 		return {
 			added: null,
+			notes: got.notes,
 			failure: {
 				step: "store",
 				what: `the free agents could not be saved: ${(e as Error).message}`,
@@ -90,7 +103,7 @@ export const refreshPool = async (
 			}
 		}
 	}
-	return { added: got.pool.players.length, failure: swept.failure ?? null }
+	return { added: got.pool.players.length, failure: swept.failure ?? null, notes: got.notes }
 }
 
 /**
@@ -181,10 +194,15 @@ export const readLeagueHere = async (
 		}
 	}
 	const id = reading.leagueId
+	/** Anything the SWEEP had to say about itself — a position served as another position's
+	 *  list, a page that came back empty. Carried into the receipt below rather than dropped,
+	 *  which is what happened to it until 2026-09-18. */
+	const sweptNotes: string[] = []
 	if (id) {
 		const swept = await refreshPool(ext, snapshot, leagueKey, id, reading.sport ?? "baseball")
 		if (swept.added !== null) said.push(`${swept.added} free agents`)
 		else if (swept.failure) said.push(swept.failure.what)
+		sweptNotes.push(...swept.notes)
 	}
 	/*
 	  A READ THAT PARTLY FAILED SAYS SO, and it did not.
@@ -211,7 +229,8 @@ export const readLeagueHere = async (
 	const snags = [
 		answer.failure ? `${answer.failure.what}${answer.failure.fix ? ` — ${answer.failure.fix}` : ""}` : null,
 		refused,
-		...reading.notes
+		...reading.notes,
+		...sweptNotes
 	].filter(Boolean)
 	const got = said.length ? `${said.join(", ")}.` : ""
 	return {

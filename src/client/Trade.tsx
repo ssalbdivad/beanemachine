@@ -918,9 +918,16 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								{poolMissed.length > 0 && (
 									<>
 										{" "}
-										{poolMissed.join(", ")} never came back, so nobody is listed at{" "}
-										{poolMissed.length === 1 ? "that position" : "those positions"} —
-										that is a gap in the read, not an empty wire.
+										{/* "never came back" and "nobody is listed" were both written when a
+										    position missing from the read meant a page that never arrived.
+										    A position can now also be refused for coming back as another
+										    position's list, and in that case its men were kept — so this
+										    said nobody was listed at a position the screen lists men at.
+										    What is true of both is that the list is short there. */}
+										{poolMissed.join(", ")} could not be read, so what is listed at{" "}
+										{poolMissed.length === 1 ? "that position" : "those positions"} is
+										short of what your league has — that is a gap in the read, not an
+										empty wire.
 									</>
 								)}
 							</p>

@@ -252,6 +252,37 @@ export const espnMoveLimit = (
 	const raw = acq?.matchupAcquisitionLimit
 	if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0)
 		return { perPeriod: null, source: null, note: null }
+	/*
+	   A MATCHUP FIELD IN A FORMAT WITH NO MATCHUPS, which reads 0 and means nothing.
+	
+	   Measured 2026-09-18 across ESPN's own templates: `matchupAcquisitionLimit` is -1 — the
+	   unlimited sentinel — in every head-to-head league, and 0 in every season-long one (flb
+	   defaults 1, 5, 6 and 7), where the field does not apply at all. Those leagues state their
+	   real cap in `acquisitionLimit`, and it is -1 there too.
+	
+	   Read as a cap, that 0 was a planner told the league allows NO acquisitions: `movesAllowed`
+	   takes the lower of the stated cap and its own rail, so every plan came back with no
+	   pickups and the note "your league allows 0 acquisitions a week". A league ESPN said was
+	   unlimited, planned as forbidden — which is the worst direction for this field to be wrong
+	   in, because the reader cannot tell a rule from a bug.
+	
+	   The discriminator is the schedule rather than the number: a league with more than one
+	   matchup period has matchups, and its matchup field means what it says — including a 0,
+	   which is a real and stateable rule. A league with one period or none does not, and the
+	   field is ignored rather than read.
+	*/
+	const periods = Number(settings?.scheduleSettings?.matchupPeriodCount)
+	const hasMatchups = Number.isFinite(periods) && periods > 1
+	if (!hasMatchups)
+		return {
+			perPeriod: null,
+			source: null,
+			note:
+				raw > 0 ?
+					`ESPN states a per-matchup limit of ${raw} for a league that plays no matchups, ` +
+					`so no period budget is claimed from it.`
+				:	null
+		}
 	const perScoringPeriod = acq?.matchupLimitPerScoringPeriod === true
 	if (!perScoringPeriod)
 		return {

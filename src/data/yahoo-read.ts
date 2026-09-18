@@ -206,11 +206,26 @@ export const readGrabs = (
 			notes.push(
 				"That settings page carried no scoring table, so the values could not be read from it."
 			)
-		else if (read.missing.length)
+		else if (read.missing.length || read.unpriced.length)
 			/* Named rather than counted: a reader told "3 values could not be read" cannot
 			   tell which of his league's rules the board is now guessing at. `missing` is the
 			   parser's own list and is already written in the reader's terms. */
-			notes.push(`Not on that page: ${read.missing.join(", ")}.`)
+			notes.push(
+				[
+					read.missing.length ? `Not on that page: ${read.missing.join(", ")}.` : null,
+					/* NOT "not on that page": the row WAS on it. What failed is the reading, and a
+					   reader told his home-run row is missing from a page he is looking at will
+					   conclude the app cannot read at all — which, about that row, is true, and is
+					   what this says instead. */
+					read.unpriced.length ?
+						`${read.unpriced.join(", ")} could not be read off that page, so ` +
+						`${read.unpriced.length === 1 ? "it scores" : "they score"} nothing until you check ` +
+						`${read.unpriced.length === 1 ? "that row" : "those rows"}.`
+					:	null
+				]
+					.filter(Boolean)
+					.join(" ")
+			)
 	}
 
 	const team = grabs.find(g => g.kind === "team")
@@ -381,7 +396,12 @@ export const readGrabs = (
 		   What is refused is the CLAIM that the position was read.
 		*/
 		const idsPerPosition = new Map<string, string>()
-		const unfiltered: string[] = []
+		/* The two checks are two different sentences. "Yahoo sent the same list for 1B as for
+		   another position" is a statement about two pages and is false of a page that was
+		   refused for carrying the wrong men; saying it anyway would send a reader looking for
+		   a duplicate that is not there. */
+		const duplicated: string[] = []
+		const mislabelled: string[] = []
 		for (const g of players) {
 			const got = parsePage(g.html!)
 			const pos = posOf(g.url)
@@ -390,16 +410,20 @@ export const readGrabs = (
 			let honoured = true
 			if (pos) {
 				for (const [other, otherIds] of idsPerPosition)
-					if (other !== pos && otherIds === ids && got.length >= 10) honoured = false
+					if (other !== pos && otherIds === ids && got.length >= 10) {
+						honoured = false
+						if (!duplicated.includes(pos)) duplicated.push(pos)
+					}
 				const named = got.filter(p => p.positions.length)
 				if (honoured && pos !== "Util" && named.length >= got.length / 2) {
 					const ofPos = named.filter(p => p.positions.includes(pos)).length
-					if (ofPos < named.length / 2) honoured = false
+					if (ofPos < named.length / 2) {
+						honoured = false
+						if (!mislabelled.includes(pos)) mislabelled.push(pos)
+					}
 				}
 				idsPerPosition.set(pos, ids)
-				if (honoured) {
-					if (!positionsRead.includes(pos)) positionsRead.push(pos)
-				} else if (!unfiltered.includes(pos)) unfiltered.push(pos)
+				if (honoured && !positionsRead.includes(pos)) positionsRead.push(pos)
 			}
 			for (const p of got)
 				if (!seen.has(p.yahooId)) {
@@ -407,13 +431,20 @@ export const readGrabs = (
 					rows.push(p)
 				}
 		}
-		if (unfiltered.length)
-			/* Named, not counted, and phrased as what it means for his list rather than as what
-			   the page did: the consequence he can act on is that the list is short at those
-			   positions, and that pressing again is the thing to do. */
+		/* Named, not counted, and phrased as what it means for his list rather than as what the
+		   page did: the consequence he can act on is that the list is short at those positions,
+		   and that pressing again is the thing to do. */
+		if (duplicated.length)
 			notes.push(
-				`Yahoo sent the same list for ${unfiltered.join(", ")} as for another position, so ` +
-					`those were not counted as read and the free agents may be short there.`
+				`Yahoo sent the same list for ${duplicated.join(", ")} as for another position, so ` +
+					`${duplicated.length === 1 ? "it was" : "those were"} not counted as read and the ` +
+					`free agents may be short there.`
+			)
+		if (mislabelled.length)
+			notes.push(
+				`The ${mislabelled.join(", ")} list came back holding mostly other positions, so ` +
+					`${mislabelled.length === 1 ? "it was" : "those were"} not counted as read and the ` +
+					`free agents may be short there.`
 			)
 		/*
 		   WHAT WAS ASKED FOR COMES FROM THE SWEEP, NOT FROM WHAT ARRIVED.

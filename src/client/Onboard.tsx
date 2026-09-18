@@ -295,8 +295,17 @@ export const Onboard = ({
 				(seats ? `, ${seats} roster seats` : "") +
 				(made.meta.max_teams ? ` and ${made.meta.max_teams} teams` : "") +
 				`. ` +
+				/* Two different shortfalls and two different sentences. A missing scoring table is
+				   fixed by filling the form in below; a row whose value would not parse is on his
+				   settings page and no form here can supply it, so "fill those in below" pointed
+				   at a form that had nothing to fill — `leagueGaps` returns no gap for it, and the
+				   finish button sat enabled beside the instruction. */
 				(read.missing.length ?
 					`It carried no ${read.missing.join(" and no ")} — fill those in below and the board can rank.`
+				: read.unpriced.length ?
+					`${read.unpriced.join(", ")} ${read.unpriced.length === 1 ? "is" : "are"} on that page and ` +
+					`the value could not be read, so ${read.unpriced.length === 1 ? "it scores" : "they score"} ` +
+					`nothing — worth checking in My league.`
 				:	`That is everything the board needs.`)
 		)
 	}
@@ -399,6 +408,11 @@ export const Onboard = ({
 			return
 		}
 		const got = readGrabs(swept.grabs, snapshot)
+		/* WHAT THE SWEEP HAS TO SAY ABOUT ITSELF, which this route dropped exactly as the other
+		   one did: a position Yahoo served as another position's list is refused, and the reason
+		   was computed here and thrown away while the board downstream said only that the
+		   position never came back. */
+		if (got.notes.length) setNote(got.notes.join(" "))
 		if (got.pool?.players.length) {
 			try {
 				poolStore.set(key, {
@@ -867,6 +881,44 @@ export const Onboard = ({
 									}
 								</p>
 							)}
+							{where === "espn" && (
+								/*
+								  AN ESPN READER'S BEST ROUTE WAS HIS FOURTH CLICK AND OFF SCREEN.
+								
+								  ESPN publishes a public league's settings to any web page that asks —
+								  `readableInBrowser` is true for ESPN alone, because lm-api-reads sends
+								  the CORS header Yahoo never will — so for him the whole setup is one
+								  address, with nothing to copy and nothing to install. The address box
+								  sat BELOW a paste box and a three-step Ctrl+A instruction he does not
+								  need: measured at 390x844 on the published build, 36px under the fold.
+								
+								  So it comes first for him, and the paste stays underneath as the route
+								  for a private league — which is a real case and the reason the paste is
+								  not simply hidden here.
+								*/
+								<div className="onboard-first">
+									<p className="sub">
+										ESPN hands a public league straight over. Paste your league&rsquo;s
+										address and there is nothing to copy and nothing to install.
+									</p>
+									<p className="onboard-url">
+										<input
+											type="text"
+											value={url}
+											placeholder="https://fantasy.espn.com/baseball/league?leagueId=…"
+											onChange={e => setUrl(e.currentTarget.value)}
+											aria-label="Your ESPN league's web address"
+										/>
+										<button type="button" className="primary" onClick={() => onImportUrl(url)} disabled={!url.trim()}>
+											Read my league
+										</button>
+									</p>
+									<p className="sub">
+										A private league answers nobody, this app included &mdash; for that one,
+										copy the page below.
+									</p>
+								</div>
+							)}
 							<ol className="paste-how">
 								<li>
 									<b>On a computer</b>, open {SETTINGS_PAGE[where]}.
@@ -898,7 +950,10 @@ export const Onboard = ({
 								</button>
 							</p>
 							{note && <p className="sub paste-note">{note}</p>}
-							{(where === "espn" || canImport) && (
+							{/* The same box again for a reader who came here some other way — a saved
+							    league whose platform is already known, or a platform that turns out to be
+							    importable. Not rendered twice for an ESPN reader, who has it above. */}
+							{where !== "espn" && canImport && (
 								<p className="onboard-url">
 									<input
 										type="text"

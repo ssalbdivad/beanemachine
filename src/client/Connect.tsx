@@ -126,10 +126,21 @@ export const IN_STORE = false
  *  `public/`, which Vite ships verbatim; test/static.mjs asserts the published site really
  *  serves them, because a download link that 404s is the same defect as the store link it
  *  replaces. */
+/*
+   THE PATH IS BUILT THE WAY EVERY OTHER PUBLISHED ASSET'S IS.
+   
+   These were root-absolute. This app is published with a RELATIVE base — `scoring.json` and
+   `snapshot.json` are both fetched through `import.meta.env.BASE_URL` for exactly that reason
+   — so a leading slash is a promise that the site sits at the root of its host, which is true
+   of beanemachine.com today and is not true of a preview deployment or a project page. The
+   file would 404 and the walkthrough's first step would be back where it started.
+*/
+const asset = (name: string): string => `${import.meta.env.BASE_URL ?? "/"}${name}`
+
 export const DOWNLOAD: Record<Browser, string | null> = {
-	chrome: "/beanemachine-chrome.zip",
-	edge: "/beanemachine-chrome.zip",
-	firefox: "/beanemachine-firefox.zip",
+	chrome: asset("beanemachine-chrome.zip"),
+	edge: asset("beanemachine-chrome.zip"),
+	firefox: asset("beanemachine-firefox.zip"),
 	"firefox-android": null,
 	safari: null,
 	none: null
@@ -185,6 +196,12 @@ export const Connect = ({
 	const store = STORE[browser]
 	const download = DOWNLOAD[browser]
 	const firefoxish = browser === "firefox" || browser === "firefox-android"
+	/** The address of this browser's own extensions page. Edge answers `edge://`, not
+	 *  `chrome://`, and a reader typing the wrong one gets a blank page. */
+	const extensionsUrl =
+		firefoxish ? "about:debugging#/runtime/this-firefox"
+		: browser === "edge" ? "edge://extensions"
+		: "chrome://extensions"
 	/* Once it is there, the steps are history: a reader who has installed it does not need
 	   to be told how, and a screen that keeps showing him is a screen that has not noticed
 	   he did the thing it asked. */
@@ -248,13 +265,31 @@ export const Connect = ({
 			</div>
 		)
 
-	if (!takesExtension(browser))
+	/*
+	   A BROWSER THAT TAKES THE READER AND HAS NO WAY TO GET IT.
+	
+	   `takesExtension` answers what the BROWSER can run, and Firefox for Android can run this
+	   perfectly well — from the add-ons site, which is the only route it has: there is no
+	   about:debugging on a phone and no folder to point at. With no listing yet, the install
+	   route for that reader does not exist at all, and he was being shown the store walkthrough
+	   with the note "it is not in the add-ons site yet, so it comes from here instead" directly
+	   above a button sending him to a search of that site — which returns two add-ons that are
+	   not this one.
+	
+	   So he is told the truth instead, and it is the same truth the phone branch below tells:
+	   on a computer this reads his league, and typing his team in works everywhere including
+	   here. The condition is the missing DOWNLOAD rather than the browser, so a browser that
+	   gains a route gains the walkthrough with it.
+	*/
+	if (!takesExtension(browser) || (!IN_STORE && !download))
 		return (
 			<div className="connect">
 				<h2>On a computer, it can read your Yahoo league</h2>
 				<p className="sub">
 					{browser === "safari" ?
 						"Not in this browser yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."
+					: browser === "firefox-android" ?
+						"Firefox on a phone can only add it from Mozilla’s add-ons site, and it is not there yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."
 					:	"Phones don’t take the reader yet. On a computer, in Chrome or Firefox, it reads your league off Yahoo for you — until then, typing your team in takes about a minute."}
 				</p>
 				<p className="onboard-go">
@@ -272,7 +307,17 @@ export const Connect = ({
 			    capped at 591px, so the third step and the way back were below the fold — the
 			    exact defect this file's own header warns about, arriving in the file that warns
 			    about it. What was cut is the part a reader does not need before he presses
-			    anything; what stays is the one thing he might be worried about. */}
+			    anything; what stays is the one thing he might be worried about.
+			
+			    AND THE FOUR-STEP WALKTHROUGH BELOW DOES NOT FIT EITHER, which this comment used
+			    to be read as claiming. Measured on the published build at 390x844 with the store
+			    listing absent: the steps run 320..979, so the third ends at the fold and the
+			    fourth is under it. That is not the same defect. A numbered list of four says how
+			    many there are and that more follow, a reader works down it one step at a time
+			    with his browser's own settings open beside it, and the two things this comment
+			    was about — the way back, and the sentence he might be worried about — are both
+			    above the fold. What is not allowed is a single required action hidden with
+			    nothing indicating it; what is here is a list that continues. */}
 			<p className="sub">
 				It reads your league in your own browser. Nothing is sent anywhere else.
 			</p>
@@ -291,7 +336,12 @@ export const Connect = ({
 						<li className="step">
 							<span className="step-n">1</span>
 							<div className="step-body">
-								<p className="step-say">Download it, then unzip the file.</p>
+								{/* The headline said "then unzip the file" for everybody while the aside
+								    under it told a Firefox reader not to — two instructions, one line
+								    apart, in opposite directions. Firefox takes the zip as it is. */}
+								<p className="step-say">
+									{firefoxish ? "Download it." : "Download it, then unzip the file."}
+								</p>
 								<p>
 									<a className="chip-btn" href={download} download>
 										Download it
@@ -299,26 +349,38 @@ export const Connect = ({
 								</p>
 								<p className="step-aside">
 									{firefoxish ?
-										"Firefox takes the zip as it is — no unzipping needed."
-									:	"Double-click the downloaded file. It becomes a folder of the same name."}
+										"Firefox takes the zip as it is — nothing to unzip."
+									:	/* "Double-click and it becomes a folder" is a Mac sentence. Windows
+									     opens a zip as a window you can look into and Load unpacked will
+									     not take it, so the instruction has to be the one that works on
+									     both: get a real folder out of it, however this machine does that. */
+										"Unzip it — on a Mac, double-click it; on Windows, right-click and Extract All. You want the folder it produces, not the zip."}
 								</p>
 							</div>
 						</li>
 						<li className="step">
 							<span className="step-n">2</span>
 							<div className="step-body">
+								{/* IN A NEW TAB, because the closing line of this walkthrough promises this
+								    page is watching and will notice the moment the add-on arrives — and it
+								    cannot notice anything if the reader has just navigated it to his
+								    browser's settings. He would come back to a page that had never seen
+								    the install and a walkthrough still asking him to do it. */}
 								<p className="step-say">
-									Type this into your address bar and press enter.
+									Open a new tab, type this in the address bar and press enter.
 								</p>
 								{/* A browser will not let a page link to its own settings, so this is
 								    text he copies rather than a button he presses — and it says so,
 								    because a reader who tries to click it and nothing happens has been
-								    told by the screen that the screen is broken. */}
+								    told by the screen that the screen is broken.
+								
+								    EDGE IS NOT CHROME HERE. Edge runs the same add-on and does not open
+								    `chrome://extensions` — it answers `edge://extensions`, and a reader
+								    typing the address this screen gave him gets nothing. The address is
+								    the one thing on this step, so getting it wrong is the whole step. */}
 								<span className="step-point">
-									<Arrow label={`pointing at the address ${firefoxish ? "about:debugging" : "chrome://extensions"}`} />
-									<span className="step-target step-address">
-										{firefoxish ? "about:debugging#/runtime/this-firefox" : "chrome://extensions"}
-									</span>
+									<Arrow label={`pointing at the address ${extensionsUrl}`} />
+									<span className="step-target step-address">{extensionsUrl}</span>
 								</span>
 								<p className="step-aside">
 									{firefoxish ?

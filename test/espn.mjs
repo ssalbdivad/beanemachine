@@ -258,8 +258,12 @@ const t = (n, ok, x = "") => {
 	   true, acquisitionLimit -1. A scoring period in ESPN baseball is a DAY, so one a day
 	   across a seven-day matchup is seven — the arithmetic is on two stated facts, and what it
 	   drops is that they are not interchangeable, which is why the note exists. */
+	/* `scheduleSettings` is carried on every one of these because the cap is a MATCHUP field and
+	   a league with no matchups does not have one — see the season-long case at the foot of this
+	   block, which is the bug these literals used to hide by omitting the schedule. */
+	const H2H = { matchupPeriodCount: 21 }
 	const daily = espnMoveLimit(
-		{ acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true } },
+		{ scheduleSettings: H2H, acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true } },
 		7
 	)
 	t("a cap of one a day across a seven-day period is seven", daily.perPeriod === 7, String(daily.perPeriod))
@@ -271,7 +275,7 @@ const t = (n, ok, x = "") => {
 
 	/* Where the cap is per MATCHUP the number is the number, and there is nothing to caveat. */
 	const weekly = espnMoveLimit(
-		{ acquisitionSettings: { matchupAcquisitionLimit: 6, matchupLimitPerScoringPeriod: false } },
+		{ scheduleSettings: H2H, acquisitionSettings: { matchupAcquisitionLimit: 6, matchupLimitPerScoringPeriod: false } },
 		7
 	)
 	t("a cap stated per matchup is taken as it stands", weekly.perPeriod === 6 && weekly.note === null,
@@ -279,7 +283,7 @@ const t = (n, ok, x = "") => {
 
 	/* -1 is ESPN's unlimited sentinel, and unlimited is null — not a large stand-in, because a
 	   planner handed 40 believes the league said 40. */
-	t("unlimited is null", espnMoveLimit({ acquisitionSettings: { matchupAcquisitionLimit: -1 } }, 7).perPeriod === null)
+	t("unlimited is null", espnMoveLimit({ scheduleSettings: H2H, acquisitionSettings: { matchupAcquisitionLimit: -1 } }, 7).perPeriod === null)
 	t("and a league that states nothing is null",
 		espnMoveLimit({}, 7).perPeriod === null && espnMoveLimit({}, 7).note === null)
 
@@ -289,7 +293,7 @@ const t = (n, ok, x = "") => {
 	   that he may make forty moves before Sunday.
 	*/
 	const seasonOnly = espnMoveLimit(
-		{ acquisitionSettings: { acquisitionLimit: 40, matchupAcquisitionLimit: -1 } },
+		{ scheduleSettings: H2H, acquisitionSettings: { acquisitionLimit: 40, matchupAcquisitionLimit: -1 } },
 		7
 	)
 	t("a season cap is never read as a weekly one", seasonOnly.perPeriod === null, String(seasonOnly.perPeriod))
@@ -297,11 +301,41 @@ const t = (n, ok, x = "") => {
 	/* And a per-day cap with no period length claims nothing — but SAYS so, because null on
 	   its own means unlimited to the planner and this league is not unlimited. */
 	const noDays = espnMoveLimit(
-		{ acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true } },
+		{ scheduleSettings: H2H, acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true } },
 		null
 	)
 	t("a daily cap with no period length is not guessed at",
 		noDays.perPeriod === null && /a day/.test(noDays.note ?? ""), JSON.stringify(noDays))
+
+	/*
+	   A MATCHUP FIELD IN A FORMAT WITH NO MATCHUPS, which reads 0 and means nothing.
+	
+	   Measured across ESPN's own templates: -1 in every head-to-head league, 0 in every
+	   season-long one (flb defaults 1, 5, 6, 7), where the field does not apply and the real
+	   cap lives in `acquisitionLimit` — also -1. Read as a cap, that 0 made `movesAllowed`
+	   return a cap of 0, so every plan for a season-long points league came back with no
+	   pickups at all and the note "your league allows 0 acquisitions a week": a league ESPN
+	   said was unlimited, planned as forbidden.
+	*/
+	const seasonLong = espnMoveLimit(
+		{
+			scheduleSettings: { matchupPeriodCount: 1, periodTypeId: 0 },
+			acquisitionSettings: { matchupAcquisitionLimit: 0, acquisitionLimit: -1 }
+		},
+		7
+	)
+	t("a season-long league's inapplicable matchup field is not read as a cap of nothing",
+		seasonLong.perPeriod === null, JSON.stringify(seasonLong))
+	t("…and nothing is said about it, because a zero that means nothing is not news",
+		seasonLong.note === null, String(seasonLong.note))
+	/* And a head-to-head league that really does forbid acquisitions still states that: the
+	   discriminator is whether the league plays matchups, not whether the number is zero. */
+	const forbidden = espnMoveLimit(
+		{ scheduleSettings: H2H, acquisitionSettings: { matchupAcquisitionLimit: 0, matchupLimitPerScoringPeriod: false } },
+		7
+	)
+	t("but a head-to-head league that allows none still says none",
+		forbidden.perPeriod === 0, JSON.stringify(forbidden))
 }
 
 /* ── the innings floor a points league does not have ──────────────────────────────────── */
@@ -327,6 +361,7 @@ const t = (n, ok, x = "") => {
 		scoring_period: { days: 7 },
 		league_rules: {
 			raw_settings: {
+				scheduleSettings: { matchupPeriodCount: 21 },
 				acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true }
 			}
 		}

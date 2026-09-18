@@ -658,7 +658,14 @@ export const useBoard = (
 				basisText:
 					`read off your league's own free-agent list: ${availableNames.size} players are actually free` +
 					(missedPositions.length ?
-						`. ${missedPositions.join(", ")} could not be read this time, so nobody is listed at ${missedPositions.length === 1 ? "that position" : "those positions"} — that is a gap in the read, not an empty wire`
+						/* "so nobody is listed at that position" was written when a position that did
+						   not come home meant a page that never arrived. A position can now also be
+						   refused for coming back as ANOTHER position's list, and in that case its men
+						   were kept — they are real free agents whatever page they arrived on — so the
+						   board is listing men at a position this sentence calls empty. What is true
+						   of both cases is the part that matters: the list is short there, and it is
+						   the READ that is short and not the wire. */
+						`. ${missedPositions.join(", ")} could not be read this time, so what is listed at ${missedPositions.length === 1 ? "that position" : "those positions"} is short of what your league has — that is a gap in the read, not an empty wire`
 					:	"")
 			}
 		// the same map `hydrate` builds, without re-hydrating a 2.1 MB snapshot to

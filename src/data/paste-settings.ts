@@ -47,6 +47,17 @@ export interface PastedLeague {
 	/** What this page did not carry, named so the caller can ask for it rather than
 	 *  guess. */
 	missing: string[]
+	/**
+	 * STATS THE PAGE LISTED AND THIS COULD NOT PRICE — which is a different thing from
+	 * `missing`, and was briefly filed in it.
+	 *
+	 * "Not on that page: point value for HR" was said about a page whose home-run row, and its
+	 * value, were both on it: what failed was the reading, not the page. And the sentence that
+	 * follows it differs too — an absent scoring table is fixed by filling in a form, while a
+	 * row that would not parse is fixed by looking at that row. Two different sentences, so
+	 * two different lists.
+	 */
+	unpriced: string[]
 }
 
 const cells = (line: string): string[] =>
@@ -190,19 +201,12 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 	}
 
 	const missing: string[] = []
-	if (unpriced.length)
-		/* Phrased to fit the two sentences that print this list — "It carried no ___" on the
-		   setup sheet and "Not on that page: ___" in the read's own notes. The codes are the
-		   page's own, in its own brackets, so he can find the rows this could not read. */
-		missing.push(
-			`point value${unpriced.length > 1 ? "s" : ""} for ${unpriced.join(", ")}`
-		)
 	if (!Object.keys(batting).length) missing.push("batting scoring")
 	if (!Object.keys(pitching).length) missing.push("pitching scoring")
 	if (!slots) missing.push("roster positions")
 	if (maxTeams === null) missing.push("team count")
 
-	return { batting, pitching, slots, slotOrder, maxTeams, settings, missing }
+	return { batting, pitching, slots, slotOrder, maxTeams, settings, missing, unpriced }
 }
 
 /**
@@ -284,7 +288,21 @@ export const leagueFromPastedSettings = (
 				`fetched that page, so beanemachine can't vouch for it — check anything that ` +
 				`looks wrong in League setup.`
 		)
-	for (const gap of read.missing) needsReview.push(`The paste carried no ${gap}.`)
+	/* "The paste carried no ___" is said about a paste. A page this browser FETCHED did not
+	   carry it either, and telling a reader his paste was short when he pasted nothing is the
+	   app describing a gesture he did not make. */
+	for (const gap of read.missing)
+		needsReview.push(from ? `That page carried no ${gap}.` : `The paste carried no ${gap}.`)
+	/* A ROW THAT WAS THERE AND WOULD NOT READ, which is not the same as a row that was absent
+	   and is not fixed the same way: nothing here can be filled in from a form, because the
+	   value is on his settings page and this could not make sense of it. Named with the page's
+	   own code so he can go and look at that row. */
+	if (read.unpriced.length)
+		needsReview.push(
+			`${read.unpriced.join(", ")} ${read.unpriced.length === 1 ? "is" : "are"} listed on ` +
+				`that page and the point value could not be read, so ${read.unpriced.length === 1 ? "it scores" : "they score"} ` +
+				`nothing here. Check ${read.unpriced.length === 1 ? "that row" : "those rows"} against League setup.`
+		)
 
 	/**
 	 * Yahoo prints the league's own id on this very page, as "League ID#".
@@ -340,9 +358,21 @@ export const leagueFromPastedSettings = (
 						fetched_at: today,
 						sources: [from.url],
 						method: from.method,
-						/* The page was fetched and the URL is in `sources`, which is the whole of
-						   what this flag has ever claimed. */
-						verified: true
+						/*
+						   AND ONLY WHEN THERE IS NOTHING MISSING FROM IT.
+						
+						   `verified` is defined in src/schema.ts as "true only when every stored value
+						   was read from the league's own pages", and the colophon prints "Every number
+						   is in your league's own points" on the strength of it. Set from the presence
+						   of a fetched URL alone, it certified a league in which a stat row would not
+						   parse — scored as 0, which is a claim about his league — while the same
+						   read was writing a review line saying so. The two cannot both be true.
+						
+						   So the fetch is necessary and not sufficient: a page this could not read in
+						   full is a page whose values did not all come from his league, whatever
+						   fetched it.
+						*/
+						verified: read.missing.length === 0 && read.unpriced.length === 0
 					}
 				:	{
 						fetched_at: today,

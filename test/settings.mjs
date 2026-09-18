@@ -83,10 +83,18 @@ const text = asPasted(real)
     read.batting.HR !== real.scoring.pitching.K, JSON.stringify(read.batting))
   t("…and is not priced at all rather than priced wrong",
     read.batting.HR === undefined, JSON.stringify(read.batting))
+  /*
+     NAMED IN ITS OWN LIST, and it was briefly filed under `missing`.
+     
+     "Not on that page: point value for HR" was said about a page whose home-run row, and its
+     value, were both on it — what failed was the reading. And the two shortfalls are fixed
+     differently: an absent scoring table is filled in on a form, while a row that would not
+     parse is on his settings page and no form here can supply it. Two lists, two sentences.
+  */
   t("…and the stat it could not price is named, with the page's own code",
-    read.missing.some(m => /HR/.test(m)), JSON.stringify(read.missing))
-  t("…in words that fit the sentence the setup sheet prints them in",
-    read.missing.some(m => /^point values? for /.test(m)), JSON.stringify(read.missing))
+    read.unpriced.includes("HR"), JSON.stringify(read.unpriced))
+  t("…and is NOT filed as something the page did not carry, because the page carried it",
+    !read.missing.some(m => /HR/.test(m)), JSON.stringify(read.missing))
   /* The rest of the table is unharmed: this is a guard on one row, not a refusal of the page. */
   t("and every other stat is read exactly as it was",
     Object.keys(real.scoring.batting).filter(c => c !== "HR")
@@ -107,7 +115,7 @@ const text = asPasted(real)
       JSON.stringify(flatRead.pitching) === JSON.stringify(real.scoring.pitching),
     JSON.stringify(flatRead.batting) + JSON.stringify(flatRead.pitching))
   t("…and names nothing as unpriced, because nothing was",
-    !flatRead.missing.some(m => /point value/.test(m)), JSON.stringify(flatRead.missing))
+    flatRead.unpriced.length === 0, JSON.stringify(flatRead.unpriced))
 }
 
 // ── the round trip ─────────────────────────────────────────────────────────────
@@ -280,6 +288,28 @@ const text = asPasted(real)
     pasted.provenance.sources.length === 0)
   /* Everything else about the two is identical — this is a claim about where the text came
      from, never about what it said. */
+  /*
+     AND A FETCH IS NECESSARY, NOT SUFFICIENT.
+     
+     `verified` is defined in the schema as "true only when every stored value was read from
+     the league's own pages", and the colophon prints "Every number is in your league's own
+     points" on the strength of it. Set from the fetched URL alone, it certified a league in
+     which a stat row would not parse — scored as 0, a claim about his league — while the same
+     read wrote a review line saying so.
+  */
+  const { league: gappy } = leagueFromPastedSettings(
+    text.split("\n").map(l => (l.startsWith("Home Runs (HR)") ? "Home Runs (HR)\tmodified\t4" : l)).join("\n"),
+    "yahoo",
+    "2026-09-18",
+    { url, method: "read off your own league page in this browser on 2026-09-18" }
+  )
+  t("a fetched page this could not read in full is NOT vouched for",
+    gappy.provenance.verified === false, JSON.stringify(gappy.provenance))
+  t("…and still says where it came from, because that part is true",
+    JSON.stringify(gappy.provenance.sources) === JSON.stringify([url]))
+  t("…and names the row it could not read",
+    gappy.needs_review.some(r => /HR/.test(r)), JSON.stringify(gappy.needs_review))
+
   t("the league itself is the same league either way",
     JSON.stringify(fetched.scoring) === JSON.stringify(pasted.scoring) &&
       JSON.stringify(fetched.roster) === JSON.stringify(pasted.roster),

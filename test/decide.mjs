@@ -2427,6 +2427,38 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("and the caveat travels with it, because these are men held and not men started",
 		/every man each side holds/i.test(card), card.slice(0, 700))
 	await page.close()
+
+	/*
+	   AND A READER AHEAD ON BOTH HALVES IS TOLD NOTHING, which is what there is to say.
+	
+	   `gapBy` holds two GAPS, not two totals, so a positive half means his men out-scored his
+	   opponent's men on that side of the ball. The first version of this sentence picked the
+	   SMALLER of the two gaps whatever its sign — so a reader ahead by 92 on bats and 26 on
+	   arms was told "the gap is in your arms", a confident instruction to go and fix something
+	   that is not broken, printed beside a total that was correct. Reproduced in a browser
+	   before this assertion existed; it is here so that it cannot come back.
+	*/
+	const ahead = await open(
+		{
+			config: cfg,
+			lineup: { [KEY]: { at: new Date().toISOString(), spots } },
+			/* Two bats and two arms against three bats — one of whom hit a home run and two of
+			   whom did nothing — and one arm who threw a single inning. Both halves of the gap
+			   come out positive and they are far apart, which is the shape that used to produce
+			   the false sentence. The opponent needs at least two thirds of the reader's roster
+			   or the comparison is refused outright, which is why he holds four. */
+			roster: { [KEY]: ["663656:hitting", "668930:hitting", "671737:pitching", "669160:pitching"] },
+			opponent: { [KEY]: ["608324:hitting", "666176:hitting", "645277:hitting", "674444:pitching"] }
+		},
+		{ actuals: true }
+	)
+	await ahead.waitForTimeout(1500)
+	const good = await ahead.$eval(".decide", e => e.innerText)
+	t("a reader ahead on both halves is still told how the week stands",
+		/you are ahead by [\d.]+/i.test(good), good.slice(0, 400))
+	t("…and is told about no hole at all, because he does not have one",
+		!/the gap is in your/i.test(good), good.slice(0, 700))
+	await ahead.close()
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

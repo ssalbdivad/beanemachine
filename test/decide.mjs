@@ -1665,8 +1665,22 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
  */
 {
 	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	/*
+	   A SMALL TEAM ON PURPOSE, because the comparison now has a floor.
+	
+	   Both cards refuse to compare two teams when the rival list is under two thirds of the
+	   reader's own roster — a gap of 262.9 against a two-man opponent is not a lead, and until
+	   2026-09-18 this screen printed it anyway while Tonight refused and pointed the reader
+	   here for it. The fixture holds eight men in total, so the seeded team is the three of
+	   them that can be spared and the two pasted below clear two thirds of three.
+	*/
+	const THREE = spots.slice(0, 3)
 	const page = await open(
-		{ config: cfg, lineup: { [KEY]: { at: new Date().toISOString(), spots } } },
+		{
+			config: cfg,
+			lineup: { [KEY]: { at: new Date().toISOString(), spots: THREE } },
+			roster: { [KEY]: [] }
+		},
 		{ actuals: true }
 	)
 	await page.waitForSelector(".recap", { timeout: 30000 })
@@ -1727,6 +1741,25 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		t("and no gap is reported while that is true",
 			!/His men have scored/.test(clash), clash.slice(0, 400))
 
+		/*
+		   AND A LIST TOO SHORT TO COMPARE IS REFUSED, which is what Tonight has always done
+		   and what this screen did not. A two-man opponent against a full roster produced a
+		   bold lead here with the shortfall named underneath — on the screen Tonight points
+		   the reader at, having just refused to answer the same question itself.
+		*/
+		await page.fill(".recap-rival textarea", hisTwo[0])
+		await page.click('.recap-rival button:text-is("That\u2019s his team")')
+		await page.waitForTimeout(1200)
+		const thin = await page.$eval(".recap", e => e.innerText)
+		t("one man against a three-man team is too few to compare",
+			!/His men have scored/.test(thin) && /too few to compare/.test(thin),
+			thin.replace(/\n+/g, " | ").slice(0, 300))
+		t("…and it says what would make it mean something",
+			/Paste the rest of his roster/.test(thin), thin.replace(/\n+/g, " | ").slice(0, 300))
+
+		await page.fill(".recap-rival textarea", `${hisTwo[0]}\n${(hisTwo[1] ?? "").split(" ").slice(-1)[0]}`)
+		await page.click('.recap-rival button:text-is("That\u2019s his team")')
+		await page.waitForTimeout(1200)
 		await page.click('.recap-rival button:text-is("Forget him")')
 		await page.waitForTimeout(800)
 		t("and he can be forgotten again",

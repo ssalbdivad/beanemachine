@@ -868,7 +868,36 @@ export const Recap = ({
 							and the comparison will mean something.
 						</p>
 					)}
-					{rivalTotal !== null && both.length === 0 && (
+					{/*
+					  TWO SCREENS, ONE COMPARISON, AND THEY DISAGREED ABOUT WHEN IT MEANS ANYTHING.
+					
+					  The Tonight card refuses to print this gap at all when the rival list is under
+					  two thirds of the reader's own roster, on the grounds that a gap of 262.9
+					  against a two-man opponent is not a lead — and then points him HERE for it.
+					  This screen printed the same comparison in bold off any list at all, with the
+					  shortfall named underneath. So the reader was sent from a screen that called
+					  the evidence insufficient to one that answered on it.
+					
+					  The floor is the same one now. Between two thirds and a full roster the number
+					  still prints with the count beside it, which is the band the caveat below was
+					  written for; under two thirds it is refused here exactly as it is there, and
+					  the sentence says what would make it mean something.
+					*/}
+					{rivalTotal !== null &&
+						both.length === 0 &&
+						men.men.length > 0 &&
+						rivalKeys.length < Math.ceil(men.men.length * (2 / 3)) && (
+							<p className="recap-bench">
+								You have {men.men.length} men on record and {rivalKeys.length} of his, which
+								is too few to compare two teams with &mdash; the difference would be mostly
+								the men you told this page about. Paste the rest of his roster and the gap
+								will mean something.
+							</p>
+						)}
+					{rivalTotal !== null &&
+						both.length === 0 &&
+						(men.men.length === 0 ||
+							rivalKeys.length >= Math.ceil(men.men.length * (2 / 3))) && (
 						<>
 							<p className="recap-bench">
 								His men have scored <b>{rivalTotal}</b> to your {periodTotal} &mdash;{" "}
@@ -891,7 +920,25 @@ export const Recap = ({
 							{/* WHICH WAY IT MOVED LAST NIGHT, which is the question the week total
 							    cannot answer. Only where both sides played: a night where one of them
 							    has no box scores at all is a comparison with nothing, not a shut-out. */}
-							{rivalLast !== null && result.played > 0 && rivalLast + result.ownedTotal > 0 && (
+							{/*
+							  AND ONLY OFF A DAY THAT WAS FULLY READ.
+							
+							  `result.unread` names a side of the ball MLB's day read did not answer, and
+							  the card says so four lines above — "4 of your men could not be checked at
+							  all … nothing is claimed about your lineup or your bench until the read
+							  succeeds". This line then compared two totals built from the half that DID
+							  answer, on both sides, and called the difference what he took out of the
+							  gap. On a hitting outage between two hitting-heavy rosters that is a
+							  verdict about the pitchers alone, printed under the card's own refusal to
+							  say anything about that day.
+							
+							  The engine already refuses every other total in this state (`complete` in
+							  src/auto/recap.ts); this one was the card's own arithmetic and never asked.
+							*/}
+							{rivalLast !== null &&
+								result.unread.length === 0 &&
+								result.played > 0 &&
+								rivalLast + result.ownedTotal > 0 && (
 								<p className="sub">
 									Last night he scored {rivalLast} to your {result.ownedTotal}, so you{" "}
 									{result.ownedTotal === rivalLast ?

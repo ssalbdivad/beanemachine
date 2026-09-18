@@ -1,4 +1,5 @@
 import { type PageKind } from "./extension.ts"
+import { pageUrl } from "./yahoo-pool.ts"
 
 /**
  * WHAT A PLATFORM IS, TO THE THING THAT READS IT.
@@ -127,11 +128,17 @@ const yahooSegments = (url: string): { seg: string[]; at: number } | null => {
 	}
 }
 
-/** Yahoo serves 25 rows a page and `count` is an OFFSET, not a page size — measured disjoint
- *  on 2026-09-03 and written down in src/data/yahoo-pool.ts, which builds this URL. */
+/**
+ * Yahoo serves 25 rows a page and `count` is an OFFSET, not a page size — measured disjoint
+ * on 2026-09-03 against league 228947, and the reason the top 25 free agents at every
+ * position were once invisible.
+ *
+ * Built by `pageUrl` rather than by a template here, because that function is where the
+ * measurement is written down and it is what the Node reader uses. Two builders would be two
+ * places to get `count` wrong, and the one that was wrong would be the one nothing tests.
+ */
 const yahooPlayers = (sport: string, leagueId: string, pos: string): string =>
-	`https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/players` +
-	`?status=A&pos=${encodeURIComponent(pos)}&sort=AR&sdir=1&count=0`
+	pageUrl(leagueId, sport, pos, 0, "A")
 
 export const YAHOO: Platform = {
 	id: "yahoo",

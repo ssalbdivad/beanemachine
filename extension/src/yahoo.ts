@@ -19,6 +19,7 @@ import {
 	pageKind,
 	leagueIdFrom,
 	sportFrom,
+	teamIdFrom,
 	rowsOnly,
 	isKnownAsk,
 	SPORT,
@@ -27,6 +28,7 @@ import {
 	type GrabFailure
 } from "../../src/data/extension.ts"
 import { pageUrl } from "../../src/data/yahoo-pool.ts"
+import { YAHOO } from "../../src/data/platforms.ts"
 
 /** Yahoo throttles by serving a wall rather than an error status, so the words are the
  *  only signal — the same two tests `src/auto/roster.ts` uses against the same site, kept
@@ -186,9 +188,15 @@ const sweep = async (
 ): Promise<{ grabs: Grab[]; failure: GrabFailure | null }> => {
 	const grabs: Grab[] = []
 	const spoken = SPOKEN
+	/* The URLs come from the descriptor, the same record the one-press plan and the manifest's
+	   own match patterns come from — so `count=0`, `status=A` and the per-position shape are
+	   stated once, in the file that says what Yahoo is, rather than here in the file that
+	   fetches. `pageUrl` is still what builds them; this asks the descriptor rather than
+	   reaching for it directly, so a platform that pages its wire differently can. */
+	const plan = YAHOO.sweep!({ kind: "players", leagueId, teamId: null, sport }, positions)
 	for (const [i, pos] of positions.entries()) {
 		say(`reading ${spoken[pos] ?? pos}`, i, positions.length)
-		const url = pageUrl(leagueId, sport, pos, 0, "A")
+		const url = plan[i]!.url
 		try {
 			/* Same-origin, from inside the reader's own signed-in tab, so his cookies go
 			   with it exactly as they would if he clicked the link himself. `credentials`
@@ -386,8 +394,23 @@ chrome.runtime.onMessage.addListener(
 				reply({ kind: "grabs", grabs: [here] })
 				return true
 			}
-			const settingsUrl = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/settings`
-			const matchupUrl = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/matchup`
+			/*
+			   THE PAGES COME FROM THE DESCRIPTOR, not from string-building here.
+			
+			   This used to build two URLs by hand, a settings page and a matchup page, with the
+			   sport interpolated into the host — which is a fact about Yahoo written inside the
+			   only file that was ever going to run on Yahoo, and therefore invisible the day a
+			   second platform arrives. `onePress` in src/data/platforms.ts answers "given where
+			   he is standing, what else does one press need", and it is the same record the
+			   manifest's match patterns are written from. This file's job is to fetch what it is
+			   handed, from the tab it is in, and to say what came back.
+			*/
+			const plan = YAHOO.onePress({
+				kind: here.kind,
+				leagueId,
+				teamId: teamIdFrom(location.href),
+				sport
+			})
 			/** A page fetched from the reader's own signed-in tab, as the text a browser would
 			 *  have rendered — see `renderedText`. Empty string when Yahoo would not serve it,
 			 *  which the caller treats as "not read" rather than as "empty". */
@@ -399,36 +422,29 @@ chrome.runtime.onMessage.addListener(
 			void (async () => {
 				try {
 					/*
-					   THE SETTINGS PAGE IS NOT FETCHED WHEN HE IS STANDING ON IT, and the matchup
-					   still is. This used to reply with the settings page alone the moment the
-					   reader pressed the button from his league's settings screen — no opponent,
-					   silently, for no reason beyond where the early-return was written. A press is
-					   a press wherever it is made, so the only thing the current page changes is
-					   which request would have been a duplicate.
-					*/
-					const text = here.kind === "settings" ? "" : await asText(settingsUrl)
-					const wall = text ? wallIn(text) : null
-					/*
-					   AND WHO HE IS PLAYING, on the same press.
+					   ONE PRESS, EVERY PAGE THE DESCRIPTOR ASKED FOR, SEQUENTIALLY.
 					
-					   "Am I winning?" is the question a head-to-head manager asks most, and until
-					   now the only way this app could answer it was to ask him to paste his
-					   opponent's roster — a second gesture, on a second page, for a fact his own
-					   league page already shows him. One more request to a page of his own league
-					   is the whole cost.
+					   Sequential rather than parallel for the reason the sweep is: Yahoo answers a
+					   burst by refusing, and commit de44045 records what that looks like — 150
+					   players, then 25, then 0, then "Request denied". Two or three requests is not
+					   a burst, and the gap is left to the sweep, which is the one that asks nine
+					   times; this loop is bounded by the descriptor and the descriptor is bounded by
+					   a reader's patience.
 					
-					   The app takes the NAMES out of it and nothing else. A score is printed on
-					   that page too, and it is deliberately not read: nobody here has seen the
-					   real page, and a regular expression written against a page nobody has seen
-					   is a number this app would print with total confidence and no idea whether
-					   it was the score, the projection, or last week's.
+					   A WALL ON ANY PAGE STOPS THE PRESS, because a throttle is a fact about the
+					   session rather than about the page: the second request would be refused too,
+					   and a half-read league written into his stores is the failure this whole
+					   check exists to prevent.
 					*/
-					const matchup = await asText(matchupUrl).catch(() => "")
 					const extra: Grab[] = []
-					if (!wall && text.trim())
-						extra.push({ url: settingsUrl, kind: "settings", text, at: now() })
-					if (matchup.trim() && !wallIn(matchup))
-						extra.push({ url: matchupUrl, kind: "matchup", text: matchup, at: now() })
+					let wall: GrabFailure | null = null
+					for (const want of plan) {
+						const text = await asText(want.url)
+						if (!text.trim()) continue
+						wall = wallIn(text)
+						if (wall) break
+						extra.push({ url: want.url, kind: want.kind, text, at: now() })
+					}
 					reply({ kind: "grabs", grabs: [here, ...extra], failure: wall ?? undefined })
 				} catch {
 					reply({ kind: "grabs", grabs: [here] })

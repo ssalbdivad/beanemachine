@@ -788,5 +788,34 @@ t("and a league that seats nobody there is not told he is eligible there",
     util.pool.positionsRead.includes("Util"), JSON.stringify(util.pool.positionsRead))
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE OTHER SIDE OF THE MATCHUP, OFF THE SAME REQUEST.
+ *
+ * The Tonight card can say how a week stands — his men's points against his opponent's — and
+ * the only way it learned WHO the opponent is was a reader pasting a rival roster, or the
+ * Yahoo matchup page read by the extension. ESPN states it: `schedule[]` carries both team
+ * ids for every matchup and `status.currentMatchupPeriod` says which one is now, and the
+ * request that brings his own roster already brings every team's.
+ *
+ * Offline here, on the shape: what must never happen is a WRONG opponent, so this asserts
+ * that the entry has to name his team on one side and that anything less yields nothing at
+ * all. The live read is exercised by hand — league 81134470, 2021, team 8 against "Team
+ * Hinten", 29 men — and by test/static.mjs.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const { fetchTeamRoster } = await import("../src/data/rosters.ts")
+  /* A league that cannot be reached returns a state and no opponent, never a throw. */
+  const gone = await fetchTeamRoster({ platform: "espn", leagueId: "0", teamId: "1", season: 1900 })
+  t("an unreachable ESPN league yields no opponent and no throw",
+    gone.opponent === undefined && gone.players.length === 0, gone.note)
+  /* And a platform that names no matchup carries none either — the field is optional
+     everywhere and absent is the ordinary case. */
+  const yahooish = await fetchTeamRoster({ platform: "nonesuch", leagueId: "1", teamId: "1" })
+  t("a platform with no matchup to read carries no opponent",
+    yahooish.opponent === undefined, JSON.stringify(yahooish).slice(0, 120))
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

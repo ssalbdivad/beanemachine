@@ -8,6 +8,7 @@ import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
 import { pool as poolStore, since } from "./pool.ts"
 import { roster as store, rosterKey } from "./roster.ts"
+import { opponentStore } from "./opponent.ts"
 import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
 import { slotsFor, type OwnershipCut } from "../engine/bscore.ts"
@@ -409,13 +410,41 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 					.map(y => ({ slot: y.slot!, name: y.name, positions: y.positions, team: y.team })),
 				at
 			)
+			/*
+			   AND WHO HE IS PLAYING, when the platform said so.
+			
+			   ESPN names both sides of the current matchup in the same response this roster came
+			   out of, so a reader who presses one button gets the other side of his week without
+			   pasting a rival's roster — which is what the Tonight card has been asking him for.
+			   Yahoo's reader fills the same store from the matchup page; this is the same store
+			   and the same shape, from a different platform.
+			
+			   Written only when men actually matched: an opponent list nobody recognises would
+			   suppress the comparison downstream rather than improve it, and the count is said
+			   so the sentence is about what he got rather than about what was sent.
+			*/
+			let facing: string | null = null
+			if (res.opponent?.players.length) {
+				const theirs: string[] = []
+				for (const y of res.opponent.players)
+					for (const r of byName.get(normalizeName(y.name)) ?? []) theirs.push(rosterKey(r.player))
+				if (theirs.length)
+					try {
+						opponentStore.set(leagueKey, theirs)
+						facing = ` You are playing ${res.opponent.name ?? `team ${res.opponent.teamId}`} this week — ${theirs.length} of their men are on record.`
+					} catch {
+						/* An opponent is one paste away and worth nothing if it costs the read that
+						   carried it — the same rule the extension route keeps. */
+					}
+			}
 			// the reader's own note, because it is the one that knows what happened:
 			// which platform, how many rows, and whether the seats came with them
 			setPullNote(
 				res.note +
 					(missed.length ?
 						` ${missed.length} not in this capture, add by hand: ${missed.join(", ")}.`
-					:	"")
+					:	"") +
+					(facing ?? "")
 			)
 		} catch (e) {
 			setPullNote(e instanceof ApiError ? e.message : String(e))

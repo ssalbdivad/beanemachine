@@ -28,6 +28,20 @@ import { espnSeason } from "./espn.ts"
 export interface RosterRead {
 	players: RosterEntry[]
 	note: string
+	/**
+	 * THE OTHER SIDE OF THIS WEEK'S MATCHUP, where the platform says who it is.
+	 *
+	 * The Tonight card can say how a week stands — his men's points against his opponent's —
+	 * and until now the only way it learned WHO his opponent is was a reader pasting a rival
+	 * roster, or a Yahoo matchup page read by the extension. An ESPN league states it: the
+	 * schedule names both team ids for the current matchup period, and the same request that
+	 * brings his own roster brings every team's.
+	 *
+	 * So it is filled from a request that was already being made, or it is absent. Absent is
+	 * the ordinary case — Yahoo's reader has its own route, and a private league answers
+	 * nobody — and every screen already handles an opponent it does not have.
+	 */
+	opponent?: { teamId: string; name: string | null; players: RosterEntry[] }
 }
 
 const UA =
@@ -201,7 +215,14 @@ const espn = async (
 	const get = (yr: number) =>
 		fetch(
 			`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${sport}` +
-				`/seasons/${yr}/segments/0/leagues/${leagueId}?view=mRoster&view=mSettings`,
+				/* Five views, one request. `mRoster` and `mSettings` are what his own team needs;
+				   `mMatchupScore` and `mStatus` name who he is playing this week, which the app
+				   otherwise learns only from a reader pasting a rival's roster; `mTeam` carries
+				   the team NAMES, which the roster view does not — measured, `teams[].name` is
+				   absent without it and an opponent this app can only call "team 5" is one the
+				   reader has to work out for himself. */
+				`/seasons/${yr}/segments/0/leagues/${leagueId}` +
+					`?view=mRoster&view=mSettings&view=mMatchupScore&view=mStatus&view=mTeam`,
 			{ headers: { ...agentHeaders(UA), accept: "application/json" } }
 		)
 	let res = await get(season)
@@ -260,8 +281,58 @@ const espn = async (
 			team: ESPN_PRO_TEAM[proTeamId] ?? null
 		})
 	}
+	/*
+	   WHO HE IS PLAYING THIS WEEK, off the same response.
+	
+	   `schedule[]` lists every matchup of the season with both team ids on it, and `status`
+	   names which matchup period is current — measured on league 81134470's 2021 season, whose
+	   period 23 holds four matchups and puts team 8 against team 5. So the opponent's roster is
+	   the same `teams[]` entry this function has already been handed, read the same way.
+	
+	   Everything about it is optional and absent is fine: a league between periods, a schedule
+	   that does not name him, a season with no matchups at all. What must never happen is a
+	   WRONG opponent, so the entry has to name his team on one side and the other side has to
+	   be a team that exists — anything less and this returns nothing rather than a guess.
+	*/
+	const opponentOf = (): RosterRead["opponent"] => {
+		const period = Number(data?.status?.currentMatchupPeriod)
+		const schedule: any[] = Array.isArray(data?.schedule) ? data!.schedule : []
+		if (!Number.isInteger(period) || !schedule.length) return undefined
+		const mine = String(teamId)
+		const match = schedule.find(
+			m =>
+				Number(m?.matchupPeriodId) === period &&
+				(String(m?.home?.teamId) === mine || String(m?.away?.teamId) === mine)
+		)
+		if (!match) return undefined
+		const otherId = String(match.home?.teamId) === mine ? match.away?.teamId : match.home?.teamId
+		if (otherId === undefined || otherId === null) return undefined
+		const other = teams.find(t => String(t?.id) === String(otherId))
+		if (!other) return undefined
+		const theirs: RosterEntry[] = []
+		for (const e of (Array.isArray(other?.roster?.entries) ? other.roster.entries : []) as any[]) {
+			const pl = e?.playerPoolEntry?.player
+			const name = typeof pl?.fullName === "string" ? pl.fullName.trim() : ""
+			if (!name) continue
+			theirs.push({
+				yahooId: String(e?.playerId ?? pl?.id ?? name),
+				name,
+				slot: ESPN_MLB_SLOT[e?.lineupSlotId as number] ?? null,
+				positions: espnPositions(pl?.eligibleSlots, played),
+				team: ESPN_PRO_TEAM[typeof pl?.proTeamId === "number" ? pl.proTeamId : 0] ?? null
+			})
+		}
+		if (!theirs.length) return undefined
+		return {
+			teamId: String(otherId),
+			name: typeof other?.name === "string" ? other.name : null,
+			players: theirs
+		}
+	}
+
 	const unseated = players.filter(p => !p.slot).length
 	return {
+		opponent: opponentOf(),
 		players,
 		note:
 			players.length ?

@@ -251,6 +251,23 @@ export interface YahooRoster {
 		team: string | null
 	}[]
 	note: string
+	/**
+	 * The other side of this week's matchup, where the platform named it.
+	 *
+	 * ESPN does — its schedule carries both team ids for the current matchup period, and the
+	 * same request that brings a reader's own roster brings every team's, so this costs
+	 * nothing beyond one more `view=` on a request already being made. Yahoo does not answer
+	 * a web page at all; its reader fills the same store from the matchup page it fetches in
+	 * the reader's own browser.
+	 *
+	 * Optional everywhere, because absent is the ordinary case and every screen that shows a
+	 * matchup already handles having no opponent.
+	 */
+	opponent?: {
+		teamId: string
+		name: string | null
+		players: { yahooId: string; name: string; slot: string | null; positions: string[]; team: string | null }[]
+	}
 }
 
 /**

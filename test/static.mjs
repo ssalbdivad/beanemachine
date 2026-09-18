@@ -2495,6 +2495,53 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   await ph.close()
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * A BROWSER THAT WILL KEEP NOTHING STILL GETS THE BOARD.
+ *
+ * `leagues.load` read storage, fetched the starter file, and then WROTE it — so a browser
+ * that refuses local storage got the masthead, the sentence "your leagues couldn't be read",
+ * and no board at all: no ranked players, no card, no last night. Every one of those screens
+ * is computed from a fetch and a capture and not one of them needs a store to RENDER. The
+ * headline was false on its face as well, since reading is what had succeeded.
+ *
+ * Driven by making `window.localStorage` throw before any app script runs, which is what a
+ * locked-down browser does.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const np = await b.newPage({ viewport: { width: 1100, height: 900 } })
+  const oops = []
+  np.on("pageerror", e => oops.push(String(e)))
+  await np.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Access is denied for this document.", "SecurityError")
+      }
+    })
+  })
+  await np.goto(BASE, { waitUntil: "domcontentloaded" })
+  await np.waitForSelector("nav button", { timeout: 30000 })
+  await np.waitForTimeout(2500)
+  const heads = await np.$$eval("h2", hs => hs.map(h => h.innerText.trim()))
+  t("a browser that refuses storage is told what it will not do, in those words",
+    heads.some(h => /won.t keep anything/i.test(h)), JSON.stringify(heads).slice(0, 200))
+  t("…and is NOT told its leagues could not be read, because they were",
+    !heads.some(h => /couldn.t be read/i.test(h)), JSON.stringify(heads).slice(0, 200))
+  t("tonight's card is on the screen all the same",
+    (await np.locator(".decide").count()) === 1)
+  await np.click("nav button:nth-child(2)")
+  await np.waitForTimeout(2500)
+  t("and the ranked board is a board, not an empty page",
+    (await np.locator(".board-row").count()) > 20,
+    String(await np.locator(".board-row").count()))
+  t("with nothing thrown on the way",
+    oops.length === 0, oops.slice(0, 2).join(" | "))
+  await np.close()
+}
+
 await b.close()
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

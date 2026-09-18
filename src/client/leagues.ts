@@ -128,15 +128,55 @@ const current = (): Config => {
  * which is what puts Onboard.tsx on screen. That is the intended outcome, not a
  * failure: seeding a stranger's league is what this used to do.
  */
+/**
+ * WHY THIS BROWSER WILL KEEP NOTHING, when it will not.
+ *
+ * Null in the ordinary case. Set when the first read or the first write was refused — a
+ * private window, a blocked origin, a full quota — and read by the app so it can say so once,
+ * plainly, rather than per store as each one fails.
+ */
+let refused: string | null = null
+const keepsNothing = (): string | null => refused
+
+/**
+ * THE FIRST VISIT RENDERS EVEN WHERE NOTHING CAN BE SAVED.
+ *
+ * This read storage, then fetched the starter file, then WROTE it — and returned nothing if
+ * that write threw. So a browser that refuses local storage got the masthead, the sentence
+ * "your leagues couldn't be read", and no board at all: no ranked players, no card, no last
+ * night. Measured in a context where `setItem` throws. Every one of those screens is computed
+ * from a fetch and a capture; not one of them needs a store to RENDER.
+ *
+ * The failure is real and it is about keeping things, so it is reported as that: the app runs
+ * on what it fetched, and `keepsNothing` carries the browser's own words to a sentence that
+ * says nothing will be remembered. What is refused is persistence, and the reader is told
+ * exactly that rather than being told his leagues could not be read — which was also false,
+ * since the read is what succeeded.
+ */
 const load = async (): Promise<Config> => {
-	const stored = read()
+	let stored: Config | null = null
+	try {
+		stored = read()
+	} catch (e) {
+		/* `storageFor` throws here when the browser refuses the API outright, which is a
+		   different failure from a corrupt value — that one `read` handles itself. */
+		refused = (e as Error).message
+	}
 	if (stored) return stored
 	const res = await fetch(`${import.meta.env.BASE_URL}scoring.json`)
 	if (!res.ok) throw new StoreError(`Couldn't load the starter scoring.json (HTTP ${res.status}).`)
 	const text = await res.text()
-	const config = write(parse(text, "The starter scoring.json"))
-	carry(JSON.parse(text) as LeagueFile, config)
-	return config
+	const parsed = parse(text, "The starter scoring.json")
+	try {
+		const config = write(parsed)
+		carry(JSON.parse(text) as LeagueFile, config)
+		return config
+	} catch (e) {
+		refused = (e as Error).message
+		/* The starter file, unstored. Everything downstream treats it as the config it is;
+		   what it will not do is survive a reload, and that is the sentence the app prints. */
+		return parsed
+	}
 }
 
 const save = (key: string, league: League): Config => {
@@ -386,4 +426,14 @@ const replace = (text: string): Loaded => {
 	}
 }
 
-export const leagues = { load, save, activate, create, suggestKey, remove, download, replace }
+export const leagues = {
+	load,
+	save,
+	activate,
+	create,
+	suggestKey,
+	remove,
+	download,
+	replace,
+	keepsNothing
+}

@@ -955,6 +955,34 @@ export const App = () => {
 				wireBusy={ext.busy}
 			/>
 
+			{/*
+			  A BROWSER THAT WILL KEEP NOTHING STILL GETS THE BOARD, and is told the truth about
+			  what it will not do.
+			
+			  It used to get the masthead and "your leagues couldn't be read" and no board at all
+			  — no ranked players, no card, no last night — because the starter file was fetched
+			  and then WRITTEN, and a refused write took the whole config down with it. Every one
+			  of those screens is computed from a fetch and a capture; not one of them needs a
+			  store to render. What is refused is keeping things, so that is what is said, once,
+			  here rather than per store as each one fails in turn.
+			*/}
+			{!loadError && leagues.keepsNothing() && (
+				<div className="grid">
+					<section className="card full">
+						<h2>This browser won&rsquo;t keep anything</h2>
+						<ul className="flags">
+							<li>{leagues.keepsNothing()}</li>
+						</ul>
+						<p className="sub" style={{ margin: "var(--sp-3) 0 0" }}>
+							Everything below works and none of it will survive closing the tab &mdash; your
+							team, your league&rsquo;s values and anything you read will be gone. A private
+							window usually does this. <b>Download</b> above saves a file you can load back
+							anywhere.
+						</p>
+					</section>
+				</div>
+			)}
+
 			{/* A store that can't be read is not an empty store, and every tab's own
 			    "configure a league first" would quietly claim it is. */}
 			{loadError && (

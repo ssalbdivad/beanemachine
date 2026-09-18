@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored, storageFor } from "./stores.ts"
+import { stored, saidPlainly, storageFor } from "./stores.ts"
 
 /**
  * The free agents in YOUR league, exactly as they were read — carried in a file.
@@ -134,7 +134,7 @@ const write = (next: Stored): Stored => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new PoolError(`This browser refused to store the free-agent pool: ${(e as Error).message}`)
+		throw new PoolError(`This browser refused to store the free-agent pool: ${saidPlainly(e)}`)
 	}
 	return out
 }

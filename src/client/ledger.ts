@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored, storageFor } from "./stores.ts"
+import { stored, saidPlainly, storageFor } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -138,7 +138,7 @@ const write = (next: Stored): Stored => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new LedgerError(`This browser refused to store the record: ${(e as Error).message}`)
+		throw new LedgerError(`This browser refused to store the record: ${saidPlainly(e)}`)
 	}
 	return out
 }
@@ -201,7 +201,7 @@ const reset = (): void => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new LedgerError(`This browser refused to clear the record: ${(e as Error).message}`)
+		throw new LedgerError(`This browser refused to clear the record: ${saidPlainly(e)}`)
 	}
 }
 

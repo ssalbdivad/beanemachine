@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored, storageFor } from "./stores.ts"
+import { stored, saidPlainly, storageFor } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -74,7 +74,7 @@ const write = (next: Stored): Stored => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new RosterError(`This browser refused to store the roster: ${(e as Error).message}`)
+		throw new RosterError(`This browser refused to store the roster: ${saidPlainly(e)}`)
 	}
 	return out
 }
@@ -129,7 +129,7 @@ const reset = (): void => {
 	try {
 		storage().removeItem(STORE_KEY)
 	} catch (e) {
-		throw new RosterError(`This browser refused to clear the roster: ${(e as Error).message}`)
+		throw new RosterError(`This browser refused to clear the roster: ${saidPlainly(e)}`)
 	}
 }
 

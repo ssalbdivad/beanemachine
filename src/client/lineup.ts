@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { stored, storageFor } from "./stores.ts"
+import { stored, saidPlainly, storageFor } from "./stores.ts"
 import { ApiError } from "./api.ts"
 
 /**
@@ -81,7 +81,7 @@ const write = (next: Stored): Stored => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new LineupError(`This browser refused to store the lineup: ${(e as Error).message}`)
+		throw new LineupError(`This browser refused to store the lineup: ${saidPlainly(e)}`)
 	}
 	return out
 }
@@ -136,7 +136,7 @@ const reset = (): void => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new LineupError(`This browser refused to clear the lineup: ${(e as Error).message}`)
+		throw new LineupError(`This browser refused to clear the lineup: ${saidPlainly(e)}`)
 	}
 }
 

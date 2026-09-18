@@ -1527,8 +1527,15 @@ clean("over the whole journey")
 	const sheet = await sp.$eval(".dock-sheet .onboard", e => e.innerText)
 	t("a team the browser refused to keep is not reported as kept",
 		/could not be saved/i.test(sheet), sheet.replace(/\n+/g, " | ").slice(0, 300))
-	t("…in the browser's own words, so the reader knows which browser said no",
-		/quota/i.test(sheet), sheet.replace(/\n+/g, " | ").slice(0, 300))
+	/* IN PLAIN WORDS, NOT THE BROWSER'S OWN. The exception's text is written for whoever wrote
+	   the page — "Failed to execute 'setItem' on 'Storage': Setting the value of
+	   'beanemachine:roster' exceeded the quota" — and this app's rule is that nothing a reader
+	   sees names a file, a field or a piece of software. What he can act on is the CAUSE, and
+	   that is what survives. */
+	t("…saying what he can do something about, and naming nothing of the software's",
+		/no room left/i.test(sheet) &&
+			!/setItem|Storage|beanemachine:/i.test(sheet),
+		sheet.replace(/\n+/g, " | ").slice(0, 300))
 	await sp.close()
 }
 

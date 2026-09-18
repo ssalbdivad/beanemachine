@@ -110,6 +110,32 @@ export const useStored = (): number =>
  * (`grep -rn 'instanceof RosterError\|instanceof LedgerError' src/` finds nothing — every
  * catch site in Board.tsx and Trade.tsx tests `instanceof ApiError` and shows `e.message`).
  */
+/**
+ * WHAT THE BROWSER SAID, IN WORDS A READER CAN ACT ON.
+ *
+ * A storage exception's own text is written for whoever wrote the page: "Failed to execute
+ * 'setItem' on 'Storage': Setting the value of 'beanemachine:roster' exceeded the quota."
+ * Every store here interpolated that verbatim, so the app's own rule — that nothing a reader
+ * sees names a file, a field or a piece of software — was broken by the one class of message
+ * he is most likely to meet, on the two screens where he enters his team.
+ *
+ * The CAUSE survives, because it is the part he can do something about: a full browser is
+ * cleared, a private window is left, and a blocked origin is a setting. What goes is the API,
+ * the method and the key. An exception nobody here recognises keeps its own words rather than
+ * being flattened into "something went wrong", which would be a worse trade: unrecognised and
+ * unreadable beats unrecognised and unsaid.
+ */
+export const saidPlainly = (e: unknown): string => {
+	const err = e as { name?: string; message?: string }
+	const text = `${err?.name ?? ""} ${err?.message ?? ""}`
+	if (/quota|exceeded the quota|QuotaExceeded/i.test(text))
+		return "this browser has no room left to save it"
+	if (/SecurityError|access is denied|denied for this document/i.test(text))
+		return "this browser does not allow saving on this page"
+	if (/private|incognito/i.test(text)) return "a private window will not keep anything"
+	return err?.message ?? String(e)
+}
+
 export const storageFor = (
 	keeping: string,
 	Fail: new (message: string) => Error
@@ -118,7 +144,7 @@ export const storageFor = (
 		return window.localStorage
 	} catch (e) {
 		throw new Fail(
-			`This browser won't let the page use local storage (${(e as Error).message}), ` +
+			`This browser won't let the page save anything (${saidPlainly(e)}), ` +
 				`so there is nowhere to keep ${keeping}. A private window usually does this.`
 		)
 	}

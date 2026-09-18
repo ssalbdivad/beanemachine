@@ -767,7 +767,12 @@ export const Recap = ({
 				<p className="sub recap-week">
 					{week.best && (
 						<>
-							<b>{week.best.name}</b> has made most of it with {week.best.points}.
+							{/* "MOST OF IT" IS A MAJORITY, and nothing computes one. `weekShape` returns
+							    the TOP scorer — `ranked[0]`, over three or more men who played, with
+							    points above zero — and the top scorer of twelve men is routinely worth
+							    a fifth of the total. The claim the code supports is that he leads, so
+							    that is the claim. */}
+							<b>{week.best.name}</b> has been your best with {week.best.points}.
 						</>
 					)}
 					{week.drag && (

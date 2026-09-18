@@ -1,6 +1,6 @@
 import { type } from "arktype"
 import { ApiError } from "./api.ts"
-import { stored, storageFor } from "./stores.ts"
+import { stored, saidPlainly, storageFor } from "./stores.ts"
 
 /**
  * WHO YOU ARE PLAYING THIS WEEK, because the app could not answer the one question a
@@ -67,7 +67,7 @@ const write = (next: Stored): Stored => {
 		// tell the screens to look again — see src/client/stores.ts
 		stored()
 	} catch (e) {
-		throw new OpponentError(`This browser refused to store your opponent: ${(e as Error).message}`)
+		throw new OpponentError(`This browser refused to store your opponent: ${saidPlainly(e)}`)
 	}
 	return out
 }

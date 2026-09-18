@@ -270,7 +270,11 @@ export const Decide = ({
 				 */
 				name: p.name,
 				positions: slotsFor(p, elig[String(p.id)]),
-				team: p.team ?? null
+				team: p.team ?? null,
+				/* A roster derived from ids the reader owns has no page behind it, so there
+				   is no league flag to read. Null, stated, rather than the field missing and
+				   the two shapes disagreeing. */
+				status: null as string | null
 			}]
 		})
 		return spots.length ? { spots, at: null as string | null, known: false } : null
@@ -900,6 +904,10 @@ export const Decide = ({
 							"he is not on the board — no projection exists for that name"
 						: live && live.kind === "no-game" ? "no game today"
 						: live && live.kind === "benched" ? "not in today's lineup"
+						/* What HIS league says, which is a fact about his own page and is
+						   therefore ahead of anything derived. It names the day-to-day and the
+						   minors, which MLB's feed does not keep. */
+						: sp.status ? `Yahoo has him ${sp.status}`
 						/*
 						 * The ENGINE'S own reason, where it has one.
 						 *

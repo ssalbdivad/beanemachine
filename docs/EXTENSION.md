@@ -544,6 +544,31 @@ cost:
   URL shapes this project has used for a year, and URLs are the most stable thing on
   Yahoo, but "most stable" is not "checked this week".
 
+**Where Yahoo's status badge sits in `innerText` is inferred, not captured.** Three
+things now read it — the pool parser, the team-page parser, and the seats they write —
+and all three key on the class pair `.F-injury, .ysf-player-status`, which comes from
+`src/auto/roster.ts`'s selector, measured by the Playwright reader on the team page. What
+nobody has checked is whether the badge is separated from the text beside it in the
+`innerText` the extension hands over. The fixture puts it in its own cell, which
+guarantees a separator; if the real page runs it together with the eligibility line
+("NYY - CQ"), the token is not found, the seat is stored with no flag, and the app behaves
+exactly as it did before the badge existed. That is the only failure available: nothing
+hides a row on an absent badge, nothing treats an absence as health, and no rating moves.
+The check costs one look at a real team page with devtools and zero requests.
+
+**And whether the players TABLE carries the badge at all is unknown.** It is measured on
+the team page and assumed on the players page. Same failure: null, and today's behaviour.
+
+**The multi-position eligibility line is read from the team page's text and has never
+been seen there.** `eligibilityInText` takes "NYY - C,1B" off the reader's own page and
+prefers it to `snapshot.eligibility`, which covers 328 of 1,446 players. Every refusal
+in it — two lines for one man, a token that is not a position, a line whose match sits
+before his name — drops him back to the capture and then to his primary position, which
+is what shipped before. So it can widen a man on a line that is uniquely his and it
+cannot narrow anybody below yesterday's answer. What is unverified is only whether the
+line is there: the fixture prints it because the capture holds one position per man and
+a fixture without it could never exercise the widening.
+
 **No score is read from the matchup page, on purpose.** The page prints one. It is
 deliberately not parsed, because nobody working on this has seen the real page, and a
 regular expression written against a page nobody has seen is a number the app would print

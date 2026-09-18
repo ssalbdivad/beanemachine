@@ -13,7 +13,7 @@
 // snapshot and everything else is ignored — so a redesign, an advertisement, or a
 // different platform entirely costs nothing.
 import { readFileSync } from "node:fs"
-import { nearestName, playersInText, rosterFromPaste } from "../src/data/paste.ts"
+import { eligibilityInText, nearestName, playersInText, rosterFromPaste } from "../src/data/paste.ts"
 
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
 const all = snap.players
@@ -613,6 +613,84 @@ const arms = pick("pitching", 3)
 	const pasted = rosterFromPaste(page, snap)
 	t("and a pasted page is still judged by the floor, so its furniture is not quoted",
 		pasted.unmatched.every(l => l.length > 3), JSON.stringify(pasted.unmatched.slice(0, 3)))
+}
+
+// ── YAHOO'S OWN FLAG BESIDE A HURT MAN ────────────────────────────────────────
+//
+// It is read from the gap between his name and the NEXT man's seat, and that gap
+// stops 24 characters short of the next name — exactly the span `slotBefore` claims
+// for his seat — because IL and NA are seat tokens as well as flags. Overlap the two
+// and the next man's IL SEAT sits this man down.
+{
+  const [a, b, c] = bats
+  /* THE ROW IS WIDE, and that is what makes this checkable rather than a fixture
+     trick. A Yahoo team row carries the seat, the name, the eligibility line, the
+     flag, the opponent, the start time and a run of stat cells, so there are well
+     over 24 characters between one man's name and the next man's seat. A narrow
+     fixture would make `statusBetween` correctly find nothing and this suite would
+     pass over a dead function. */
+  const wide = "Wed 7:05 pm @ BAL Preview 0.0 0.0 0.0 0.0 Add Drop"
+  const flagged = playersInText(
+    `C\t${a.name} NYY - C\tQ\t${wide}\n` +
+      `1B\t${b.name} NYY - 1B\t${wide}\n` +
+      `IL\t${c.name} NYY - OF\t${wide}`,
+    all
+  ).players
+  const of = n => flagged.find(x => x.id === n.id)
+  t("the flag between his name and the next man is read",
+    of(a)?.status === "Q", JSON.stringify(of(a)))
+  t("a man with nothing beside him carries no flag, and null is not \"healthy\"",
+    of(b)?.status === null, JSON.stringify(of(b)))
+  /* THE ONE THAT MATTERS. The third man SITS in an IL seat; the second man has
+     nothing. If the window reached the next name, "IL" would be read as the second
+     man's injury and a healthy regular would be benched by a seat label. */
+  t("the next man's IL SEAT is never read as this man's injury",
+    of(b)?.status === null && of(c)?.slot === "IL", `${of(b)?.status} / ${of(c)?.slot}`)
+  const plus = playersInText(`C\t${a.name} NYY - C\tIL+\tP\tAdd/Drop`, all).players
+  t("IL+ is read at its own index rather than shadowed by IL",
+    plus[0]?.status === "IL+", JSON.stringify(plus[0]))
+  t("…and a bare P in the same gap is never a flag, because P is a seat and a position",
+    plus[0]?.status !== "P")
+  t("a typed list of names carries no flags at all, which is what a typed list says",
+    playersInText(bats.map(p => p.name).join("\n"), all).players.every(p => p.status === null))
+}
+
+// ── THE LEAGUE'S OWN ELIGIBILITY LINE ─────────────────────────────────────────
+//
+// "NYY - C,1B" is the live multi-position line and the only place a league's REAL
+// eligibility is readable. Until now this app read `snapshot.eligibility`, 328 of
+// 1,446 players captured on one day, and gave the other 77% StatsAPI's single
+// primary position. Every refusal below leaves a man ABSENT, which puts him back on
+// exactly those two fallbacks — so the rule can widen a man and can never narrow one.
+{
+  const [a, b] = bats
+  const arm = arms[0]
+  const got = eligibilityInText(
+    `C\t${a.name} NYY - C,1B\tAdd/Drop\n` +
+      `SP\t${arm.name} DET - SP\tWed 7:05 @ BAL\t14-4 W-L\n` +
+      `1B\t${b.name} NYY - 1B,XX\tAdd/Drop`,
+    [a, b, arm]
+  )
+  t("the whole line is read, so a man Yahoo lists at two positions is eligible at two",
+    JSON.stringify(got.get(a.id)) === JSON.stringify(["C", "1B"]), JSON.stringify(got.get(a.id)))
+  t("a pitcher's W-L record is not read as an eligibility line",
+    JSON.stringify(got.get(arm.id)) === JSON.stringify(["SP"]), JSON.stringify(got.get(arm.id)))
+  t("a list carrying one token that is not a position is refused whole, not in part",
+    got.get(b.id) === undefined, JSON.stringify(got.get(b.id)))
+  /* Ohtani is the real shape: Yahoo lists him twice, as a batter and as a pitcher,
+     with a different line each. One line is his, or none is. */
+  t("a man on two lines has no line that is his, so he keeps the fallback",
+    eligibilityInText(`C\t${a.name} NYY - C\n SP\t${a.name} NYY - SP`, [a]).get(a.id) === undefined)
+  t("a token before a name is not that name's eligibility",
+    eligibilityInText(`NYY - C,1B\tsomething else entirely ${a.name}`, [a]).get(a.id) === undefined)
+  t("a typed list with no line at all yields nothing and throws nothing",
+    eligibilityInText(bats.map(p => p.name).join("\n"), bats).size === 0)
+  // And the seat it actually produces: DH must become Util or a designated hitter is
+  // unseatable, which `slotsFor` does and this must not bypass.
+  const seated = rosterFromPaste(`C\t${a.name} NYY - C,1B\tAdd/Drop`, snap).spots
+  t("the page's line reaches the seat, widening a man the capture never listed",
+    seated[0]?.positions.includes("1B") && seated[0]?.positions.includes("C"),
+    JSON.stringify(seated[0]))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

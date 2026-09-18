@@ -23,8 +23,14 @@ export interface RosterSpot {
 	 * field is why the planner could not be run from the page at all: `resolveRoster`
 	 * read `.trim()` off it and threw on the first spot. MLB's own injury list is
 	 * consulted independently, so an absent status costs a warning, not a wrong plan.
+	 *
+	 * NULL IS ALLOWED NOW, and it is the browser's honest answer: `src/client/lineup.ts`
+	 * carries this field since the paste parser started reading the badge, and it writes
+	 * null for a seat whose page printed nothing. Null and "" mean the same thing here —
+	 * no flag — and the one consumer runs both through `isReserveSlot`, which is false
+	 * for either.
 	 */
-	status?: string
+	status?: string | null
 }
 
 export interface RosterRead {

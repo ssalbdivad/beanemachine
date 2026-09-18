@@ -26,7 +26,11 @@ const Spot = type({
 	slot: "string > 0",
 	name: "string > 0",
 	positions: "string[]",
-	"team?": "string | null"
+	"team?": "string | null",
+	/** Yahoo's own flag beside him — IL, IL+, NA, DTD, Q — where his page printed one.
+	 *  Optional because every set of seats stored before this shipped has none, and
+	 *  because a typed list of names has no page to read one from. */
+	"status?": "string | null"
 })
 const Stored = type({
 	"[string]": {

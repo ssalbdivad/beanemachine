@@ -48,6 +48,10 @@ export interface PastedPlayer {
 	/** The seat he was sitting in, where the paste carried one. Null is honest: a
 	 *  free-agent list has no seats, and neither does a bare list of names. */
 	slot: string | null
+	/** Yahoo's own flag beside his name — IL, IL+, NA, DTD, Q — where the page
+	 *  printed one. Null is honest and means the page said nothing, never that the
+	 *  man is well. */
+	status: string | null
 }
 
 export interface PasteResult {
@@ -115,7 +119,11 @@ export const playersInText = (
 		}
 	}
 
-	const found: { p: { id: number; name: string; group: string }; at: number }[] = []
+	/* `k` is kept because the window `statusBetween` reads starts at the END of the
+	   name, and the spelling that MATCHED may be the surname-first one. Both are the
+	   same characters reordered and therefore the same length, but carrying the key is
+	   exact rather than nearly right, and costs a field. */
+	const found: { p: { id: number; name: string; group: string }; at: number; k: string }[] = []
 	const ambiguous: string[] = []
 	const seen = new Set<number>()
 	for (const [k, matches] of byKey) {
@@ -132,7 +140,7 @@ export const playersInText = (
 		const p = distinct[0]!
 		if (seen.has(p.id)) continue
 		seen.add(p.id)
-		found.push({ p, at })
+		found.push({ p, at, k })
 	}
 
 	// In the order they appeared, because a roster page lists a team in seat order and
@@ -140,11 +148,21 @@ export const playersInText = (
 	found.sort((a, b) => a.at - b.at)
 
 	return {
-		players: found.map(({ p, at }) => ({
+		players: found.map(({ p, at, k }, i) => ({
 			name: p.name,
 			id: p.id,
 			group: p.group === "pitching" ? "pitching" : "hitting",
-			slot: slotBefore(hay, at)
+			slot: slotBefore(hay, at),
+			status: statusBetween(
+				hay,
+				at + 1 + k.length,
+				/* The 24 is subtracted only where there IS a next man, because it exists to
+				   keep his SEAT out of this man's window. Subtracting it from the end of the
+				   page instead closes the last man's window entirely — and on a one-man
+				   paste, where `hay` is shorter than 24 characters past the name, it closes
+				   everybody's. */
+				found[i + 1] ? found[i + 1]!.at - 24 : hay.length
+			)
 		})),
 		ambiguous: [...new Set(ambiguous)]
 	}
@@ -169,6 +187,37 @@ const slotBefore = (hay: string, at: number): string | null => {
 		if (i >= 0 && (!best || i > best.at)) best = { slot, at: i }
 	}
 	return best?.slot ?? null
+}
+
+/** Tokens Yahoo prints beside a hurt man, AFTER `key()`: lowercased, punctuation
+ *  already collapsed to a space. */
+const STATUS_TOKENS = ["il+", "il", "na", "dtd", "q"]
+
+/**
+ * The flag between this man's name and the next man's seat.
+ *
+ * NOT "the rest of his line": `key` collapsed every newline, so there are no lines. The
+ * window therefore runs from the end of his name to 24 characters before the NEXT name
+ * found — 24 because that is exactly the span `slotBefore` claims for the next man's
+ * seat, and IL and NA are seat tokens as well as flags. Overlap the two and the next
+ * man's IL SEAT is read as this man's flag, which sits a healthy regular down. Where
+ * the gap is empty the flag is absent, which is today's behaviour.
+ *
+ * `p` and `o` are deliberately not in the set: `P` is a real seat and a real position in
+ * `SLOT_TOKENS`, and including it would flag every pitcher in the league.
+ *
+ * "IL+" and "IL" are both tested and the EARLIEST index wins, so `" il+ "` is found at
+ * its own position rather than shadowed; a page writing "IL60" arrives here as `il 60`
+ * and matches `il`, which is the honest reading of it.
+ */
+const statusBetween = (hay: string, from: number, until: number): string | null => {
+	const window = hay.slice(from, Math.max(from, until))
+	let best: { token: string; at: number } | null = null
+	for (const token of STATUS_TOKENS) {
+		const i = window.indexOf(` ${token} `)
+		if (i >= 0 && (!best || i < best.at)) best = { token, at: i }
+	}
+	return best ? best.token.toUpperCase() : null
 }
 
 /**
@@ -475,7 +524,15 @@ export interface PastedRoster {
 	keys: string[]
 	/** Seats, ready for the lineup store. Empty when the paste carried none, which
 	 *  is honest: a bare list of names has no seats. */
-	spots: { slot: string; name: string; positions: string[]; team: string | null }[]
+	spots: {
+		slot: string
+		name: string
+		positions: string[]
+		team: string | null
+		/** Yahoo's own flag beside him, where his page printed one — the second,
+		 *  independent source `resolveRoster` needs to sit a man MLB has not listed. */
+		status: string | null
+	}[]
 	/** What actually happened, in the reader's terms, for the page to print. */
 	note: string
 	/**
@@ -561,6 +618,68 @@ const unmatchedLines = (text: string, players: PastedPlayer[]): string[] => {
 		})
 }
 
+/** The tokens Yahoo's eligibility line is written in, and the only ones `slotsFor` and
+ *  `slot_accepts` speak. A line carrying anything else is not an eligibility line,
+ *  whatever else it looks like. */
+const POS_TOKENS = new Set([
+	"C", "1B", "2B", "3B", "SS", "OF", "LF", "CF", "RF", "DH", "Util", "SP", "RP", "P"
+])
+
+/**
+ * The league's own eligibility line, off the page the reader just handed over.
+ *
+ * Yahoo prints "NYY - C,1B" beside every man on a team page: the live multi-position
+ * line, and the only place a league's REAL eligibility is readable. This app has been
+ * reading a capture instead — `snapshot.eligibility`, 328 of 1,446 players, taken on one
+ * day — and giving the other 77% StatsAPI's single primary position.
+ *
+ * Every refusal below leaves a man ABSENT from the map, which puts him back on exactly
+ * the two fallbacks that ship today. The rule therefore cannot narrow anybody below
+ * today's answer; it can only widen a man on a line that is uniquely his and whose every
+ * token is a position.
+ *
+ *   ONE LINE OR NOTHING. A man Yahoo lists twice — Ohtani appears as a batter and as a
+ *   pitcher, with a different line each — has no single line that is his, and picking one
+ *   would be picking half of him.
+ *
+ *   THE TOKEN MUST FOLLOW HIS NAME. The prefix of the line before the match is checked
+ *   for his name rather than character offsets being reconstructed, because `key` changes
+ *   lengths. That is what makes "it is his line, and it is after him" checkable.
+ *
+ *   THE WHOLE LIST OR NONE OF IT. "W-L" in a pitcher's record column parses as `W - L`
+ *   and dies on the token set; so does "IL-10"; so would a redesign printing
+ *   "NYY - C,1B,XX". Half an eligibility line would widen a man on half the evidence,
+ *   which is worse than the capture it replaces.
+ */
+export const eligibilityInText = (
+	text: string,
+	men: { id: number; name: string }[]
+): Map<number, string[]> => {
+	const out = new Map<number, string[]>()
+	const lines = text.split(/\r?\n/)
+	const keyed = lines.map(l => ` ${key(l)} `)
+	for (const p of men) {
+		const spellings = [p.name, surnameFirst(p.name)].filter((x): x is string => !!x)
+		const hits = new Set<number>()
+		for (const spelling of spellings) {
+			const needle = ` ${key(spelling)} `
+			for (let i = 0; i < keyed.length; i++) if (keyed[i]!.includes(needle)) hits.add(i)
+		}
+		if (hits.size !== 1) continue
+		const line = lines[[...hits][0]!]!
+		for (const m of line.matchAll(/\b([A-Z]{2,3})\s*-\s*([A-Z0-9,]+)/g)) {
+			const before = key(line.slice(0, m.index))
+			if (!spellings.some(sp => before.includes(key(sp)))) continue
+			const tokens = (m[2] ?? "").split(",").map(x => x.trim()).filter(Boolean)
+			if (!tokens.length || tokens.length > 4) break
+			if (!tokens.every(x => POS_TOKENS.has(x))) break
+			out.set(p.id, tokens)
+			break
+		}
+	}
+	return out
+}
+
 export const rosterFromPaste = (
 	text: string,
 	snapshot: {
@@ -615,7 +734,9 @@ export const rosterFromPaste = (
 			if (!one || held.has(one.id)) continue
 			held.add(one.id)
 			resolved.add(norm(line))
-			bySurname.push({ name: one.name, id: one.id, group: one.group, slot: null })
+			/* No seat and no flag: this branch recovers a man from a line the matcher could
+			   not place at all, so there is no position in `hay` to read either from. */
+			bySurname.push({ name: one.name, id: one.id, group: one.group, slot: null, status: null })
 		}
 	}
 	const found: PasteResult =
@@ -683,6 +804,9 @@ export const rosterFromPaste = (
 	 * claim and it is the same fallback the board already makes; stating it beats
 	 * seating nobody.
 	 */
+	/* Hoisted above `spots` because that is its only caller, and computed once over the
+	   whole page rather than per seat. */
+	const fromPage = eligibilityInText(text, found.players)
 	const spots = found.players
 		.filter(f => f.slot)
 		.map(f => {
@@ -701,8 +825,28 @@ export const rosterFromPaste = (
 				 * capture, so most of every pasted roster fell through to that raw
 				 * position and could be seated nowhere.
 				 */
-				positions: p ? slotsFor(p, snapshot.eligibility?.[String(f.id)]) : [],
-				team: p?.team ?? null
+				/*
+				 * THE PAGE FIRST, THE GRID SECOND, THE PRIMARY POSITION LAST.
+				 *
+				 * `snapshot.eligibility` covers 328 of 1,446 players — 23% — and was captured
+				 * on one day of one season, in a repo whose own eligibility thresholds are a
+				 * per-league setting. The other 77% fell through to StatsAPI's single primary
+				 * position, which `slotsFor` itself calls the largest known accuracy gap here.
+				 *
+				 * The text the reader just handed over carries his league's REAL line, minutes
+				 * old, beside every man on it. Where it is readable it wins, including where it
+				 * is NARROWER than the grid: both are Yahoo's own eligibility, and the page is
+				 * the one that is about this league today.
+				 *
+				 * `slotsFor` stays the mapping, not the source: it turns DH into Util (no Util
+				 * seat's accepts list carries DH, so raw tokens alone leave a designated hitter
+				 * unseatable), adds P beside SP/RP, and falls back to the primary position when
+				 * a set maps to nothing.
+				 */
+				positions:
+					p ? slotsFor(p, fromPage.get(f.id) ?? snapshot.eligibility?.[String(f.id)]) : [],
+				team: p?.team ?? null,
+				status: f.status
 			}
 		})
 

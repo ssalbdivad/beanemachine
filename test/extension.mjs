@@ -108,14 +108,45 @@ const seated = (() => {
 	]
 })()
 
+/*
+   THE ROW IS THE WIDTH A REAL ONE IS, and two of its cells are new.
+
+   It used to be `<td>slot</td><td>name TEAM - POS</td>` and nothing else, which is a
+   shape no Yahoo team page has: consecutive names sat under 24 characters apart, so
+   `statusBetween` correctly found nothing and a suite over it would have passed over a
+   dead function. The trailing cells are this file's reconstruction of the columns a real
+   row carries and are labelled as such.
+
+   Two cells are INFERRED rather than measured, and the inference is named so a green
+   suite is not read as a capture:
+     · the status badge, whose class pair comes from src/auto/roster.ts's selector;
+     · the eligibility line with TWO positions — Yahoo prints the live multi-position
+       line here and the capture in data/snapshot.json holds one primary position per
+       man, so a fixture printing `p.position` alone can never exercise the widening.
+   docs/EXTENSION.md records both gaps.
+*/
+const FLAG_AT = 0
+const WIDE_AT = 1
 const teamPage = () =>
 	`<!doctype html><meta charset="utf-8"><title>My Team</title><body><table>` +
 	`<tr><th>Pos</th><th>Player</th></tr>` +
 	seated
-		.map(
-			({ slot, p }) =>
-				`<tr><td>${slot}</td><td>${p.name} ${p.team ?? "FA"} - ${p.position ?? "Util"}</td></tr>`
-		)
+		.map(({ slot, p }, i) => {
+			const elig =
+				i === WIDE_AT ? `${p.position ?? "Util"},1B` : (p.position ?? "Util")
+			return (
+				`<tr><td>${slot}</td><td>${p.name} ${p.team ?? "FA"} - ${elig}</td>` +
+				/* Its own CELL, not a bare inline span inside the name cell: `innerText`
+				   renders `C<span>Q</span>` as "CQ" with no separator, and the parser reads
+				   space-delimited tokens. A cell is the conservative reconstruction — if the
+				   real page turns out to run the badge together with the eligibility line, the
+				   flag is absent and the seat is stored without one, which is where this was
+				   yesterday. */
+				(i === FLAG_AT ? `<td><span class="F-injury">Q</span></td>` : `<td></td>`) +
+				`<td>Wed 7:05 pm @ BAL</td><td>Preview</td>` +
+				`<td>0.0</td><td>0.0</td><td>0.0</td><td>Add Drop</td></tr>`
+			)
+		})
 		.join("") +
 	`</table></body>`
 
@@ -1246,9 +1277,16 @@ await walled.close()
 	const got = await ui.evaluate(k => {
 		const read = n => JSON.parse(localStorage.getItem(`beanemachine:${n}`) ?? "null")
 		const pool = read("pool")?.[k]
+		const spots = read("lineup")?.[k]?.spots ?? []
 		return {
 			roster: read("roster")?.[k]?.length ?? 0,
-			spots: read("lineup")?.[k]?.spots?.length ?? 0,
+			spots: spots.length,
+			/* The two things the TEAM page prints that the browser route used to lose
+			   between the text and the store: the flag beside a hurt man, and the live
+			   multi-position eligibility line. Read back out of the store rather than off
+			   the parser, because the four narrowing points between them are where it died. */
+			seatFlags: spots.filter(x => x.status).map(x => x.status),
+			widened: spots.filter(x => x.positions.length > 1).length,
 			pool: pool?.players?.length ?? 0,
 			asked: pool?.positionsRequested?.length ?? 0,
 			note: pool?.note ?? "",
@@ -1263,6 +1301,16 @@ await walled.close()
 	}, KEY)
 	t("one press puts his team in this browser, with the seat each man is in",
 		got.roster === seated.length && got.spots === seated.length, JSON.stringify(got))
+	t("the flag his own team page printed beside a man reaches the seats it stores",
+		got.seatFlags.length === 1 && got.seatFlags[0] === "Q", JSON.stringify(got.seatFlags))
+	t("…and it is not smeared onto the man below him",
+		got.seatFlags.length === 1, JSON.stringify(got.seatFlags))
+	/* The capture holds one primary position per man, so before this the only widening
+	   available came from `snapshot.eligibility` — 328 of 1,446 players. The page's own
+	   line is what widens the rest, and this is the seat coming back wider than the
+	   capture could have made it. */
+	t("…and the league's own eligibility line widens the seat the capture could not",
+		got.widened >= 1, String(got.widened))
 	t("and his league's free agents, stamped with when they were read",
 		got.pool === 9 * PAGE_ROWS && got.stamped, JSON.stringify(got))
 	t("and says where they came from, because a carried file and a read age differently",

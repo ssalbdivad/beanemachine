@@ -323,7 +323,13 @@ export const resolveRoster = (input: PlanInput): Resolved[] => {
 		// projection knows neither: it assumes everyone plays the whole horizon.
 		const unavailable =
 			rated?.injury ? `MLB lists him ${rated.injury}`
-			: /^IL/i.test((spot.status ?? "").trim()) && (spot.status ?? "").trim() ? `Yahoo flags him ${spot.status}`
+			: /* The engine's own predicate rather than a second hand-rolled `/^IL/i` — see
+			     `isReserveSlot`, which exists precisely so there is one of these. It newly
+			     catches NA, a man in an active seat whom his league says is not in the
+			     majors, and it deliberately does NOT catch DTD or Q, because nothing here
+			     can tell whether they will play. `isReserveSlot("")` is false, so an
+			     absent flag is still absent. */
+			isReserveSlot((spot.status ?? "").trim()) ? `Yahoo flags him ${(spot.status ?? "").trim()}`
 			: null
 		return { spot, rated, legal, unavailable, blocked }
 	})

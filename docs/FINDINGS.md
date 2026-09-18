@@ -210,3 +210,93 @@ found it, so the next pass starts from evidence.
   ask for the identical `byDateRange` URL — same window, same group — separately, despite the
   hook being shared for exactly that reason. Hoisting it to the page would pay for most of
   another live read.
+
+---
+
+## Open after the browser reader landed — 2026-09-17
+
+The reader (`extension/`) was built, hardened and refuted in one day. Five lenses ran against
+it and against the engine changes it made live; most of what they found is fixed and named in
+the commits between `d81b42d` and `ec83079`. This is the remainder, with the evidence, so the
+next pass starts from a measurement rather than a fresh walk.
+
+### Parsing, and the one contaminant in ten that still gets through
+
+A team page is not only a team, and the extension has no selection to narrow it: it hands
+over the whole page's text. Men named in a matchup strip or a trending panel are now dropped
+by requiring a SEAT beside the name — measured on a constructed page, 15 matched, 10 kept, 5
+dropped — but **one of six contaminants survived** that test, because a seat token earlier in
+the page can attach to a later name. Two paste.ts behaviours are behind it and both predate
+this route:
+
+- `slotBefore` accepts the English word **"of"** as an OF seat (`SLOT_TOKENS`, paste.ts:38).
+  A sentence ending "…of" before a player's name gives him an outfield seat, and a wrong seat
+  is worse than no seat, because the Tonight card diffs against it.
+- The FIRST mention of a name in the text decides his seat (paste.ts:122), so a news blurb
+  above the table costs a real roster man the seat he is really in.
+
+Both are in the parser the whole product's front door runs on, with 54 assertions over it, so
+neither is a one-line change. The honest framing is that the extension route made a latent
+paste hazard reachable more often, not that it introduced one.
+
+### The opponent list is unbounded and double-counts a two-way player
+
+`readGrabs` subtracts the reader's own men from every name on the matchup page and calls the
+rest his opponent. Nothing caps it, so a page that names a hundred men produces a
+hundred-man opponent, and `useMatchup.theirs` then sums them against the reader's twenty-odd.
+The `>= 3` length guard in the recap fires, but explains it as "lines spelled in a way this
+page could not match", which is the wrong reason. A two-way player is also two keys and is
+counted twice in the number the reader is shown, which is the number he uses to judge whether
+the comparison is fair.
+
+### A covered slot with `count` or fewer free men degenerates
+
+`depth = Math.min(count, eligible.length - 1)` lands on the LAST man on the wire when the wire
+at that slot is shorter than the reader's seats there — which is candidate B, the rule
+`data/results/wire-depth/` measured and rejected, arriving by the back door on the thinnest
+wires. Nobody has measured how often a real sweep is that thin at a slot.
+
+### Two tests that would pass while the thing they name is broken
+
+- `test/engine.mjs:1433` is named "a slot no rateable player is eligible for keeps the zero"
+  and cannot see the bar it is named after; it is the only guard on the branch bscore.ts calls
+  the most expensive number in the function.
+- The integration suite's team-page fixture is a bare roster table, so its roster assertion
+  passes for a page that has nothing else on it — which is not the page the extension sends.
+  The contamination fix above is tested by a script in the commit, not by the suite.
+
+### The reader cannot be published yet
+
+Named because acquiring them is not a code change:
+
+- **addons.mozilla.org refuses new extensions without
+  `browser_specific_settings.gecko.data_collection_permissions`** (required since 2025-11-03).
+  `extension/build.mjs` does not emit it, so the Firefox build cannot be submitted as it
+  stands. This is the only one of these that is a code change, and it is small.
+- A privacy policy at a URL (Chrome links to one; `extension/PRIVACY.md` is a file in a repo).
+- At least one screenshot at 1280×800 or 640×400, and a 440×280 promo tile. Nothing emits any.
+- Chrome wants 96×96 of artwork inside a 128px canvas; the build draws full bleed.
+- A packaged zip: `/usr/bin/zip` is not on this machine, so the build has never produced one
+  and both stores take a zip.
+- A developer account and a trader/non-trader declaration for Chrome; pre-build source and
+  build instructions for Mozilla's reviewers, because the shipped code is bundled by Vite.
+
+### Smaller, all measured
+
+- `extension/src/*.ts` has never been type-checked: `tsconfig.json` covers `src`, `api` and
+  `vite.config.ts`, and `@types/chrome` is not installed. `npm run check` has never looked at
+  the three files that actually run in a browser.
+- The background's `open-yahoo` branch is unreachable — the bridge drops the field that would
+  reach it. Left with a comment saying so, and warning that wiring it up without removing the
+  page's own `window.open` gives the reader two tabs.
+- The Decide card's team-count refusal still explains itself in terms of a wire depth that no
+  longer applies to a reader who has read his league's own list.
+- `chrome.runtime.reload()` under `--load-extension` does not bring the extension back, so the
+  second half of a store update — "and then it works again" — cannot be tested in this
+  harness. The orphan block is therefore last in `test/extension.mjs`, and anything needing a
+  working reader has to sit above it.
+- MV3 service-worker sleep is not reproducible under Playwright (the debugger keeps the worker
+  alive), so the `tabs.query` fix that replaced an in-memory tab map is reasoned rather than
+  reproduced.
+- One run in roughly ten of `test/extension.mjs` reported two failures whose identity was not
+  captured. Nine consecutive runs since have been clean at 109/0.

@@ -566,8 +566,25 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 		 * against men it no longer holds. Seats are only true about the roster they
 		 * came off, so where this paste has none, the old ones go.
 		 */
-		if (read.spots.length) lineupStore.set(leagueKey, read.spots, new Date().toISOString())
-		else lineupStore.clear(leagueKey)
+		/*
+		   THE SEATS ARE WRITTEN INSIDE THE SAME GUARD AS THE MEN, and they were not.
+		
+		   `persist` catches a refused write and puts the browser's own words on the screen. The
+		   two lines below sat outside it, so a browser that accepted the roster and refused the
+		   seats threw out of the click handler entirely: `setPasteNote` and `setPasted` never
+		   ran, `storeError` stayed null, and the screen said NOTHING — no count, no error, the
+		   textarea still full. The two stores are a pair, and the pair is what has to succeed
+		   or be reported.
+		*/
+		try {
+			if (read.spots.length) lineupStore.set(leagueKey, read.spots, new Date().toISOString())
+			else lineupStore.clear(leagueKey)
+		} catch (e) {
+			setStoreError(
+				`Your men were saved and their seats were not (${e instanceof ApiError ? e.message : String(e)}). ` +
+					`Tonight will treat every one of them as unseated until this browser can keep them.`
+			)
+		}
 		setPasteNote(read.note)
 		setPasted("")
 	}

@@ -755,9 +755,21 @@ export const Onboard = ({
 						  and read in none. A storage failure here was completely silent: the reader
 						  pressed the button, saw his players named back, and had nothing saved.
 						*/}
-						{teamNote && !read.players.length && (
-							<p className="onboard-missed">{teamNote}</p>
-						)}
+						{/*
+						  AND THE GUARD MADE IT UNREACHABLE, which is the same bug one layer out.
+						
+						  `!read.players.length` was the condition, and every path that sets a storage
+						  message runs only AFTER `if (!got.players.length) return setTeamNote(got.note)`
+						  — so a note about a failed save exists exactly when this guard is false. The
+						  block written to stop a silent storage failure could not render on a storage
+						  failure. Measured: the sheet named all fourteen men back, with nothing saved
+						  and nothing said.
+						
+						  The condition is the note itself now. On a clean read there IS no note —
+						  `setTeamNote(null)` on success, because the list of names below is the
+						  confirmation — so nothing appears where nothing went wrong.
+						*/}
+						{teamNote && <p className="onboard-missed">{teamNote}</p>}
 					</div>
 					)
 				})()}

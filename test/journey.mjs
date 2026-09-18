@@ -168,7 +168,6 @@ let stage = "the page loads at all"
 const at = where => { stage = where }
 process.on("uncaughtException", async e => {
 	t(stage, false, String(e.message ?? e).split("\n")[0])
-	console.log(`\npassed ${pass}, failed ${fail}`)
 	await browser.close().catch(() => {})
 	process.exit(1)
 })
@@ -1479,6 +1478,58 @@ clean("over the whole journey")
     /of your men can score|seats score nothing|nothing to change/i.test(after),
     after.slice(0, 200))
   await live.close()
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * A TEAM THAT COULD NOT BE SAVED SAYS SO, and for months it could not.
+ *
+ * The first-run sheet writes the roster inside a try/catch and puts the browser's own words
+ * in `teamNote` when the write is refused — a private window, a full phone. The block that
+ * RENDERS that note was guarded on `!read.players.length`, and every path that sets it runs
+ * only after the parser returned players, so the note existed exactly when the guard was
+ * false. The sheet named all fourteen men back with nothing saved and nothing said, on the
+ * step with the highest attrition in the product.
+ *
+ * Driven by letting the page read storage and refusing the write, which is what a full quota
+ * looks like.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const sp = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	/* A stranger's first visit: the served seed carries a league on the dev server and none on
+	   the published build, and the dock — the only way into the sheet with no league — exists
+	   exactly when there is none. */
+	await sp.route("**/scoring.json", async route => {
+		const j = await (await route.fetch()).json()
+		j.leagues = {}
+		j.active_league = null
+		await route.fulfill({ json: j })
+	})
+	await sp.addInitScript(() => {
+		const real = Storage.prototype.setItem
+		Storage.prototype.setItem = function (k, v) {
+			if (String(k).startsWith("beanemachine:roster"))
+				throw new DOMException("The quota has been exceeded.", "QuotaExceededError")
+			return real.call(this, k, v)
+		}
+	})
+	await sp.goto(BASE, { waitUntil: "domcontentloaded" })
+	await sp.waitForSelector("nav button", { timeout: 30000 })
+	await sp.waitForTimeout(1200)
+	await sp.waitForSelector(".dock-bar button", { timeout: 30000 })
+	if ((await sp.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
+		await sp.click(".dock-bar button")
+	await sp.waitForSelector(".dock-sheet .onboard textarea", { timeout: 20000 })
+	await sp.fill(".dock-sheet .onboard textarea", "Aaron Judge\nTarik Skubal\nCal Raleigh")
+	await sp.click('.dock-sheet .onboard button:has-text("That\u2019s my team")')
+	await sp.waitForTimeout(1200)
+	const sheet = await sp.$eval(".dock-sheet .onboard", e => e.innerText)
+	t("a team the browser refused to keep is not reported as kept",
+		/could not be saved/i.test(sheet), sheet.replace(/\n+/g, " | ").slice(0, 300))
+	t("…in the browser's own words, so the reader knows which browser said no",
+		/quota/i.test(sheet), sheet.replace(/\n+/g, " | ").slice(0, 300))
+	await sp.close()
 }
 
 await browser.close()

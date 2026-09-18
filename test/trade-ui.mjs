@@ -1533,6 +1533,17 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	const said = await page.$eval('[role="status"][aria-live]', e => e.textContent?.trim() ?? "")
 	t("and removing a man says which man, where a screen reader will hear it",
 		said === `${first.who} removed from your team.`, said)
+
+	/* CLEARING THE WHOLE TEAM is the same control one order of magnitude up, and the same
+	   function that announced one man leaving left all of them leaving silent. */
+	/* The page already accepts dialogs — see where it is opened — so a second handler here
+	   would try to accept one that is already handled. */
+	const before = await page.locator(".trade-owned-fold .trade-line").count()
+	await page.click('button:has-text("Clear team")')
+	await page.waitForTimeout(600)
+	const cleared = await page.$eval('[role="status"][aria-live]', e => e.textContent?.trim() ?? "")
+	t("clearing the whole team says so too, and says how many went",
+		new RegExp(`All ${before} players cleared`).test(cleared), `${cleared} (had ${before})`)
 	t("…and he is gone from the list",
 		!(await page.$(`.trade-owned-fold button.act[aria-label="Remove ${first.who}"]`)), first.who)
 	await page.close()

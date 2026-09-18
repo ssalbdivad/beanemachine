@@ -435,6 +435,26 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 			   so the sentence is about what he got rather than about what was sent.
 			*/
 			let facing: string | null = null
+			/*
+			   AND AN OPPONENT WHO IS NO LONGER THE OPPONENT IS FORGOTTEN.
+			
+			   ESPN states who the reader is playing, so a read that comes back without one is a
+			   read that says there is nobody this week — a bye, a consolation ladder, the space
+			   between two matchup periods. With no else branch, LAST week's opponent stayed in
+			   the store and every card went on comparing his men against a team he is not playing,
+			   under a heading saying how the week stands.
+			
+			   Only for a platform that states it. A Yahoo opponent arrives by paste or off the
+			   matchup page, and clearing his on a roster read would throw away something this
+			   read knows nothing about.
+			*/
+			if (platform === "espn" && !res.opponent?.players.length) {
+				try {
+					opponentStore.clear(leagueKey)
+				} catch {
+					/* A stale opponent is better than a failed read that says nothing. */
+				}
+			}
 			if (res.opponent?.players.length) {
 				const theirs: string[] = []
 				for (const y of res.opponent.players)
@@ -1170,10 +1190,15 @@ export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) =
 						<button
 							type="button"
 							className="ghost"
-							onClick={() =>
-								confirm(`Clear all ${owned.length} players from this team?`) &&
+							onClick={() => {
+								const had = owned.length
+								if (!confirm(`Clear all ${had} players from this team?`)) return
 								persist(dropTeam)
-							}
+								/* The same function that announces ONE player leaving left all of them
+								   leaving silent: the rows vanish, which is the whole of the feedback for
+								   a reader who can see them and none at all for one who cannot. */
+								say?.(`All ${had} players cleared from this team.`)
+							}}
 						>
 							Clear team
 						</button>

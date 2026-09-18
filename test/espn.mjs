@@ -13,13 +13,21 @@
  * this file exists to prevent.
  */
 import {
+	espnInningsMinimum,
 	espnLock,
+	espnMoveLimit,
+	espnPointsFormat,
 	espnSeason,
 	espnTradeDeadline,
 	forgetEspnSeason,
 	ESPN_API
 } from "../src/data/espn.ts"
-import { deriveEspnPeriod, leagueTradeDeadline, deriveTradeDeadline } from "../src/import.ts"
+import {
+	deriveEspnPeriod,
+	leagueLimits,
+	leagueTradeDeadline,
+	deriveTradeDeadline
+} from "../src/import.ts"
 
 let pass = 0,
 	fail = 0
@@ -206,6 +214,152 @@ const t = (n, ok, x = "") => {
 	const empty = await espnSeason(answer({}), {}, jan)
 	t("an answer with no season in it falls back", empty.season === 2027)
 	forgetEspnSeason()
+}
+
+/* ── what kind of league it is ────────────────────────────────────────────────────────── */
+{
+	t("a head-to-head points league is one this app can price",
+		espnPointsFormat({ scoringSettings: { scoringType: "H2H_POINTS" } }).ok)
+	t("and so is a season-long points league",
+		espnPointsFormat({ scoringSettings: { scoringType: "TOTAL_SEASON_POINTS" } }).ok)
+
+	/*
+	   THE ONE THAT WAS BEING IMPORTED AS SOMETHING IT IS NOT.
+	
+	   ESPN's category leagues carry a `scoringItems` array exactly like a points league's,
+	   with `points: 1.0` in every entry — "this category counts", not "a home run is worth one
+	   point". Six of the eleven default ids are ones this app's map can name, so six landed in
+	   the scoring table as 1.0 apiece and the import reported a league whose scoring had been
+	   read. A board built on that ranks a single against a home run as equals.
+	*/
+	const cat = espnPointsFormat({ scoringSettings: { scoringType: "H2H_CATEGORY" } })
+	t("a categories league is refused", !cat.ok, JSON.stringify(cat))
+	t("…in words that say what kind of league it is rather than what this app is",
+		/categories league/.test(cat.why) && !/scoringType|schema|import/.test(cat.why), cat.why)
+	t("and so is roto", !espnPointsFormat({ scoringSettings: { scoringType: "ROTO" } }).ok)
+
+	/* A format nobody here has seen is refused too, and quotes ESPN's own word for it. The
+	   cost is asymmetric: a refusal is a sentence a reader can act on, and the alternative is
+	   a confident board built on a table that was never a table of points. */
+	/* "H2H_MOST_CATEGORIES" was tried here first and is NOT the right example: it carries the
+	   word CATEGORIES, so it takes the branch above and is refused as what it is, which is the
+	   behaviour wanted. The case this asserts is a name with nothing recognisable in it. */
+	const odd = espnPointsFormat({ scoringSettings: { scoringType: "H2H_SOMETHING_NEW" } })
+	t("a format this does not know is refused rather than assumed to be points", !odd.ok)
+	t("…and the refusal quotes what ESPN actually said", /H2H_SOMETHING_NEW/.test(odd.why), odd.why)
+	t("and a categories league by any name is still refused as a categories league",
+		/categories league/.test(espnPointsFormat({ scoringSettings: { scoringType: "H2H_MOST_CATEGORIES" } }).why))
+	t("a league that states no scoring type at all is refused", !espnPointsFormat({}).ok)
+}
+
+/* ── the move cap ─────────────────────────────────────────────────────────────────────── */
+{
+	/* Measured on ESPN's template: matchupAcquisitionLimit 1, matchupLimitPerScoringPeriod
+	   true, acquisitionLimit -1. A scoring period in ESPN baseball is a DAY, so one a day
+	   across a seven-day matchup is seven — the arithmetic is on two stated facts, and what it
+	   drops is that they are not interchangeable, which is why the note exists. */
+	const daily = espnMoveLimit(
+		{ acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true } },
+		7
+	)
+	t("a cap of one a day across a seven-day period is seven", daily.perPeriod === 7, String(daily.perPeriod))
+	t("…and says it is one a day rather than seven at once",
+		/a day/.test(daily.note ?? ""), String(daily.note))
+	t("…and the source is a sentence, not a field name",
+		/1 added player a day/.test(daily.source ?? "") && !/matchupAcquisition/.test(daily.source ?? ""),
+		String(daily.source))
+
+	/* Where the cap is per MATCHUP the number is the number, and there is nothing to caveat. */
+	const weekly = espnMoveLimit(
+		{ acquisitionSettings: { matchupAcquisitionLimit: 6, matchupLimitPerScoringPeriod: false } },
+		7
+	)
+	t("a cap stated per matchup is taken as it stands", weekly.perPeriod === 6 && weekly.note === null,
+		JSON.stringify(weekly))
+
+	/* -1 is ESPN's unlimited sentinel, and unlimited is null — not a large stand-in, because a
+	   planner handed 40 believes the league said 40. */
+	t("unlimited is null", espnMoveLimit({ acquisitionSettings: { matchupAcquisitionLimit: -1 } }, 7).perPeriod === null)
+	t("and a league that states nothing is null",
+		espnMoveLimit({}, 7).perPeriod === null && espnMoveLimit({}, 7).note === null)
+
+	/*
+	   THE SEASON CAP IS NOT THE WEEKLY CAP, which is the error this field is one letter away
+	   from: `acquisitionLimit` is the whole season's signings and would tell a reader in April
+	   that he may make forty moves before Sunday.
+	*/
+	const seasonOnly = espnMoveLimit(
+		{ acquisitionSettings: { acquisitionLimit: 40, matchupAcquisitionLimit: -1 } },
+		7
+	)
+	t("a season cap is never read as a weekly one", seasonOnly.perPeriod === null, String(seasonOnly.perPeriod))
+
+	/* And a per-day cap with no period length claims nothing — but SAYS so, because null on
+	   its own means unlimited to the planner and this league is not unlimited. */
+	const noDays = espnMoveLimit(
+		{ acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true } },
+		null
+	)
+	t("a daily cap with no period length is not guessed at",
+		noDays.perPeriod === null && /a day/.test(noDays.note ?? ""), JSON.stringify(noDays))
+}
+
+/* ── the innings floor a points league does not have ──────────────────────────────────── */
+{
+	/* `statQualificationMinimum: {limitValue: 30, statId: 34}`, measured. Stat 34 is OUTS
+	   RECORDED — this project's own map says so and it was re-confirmed player by player
+	   against MLB StatsAPI — so 30 is TEN innings, not thirty. And ESPN's roto template states
+	   3000 of them, a thousand innings, which is a season's staff rather than a week's floor. */
+	const outs = espnInningsMinimum({ scoringSettings: { statQualificationMinimum: { limitValue: 30, statId: 34 } } })
+	t("ESPN's qualification minimum is not read as a weekly innings floor", outs.perPeriod === null)
+	t("…and where it is reported it is converted from outs to innings",
+		/10 innings/.test(outs.note ?? ""), String(outs.note))
+	t("a qualification on some other stat is named rather than converted",
+		/does not recognise/.test(espnInningsMinimum({ scoringSettings: { statQualificationMinimum: { limitValue: 5, statId: 53 } } }).note ?? ""))
+	t("and a points league, which carries the field nowhere, is simply silent",
+		espnInningsMinimum({ scoringSettings: {} }).note === null)
+}
+
+/* ── both rules, through the league, for whichever platform it came from ──────────────── */
+{
+	const espnLeague = {
+		meta: { platform: "espn" },
+		scoring_period: { days: 7 },
+		league_rules: {
+			raw_settings: {
+				acquisitionSettings: { matchupAcquisitionLimit: 1, matchupLimitPerScoringPeriod: true }
+			}
+		}
+	}
+	const got = leagueLimits(espnLeague)
+	t("an ESPN league's move cap is found through the league", got.movesPerPeriod === 7, JSON.stringify(got))
+	t("…and the caveat travels with it, because the planner acts on the number",
+		got.notes.some(n => /a day/.test(n)), JSON.stringify(got.notes))
+	t("…and its innings floor stays null, because a points league does not have one",
+		got.inningsPerPeriod === null)
+
+	/*
+	   THE BUG: ESPN's nested settings handed to the Yahoo row reader miss every lookup, so
+	   both numbers came back null — and null means UNLIMITED to the planner. Every ESPN reader
+	   was planned against the app's generic default while the screen beside it promised his
+	   league's own rule.
+	*/
+	const asYahoo = leagueLimits({ league_rules: espnLeague.league_rules })
+	t("read as Yahoo rows it would have said nothing at all", asYahoo.movesPerPeriod === null)
+
+	const yahooLeague = {
+		meta: { platform: "yahoo" },
+		league_rules: {
+			raw_settings: {
+				"Max Acquisitions per Week": "6",
+				"Min innings pitched per team per week": "20"
+			}
+		}
+	}
+	const y = leagueLimits(yahooLeague)
+	t("and a Yahoo league still reads its printed rows, with no caveat to add",
+		y.movesPerPeriod === 6 && y.inningsPerPeriod === 20 && y.notes.length === 0,
+		JSON.stringify(y))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

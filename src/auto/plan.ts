@@ -169,6 +169,16 @@ export interface PlanInput {
 		movesPerPeriod: number | null
 		inningsPerPeriod: number | null
 		/**
+		 * CAVEATS THAT TRAVEL WITH THE NUMBER, because a number whose unit was converted is
+		 * not the same claim as one the league printed.
+		 *
+		 * ESPN states an acquisition cap PER DAY on a weekly league, so a cap of six across
+		 * the period is six that cannot all be spent on Saturday. The arithmetic is honest and
+		 * the constraint it drops is real, so the sentence that prints the cap prints this
+		 * beside it. Empty for a Yahoo league, which states the rule in the unit this uses.
+		 */
+		notes?: string[]
+		/**
 		 * INNINGS ALREADY THROWN IN THIS SCORING PERIOD, and whether this plan's window is
 		 * that period.
 		 *
@@ -641,7 +651,8 @@ export const planMoves = (
 	if (byLeague)
 		notes.push(
 			`your league allows ${cap} acquisition${cap === 1 ? "" : "s"} a week, which is fewer ` +
-				`than the ${options.maxMoves} moves this run would otherwise make, so ${cap} is the cap`
+				`than the ${options.maxMoves} moves this run would otherwise make, so ${cap} is the cap` +
+				(input.limits?.notes?.length ? ` — ${input.limits.notes.join(" ")}` : ``)
 		)
 
 	const onRoster = new Set(input.roster.map(s => normalizeName(s.name)))
@@ -1062,7 +1073,8 @@ export const planSwaps = (
 	if (byLeague)
 		notes.push(
 			`your league allows ${cap} acquisition${cap === 1 ? "" : "s"} a week, which is fewer ` +
-				`than the ${options.maxMoves} moves this run would otherwise make, so ${cap} is the cap`
+				`than the ${options.maxMoves} moves this run would otherwise make, so ${cap} is the cap` +
+				(input.limits?.notes?.length ? ` — ${input.limits.notes.join(" ")}` : ``)
 		)
 	let roster = input.roster
 	/** The lineup before any of this, kept so the innings floor below can be asked of

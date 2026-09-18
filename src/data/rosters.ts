@@ -80,8 +80,14 @@ const yahoo = async (leagueId: string, teamId: string, sport: string): Promise<R
  * exactly. Ids 8-11, 14, 15 and 19 are never played in that league's shape but
  * appear in `eligibleSlots` on precisely the men who could hold them (9 on the
  * centre fielders, 15 on the relievers, 19 on the infielders), which is what
- * fixes their meaning. 18 and 20-22 were never observed anywhere and are
+ * fixes their meaning. 18 and 20-21 were never observed anywhere and are
  * deliberately absent rather than guessed at.
+ *
+ * 22 was in that sentence until 2026-09-18, and it was wrong: the same league's own
+ * `settings.rosterSettings.lineupSlotStatLimits` is keyed by slot id and carries 22,
+ * which is a per-matchup STARTS CAP on a seat — a rule the importer reads nowhere. What
+ * stands is that 22 has never been observed as an occupied SEAT, which is what this map
+ * is for, so it stays out of the map and the sentence stops overstating.
  */
 /**
  * The seats a player is eligible for, from ESPN's numeric `eligibleSlots`.

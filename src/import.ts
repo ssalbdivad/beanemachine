@@ -1,7 +1,14 @@
 import type { League } from "./schema.ts"
 import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
 import { ESPN_MLB_SLOT } from "./data/rosters.ts"
-import { espnLock, espnSeason, espnTradeDeadline } from "./data/espn.ts"
+import {
+	espnInningsMinimum,
+	espnLock,
+	espnMoveLimit,
+	espnPointsFormat,
+	espnSeason,
+	espnTradeDeadline
+} from "./data/espn.ts"
 import { IL_SLOTS, rosterCounts } from "./engine/bscore.ts"
 
 /**
@@ -251,7 +258,9 @@ export interface DerivedPeriod {
 /**
  * ESPN's numeric scoring stat ids, mapped to this engine's stat codes.
  *
- * ESPN publishes only `{ statId, points }` — no names anywhere in the payload — so
+ * ESPN publishes `{ statId, points, isReverseItem, leagueRanking, leagueTotal,
+ * pointsOverrides }` and NO NAMES anywhere in the payload — the whole `scoringItems` array
+ * contains no string values at all, re-measured 2026-09-18 — so
  * an imported ESPN league landed its whole scoring table in `scoring.unmapped` and
  * the board refused it: "this league has no scoring yet", with no way forward. The
  * import worked and the product did not.
@@ -772,20 +781,57 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	   and disagrees for exactly the months somebody sets a league up in — see `espnSeason`. */
 	const asked = t.season ? null : await espnSeason(fetch, agentHeaders(USER_AGENT))
 	const season = t.season ?? asked!.season
+	/* TWO VIEWS, ONE REQUEST. `mTeam` costs nothing beside `mSettings` and carries the
+	   league's teams — which is where this league's own NAME for the reader's team lives, and
+	   the join that answers "which of these is mine". Yahoo pays a whole extra page fetch for
+	   the same fact. */
 	const url =
 		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${t.sport}` +
-		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings`
+		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings&view=mTeam`
 
-	const res = await fetch(url, { headers: agentHeaders(USER_AGENT) })
+	/*
+	   THE SEASON JUST GONE, AND THEN THE RIGHT SENTENCE FOR EACH WAY THIS FAILS.
+	
+	   This threw one sentence at every non-200: "Private leagues need cookies; only
+	   publicly-viewable leagues can be imported." For a 404 that is a lie with a dead end in
+	   it — a PUBLIC league returns 404 for a season it never played, which is the single most
+	   likely failure a reader hits between seasons, and he was told his league was private and
+	   left there. The roster reader in src/data/rosters.ts has branched these correctly for
+	   months, including the retry; the importer never learned it.
+	*/
+	const get = (yr: number) =>
+		fetch(url.replace(/seasons\/\d+/, `seasons/${yr}`), { headers: agentHeaders(USER_AGENT) })
+	let res = await get(season)
+	if (res.status === 404) res = await get(season - 1)
 	if (!res.ok) {
 		throw new ImportError(
-			`ESPN returned HTTP ${res.status} for league ${t.leagueId}. Private leagues ` +
-				"need cookies; only publicly-viewable leagues can be imported."
+			res.status === 401 || res.status === 403 ?
+				`ESPN returned HTTP ${res.status} for league ${t.leagueId}: that league is not ` +
+					`publicly viewable, and reading a private one would need your ESPN cookies.`
+			: res.status === 404 ?
+				`ESPN has no league ${t.leagueId} in ${season} or ${season - 1}. Check the id in ` +
+					`your league's own URL — it is the number after leagueId=.`
+			:	`ESPN returned HTTP ${res.status} for league ${t.leagueId}.`
 		)
 	}
 	const data = (await res.json()) as Record<string, any>
 	const settings = data.settings ?? {}
 	const scoringSettings = settings.scoringSettings ?? {}
+	/*
+	   A CATEGORIES LEAGUE IS NOT A POINTS LEAGUE, AND THIS USED TO IMPORT ONE AS THE OTHER.
+	
+	   ESPN's category leagues carry a `scoringItems` array exactly like a points league's,
+	   with `points: 1.0` in every entry — meaning "this category counts", not "a home run is
+	   worth one point". Six of the eleven default ids are ones this app's stat map can name,
+	   so six of them landed in the scoring table as 1.0 apiece and the import reported a
+	   league whose scoring had been read. Everything downstream is a number of points computed
+	   from that table: a board built on it ranks a single against a home run as equals.
+	
+	   The Yahoo path has refused this since the beginning — a settings page with no points
+	   table throws, naming roto and categories as the likely reason. See `espnPointsFormat`.
+	*/
+	const format = espnPointsFormat(settings)
+	if (!format.ok) throw new ImportError(format.why!)
 	const lineupSlotCounts: Record<string, number> = settings.rosterSettings?.lineupSlotCounts ?? {}
 
 	// ESPN identifies stats and lineup slots by numeric id. We keep them raw
@@ -821,8 +867,25 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 		}
 	}
 	const slots = namedSlots
+	/* One entry per seat, ascending by ESPN's slot id — `Object.entries` on a parsed object
+	   already iterates integer keys in ascending numeric order, so this is ESPN's own order
+	   rather than the order the bytes happened to arrive in. */
+	const slotOrder: string[] = []
+	for (const [id, n] of Object.entries(lineupSlotCounts)
+		.map(([id, n]) => [Number(id), Number(n)] as const)
+		.sort((a, b) => a[0] - b[0])) {
+		if (n <= 0) continue
+		const name = ESPN_MLB_SLOT[id] ?? String(id)
+		for (let k = 0; k < n; k++) slotOrder.push(name)
+	}
 
 	const { period: espnPeriod, needsReview: periodReview } = deriveEspnPeriod(settings)
+	/* A points league does not carry an innings floor and ESPN's nearest field is a
+	   category-format qualification total in OUTS — see `espnInningsMinimum`, which converts
+	   and names it rather than returning it as a weekly floor. Almost always silent here;
+	   reported when it is not, because a number this app declined to use is a thing the
+	   reader is entitled to know about. */
+	const inningsNote = espnInningsMinimum(settings).note
 
 	return {
 		meta: {
@@ -832,9 +895,21 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 			league_name: settings.name ?? null,
 			league_url: `https://fantasy.espn.com/baseball/league?leagueId=${t.leagueId}`,
 			team_id: t.teamId,
-			team_name: null,
+			/* HIS LEAGUE'S OWN NAME FOR HIS TEAM, off the `mTeam` view that now rides along with
+			   the settings request. It was null because nothing asked; Yahoo pays a whole extra
+			   page fetch for the same fact. Null still, when the URL carried no team number or
+			   when ESPN's list does not contain it — a team name guessed at is a stranger's. */
+			team_name:
+				(t.teamId &&
+					(data.teams as any[] | undefined)?.find(x => String(x?.id) === String(t.teamId))
+						?.name) ||
+				null,
 			season,
 			scoring_type: scoringSettings.scoringType ?? null,
+			/* ESPN states this about itself, and the app has a field for it that only the Yahoo
+			   side ever set. It is the difference between "we could not read your league" and
+			   "your league is private", which is the whole of what a reader can act on. */
+			...(typeof settings.isPublic === "boolean" ? { publicly_viewable: settings.isPublic } : {}),
 			max_teams: settings.size ?? null
 		},
 		scoring_period: espnPeriod,
@@ -847,8 +922,22 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 		roster: {
 			raw: null,
 			slots,
-			slot_order: null,
-			counts: null,
+			/*
+			   THE SEATS, IN THE ORDER ESPN LISTS THEM, AND THE COUNTS THAT FOLLOW FROM THEM.
+			
+			   Both were null, and both were derivable from the payload already in hand with no
+			   second request. `slot_order` is one entry per seat in ascending lineup-slot-id
+			   order, which is ESPN's own canonical order — C, 1B, 2B, 3B, SS, OF… — rather than
+			   a printed order this has ever seen on a page, and the difference is worth naming:
+			   Yahoo's comes off the settings page as the reader sees it, this one comes off the
+			   ids. What the two have in common is the only thing anything downstream reads it
+			   for, which is how many seats there are and what may sit in them.
+			
+			   A seat ESPN names only by a number keeps its number here too, and is reported
+			   below — the same rule the slot map itself follows.
+			*/
+			slot_order: slotOrder.length ? slotOrder : null,
+			counts: slotOrder.length ? { ...rosterCounts(slots), total: slotOrder.length } : null,
 			slot_accepts: null
 		},
 		eligibility: null,
@@ -860,6 +949,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 			verified: false
 		},
 		needs_review: [
+			...(inningsNote ? [inningsNote] : []),
 			...(t.teamId ? []
 			:	[
 					"The URL didn't carry `teamId=`, so which of these teams is yours is not " +
@@ -990,16 +1080,55 @@ export const deriveInningsMinimum = (
  * a screen can say where a limit came from instead of asserting it.
  */
 export const leagueLimits = (
-	league: Pick<League, "league_rules">
-): { movesPerPeriod: number | null; inningsPerPeriod: number | null; sources: string[] } => {
-	const raw = ((league.league_rules as { raw_settings?: Record<string, string> } | undefined)
-		?.raw_settings ?? {}) as Record<string, string>
+	league: Pick<League, "league_rules"> & {
+		/* Optional so a caller with nothing but a settings map — which is every test of this
+		   and was every caller before ESPN — still gets the Yahoo reading it always got. */
+		meta?: { platform?: string | null } | null
+		scoring_period?: { days?: number | null } | null
+	}
+): {
+	movesPerPeriod: number | null
+	inningsPerPeriod: number | null
+	sources: string[]
+	/** Caveats a screen must print BESIDE a number, rather than instead of it — a per-day cap
+	 *  summed into a weekly budget is the case this exists for. Empty on the Yahoo side, where
+	 *  the page states the rule in the unit the app uses. */
+	notes: string[]
+} => {
+	const rules = (league.league_rules as { raw_settings?: unknown } | undefined)?.raw_settings
+	/*
+	   AN ESPN LEAGUE STATES BOTH OF THESE AND WAS ANSWERING NEITHER.
+	
+	   This reached into `raw_settings` and looked up Yahoo's printed row labels — "Max
+	   Acquisitions per Week", "Min innings pitched per team per week". An ESPN league's
+	   `raw_settings` is ESPN's own nested JSON, so both lookups missed, both numbers came back
+	   null, and null means UNLIMITED to the planner: every ESPN reader was planned against the
+	   app's generic default while the screen beside it promised his league's own rule. Same
+	   shape as the trade deadline, one field over — see `leagueTradeDeadline`.
+	*/
+	if (league.meta?.platform === "espn" && rules && typeof rules === "object") {
+		const settings = rules as Record<string, any>
+		const moves = espnMoveLimit(settings, league.scoring_period?.days ?? null)
+		const innings = espnInningsMinimum(settings)
+		return {
+			movesPerPeriod: moves.perPeriod,
+			inningsPerPeriod: innings.perPeriod,
+			sources: [moves.source, innings.source].filter((s): s is string => s !== null),
+			/* The MOVE caveat only. It qualifies a number the planner acts on — six a week that
+			   are one a day cannot all be made on Saturday — so it has to travel with the number.
+			   `espnInningsMinimum`'s note is about a field a points league does not carry, and it
+			   is reported once at import time in `needs_review` rather than on every plan. */
+			notes: [moves.note].filter((n): n is string => n !== null)
+		}
+	}
+	const raw = (rules ?? {}) as Record<string, string>
 	const moves = deriveMoveLimit(raw)
 	const innings = deriveInningsMinimum(raw)
 	return {
 		movesPerPeriod: moves.perPeriod,
 		inningsPerPeriod: innings.perPeriod,
-		sources: [moves.source, innings.source].filter((s): s is string => s !== null)
+		sources: [moves.source, innings.source].filter((s): s is string => s !== null),
+		notes: []
 	}
 }
 

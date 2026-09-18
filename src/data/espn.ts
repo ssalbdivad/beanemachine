@@ -158,3 +158,177 @@ export const espnTradeDeadline = (
 	const date = ET.format(new Date(raw))
 	return { date, source: `ESPN states a trade deadline of ${date} (Eastern)` }
 }
+
+/* ── what kind of league it is ────────────────────────────────────────────────────────── */
+
+/**
+ * WHETHER THIS APP CAN PRICE THIS LEAGUE AT ALL.
+ *
+ * Everything downstream — the board's ranking, the Tonight card, the trade evaluator — is a
+ * number of POINTS, and it is computed from a table of points per stat. A category league
+ * does not have one. It has eleven categories a team wins or loses, and no point value
+ * anywhere, which is a different game that happens to be played with the same players.
+ *
+ * The Yahoo path has always refused this: a settings page with no points table throws, and
+ * the message says it may be a roto or categories league. The ESPN path could not refuse it,
+ * because ESPN's category leagues DO carry a `scoringItems` array — with `points: 1.0` in
+ * every entry, meaning "this category counts", not "a home run is worth one point". Measured
+ * on ESPN's own H2H_CATEGORY template: six of eleven ids are ones this app's stat map can
+ * name, so six of them landed in `scoring.batting`/`scoring.pitching` as 1.0 apiece and the
+ * import reported a league whose scoring had been read. A board built on that table ranks a
+ * single against a home run as equals and prices a strikeout the same as a save.
+ *
+ * So the refusal is on ESPN's own word for the format, and every value this does not KNOW to
+ * be a points format is refused too. That is the direction the cost is asymmetric in: a
+ * refusal tells a reader plainly that his league is not one this ranks, and the alternative
+ * is a confident board he has no way of checking.
+ */
+const POINTS_FORMATS = new Set(["H2H_POINTS", "TOTAL_SEASON_POINTS", "POINTS"])
+
+export const espnPointsFormat = (
+	settings: Record<string, any> | null | undefined
+): { ok: boolean; stated: string | null; why: string | null } => {
+	const stated =
+		typeof settings?.scoringSettings?.scoringType === "string" ?
+			(settings.scoringSettings.scoringType as string)
+		:	null
+	if (stated && POINTS_FORMATS.has(stated)) return { ok: true, stated, why: null }
+	if (stated === null)
+		return {
+			ok: false,
+			stated,
+			why:
+				"ESPN did not say how that league scores, and this app can only rank a league " +
+				"that pays points per stat."
+		}
+	const known = /CATEGOR/i.test(stated) || stated === "ROTO"
+	return {
+		ok: false,
+		stated,
+		why:
+			known ?
+				"That is a categories league — teams win or lose each category rather than " +
+					"scoring points — and this app ranks by points, so it cannot price it."
+			:	`ESPN calls that league's scoring ${stated}, which this app does not know how to ` +
+				`price. It ranks leagues that pay points per stat.`
+	}
+}
+
+/* ── the two per-period rules ─────────────────────────────────────────────────────────── */
+
+/**
+ * HOW MANY MEN A MANAGER MAY ADD IN ONE SCORING PERIOD.
+ *
+ * Yahoo prints "Max Acquisitions per Week" and this app reads that row. ESPN states the same
+ * rule in `acquisitionSettings`, and the field to read is `matchupAcquisitionLimit` — NOT
+ * `acquisitionLimit`, which is the SEASON cap and would tell a reader in April that he may
+ * make forty moves before Sunday. `rosterSettings.moveLimit` is not it either: it sits in the
+ * block that governs lineup locking, and what it counts was never measured in any league that
+ * populated it, so it is left alone rather than guessed at.
+ *
+ * `-1` is ESPN's unlimited sentinel, and unlimited is null here — not a large stand-in — for
+ * the same reason "No maximum" is null on the Yahoo side: a planner handed null falls back to
+ * its own measured default, and a planner handed 40 believes the league said 40.
+ *
+ * THE UNIT IS THE HARD PART, and it is why this returns a note as well as a number.
+ * `matchupLimitPerScoringPeriod` decides whether the cap is per MATCHUP or per SCORING
+ * PERIOD, and in ESPN baseball a scoring period is a DAY while a matchup is usually a week.
+ * A cap of 1 per day and a cap of 1 per week are the same number and a sevenfold difference
+ * in what a manager may do. Measured across fifteen payloads, the flag is true exactly when
+ * the season has more than one matchup period — so on a weekly league the cap is per day, and
+ * the week's budget is that number times the days in the period.
+ *
+ * Multiplying is arithmetic on two stated facts, not a guess, and it is the number a planner
+ * needs; what it cannot carry is that the days are not interchangeable — six moves in a week
+ * whose cap is one a day cannot all be made on Saturday. That constraint is stated in the
+ * source sentence rather than silently lost, and `days` is only supplied by a caller that
+ * knows the period length from the league's own settings.
+ */
+export const espnMoveLimit = (
+	settings: Record<string, any> | null | undefined,
+	daysInPeriod: number | null
+): { perPeriod: number | null; source: string | null; note: string | null } => {
+	const acq = settings?.acquisitionSettings
+	const raw = acq?.matchupAcquisitionLimit
+	if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0)
+		return { perPeriod: null, source: null, note: null }
+	const perScoringPeriod = acq?.matchupLimitPerScoringPeriod === true
+	if (!perScoringPeriod)
+		return {
+			perPeriod: raw,
+			source: `ESPN states a limit of ${raw} added players per matchup`,
+			note: null
+		}
+	if (!daysInPeriod || daysInPeriod < 1)
+		return {
+			perPeriod: null,
+			source: null,
+			/* The cap is real and its unit is a day; without the period length there is no
+			   honest weekly number, and inventing one is the failure this whole file is written
+			   against. Said rather than dropped, because "unlimited" is what null means to a
+			   planner and this league is not unlimited. */
+			note:
+				`ESPN caps added players at ${raw} a day, and this does not know how long your ` +
+				`scoring period runs, so no weekly budget is claimed.`
+		}
+	const total = raw * daysInPeriod
+	return {
+		perPeriod: total,
+		source:
+			`ESPN states a limit of ${raw} added player${raw === 1 ? "" : "s"} a day, which is ` +
+			`${total} across a ${daysInPeriod}-day period`,
+		note:
+			raw * daysInPeriod === total && daysInPeriod > 1 ?
+				`Those ${total} are ${raw} a day rather than ${total} to spend at once.`
+			:	null
+	}
+}
+
+/**
+ * THE INNINGS FLOOR, WHICH AN ESPN POINTS LEAGUE DOES NOT HAVE.
+ *
+ * Yahoo prints "Min innings pitched per team per week" and a lot of streaming happens because
+ * of it. The nearest thing in ESPN's settings is `scoringSettings.statQualificationMinimum`,
+ * and it is NOT the same rule — twice over:
+ *
+ *   IT IS IN OUTS, NOT INNINGS. Its `statId` is 34, which this project's own stat map already
+ *   names as outs recorded, re-confirmed player by player against MLB StatsAPI. The measured
+ *   `limitValue: 30` is ten innings, not thirty. A floor read three times too high would have
+ *   the planner streaming pitchers a reader does not need.
+ *
+ *   IT IS A CATEGORY-FORMAT RULE. ESPN's ROTO template states 3000 outs — a thousand innings,
+ *   which is a whole season's staff — and a real H2H_POINTS league omits the field entirely.
+ *   So it is a qualification threshold for a scoring window, not a per-week floor, and a
+ *   points league does not carry one at all.
+ *
+ * The honest answer for a points league is therefore null, and null is SAID: the screens that
+ * print an innings floor print nothing rather than a number nobody set. Where the field is
+ * present it is converted and named as what it is, so a future caller has the measurement
+ * rather than the field.
+ */
+export const espnInningsMinimum = (
+	settings: Record<string, any> | null | undefined
+): { perPeriod: number | null; source: string | null; note: string | null } => {
+	const min = settings?.scoringSettings?.statQualificationMinimum
+	if (!min || typeof min.limitValue !== "number") return { perPeriod: null, source: null, note: null }
+	/* Only outs are convertible. Any other stat id is a qualification rule about something
+	   else entirely and is named rather than turned into innings. */
+	if (min.statId !== 34)
+		return {
+			perPeriod: null,
+			source: null,
+			note: `ESPN states a qualification minimum this does not recognise (stat ${min.statId}).`
+		}
+	const innings = min.limitValue / 3
+	return {
+		perPeriod: null,
+		source: null,
+		/* NOT returned as a per-period floor, however tempting: on ESPN's own roto template the
+		   same field reads 3000 outs, which is a thousand innings and a whole season's staff.
+		   Read as a weekly floor it would tell a reader he is a thousand innings short every
+		   week. It is reported, in innings, for whoever wires up a category league. */
+		note:
+			`ESPN states a qualifying total of ${innings} innings for the whole scoring window, ` +
+			`which is not a per-week floor, so none is claimed.`
+	}
+}

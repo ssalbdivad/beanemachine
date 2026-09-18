@@ -14,6 +14,8 @@
  */
 import {
 	espnInningsMinimum,
+	espnMatchupDays,
+	openingDayOf,
 	espnLock,
 	espnMoveLimit,
 	espnPointsFormat,
@@ -275,6 +277,83 @@ const t = (n, ok, x = "") => {
 	const empty = await espnSeason(answer({}), {}, jan)
 	t("an answer with no season in it falls back", empty.season === 2027)
 	forgetEspnSeason()
+}
+
+/* ── the days his current matchup actually runs over ──────────────────────────────────── */
+{
+	/*
+	   MEASURED AGAINST A REAL LEAGUE'S REAL SEASON.
+	
+	   League 81134470, 2021: `firstScoringPeriod` 12, `finalScoringPeriod` 186,
+	   `currentMatchupPeriod` 23, and `matchupPeriods` ending {"22":[22,23],"23":[24,25]} — all
+	   read off ESPN on 2026-09-18. MLB's own schedule puts the 2021 opener on 2021-04-01, and
+	   period 186 counted from there lands on 2021-10-03, which is the day that season ended.
+	   That agreement is what makes "a scoring period is a calendar day from opening day"
+	   a measurement rather than an assumption.
+	*/
+	const status = { firstScoringPeriod: 12, currentMatchupPeriod: 23, finalScoringPeriod: 186 }
+	const sched = { matchupPeriods: { 20: [20], 21: [21], 22: [22, 23], 23: [24, 25] } }
+	const playoff = espnMatchupDays(status, sched, "2021-04-01")
+	t("a two-week playoff round comes back as a fortnight, on its own dates",
+		playoff.start === "2021-09-20" && playoff.end === "2021-10-03" && playoff.days === 14,
+		JSON.stringify(playoff))
+	const regular = espnMatchupDays({ ...status, currentMatchupPeriod: 20 }, sched, "2021-04-01")
+	t("and a regular-season matchup is the Monday-to-Sunday week it is",
+		regular.start === "2021-08-23" && regular.end === "2021-08-29" && regular.days === 7,
+		JSON.stringify(regular))
+	/* The last round is clipped to the day the league's own season ends rather than running
+	   into October on a calendar nobody plays. */
+	t("the last round stops where the league's season does",
+		playoff.end === "2021-10-03", playoff.end)
+
+	/* Every part is required, and a missing one is null rather than half a window: a window
+	   that looks authoritative and is not the reader's is worse than no window. */
+	t("no opening day, no window", espnMatchupDays(status, sched, null) === null)
+	t("no status, no window", espnMatchupDays(null, sched, "2021-04-01") === null)
+	t("a matchup this league's map does not name gives nothing",
+		espnMatchupDays({ ...status, currentMatchupPeriod: 99 }, sched, "2021-04-01") === null)
+	t("and nonsense for an opening day gives nothing",
+		espnMatchupDays(status, sched, "not a date") === null)
+}
+
+/* ── and the window reaches the league ────────────────────────────────────────────────── */
+{
+	const settings = {
+		scheduleSettings: {
+			matchupPeriodLength: 1,
+			matchupPeriodCount: 21,
+			playoffMatchupPeriodLength: 2,
+			matchupPeriods: { 20: [20], 21: [21], 22: [22, 23], 23: [24, 25] }
+		},
+		rosterSettings: { lineupLocktimeType: "INDIVIDUAL_GAME" }
+	}
+	const status = { firstScoringPeriod: 12, currentMatchupPeriod: 23, finalScoringPeriod: 186 }
+	const got = deriveEspnPeriod(settings, status, "2021-04-01")
+	t("an imported league carries the window it is actually playing",
+		got.period.days === 14 && got.period.anchor === "2021-09-20", JSON.stringify(got.period))
+	t("…with a start weekday read off that date rather than assumed",
+		got.period.starts_on === "mon", String(got.period.starts_on))
+	t("…and says nothing about assuming Monday, because it did not",
+		!got.needsReview.some(r => /assumes Monday/.test(r)), JSON.stringify(got.needsReview))
+	t("…and warns that this round is longer than the league's usual week",
+		got.needsReview.some(r => /14 days rather than your league's usual 7/.test(r)),
+		JSON.stringify(got.needsReview))
+	t("…in a sentence that says what to do about it",
+		got.needsReview.some(r => /Read your league again/.test(r)), JSON.stringify(got.needsReview))
+
+	/* A REGULAR WEEK SAYS NOTHING EXTRA, because there is nothing to say. */
+	const week = deriveEspnPeriod(settings, { ...status, currentMatchupPeriod: 20 }, "2021-04-01")
+	t("a regular-season week is seven days and carries no warning",
+		week.period.days === 7 && !week.needsReview.some(r => /rather than your league's usual/.test(r)),
+		JSON.stringify(week.period))
+
+	/* AND A CALLER WITH NEITHER gets exactly what it got before: the league in the abstract,
+	   with the Monday assumption stated. */
+	const abstract = deriveEspnPeriod(settings)
+	t("a caller with no status falls back to the league's usual length",
+		abstract.period.days === 7 && abstract.period.anchor === null, JSON.stringify(abstract.period))
+	t("…and says it is assuming a Monday start, because it is",
+		abstract.needsReview.some(r => /assumes Monday/.test(r)), JSON.stringify(abstract.needsReview))
 }
 
 /* ── what kind of league it is ────────────────────────────────────────────────────────── */

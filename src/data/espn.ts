@@ -378,3 +378,111 @@ export const espnInningsMinimum = (
 			`which is not a per-week floor, so none is claimed.`
 	}
 }
+
+/* ── which days this league's current matchup runs over ───────────────────────────────── */
+
+/** A date `n` days after an ISO date, in ISO. Calendar arithmetic in UTC on a date-only
+ *  string, which has no hours to shift and therefore no timezone to get wrong. */
+const plus = (iso: string, n: number): string =>
+	new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+
+/** The Monday on or before a date. `getUTCDay` is 0 for Sunday, so Monday is 1. */
+const mondayOnOrBefore = (iso: string): string => {
+	const day = new Date(`${iso}T00:00:00Z`).getUTCDay()
+	return plus(iso, -((day + 6) % 7))
+}
+
+/**
+ * THE DAYS THE READER'S CURRENT MATCHUP ACTUALLY RUNS OVER.
+ *
+ * ESPN states its schedule in SCORING PERIODS, which in baseball are calendar days counted
+ * from the season's first regular-season game — measured on two seasons and exact in both:
+ * for 2021, `finalScoringPeriod` 186 against an opening day of 2021-04-01 lands on
+ * 2021-10-03, which is the day that season ended; for 2026, period 177 was the current one on
+ * 2026-09-17 against an opening day of 2026-03-25.
+ *
+ * What the app needed and did not have is the START of the current matchup. Without it an
+ * imported ESPN league fell back to "assume Monday", and during the playoffs to a seven-day
+ * window over a fortnight-long round — so every figure computed across the period, on both
+ * sides of the matchup, was half the matchup he was playing.
+ *
+ * THE DERIVATION, and every field in it is stated by the league rather than guessed:
+ *
+ *   dateOf(n)      = opening day + (n - 1) days
+ *   weekOneMonday  = the Monday on or before dateOf(status.firstScoringPeriod)
+ *   units          = settings.scheduleSettings.matchupPeriods[status.currentMatchupPeriod]
+ *   start          = weekOneMonday + (units[0] - 1) * 7, never before the league's first day
+ *   end            = start + (units.length * 7) - 1, never after the league's last day
+ *
+ * `matchupPeriods` is what makes the playoffs come out right: a regular-season matchup lists
+ * one unit and a playoff round lists two, so the span falls out of the league's own map
+ * rather than out of a rule about playoffs. Checked against league 81134470's 2021 season,
+ * whose matchup 23 lists units [24, 25] and runs 2021-09-20 to 2021-10-03.
+ *
+ * Returns null the moment any part of it is missing, because half a derivation here is a
+ * window that looks authoritative and is not the reader's.
+ */
+export const espnMatchupDays = (
+	status: Record<string, any> | null | undefined,
+	sched: Record<string, any> | null | undefined,
+	/** The season's first regular-season game day, ISO. Scoring period 1. */
+	openingDay: string | null
+): { start: string; end: string; days: number; matchup: number } | null => {
+	if (!openingDay || !/^\d{4}-\d{2}-\d{2}$/.test(openingDay)) return null
+	const first = Number(status?.firstScoringPeriod)
+	const current = Number(status?.currentMatchupPeriod)
+	const final = Number(status?.finalScoringPeriod)
+	if (!Number.isInteger(first) || first < 1) return null
+	if (!Number.isInteger(current) || current < 1) return null
+	const units = (sched?.matchupPeriods as Record<string, unknown> | undefined)?.[String(current)]
+	const list =
+		Array.isArray(units) ? units.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
+	if (!list.length) return null
+
+	const dateOf = (n: number): string => plus(openingDay, n - 1)
+	const leagueStart = dateOf(first)
+	const leagueEnd = Number.isInteger(final) && final > 0 ? dateOf(final) : null
+	const weekOne = mondayOnOrBefore(leagueStart)
+	let start = plus(weekOne, (Math.min(...list) - 1) * 7)
+	if (start < leagueStart) start = leagueStart
+	let end = plus(plus(weekOne, (Math.max(...list) - 1) * 7), 6)
+	if (leagueEnd && end > leagueEnd) end = leagueEnd
+	if (end < start) return null
+	const days = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1
+	return { start, end, days, matchup: current }
+}
+
+/**
+ * THE DAY THE SEASON STARTED, asked of the one source this app already trusts for a calendar.
+ *
+ * ESPN's scoring period 1 is the first day of the regular season, and MLB's own schedule is
+ * where this app reads every other date it uses. Two independent confirmations that they
+ * agree: 2026 opens 2026-03-25 (one game, NYY at SF) and ESPN's period 177 was current on
+ * 2026-09-17, which is 176 days later; 2021 opens 2021-04-01 and ESPN's final period for that
+ * season, 186, is 2021-10-03, which is the day the 2021 season ended.
+ *
+ * `gameType=R` matters: without it the window picks up spring training, and 2026 has ten
+ * exhibition games on 2026-03-24 — the day before the opener, which would move every date in
+ * the derivation by one.
+ *
+ * Null rather than a guess when it cannot be read, which makes the caller fall back to what it
+ * did before rather than to a calendar nobody checked.
+ */
+export const openingDayOf = async (
+	season: number,
+	fetchImpl: typeof fetch = fetch
+): Promise<string | null> => {
+	try {
+		const res = await fetchImpl(
+			`https://statsapi.mlb.com/api/v1/schedule?sportId=1&gameType=R` +
+				`&startDate=${season}-03-01&endDate=${season}-04-15`
+		)
+		if (!res.ok) return null
+		const data = (await res.json()) as { dates?: { date?: string; games?: unknown[] }[] }
+		for (const day of data.dates ?? [])
+			if (typeof day.date === "string" && (day.games?.length ?? 0) > 0) return day.date
+		return null
+	} catch {
+		return null
+	}
+}

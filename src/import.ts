@@ -3,6 +3,8 @@ import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
 import { ESPN_MLB_SLOT } from "./data/rosters.ts"
 import {
 	espnInningsMinimum,
+	espnMatchupDays,
+	openingDayOf,
 	espnLock,
 	espnMoveLimit,
 	espnPointsFormat,
@@ -402,7 +404,16 @@ export const mapEspnScoring = (
  *   says so, so `lineup_lock` stays null and the board treats the rest of the
  *   current period as actionable.
  */
-export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod => {
+export const deriveEspnPeriod = (
+	settings: Record<string, any>,
+	/** ESPN's own `status` block, from `view=mStatus`. Optional because a caller with only a
+	 *  settings payload — every test of this before the window was derivable, and any stored
+	 *  league re-read from `raw_settings` — still gets what it always got. */
+	status?: Record<string, any> | null,
+	/** The season's first regular-season game day, ISO, which is ESPN's scoring period 1.
+	 *  Null where it could not be read; the derivation is then skipped rather than guessed. */
+	openingDay?: string | null
+): DerivedPeriod => {
 	const needsReview: string[] = []
 	const sched = settings?.scheduleSettings
 	/*
@@ -462,6 +473,49 @@ export const deriveEspnPeriod = (settings: Record<string, any>): DerivedPeriod =
 			sched.matchupPeriodCount
 		:	null
 	const days = length * 7
+	/*
+	   THE WINDOW HIS LEAGUE IS ACTUALLY PLAYING, where ESPN gives enough to work it out.
+	
+	   Everything below this point describes the league in the abstract — a matchup is seven
+	   days, the start weekday is unknown, assume Monday. `espnMatchupDays` answers the
+	   question a reader's screen actually asks: which DAYS is the matchup in front of him,
+	   which is the window his men's points and his opponent's are summed over.
+	
+	   It needs the `status` block and the season's opening day, so a caller without them gets
+	   exactly what this returned before. With them, the anchor is a real date this league is
+	   known to have started a period on, and the length is the CURRENT matchup's — which is
+	   how a two-week playoff round stops being reported as one week.
+	*/
+	const window = espnMatchupDays(status, sched, openingDay ?? null)
+	if (window) {
+		const WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const
+		return {
+			period: {
+				kind: "matchup",
+				days: window.days,
+				starts_on: WEEKDAY[new Date(`${window.start}T00:00:00Z`).getUTCDay()]!,
+				anchor: window.start,
+				lineup_lock: lock,
+				source:
+					`ESPN's own schedule for your league: matchup ${window.matchup} runs ` +
+					`${window.start} to ${window.end}, which is ${window.days} days.`
+			},
+			needsReview: [
+				...needsReview,
+				/* THE WINDOW IS THE ONE THAT WAS CURRENT WHEN IT WAS READ. The length is not
+				   constant across an ESPN season — the playoff rounds are double — so a league
+				   imported in August and looked at in October is tiling the wrong length. Said
+				   rather than silently drifting, because the drift is invisible on screen. */
+				...(window.days !== days ?
+					[
+						`This matchup runs ${window.days} days rather than your league's usual ` +
+							`${days}. Read your league again when the round changes and the window ` +
+							`will follow it.`
+					]
+				:	[])
+			]
+		}
+	}
 	needsReview.push(
 		"ESPN states how long a period runs but not which weekday it starts on, so the board " +
 			"assumes Monday and says so wherever it prints the week."
@@ -849,7 +903,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	   the same fact. */
 	const url =
 		`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${t.sport}` +
-		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings&view=mTeam`
+		`/seasons/${season}/segments/0/leagues/${t.leagueId}?view=mSettings&view=mTeam&view=mStatus`
 
 	/*
 	   THE SEASON JUST GONE, AND THEN THE RIGHT SENTENCE FOR EACH WAY THIS FAILS.
@@ -955,7 +1009,16 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 		for (let k = 0; k < n; k++) slotOrder.push(name)
 	}
 
-	const { period: espnPeriod, needsReview: periodReview } = deriveEspnPeriod(settings)
+	/* The season's opening day, which is ESPN's scoring period 1 — see `openingDayOf`. One
+	   small request to the schedule this app already reads, and null when it cannot be had,
+	   which makes the period fall back to what it was before rather than to a calendar nobody
+	   checked. */
+	const openingDay = await openingDayOf(read)
+	const { period: espnPeriod, needsReview: periodReview } = deriveEspnPeriod(
+		settings,
+		data.status,
+		openingDay
+	)
 	/* A points league does not carry an innings floor and ESPN's nearest field is a
 	   category-format qualification total in OUTS — see `espnInningsMinimum`, which converts
 	   and names it rather than returning it as a weekly floor. Almost always silent here;

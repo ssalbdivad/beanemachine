@@ -489,5 +489,43 @@ if (weakC && strongC) {
     JSON.stringify(startingLineup(shape, [], bars).points) === JSON.stringify(flat.points))
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * TWO MEN WITH ONE NAME ARE STILL TWO MEN.
+ *
+ * Whether a seat changed hands was decided by comparing the two names, and two major
+ * leaguers share a name often enough that this repo has a note about it — two called Will
+ * Smith, two called Max Muncy. A seat that changed between them compared EQUAL, so the change
+ * was skipped and the screen read "No spot in your starting lineup changes hands" beside a
+ * delta of -32.07: the arithmetic contradicting the sentence printed next to it.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const twins = byPoints.filter(r => r.slots.includes("Util")).slice(0, 2)
+  t("the fixture has two different men to work with",
+    twins.length === 2 && key(twins[0]) !== key(twins[1]))
+  /* The same NAME on two different ids, which is exactly what MLB does. */
+  const sameName = twins.map(r => ({ ...r, player: { ...r.player, name: "Will Smith" } }))
+  const oneUtil = { ...league, roster: { ...league.roster, slots: { Util: 1 } } }
+  const before = startingLineup(oneUtil, [sameName[0]], bars)
+  const after = startingLineup(oneUtil, [sameName[1]], bars)
+  t("two men called the same thing are not the same man in a lineup",
+    before.starters[0].player.player.id !== after.starters[0].player.player.id)
+  const swapped = evaluateTrade({
+    league: oneUtil, roster: [sameName[0]], out: [sameName[0]], in: [sameName[1]], pool, teams
+  })
+  t("a seat that changes between two men of one name is reported as a change",
+    swapped.changes.length === 1, JSON.stringify(swapped.changes))
+  t("…so the delta and the sentence beside it agree",
+    Math.abs(swapped.delta) < 0.01 || swapped.changes.length > 0,
+    `${swapped.delta} with ${swapped.changes.length} change(s)`)
+  /* And a seat that really did not change is still silent — the check is identity, not
+     inequality of everything. */
+  const still = evaluateTrade({
+    league: oneUtil, roster: [sameName[0]], out: [], in: [], pool, teams
+  })
+  t("a lineup that did not change reports no changes", still.changes.length === 0)
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

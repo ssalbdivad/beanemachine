@@ -547,6 +547,24 @@ const nameOf = (s: Start) =>
 	s.player ? s.player.player.name : s.source === "replacement" ? `replacement ${s.slot}` : null
 
 /**
+ * WHETHER TWO SEATS HOLD THE SAME THING, decided by identity rather than by spelling.
+ *
+ * `nameOf` is for PRINTING, and two different major leaguers share a name often enough that
+ * this project has a note about it: two men called Will Smith, two called Max Muncy. A seat
+ * that changed hands between two of them compared equal, so the change was skipped — and the
+ * screen read "No spot in your starting lineup changes hands" beside a delta of -32.07, which
+ * is the arithmetic contradicting the sentence printed next to it.
+ *
+ * A rostered man is his `keyOf` — id and side of the ball. A seat covered off the wire is the
+ * man covering it where one is known, and the slot where none is, so two seats priced at two
+ * different free agents no longer read as unchanged either.
+ */
+const heldBy = (s: Start): string =>
+	s.player ? `own:${keyOf(s.player)}`
+	: s.source === "replacement" ? `free:${s.free ? keyOf(s.free) : s.slot}`
+	: `none:${s.slot}`
+
+/**
  * Evaluates a proposed trade by the only measure that decides one: what my
  * starting lineup projects for before and after.
  *
@@ -592,7 +610,7 @@ export const evaluateTrade = (proposal: TradeProposal): TradeVerdict => {
 	const changes: SlotChange[] = []
 	lineups.before.starters.forEach((was, i) => {
 		const now = lineups.after.starters[i]!
-		if (nameOf(was) === nameOf(now)) return
+		if (heldBy(was) === heldBy(now)) return
 		changes.push({
 			slot: was.slot,
 			before: nameOf(was),

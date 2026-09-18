@@ -682,5 +682,58 @@ if (live.error) {
   t("a live line prices into real points", typeof liveRecap.ownedTotal === "number" && Number.isFinite(liveRecap.ownedTotal), String(liveRecap.ownedTotal))
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * WHICH HALF THE GAP IS IN.
+ *
+ * The Tonight card says "you are behind by 41 with 2 days left". `useMatchup` computed that
+ * by scoring every man each side holds through the league's own table — knowing, for each
+ * one, which side of the ball he was on — and then summing and throwing the split away. The
+ * split is the instruction: "behind by 41" and "behind by 41, and all of it is pitching" are
+ * different moves tonight.
+ *
+ * No new read and no new estimate. What is asserted here is that the halves are the same
+ * arithmetic as the total, that a man is counted on exactly one side, and that the two
+ * scoring tables are not crossed — a hitter scored through the pitching table is the failure
+ * that would make this worse than the silence it replaced.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const { sidesOf } = await import("../src/client/useMatchup.ts")
+  const league = JSON.parse(readFileSync("scoring.json", "utf8")).leagues["yahoo:228947"]
+
+  /* One of each, with stats this league pays for: a home run and a walk, four innings and
+     six strikeouts. Written as literals rather than taken from a capture so the expected
+     points can be computed here from the league's own table. */
+  const lines = new Map([
+    ["1:hitting", { key: "1:hitting", id: 1, name: "A Bat", team: "NYM", teamId: 121, group: "hitting",
+      stats: { hits: 2, homeRuns: 1, baseOnBalls: 1, runs: 1, rbi: 2, doubles: 0, triples: 0, stolenBases: 0, strikeOuts: 1 } }],
+    ["2:pitching", { key: "2:pitching", id: 2, name: "An Arm", team: "NYM", teamId: 121, group: "pitching",
+      stats: { outs: 18, strikeOuts: 6, baseOnBalls: 1, hits: 4, earnedRuns: 1, wins: 1, saves: 0, losses: 0 } }]
+  ])
+
+  const both = sidesOf(["1:hitting", "2:pitching"], lines, league)
+  t("the two halves add up to the total they were split out of",
+    Math.abs(both.hitting + both.pitching - both.points) < 0.05, JSON.stringify(both))
+  t("and each half is exactly the men on that side of the ball",
+    both.hitting === sidesOf(["1:hitting"], lines, league).points &&
+      both.pitching === sidesOf(["2:pitching"], lines, league).points,
+    JSON.stringify(both))
+  t("a hitter scores nothing on the pitching side and an arm nothing on the hitting side",
+    sidesOf(["1:hitting"], lines, league).pitching === 0 &&
+      sidesOf(["2:pitching"], lines, league).hitting === 0,
+    JSON.stringify([sidesOf(["1:hitting"], lines, league), sidesOf(["2:pitching"], lines, league)]))
+  /* This league pays for a home run and docks a strikeout, and pays for outs and strikeouts
+     on the mound. Both halves are positive here, which is the sanity check that the two
+     tables were not crossed — a hitter run through the pitching table would be paid for his
+     strikeouts, which is exactly the sign error the whole scoring map was built to prevent. */
+  t("and both halves are priced by the table for their own side",
+    both.hitting > 0 && both.pitching > 0, JSON.stringify(both))
+  t("a side with nobody on record is null rather than zero, because they are opposite claims",
+    sidesOf([], lines, league) === null)
+  t("and a man this app has no line for is not counted as a nought",
+    sidesOf(["999:hitting"], lines, league) === null)
+}
+
 console.log(`passed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

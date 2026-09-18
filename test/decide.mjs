@@ -202,13 +202,18 @@ const open = async (seeds, opts = {}) => {
 				contentType: "application/json",
 				body: JSON.stringify(r.request().url().includes("group=pitching") ? DAY_PITCHING : DAY_HITTING)
 			}))
-	await page.addInitScript(([l, p, cfg, ro, led]) => {
+	await page.addInitScript(([l, p, cfg, ro, led, opp]) => {
 		if (l) localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
 		if (p) localStorage.setItem("beanemachine:pool", JSON.stringify(p))
 		if (cfg) localStorage.setItem("beanemachine:config", JSON.stringify(cfg))
 		if (ro) localStorage.setItem("beanemachine:roster", JSON.stringify(ro))
 		if (led) localStorage.setItem("beanemachine:ledger", JSON.stringify(led))
-	}, [seeds.lineup ?? null, seeds.pool ?? null, seeds.config ?? null, seeds.roster ?? null, seeds.ledger ?? null])
+		/* The men on the OTHER side of the matchup, which only a paste or an extension read
+		   ever writes. Seeded here so the one sentence on this card that compares two teams
+		   can be asserted at all — its gate needs an opponent list at least two thirds the
+		   size of the reader's own roster, which no other seed in this file produces. */
+		if (opp) localStorage.setItem("beanemachine:opponent", JSON.stringify(opp))
+	}, [seeds.lineup ?? null, seeds.pool ?? null, seeds.config ?? null, seeds.roster ?? null, seeds.ledger ?? null, seeds.opponent ?? null])
 	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
 	await page.waitForSelector(".decide", { timeout: 30000 })
 	await page.waitForTimeout(1500)
@@ -2373,6 +2378,55 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			/called off/.test(said) && /nothing tonight/.test(said), said)
 		await page.close()
 	}
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * WHICH HALF THE GAP IS IN.
+ *
+ * The card has been able to say "you are behind by 41 with 2 days left" and nothing more.
+ * `useMatchup` computed that by scoring every man each side HOLDS through the league's own
+ * table — knowing, for each one, which side of the ball he was on — and then summing and
+ * throwing the split away. "Behind by 41" and "behind by 41, and the gap is in your arms"
+ * are different instructions for tonight, and the second costs no new read, no new estimate
+ * and no new claim.
+ *
+ * Seeded rather than typed: the reader holds three hitters, his opponent holds three arms
+ * who threw six shutout innings apiece, both out of the committed byDateRange fixtures the
+ * page is served for every date it asks for. The caveat is asserted with the number, as it
+ * is everywhere else this comparison appears — these are men HELD, not men started.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	/* Kyle Tucker, Brice Turang, Alex Bregman — each a home run and three hits in the
+	   fixture; Taj Bradley, Dustin May, Steven Cruz on the other side. */
+	const mine = ["663656:hitting", "668930:hitting", "608324:hitting"]
+	const his = ["671737:pitching", "669160:pitching", "674444:pitching"]
+	const page = await open(
+		{
+			config: cfg,
+			lineup: { [KEY]: { at: new Date().toISOString(), spots } },
+			roster: { [KEY]: mine },
+			opponent: { [KEY]: his }
+		},
+		{ actuals: true }
+	)
+	await page.waitForTimeout(1500)
+	const card = await page.$eval(".decide", e => e.innerText)
+	t("the card puts the two sides side by side at all",
+		/you are (ahead|behind) by [\d.]+|you are level/i.test(card), card.slice(0, 500))
+	t("and names which half of the ball the gap is in",
+		/the gap is in your (bats|arms)/i.test(card), card.slice(0, 700))
+	/* His side is three pitchers and nothing else, so the reader's bats are ahead and his
+	   arms are behind: the half named has to be the arms. A version of this that named the
+	   bats would be reading the two tables crossed, which is the failure the node assertions
+	   in test/actuals.mjs pin the arithmetic against. */
+	t("…and with three arms against three bats, that half is the arms",
+		/the gap is in your arms/i.test(card), card.slice(0, 700))
+	t("and the caveat travels with it, because these are men held and not men started",
+		/every man each side holds/i.test(card), card.slice(0, 700))
+	await page.close()
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

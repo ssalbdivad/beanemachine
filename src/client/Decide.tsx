@@ -2259,6 +2259,40 @@ export const Decide = ({
 								&nbsp;&mdash; every man each side holds, over this scoring period, which is
 								not the score your league will pay. Nothing below is playing for or against
 								that lead: it is the same answer either way.
+								{/*
+								  WITH WHAT, which is the question a reader asks the moment he knows he is
+								  behind — and the one the card can answer with arithmetic it has already
+								  done. `total` in useMatchup.ts scored every man through his league's own
+								  table and knew the side of the ball for each; it summed them and threw
+								  the split away. "Behind by 41" and "behind by 41, and it is all pitching"
+								  are different instructions for tonight.
+								
+								  Said only where it points somewhere. Two halves within a few points of
+								  each other are a week that is simply close, and a sentence naming a
+								  "hole" of four points would be this app inventing a reason to act.
+								*/}
+								{matchup.gapBy &&
+									(() => {
+										const { hitting, pitching } = matchup.gapBy
+										const worse = Math.abs(hitting - pitching)
+										/* Ten points over a scoring period, on a table where a home run is
+										   worth four and an out recorded is worth one: below that the two
+										   halves are telling a reader the same thing. */
+										if (worse < 10) return null
+										const behindAt = hitting < pitching ? "bats" : "arms"
+										const side = hitting < pitching ? hitting : pitching
+										const other = hitting < pitching ? pitching : hitting
+										const otherName = hitting < pitching ? "arms" : "bats"
+										return (
+											<>
+												{" "}
+												The gap is in your <b>{behindAt}</b>: {side >= 0 ? "+" : ""}
+												{side} there against {other >= 0 ? "+" : ""}
+												{other} from your {otherName}, on the same count of every man
+												held.
+											</>
+										)
+									})()}
 							</>
 						:	<>
 								Nothing here is playing for or against a lead &mdash; it does not know your

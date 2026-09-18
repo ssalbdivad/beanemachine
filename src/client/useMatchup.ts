@@ -33,6 +33,13 @@ import { opponentStore } from "./opponent.ts"
  * every sentence built on it has to say so. A reader who wants the score opens Yahoo; a
  * reader who wants to know whether to chase tonight wants this.
  */
+/** A side's points, and the two halves that made them. */
+export interface Sides {
+	points: number
+	hitting: number
+	pitching: number
+}
+
 export interface Matchup {
 	/** The league's own period, resolved once. Null before the capture arrives. */
 	period: ReturnType<typeof resolvePeriod> | null
@@ -47,6 +54,12 @@ export interface Matchup {
 	theirs: number | null
 	/** `mine - theirs`, positive when he is ahead. Null when either side is. */
 	gap: number | null
+	/** The same three numbers split by side of the ball, for the one question a reader asks
+	 *  after "am I behind": with what. Null exactly when `mine`/`theirs` are. */
+	mineBy: Sides | null
+	theirsBy: Sides | null
+	/** `mineBy - theirsBy`, per half. Null when either side is. */
+	gapBy: { hitting: number; pitching: number } | null
 	/** How many of his opponent's men are on record, so a screen can refuse to compare a
 	 *  full roster with half of one. */
 	rivals: number
@@ -56,21 +69,43 @@ export interface Matchup {
 	daysLeft: number | null
 }
 
-const total = (
+/**
+ * THE SAME SUM, KEPT IN ITS TWO HALVES.
+ *
+ * This already scored every man through `scoreStats` and then threw away everything but one
+ * number — while knowing, for each key, which side of the ball it was. "You are behind by 41"
+ * became "his arms have out-scored yours by 63, your bats are +22" for the cost of not
+ * discarding what was already computed, and that is the difference between knowing a reader
+ * is behind and knowing whether tonight's move is a bat or an arm.
+ *
+ * No new read, no new estimate, no new claim: the same arithmetic, printed one level finer.
+ * Whatever clause the total carries, each half carries too — these are the men each side
+ * HOLDS, not the men each side started.
+ */
+export const sidesOf = (
 	keys: Iterable<string>,
 	lines: Map<string, ActualLine>,
 	league: League
-): number | null => {
-	let sum = 0
+): Sides | null => {
+	let hitting = 0
+	let pitching = 0
 	let any = false
 	for (const key of keys) {
 		const line = lines.get(key)
 		if (!line) continue
 		any = true
 		const group = key.endsWith(":pitching") ? "pitching" : "hitting"
-		sum += scoreStats(line.stats, tableFor(league, group), group).points
+		const points = scoreStats(line.stats, tableFor(league, group), group).points
+		if (group === "pitching") pitching += points
+		else hitting += points
 	}
-	return any ? Number(sum.toFixed(1)) : null
+	return any ?
+			{
+				points: Number((hitting + pitching).toFixed(1)),
+				hitting: Number(hitting.toFixed(1)),
+				pitching: Number(pitching.toFixed(1))
+			}
+		:	null
 }
 
 export const useMatchup = (
@@ -116,11 +151,11 @@ export const useMatchup = (
 	}, [leagueKey, rev])
 
 	const mine = useMemo(
-		() => (read.lines && league && owned.length ? total(owned, read.lines, league) : null),
+		() => (read.lines && league && owned.length ? sidesOf(owned, read.lines, league) : null),
 		[read.lines, league, owned]
 	)
 	const theirs = useMemo(
-		() => (read.lines && league && rivals.length ? total(rivals, read.lines, league) : null),
+		() => (read.lines && league && rivals.length ? sidesOf(rivals, read.lines, league) : null),
 		[read.lines, league, rivals]
 	)
 
@@ -144,9 +179,19 @@ export const useMatchup = (
 		lines: read.lines,
 		loading: read.loading,
 		error: read.error,
-		mine,
-		theirs,
-		gap: mine !== null && theirs !== null ? Number((mine - theirs).toFixed(1)) : null,
+		mine: mine?.points ?? null,
+		theirs: theirs?.points ?? null,
+		gap:
+			mine && theirs ? Number((mine.points - theirs.points).toFixed(1)) : null,
+		mineBy: mine,
+		theirsBy: theirs,
+		gapBy:
+			mine && theirs ?
+				{
+					hitting: Number((mine.hitting - theirs.hitting).toFixed(1)),
+					pitching: Number((mine.pitching - theirs.pitching).toFixed(1))
+				}
+			:	null,
 		rivals: rivals.length,
 		daysLeft
 	}

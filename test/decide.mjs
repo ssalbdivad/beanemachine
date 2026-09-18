@@ -2494,6 +2494,48 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	await ahead.close()
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * A READ THAT HAS NOT ANSWERED YET IS NOT A READ THAT SUCCEEDED.
+ *
+ * `useSlate` answers three states — slate, error, loading — and this card destructured two.
+ * The stale-capture notice fires on `error`, which is the app's correct handling of a read
+ * that FAILED; a read still in flight fell through to the same capture fallback with no
+ * sentence attached. So for the first seconds the card presented a ten-day-old schedule as
+ * tonight — no lock times, a different lineup, a different add — and then rearranged itself
+ * unprompted in front of the reader.
+ *
+ * The comment above that notice already said it: both feeds fall back to the shipped capture,
+ * which is the right behaviour and the wrong thing to do silently. The fix had landed for the
+ * failed case and not for the pending one.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const slow = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	/* Hold tonight's schedule open, which is what a slow morning looks like. */
+	await slow.route("**statsapi.mlb.com/api/v1/schedule**", async r => {
+		await new Promise(x => setTimeout(x, 7000))
+		await r.continue()
+	})
+	await slow.addInitScript(([l, cfg]) => {
+		localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+		localStorage.setItem("beanemachine:config", JSON.stringify(cfg))
+	}, [seedLineup, JSON.parse(readFileSync("scoring.json", "utf8"))])
+	await slow.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await slow.waitForSelector(".decide", { timeout: 30000 })
+	await slow.waitForTimeout(2000)
+	const pending = await slow.$eval(".decide", e => e.innerText)
+	t("while tonight's schedule is still coming, the card says so",
+		/schedule is still coming/i.test(pending), pending.replace(/\n+/g, " | ").slice(0, 300))
+	t("…and says what it is showing in the meantime",
+		/from the capture/i.test(pending), pending.replace(/\n+/g, " | ").slice(0, 300))
+	await slow.waitForTimeout(8000)
+	const settled = await slow.$eval(".decide", e => e.innerText)
+	t("and stops saying it the moment the schedule arrives",
+		!/schedule is still coming/i.test(settled), settled.replace(/\n+/g, " | ").slice(0, 300))
+	await slow.close()
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 await browser.close()
 process.exit(fail ? 1 : 0)

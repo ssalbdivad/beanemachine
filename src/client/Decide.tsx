@@ -108,7 +108,18 @@ export const Decide = ({
 }) => {
 	const storedSeats = leagueKey ? lineupStore.of(leagueKey) : null
 	/** Tonight, live, from MLB. One request, no server — see src/data/today.ts. */
-	const { slate, error: slateError } = useSlate()
+	/*
+	   `loading` IS THE THIRD STATE, and discarding it made a pending read look like a finished
+	   one. `useSlate` answers slate, error and loading; the stale-capture notice below fires on
+	   `error` alone, which is the app's correct handling of a read that FAILED. A read that has
+	   not answered yet falls through to the same capture fallback with no sentence attached —
+	   so for the first few seconds the card presented a ten-day-old schedule as tonight, with
+	   no lock times, a different lineup and a different add, and then rearranged itself
+	   unprompted. The comment above that notice says it in its own words: both feeds fall back
+	   to the shipped capture, which is the right behaviour and the wrong thing to do silently.
+	   The fix landed for the failed case and not for the pending one.
+	*/
+	const { slate, error: slateError, loading: slateLoading } = useSlate()
 	/**
 	 * The capture's injured list, brought up to date.
 	 *
@@ -1870,6 +1881,20 @@ export const Decide = ({
 						  this file exists to stop making. `slateError` and the injury error were
 						  both being captured and never rendered.
 						*/}
+						{/*
+						  WHILE THE READ IS STILL OUT, the same sentence with the reason it is true:
+						  tonight's schedule has not arrived yet, so what is on the screen is the
+						  capture. It says so for the seconds it lasts and then stops saying it,
+						  which is the difference between a card that rearranges itself in front of
+						  a reader and one that told him it was about to.
+						*/}
+						{!slateError && slateLoading && (
+							<span className="decide-stale">
+								tonight&rsquo;s schedule is still coming — these seats and times are from
+								the capture, {freshness(snapshot?.capturedAt, Date.now()).label}, until it
+								arrives
+							</span>
+						)}
 						{(slateError || injuryError) && (
 							<span className="decide-stale">
 								couldn&rsquo;t reach MLB ({slateError ?? injuryError}) — tonight&rsquo;s{" "}

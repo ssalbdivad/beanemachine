@@ -789,8 +789,11 @@ t("and it does not offer Yahoo a URL import a browser cannot perform",
  * says what the board behind it is running on, and that answering the question is what
  * makes it his. Without that line the sheet is a box with no stated consequence.
  */
+/* "already running" went with the clause explaining that a board he has not set up is still a
+   board. Both halves of the claim survive in fewer words: whose values are behind the sheet,
+   and what answering makes of them. */
 t("a first visit is told the board behind the sheet is already running, on borrowed values",
-  /already running/i.test(await p.$eval(".onboard-done", e => e.innerText)) &&
+  /one real league.s values/i.test(await p.$eval(".onboard-done", e => e.innerText)) &&
     /makes it yours/i.test(await p.$eval(".onboard-done", e => e.innerText)),
   await p.$eval(".onboard-done", e => e.innerText))
 /*

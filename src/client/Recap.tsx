@@ -514,8 +514,7 @@ export const Recap = ({
 					</header>
 					<p className="sub">
 						The best nights in baseball, worth what one real league&rsquo;s scoring would have
-						paid for them. Real box scores, not projections &mdash; put your team in and this
-						becomes your team&rsquo;s night.
+						paid for them. Put your team in and this becomes your team&rsquo;s night.
 					</p>
 					<ul className="recap-list recap-best">
 						{/* The gutter holds the RANK here, not a seat: there is no lineup on this
@@ -630,8 +629,7 @@ export const Recap = ({
 			    and the one thing the app must not do is imply it cannot. */}
 			{!final && (
 				<p className="sub">
-					Some of those games may not be over yet &mdash; that is what MLB had recorded
-					when this page asked, and the late ones on the west coast finish after it.
+					Some of those games may not be over yet.
 				</p>
 			)}
 
@@ -670,8 +668,8 @@ export const Recap = ({
 			*/}
 			{result.leftOnBench !== null && result.leftOnBench > 0 && (
 				<p className="recap-bench">
-					<b>{result.leftOnBench}</b> points sat on your bench &mdash; knowing now what
-					nobody knew then, the best lineup you could have set was worth{" "}
+					<b>{result.leftOnBench}</b> points sat on your bench &mdash; in hindsight, the best lineup you could
+					have set was worth{" "}
 					{result.best.total}.
 					{result.biggest && (
 						/* Two sentences, because a starter who was BAD and a starter who never
@@ -712,9 +710,8 @@ export const Recap = ({
 			    sentence about the clock. */}
 			{result.played === 0 && !result.unread.length && final && (
 				<p className="sub">
-					None of your men played on {plainDay(date)} &mdash; every one of their clubs was
-					off or out of the day&rsquo;s record, so the {headline} above is an empty day
-					rather than a bad one.
+					None of your men played on {plainDay(date)} &mdash; the {headline} above is an
+					empty day rather than a bad one.
 				</p>
 			)}
 				</>
@@ -750,8 +747,7 @@ export const Recap = ({
 				<p className="sub">
 					In this {period.kind === "matchup" ? "matchup" : "scoring period"} so far (
 					{plainDay(period.periodStart!)} to {plainDay(periodTo)}), every man you hold has
-					scored <b>{periodTotal}</b> &mdash; the size of your week rather than the score,
-					because it counts every man on your team now and not the men you started.
+					scored <b>{periodTotal}</b> &mdash; the size of your week rather than the score.
 				</p>
 			)}
 
@@ -868,9 +864,8 @@ export const Recap = ({
 						<p className="recap-bench">
 							<b>{both.length}</b> of the men you just entered are on YOUR team as well
 							&mdash; {andList(both.slice(0, 3))}
-							{both.length > 3 ? ` and ${both.length - 3} more` : ""}. One man cannot be
-							on both sides of a matchup, so this is probably your own roster. Paste his
-							and the comparison will mean something.
+							{both.length > 3 ? ` and ${both.length - 3} more` : ""}. That is probably your own
+							roster. Paste his and the comparison will mean something.
 						</p>
 					)}
 					{/*
@@ -893,10 +888,9 @@ export const Recap = ({
 						men.men.length > 0 &&
 						rivalKeys.length < Math.ceil(men.men.length * (2 / 3)) && (
 							<p className="recap-bench">
-								You have {men.men.length} men on record and {rivalKeys.length} of his, which
-								is too few to compare two teams with &mdash; the difference would be mostly
-								the men you told this page about. Paste the rest of his roster and the gap
-								will mean something.
+								You have {men.men.length} men on record and {rivalKeys.length} of his &mdash;
+								too few to compare. Paste the rest of his roster and the gap will mean
+								something.
 							</p>
 						)}
 					{rivalTotal !== null &&
@@ -918,9 +912,8 @@ export const Recap = ({
 										with {daysLeft} {daysLeft === 1 ? "day" : "days"} left in it
 									</>
 								)}
-								. Both sides count every man held, because this page can see neither
-								lineup &mdash; so it is the gap, measured the same way twice, and not the
-								score your league will pay.
+								. Both sides count every man held &mdash; the gap, not the score your
+								league will pay.
 							</p>
 							{/* WHICH WAY IT MOVED LAST NIGHT, which is the question the week total
 							    cannot answer. Only where both sides played: a night where one of them
@@ -964,9 +957,6 @@ export const Recap = ({
 								<p className="sub">
 									You have {men.men.length} men on record and he has {rivalKeys.length}, so
 									part of that gap is a difference in how many men each side is counting.
-									The {Math.abs(men.men.length - rivalKeys.length)} missing from{" "}
-									{men.men.length > rivalKeys.length ? "his list" : "yours"} are probably
-									lines spelled in a way this page could not match to a player.
 								</p>
 							)}
 						</>
@@ -988,7 +978,7 @@ export const Recap = ({
 					{extensionHere() && (
 						<p className="sub">
 							Your browser can read this off your matchup page &mdash; it comes across with
-							your league on <b>{tab("trade")}</b>, and there is nothing to paste.
+							your league on <b>{tab("trade")}</b>.
 						</p>
 					)}
 					<OpponentBox

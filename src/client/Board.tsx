@@ -902,7 +902,7 @@ export const Board = ({
 	const availTitle =
 		availability.basis === "pool" || !poolError ?
 			availability.basisText
-		:	`${availability.basisText}. Your league's own free-agent list could not be read: ${poolError}`
+		:	`${availability.basisText}. Your league's own free-agent list could not be read.`
 	useEffect(() => {
 		writeView(filters)
 	}, [filters.mode, filters.days])
@@ -1197,14 +1197,6 @@ export const Board = ({
 	 * figure Billy's card already quotes for the one man it picks ("rostered in 35% of
 	 * leagues"), so the board and the card cannot disagree about it.
 	 */
-	const topOwned = (() => {
-		const ten = rows.slice(0, 10)
-		if (ten.length < 10) return null
-		const shares = ten.map(r => r.rosteredPct)
-		if (shares.some(v => v == null)) return null
-		const pcts = shares as number[]
-		return { low: Math.round(Math.min(...pcts)), high: Math.round(Math.max(...pcts)) }
-	})()
 	return (
 		<>
 			{/*
@@ -1247,20 +1239,7 @@ export const Board = ({
 			*/}
 			<div className="full">
 				<p className="sub board-intro">
-					{purpose("wire")}{" "}
-					{availableOnly && (
-						<>
-							The top names are unfamiliar because hardly anybody has taken them, which is
-							what leaves them free for you
-							{topOwned ?
-								<>
-									{" "}
-									— the first ten are rostered in {topOwned.low}% to {topOwned.high}% of
-									leagues.
-								</>
-							:	"."}
-						</>
-					)}
+					{purpose("wire")}
 				</p>
 			</div>
 			{/*
@@ -1374,7 +1353,7 @@ export const Board = ({
 						</label>
 						<label
 							className="toggle"
-							title="Keeps only players the schedule has pitching inside this window — published turns plus the games his club has not named a starter for yet, at his own rate of starting. It is the same count the ranking is built on."
+							title="Keeps only players the schedule has pitching inside this window — published turns plus the games his club has not named a starter for yet, at his own rate of starting."
 						>
 							<input
 								type="checkbox"
@@ -1759,13 +1738,11 @@ export const Board = ({
 						starting assignments, {streaming.fullyNamed} of {streaming.clubs} clubs
 						completely.
 						{streaming.fullyNamed < streaming.clubs &&
-							" The rest are estimated from each pitcher's own rate of starting, and every row says which of the two it is showing."}
+							" The rest are estimated from each pitcher's own rate of starting."}
 						{/* Only when NOT ONE club is fully named — the point at which a longer
 						    window has stopped buying certainty and is only buying games. Said
 						    here rather than as a permanent caption, because on a three-day
 						    window it is not true and a warning that is always on is furniture. */}
-						{streaming.fullyNamed === 0 &&
-							" A shorter window is where this data is strongest: MLB names starters about three days ahead and then stops."}
 					</p>
 				)}
 				{/* A "Moves left" box, a line of the league's per-period rules, and a "Your
@@ -1851,7 +1828,7 @@ export const Board = ({
 						<span
 							className="r"
 							data-col="games"
-							title="What this player gets out of the window. For a starting pitcher whose turns MLB has published it is his own scheduled starts (GS); for everyone else it is the games his team plays (GP). Six-game weeks are worth chasing; four-game weeks are why a good hitter can be the wrong start."
+							title="What this player gets out of the window. For a starting pitcher whose turns MLB has published it is his own scheduled starts (GS); for everyone else it is the games his team plays (GP)."
 						>
 							{filters.mode === "stream" ? "starts" : "games"}
 						</span>
@@ -1932,18 +1909,13 @@ export const Board = ({
 						    tooltip carries, because a phone has no hover. */}
 						{sort === "points" ?
 							<>
-								The streaming list is ordered by what a man actually scores over the window
-								you picked, not by what he is ahead of a free pickup by &mdash; because the
-								question there is which arm to start, and a free arm you are not starting
-								is worth nothing to you this week.
+								Projected points over the window you picked, not a promise.
 							</>
 						: sort === "deltaMine" ?
 							<>
 								Every other number here is measured against the man left at that spot once
 								every team has filled it, which is the bar for the league. This one is the
-								bar for you: the worst man you own who could hold the seat. A deep outfield makes a good
-								free-agent outfielder worth nothing to you; a hole at catcher makes a
-								mediocre one worth a great deal.{" "}
+								bar for you: the worst man you own who could hold the seat.{" "}
 								{/*
 								  WHAT THIS ORDERING IS AND IS NOT, said where the reader meets it.
 								  
@@ -1957,10 +1929,8 @@ export const Board = ({
 								  the only one that is true: it is the question the reader just
 								  answered, not the ordering that is known to win.
 								*/}
-								Which of the two predicts better is not something this app has measured:
-								ordering by your own roster is the question you just answered by telling
-								us your team, and &ldquo;ahead by&rdquo; is the one with a season of
-								results behind it. Both are on every row.
+								&ldquo;Ahead by&rdquo; is the ordering with a season of results behind it;
+								this one has not been measured. Both are on every row.
 							</>
 						:	<>
 								It ranks players; it does not promise points. 35 means further ahead of the

@@ -201,13 +201,11 @@ export const recap = (input: {
 	const complete = !unreadMen && !noGames && !tooEarly
 	if (noGames)
 		blocked.push(
-			"MLB has no box scores at all for that date — nobody in baseball played, so there " +
-				"is nothing to report rather than nothing scored."
+			"MLB has no box scores at all for that date — nobody in baseball played."
 		)
 	else if (tooEarly)
 		blocked.push(
-			"Those games have not been played yet, so there is nothing on record for them — " +
-				"this is a clock, not a result."
+			"Those games have not been played yet."
 		)
 	else if (unreadMen)
 		/* TWO SENTENCES, BECAUSE THERE IS NOT ALWAYS A TOTAL ABOVE. When one side of the ball

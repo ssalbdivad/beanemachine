@@ -286,8 +286,7 @@ export const Onboard = ({
 		const { league: made, read } = leagueFromPastedSettings(pasted, where)
 		if (!made) {
 			setNote(
-				`No scoring table in that. beanemachine looks for the rows that print a stat's ` +
-					`own code in brackets — "Home Runs (HR)" and the number beside it. Open ` +
+				`No scoring table in that. Open ` +
 					`the page that lists what each stat is worth, select all of it, and paste ` +
 					`again.` +
 					(read.slots ? ` (The roster slots WERE in that paste, so it is close.)` : "")
@@ -388,7 +387,7 @@ export const Onboard = ({
 				setReadFailure({
 					step: "store",
 					what: `your team could not be saved in this browser: ${(e as Error).message}`,
-					fix: "A private window usually does this, and so does a full phone."
+					fix: null
 				})
 			}
 		}
@@ -496,8 +495,7 @@ export const Onboard = ({
 			setTeamNote(null)
 		} catch (e) {
 			setTeamNote(
-				`Your team could not be saved in this browser: ${(e as Error).message} ` +
-					`A private window usually does this, and so does a full phone.`
+				`Your team could not be saved in this browser: ${(e as Error).message}`
 			)
 		}
 	}
@@ -817,9 +815,6 @@ export const Onboard = ({
 								</button>
 							))}
 						</div>
-						<p className="sub">
-							It changes who counts as a good pickup more than anything else does.
-						</p>
 					</div>
 				)}
 
@@ -856,10 +851,7 @@ export const Onboard = ({
 				<details className="onboard-alts">
 					<summary>My league scores differently</summary>
 					<p className="sub">
-						The numbers you are looking at come from one real Yahoo league&rsquo;s settings
-						page, copied &mdash; they are not Yahoo&rsquo;s defaults and they are not yours.
-						If your league
-						pays differently, every ranking shifts &mdash; here is how to tell it.
+						If your league pays differently, here is how to tell it.
 					</p>
 					<div className="chips onboard-where">
 						{WHERE.map(w => (
@@ -905,8 +897,7 @@ export const Onboard = ({
 								*/
 								<div className="onboard-first">
 									<p className="sub">
-										ESPN hands a public league straight over. Paste your league&rsquo;s
-										address and there is nothing to copy and nothing to install.
+										Paste your league&rsquo;s address.
 									</p>
 									<p className="onboard-url">
 										<input
@@ -921,8 +912,7 @@ export const Onboard = ({
 										</button>
 									</p>
 									<p className="sub">
-										A private league answers nobody, this app included &mdash; for that one,
-										copy the page below.
+										For a private league, copy the page below.
 									</p>
 								</div>
 							)}
@@ -1043,9 +1033,8 @@ export const Onboard = ({
 							{read && read.players.length ? "Show me tonight" : "Show me the board"}
 						</button>
 					:	<span className="sub">
-							The board behind this is already running, on one real league&rsquo;s values,
-							with no team
-							behind it. Answering the question above makes it yours.
+							The board behind this runs on one real league&rsquo;s values. Answering the
+							question above makes it yours.
 						</span>
 					}
 					{league && missing.length > 0 && (

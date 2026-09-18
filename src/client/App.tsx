@@ -983,10 +983,8 @@ export const App = () => {
 							<li>{leagues.keepsNothing()}</li>
 						</ul>
 						<p className="sub" style={{ margin: "var(--sp-3) 0 0" }}>
-							Everything below works and none of it will survive closing the tab &mdash; your
-							team, your league&rsquo;s values and anything you read will be gone. A private
-							window usually does this. <b>Download</b> above saves a file you can load back
-							anywhere.
+							Everything below works, and none of it will survive closing the tab &mdash; your
+							team, your league&rsquo;s values and anything you read will be gone.
 						</p>
 					</section>
 				</div>
@@ -1002,8 +1000,7 @@ export const App = () => {
 							<li>{loadError}</li>
 						</ul>
 						<p className="sub" style={{ margin: "var(--sp-3) 0 0" }}>
-							Nothing was overwritten and nothing was guessed at. <b>Load file</b> above
-							replaces what is in this browser with a file you saved.
+							<b>Load file</b> below replaces what is in this browser with a file you saved.
 						</p>
 					</section>
 				</div>
@@ -1047,8 +1044,7 @@ export const App = () => {
 								   is the wrong question. The only league that matters here is his. */
 								!confirm(
 									`Confirm that these values match your own league's settings page? ` +
-										`Nothing was read from your league, so this records that you ` +
-										`checked them by hand — it does not make them read from your league.`
+										`This records that you checked them by hand; nothing was read from your league.`
 								)
 							)
 								return
@@ -1066,7 +1062,7 @@ export const App = () => {
 										method: `manual entry: started from the ${platform} preset, then checked by hand against the league's own settings page on ${on}`
 									},
 									needs_review: [
-										`These values were started from the ${platform} preset and confirmed by hand on ${on}. Nothing was read from this league's own pages, so it stays unverified — importing the league is the only route that changes that.`
+										`These values were started from the ${platform} preset and confirmed by hand on ${on}. Nothing was read from this league's own pages.`
 									]
 								}),
 								key

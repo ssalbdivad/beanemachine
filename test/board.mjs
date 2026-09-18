@@ -1071,9 +1071,13 @@ t("and no two streaming columns are printed on top of each other",
     /Ordered by the points/i.test(streamLegend) && !/Ahead by/.test(streamLegend),
     streamLegend.replace(/\s+/g, " ").slice(0, 140))
   // and it is the same disclosure, not a second sentence bolted on for this tab
+  /* The body used to explain WHY this list is ordered the way it is — "because the question
+     there is which arm to start, and a free arm you are not starting is worth nothing to you
+     this week". What has to be behind the fold is the caveat, not the argument: these are
+     projections. */
   t("and it is still one tap to the caveat behind it",
     (await fresh.$eval(".board-legend", e => e.tagName.toLowerCase())) === "details" &&
-      /which arm to start/.test(streamLegend),
+      /not a promise/.test(streamLegend),
     streamLegend.replace(/\s+/g, " ").slice(0, 200))
   await fresh.close()
 }
@@ -1148,7 +1152,12 @@ t("a window running past the reset says the extra games score for the next match
  * capture of any age.
  */
 const clubsNamed = note => (note.match(/(\d+) of (\d+) clubs completely/) ?? []).slice(1).map(Number)
-const warns = note => /shorter window is where this data is strongest/.test(note)
+/* THE SIGNAL MOVED. It used to be "a shorter window is where this data is strongest: MLB names
+   starters about three days ahead and then stops" — an explanation of the FEED, which is
+   exactly the kind of sentence no screen carries any more. The hedge that survives is the one
+   about his board: the starts that were not named are estimated. It renders on precisely the
+   same condition, so the property under test is unchanged. */
+const warns = note => /estimated from each pitcher's own rate of starting/.test(note)
 for (const [label, note] of [["the period", periodNote], ["seven days", sevenNote]]) {
   const [done, all] = clubsNamed(note)
   if (!Number.isFinite(done) || !Number.isFinite(all)) continue
@@ -3053,8 +3062,18 @@ await phone.close()
   t("and the nav no longer carries it as a hover, because the screen says it",
     (await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))) === null,
     String(await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))))
-  t("and the board says why the men at the top of it are names nobody knows",
-    /taken them/.test(intro) && /rostered in \d+% to \d+% of leagues/.test(intro), intro)
+  /*
+     THIS ASSERTED AN EXPLANATION, AND THE EXPLANATION WAS REMOVED ON PURPOSE.
+     
+     It required the intro to say "the top names are unfamiliar because hardly anybody has
+     taken them" with the first ten's rostered range. That is the board arguing its own case,
+     and no screen does that any more. It is not lost evidence — what the board owes a reader
+     is what the list IS, which the tab's own sentence says and which the assertion two lines
+     above already pins. Recorded rather than deleted so that nobody reads its absence as a
+     regression and puts the paragraph back.
+  */
+  t("and the intro says what the list is without arguing for it",
+    /Everyone you can actually get/.test(intro) && !/because hardly anybody/.test(intro), intro)
   await first.close()
 }
 

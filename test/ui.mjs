@@ -829,9 +829,12 @@ t("and it is recorded as entered by hand, not as read from the league",
     /checked by hand/.test(checked.provenance.method) &&
     checked.provenance.verified === false,
   JSON.stringify(checked.provenance))
+/* THE WORD WAS "unverified", and the sentence says the same thing in a reader's words now:
+   "Nothing was read from this league's own pages." Both halves of the claim are still
+   required — where the values came from, and that they did not come from his league. */
 t("and the one line left says where the values came from and that it is still unverified",
   checked.needs_review.length === 1 && /preset/.test(checked.needs_review[0]) &&
-    /unverified/.test(checked.needs_review[0]),
+    /nothing was read from this league/i.test(checked.needs_review[0]),
   JSON.stringify(checked.needs_review))
 /* The tab press is new, and it is the assertion's subject moving rather than the assertion
    changing. A first visit used to land on the ranked board; it now lands on Tonight, because
@@ -1371,12 +1374,14 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await ep.click(".onboard-where button:has-text('ESPN')")
 	await ep.waitForSelector(".onboard-first", { timeout: 10000 })
 	const say = await ep.$eval(".onboard-first", e => e.innerText)
-	t("an ESPN reader is told his league can be read straight from its address",
-		/hands a public league straight over/.test(say), say.slice(0, 200))
-	/* The private case is the reason the paste stays underneath rather than being hidden, and
-	   it is the one thing about ESPN this app genuinely cannot do. */
-	t("…and that a private one answers nobody, this app included",
-		/private league answers nobody/i.test(say), say)
+	/* THESE REQUIRED THE EXPLANATIONS — "ESPN hands a public league straight over", "a private
+	   league answers nobody, this app included" — and no screen explains itself any more. What
+	   the claims were protecting survives: he is told what to do with his address, and told
+	   where to go when it is a private league. */
+	t("an ESPN reader is told what to do with his league's address",
+		/paste your league.{0,3}s address/i.test(say), say.slice(0, 200))
+	t("…and where to go when it is a private one",
+		/private league/i.test(say), say)
 	t("there is one address box on that screen, not two",
 		(await ep.locator(".onboard-url").count()) === 1,
 		String(await ep.locator(".onboard-url").count()))

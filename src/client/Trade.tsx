@@ -529,7 +529,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 		if (!found.players.length) {
 			setWireNote(
 				"No players found in that. Open your league's free-agent or players page, " +
-					"select all of it, and paste — the names are what this matches on."
+					"select all of it, and paste."
 			)
 			return
 		}
@@ -692,8 +692,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			<section className="card full">
 				<h2>Trade</h2>
 				<p className="empty">
-					Import or configure a league first — a trade is worth what it does to the slots
-					that league makes you fill.
+					Import or configure a league first.
 				</p>
 			</section>
 		)
@@ -702,9 +701,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			<section className="card full">
 				<h2>Trade</h2>
 				<p className="empty">
-					This league doesn&rsquo;t say how many teams are in it, and how deep the waiver
-					wire runs depends on that — so a vacated spot has no honest price yet. Open{" "}
-					<b>My league</b> and set the team count.
+					Set the team count under <b>This league</b> below and this fills in.
 				</p>
 			</section>
 		)
@@ -716,14 +713,12 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			<section className="card full trade-unscored">
 				<h2>This league has no scoring yet</h2>
 				<p className="sub">
-					<b>{league.meta.league_name ?? leagueKey}</b> gives you the roster shape but not
-					what each stat is worth, so every projection would score exactly zero and every
-					trade would come out at +0.00. That is not a verdict, it is a missing input.
+					<b>{league.meta.league_name ?? leagueKey}</b> has roster slots but no point values
+					yet.
 				</p>
 				<p className="sub">
-					Paste your league URL above to read the real values off the platform, or open{" "}
-					<b>My league</b> and enter them. A trade is priced in your league&rsquo;s own
-					points, so it cannot mean anything until those exist.
+					Enter them under <b>Batting</b> and <b>Pitching</b> below, or paste your league
+					URL above to read them off the platform.
 				</p>
 			</section>
 		)
@@ -1160,8 +1155,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 						<span className="sub">
 							{pullNote ??
 								(!readTeamId ?
-									`This league's URL didn't say which team is yours, so ${platformName} needs the ` +
-									`number to read it.`
+									"Enter your team number above to read it."
 								:	/* The caveat that used to stand here explained which leagues this route
 									   can reach and what the platform may do about it — three sentences of
 									   why, on a button whose outcome is one press away. What a reader needs
@@ -1194,8 +1188,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 							</span>
 						</summary>
 						<p className="sub">
-							Worth a minute: without it, who is available is <b>estimated</b> from how
-							widely each player is rostered. Open your league&rsquo;s <b>Players</b> or{" "}
+							Open your league&rsquo;s <b>Players</b> or{" "}
 							<b>Free Agents</b> page, set the filter to available players, select all and
 							paste. Do it once a week — anyone added or dropped since is not in it.
 						</p>
@@ -1320,9 +1313,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 								))}
 						</details>
 					:	<p className="empty">
-							No players yet. Search above and add the ones you own — every number on
-							this page is about your slots, so there is nothing to say until it knows
-							what you hold.
+							No players yet. Search above and add the ones you own.
 						</p>
 					}
 				</div>
@@ -1330,8 +1321,8 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 					<ul className="notes warn trade-unresolved">
 						{unresolved.map(k => (
 							<li key={k}>
-								{k} is on this team but has no row in the current capture, so nothing can
-								be projected for him. He is counted nowhere below.
+								{k} is on this team but has no row in the current capture, so he is counted
+								nowhere below.
 							</li>
 						))}
 					</ul>
@@ -1393,13 +1384,11 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 					<h2>The deal</h2>
 					{tradeWindow.closed ?
 						<p className="sub">
-							Your league stopped taking trades on <b>{tradeWindow.on}</b>, so a deal priced
-							here could not be made. Your roster and lineup above are still live, and adds
-							and drops are on <b>{tab("board")}</b>.
+							Your league stopped taking trades on <b>{tradeWindow.on}</b>. Adds and drops are
+							on <b>{tab("board")}</b>.
 						</p>
 					:	<p className="sub">
-							Pick who leaves and who arrives and this prices the offer — what your
-							starting lineup would project afterwards, against what it projects now.
+							Pick who leaves and who arrives and this prices the offer.
 						</p>
 					}
 					{/* A disclosure, not a wall. The evaluator still works, and a reader with a
@@ -1414,9 +1403,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			:	<section className="card full trade-deal">
 				<h2>The deal</h2>
 				<p className="sub">
-					Pick who leaves and who arrives. The verdict is what your starting lineup
-					projects afterwards — bench depth counts only as far as it changes what you can
-					start.
+					Pick who leaves and who arrives.
 				</p>
 				<div className="deal">
 					<div className="deal-side">
@@ -1780,8 +1767,7 @@ const LineupCard = ({
 						  exactly that argument for saying nothing. Saying the dates is true
 						  whatever the period turns out to be.
 						*/}
-						projected points{win ? ` from ${win.from} to ${win.to}` : ""}, every spot below
-						added up ·{" "}
+						projected points{win ? ` from ${win.from} to ${win.to}` : ""} ·{" "}
 						{lineup.starters.filter(s => s.source === "roster").length} of{" "}
 						{lineup.starters.length} spots filled by your own players
 						{lineup.holes.length > 0 &&

@@ -1575,8 +1575,7 @@ export const Decide = ({
 					planned: {owned.error}
 				</p>
 				<p className="sub">
-					Open <b>{tab("trade")}</b> &mdash; it says what went wrong and has the button
-					that clears it.
+					Open <b>{tab("trade")}</b> to clear it.
 				</p>
 			</section>
 		)
@@ -1606,8 +1605,7 @@ export const Decide = ({
 				<h2>What should I do?</h2>
 				<p>
 					Nothing yet — <b>{league.meta.league_name ?? "this league"}</b> does not say how
-					many teams are in it, and how deep the wire runs before it reaches replacement
-					level depends on that. Without it no move has an honest price.
+					many teams are in it.
 				</p>
 				<p className="sub">
 					Open <b>My league</b> and set the team count.
@@ -1624,9 +1622,7 @@ export const Decide = ({
 				<h2>What should I do?</h2>
 				<p>
 					Nothing yet — <b>{league.meta.league_name ?? "this league"}</b> gives the roster
-					shape but not what each stat is worth, so every projection here would be exactly
-					zero and every recommendation would be a tie. That is a missing input, not an
-					answer.
+					shape but not what each stat is worth.
 				</p>
 				<p className="sub">
 					Open <b>My league</b> and read the values off your platform, or enter them.
@@ -1681,7 +1677,7 @@ export const Decide = ({
 					</button>{" "}
 					and this becomes tonight&rsquo;s lineup and the moves to make. About a
 					minute, and it stays in this browser.
-					{espn && " Your platform answers a browser directly, so it can read the whole roster in one click."}
+					{espn && " Your platform can read the whole roster in one click."}
 				</p>
 			</section>
 		)
@@ -1699,7 +1695,7 @@ export const Decide = ({
 					    reader deciding tonight's lineup does not need telling which year it is. */}
 					For <b>{PERIOD_NAME[rated.period.kind]}</b>, {plainDate(rated.period.start)} to{" "}
 					{plainDate(rated.period.end)}
-					{rated.period.assumed && " — assumed, your league states no scoring period"}.
+					{rated.period.assumed && " — assumed"}.
 				</p>
 			)}
 
@@ -1867,7 +1863,7 @@ export const Decide = ({
 						    the same breath. Answering it is a chip on My league. */}
 						{today.assumedDaily && (
 							<span className="decide-gain decide-assumed">
-								if your league lets you change the lineup every day &mdash; most do, and{" "}
+								if your league lets you change the lineup every day &mdash;{" "}
 								<b>{tab("trade")}</b> takes the answer
 							</span>
 						)}
@@ -1935,8 +1931,8 @@ export const Decide = ({
 					    compare against, so there is no diff, and saying so is the answer. */}
 					{!today.lineup.starters.length && today.bench.length ?
 						<p className="sub">
-							None of your players could be priced for today, so there is nothing to
-							compare against — this is not a recommendation to bench them.{" "}
+							None of your players could be priced for today — this is not a
+							recommendation to bench them.{" "}
 							{today.bench.length} {today.bench.length === 1 ? "man is" : "men are"} in
 							your active seats.
 						</p>
@@ -2111,10 +2107,8 @@ export const Decide = ({
 									    league's total includes the bench and the injured list. The honest
 									    claim is about provenance, not about a count. */}
 									These seats come from the {today.partial.given} men you have named, not
-									from your league&rsquo;s own {today.partial.total} &mdash; so a seat is
-									empty here whenever nobody you named can fill it, which is not the same
-									as empty in your league. Reading your roster off your platform on{" "}
-									<b>{tab("trade")}</b> settles it.
+									from your league&rsquo;s own {today.partial.total}. Read your roster off
+									your platform on <b>{tab("trade")}</b> to settle it.
 								</p>
 							)}
 							<ul className="decide-list decide-fill">
@@ -2224,9 +2218,8 @@ export const Decide = ({
 							   is now one that is true however the seats got here. */
 							<>vs the seats you last gave it, {readAgo(today.readAt)}</>
 						:	<>
-								Nothing here knows which seats you currently have these men in, so this is
-								the lineup to <b>set</b>, not the changes to make. Read your roster off
-								your platform on <b>My league</b> and it becomes a list of changes.
+								This is the lineup to <b>set</b>, not the changes to make. Read your roster
+								off your platform on <b>My league</b> and it becomes a list of changes.
 							</>
 						}
 					</p>
@@ -2307,8 +2300,7 @@ export const Decide = ({
 									</>
 								)}
 								&nbsp;&mdash; every man each side holds, over this scoring period, which is
-								not the score your league will pay. Nothing below is playing for or against
-								that lead: it is the same answer either way.
+								not the score your league will pay.
 								{/*
 								  WITH WHAT, which is the question a reader asks the moment he knows he is
 								  behind — and the one the card can answer with arithmetic it has already
@@ -2381,14 +2373,12 @@ export const Decide = ({
 								  offer. Where it is not there, the sentence stops at what this card can
 								  say about itself.
 								*/}
-								Nothing here is playing for or against a lead &mdash; it does not know your
-								league&rsquo;s scoreboard
 								{matchup.mine !== null ?
 									<>
-										, and how your week stands is on <b>Last night</b>, against an opponent
-										you tell it about.
+										How your week stands is on <b>Last night</b>, against an opponent you
+										tell it about.
 									</>
-								:	"."}
+								:	null}
 							</>
 						}
 					</p>

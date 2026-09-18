@@ -1247,8 +1247,10 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	cfg.leagues[KEY].meta.platform = "espn"
 	const page = await open({ config: cfg }, { offline: true })
 	const text = await page.$eval(".decide", e => e.innerText)
+	/* "answers a browser directly" was the CORS explanation in a reader's clothing. The claim
+	   it protected is the capability, which is what the sentence says now. */
 	t("an ESPN league is told its platform can read the roster for it",
-		/answers a browser directly/.test(text) && !/CORS/.test(text), text.slice(0, 400))
+		/can read the whole roster in one click/.test(text) && !/CORS/.test(text), text.slice(0, 400))
 	/*
 	 * The second assertion here used to be `!(await page.$(".decide-cmd"))` — that an
 	 * ESPN reader is not handed a command line he does not need. No reader is handed
@@ -1505,8 +1507,11 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	   is actually running. The card was right and the expectation was wrong. */
 	t("the bench gap is the difference", /27\.7 points sat on your bench/.test(card), card)
 	t("and the best lineup it is measured against is stated", /worth 91\.3/.test(card), card)
+	/* The label moved into the sentence when the explanation after it was cut: "in hindsight"
+	   now sits between the number and the lineup it describes, which is the same claim in
+	   fewer words. */
 	t("labelled as hindsight rather than as a thing he should have known",
-		/knowing now what nobody knew then/.test(card), card)
+		/in hindsight, the best lineup you could/.test(card), card)
 	/* THE SENTENCE CHANGED, and this assertion changed with it rather than being relaxed.
 	   It used to read "Bregman scored 25.8 more than Jo Adell", and the difference is what
 	   that phrasing does when the man in the seat never played: the subtraction treats his
@@ -1949,7 +1954,11 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		/one real league\u2019s scoring|one real league's scoring/.test(card), card.slice(0, 300))
 	// Facts, not estimates — which is the distinction the whole card exists to carry onto a
 	// screen where everything else is a projection.
-	t("and said to be box scores rather than projections", /Real box scores, not projections/.test(card), card)
+	/* "Real box scores, not projections" explained the difference between this card and the
+	   others; what has to survive is that these are what HAPPENED, which the heading and the
+	   date carry. Asserted on the date, which is the part a reader checks. */
+	t("and said to be box scores rather than projections",
+		/last night/i.test(card) && !/projected/i.test(card.split("\n").slice(0, 3).join(" ")), card)
 	t("the biggest night in the fixture leads", /Dustin May/.test(card) && /40\.1/.test(card), card)
 	t("and a scoreless night is not in it", !/Jo Adell/.test(card), card)
 	/* Real names on the first screen of a 390px phone, where there used to be none. Asserted as
@@ -2214,8 +2223,13 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("a card built from a short typed list says where its seat count came from",
 		said.length === 1 && /13 men you have named/.test(said[0]) && /own 27/.test(said[0]),
 		said.join(" | ") || "(nothing said)")
+	/* The clause that spelled out what "empty" means here went with every other sentence that
+	   explained the app to itself. The provenance is the claim — these seats are the men he
+	   named, not his league's — and the action after it is what he can do about it. */
 	t("and says what that means for an empty seat, in his terms",
-		/not the same as empty in your league/.test(said[0] ?? ""), said[0] ?? "")
+		/men you have named, not from your league/.test(said[0] ?? "") &&
+			/Read your roster off your platform/.test(said[0] ?? ""),
+		said[0] ?? "")
 	/* And it does not do the subtraction: 27 − 13 = 14 is not the number of empty seats on
 	   this card, and printing it there was the first version of this sentence. */
 	t("and claims no count of empty seats it cannot back",

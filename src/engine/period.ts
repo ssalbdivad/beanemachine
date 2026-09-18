@@ -294,3 +294,54 @@ export const windowFrom = (
 	}
 	return w
 }
+
+/**
+ * THE LAST DAY THIS LEAGUE SCORES, or the last day there is baseball for.
+ *
+ * Yahoo prints the end of its own season inside the Playoffs row and this app ranked past it:
+ * every screen that offers "the rest of the season" was offering men for games the reader's
+ * league will not score. On league 228947, read on 2026-09-18, the season ends on the 27th and
+ * the Stash board was holding players for October.
+ *
+ * The league's date only ever pulls the horizon IN. A league that scores later than the
+ * captured slate cannot be ranked past the slate whatever it says, and a league that states
+ * nothing gets exactly what it got before.
+ */
+export const scoringEnd = (
+	league: { scoring_period?: { ends_on?: string | null } | null } | null | undefined,
+	seasonEnd: string
+): string => {
+	const ends = league?.scoring_period?.ends_on
+	return ends && ends < seasonEnd ? ends : seasonEnd
+}
+
+/**
+ * WHICH OF HIS LEAGUE'S OWN NUMBERED WEEKS THIS IS — and null unless it is checkable.
+ *
+ * The settings page names the playoff weeks and the day the last of them ends, so walking back
+ * in sevens from that date gives the number of any week. What makes it a reading rather than a
+ * derivation is the guard: the walk must land EXACTLY on the first day of the period this app
+ * has already resolved, and the answer must fall inside the weeks Yahoo actually listed. In
+ * the playoff weeks that is one or two subtractions from a printed anchor; every other week of
+ * the season it is null, and the screens say nothing.
+ */
+export const leagueWeek = (
+	league: { scoring_period?: { ends_on?: string | null; week?: { of: number | null } | null } | null } | null | undefined,
+	period: { kind: string; periodStart: string | null; periodEnd: string | null }
+): { number: number; of: number } | null => {
+	const ends = league?.scoring_period?.ends_on
+	const of = league?.scoring_period?.week?.of
+	if (!ends || typeof of !== "number" || period.kind !== "matchup") return null
+	if (!period.periodStart || !period.periodEnd) return null
+	const day = 86_400_000
+	const back = (Date.parse(`${ends}T00:00:00Z`) - Date.parse(`${period.periodEnd}T00:00:00Z`)) / day
+	/* Whole weeks, and never ahead of the stated end: a period that runs past the last day the
+	   league scores is a period this cannot number. */
+	if (!Number.isInteger(back / 7) || back < 0) return null
+	const number = of - back / 7
+	/* Inside the listed weeks only. Yahoo lists the playoff weeks, so the two or three it names
+	   are the ones whose number is a subtraction from something printed rather than a count of
+	   sevens across a season whose first week this app has never seen. */
+	if (number > of || number < of - 2) return null
+	return { number, of }
+}

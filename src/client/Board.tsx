@@ -14,7 +14,7 @@ import {
 	canReadPool, api, ApiError, getMode, poolIsPartial, type AvailablePool
 } from "./api.ts"
 import { useEffect } from "react"
-import { datesBetween, type ResolvedPeriod } from "../engine/period.ts"
+import { datesBetween, leagueWeek, type ResolvedPeriod } from "../engine/period.ts"
 import { purpose, tab } from "./panels.tsx"
 import { andList, statLabel } from "../data/names.ts"
 
@@ -527,7 +527,11 @@ const day = (iso: string): string => {
  */
 const horizonSpan = (
 	over: { kind: "period" | "rest" | "fortnight"; start: string; end: string },
-	period: ResolvedPeriod | null
+	period: ResolvedPeriod | null,
+	/** What the league says about its own season, where it says anything: the day it stops
+	 *  scoring, and which of its numbered weeks this is. Both null for a league that states
+	 *  neither, and the phrasing below is then exactly what it was. */
+	league?: { ends_on: string | null; week: { number: number; of: number } | null } | null
 ) => {
 	if (over.kind === "period" && period) {
 		const days = datesBetween(over.start, over.end)
@@ -545,9 +549,20 @@ const horizonSpan = (
 		}
 	}
 	if (over.kind === "rest")
+		/*
+		   "THE END OF THE SEASON" WAS BASEBALL'S, NOT HIS.
+		
+		   Yahoo states the day a league stops scoring, and this board was ranking past it —
+		   holding men for games his league will not pay for. Where the league said, the date is
+		   named; where it also numbers its weeks and the number is checkable, that is named too,
+		   because "week 25 of 26" is what a manager calls the thing this window is.
+		*/
 		return {
-			range: `${day(over.start)} → the end of the season`,
-			phrase: "the rest of the regular season"
+			range:
+				league?.ends_on ?
+					`${day(over.start)} → ${day(league.ends_on)}${league.week ? ` · week ${league.week.number} of ${league.week.of}` : ""}`
+				:	`${day(over.start)} → the end of the season`,
+			phrase: league?.ends_on ? "the rest of your league's season" : "the rest of the regular season"
 		}
 	return { range: `${day(over.start)} → ${day(over.end)}`, phrase: "the fortnight ahead" }
 }
@@ -987,7 +1002,16 @@ export const Board = ({
 
 	// Not a hook, so it belongs after the refusals above rather than among them —
 	// and it needs the snapshot they have just established exists.
-	const span = horizonSpan(ratedOver, period)
+	const span = horizonSpan(
+		ratedOver,
+		period,
+		league ?
+			{
+				ends_on: league.scoring_period?.ends_on ?? null,
+				week: period ? leagueWeek(league, period) : null
+			}
+		:	null
+	)
 
 	/**
 	 * A row's start schedule, or null where there is nothing honest to say: off the

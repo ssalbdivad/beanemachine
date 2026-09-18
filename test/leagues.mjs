@@ -21,7 +21,7 @@ import {
   IN_BROWSER,
   readableInBrowser
 } from "../src/import.ts"
-import { resolvePeriod } from "../src/engine/period.ts"
+import { resolvePeriod, leagueWeek, scoringEnd } from "../src/engine/period.ts"
 
 const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
 const snap = JSON.parse(readFileSync("data/snapshot.json", "utf8"))
@@ -851,6 +851,101 @@ t("and so does a payload with no scheduleSettings at all",
       JSON.stringify(yahooish.P) === JSON.stringify(["SP", "RP"]) &&
       yahooish.BN === "any" && yahooish.IL === "injured_only",
     JSON.stringify(yahooish))
+}
+
+/*
+ * THE DAY THIS LEAGUE STOPS SCORING, off a row the parser already read for something else.
+ *
+ * "6 teams - Week 24, 25 and 26 (ends Sunday, Sep 27)" was read for the WEEKDAY alone, so a
+ * period could be told which day it opens on. The date beside it was dropped — and it is the
+ * only statement on any page of when the reader's own season ends, so every screen offering
+ * "the rest of the season" offered him games his league will not score.
+ *
+ * Yahoo does not print the year. It is inferred from today and then CHECKED against the
+ * weekday Yahoo did print: Sep 27 is a Sunday in 2026 and a Monday in 2027, so a page read in
+ * January resolves to the season just gone rather than to a date nobody stated.
+ */
+{
+  const rows = cfg.leagues["yahoo:228947"].league_rules.raw_settings
+  const read = deriveScoringPeriod(rows, "2026-09-18")
+  t("the league's own last scoring day is read off the Playoffs row",
+    read.period.ends_on === "2026-09-27", String(read.period.ends_on))
+  t("and the last of its numbered weeks with it",
+    read.period.week?.of === 26, JSON.stringify(read.period.week))
+  t("…without the team count in front of them ever becoming a week",
+    read.period.week?.of !== 6, JSON.stringify(read.period.week))
+  t("and the source says where both came from",
+    /last day this league scores/.test(read.period.source ?? ""), read.period.source ?? "")
+  /* Everything the row was read for before is untouched — this is an addition. */
+  t("and the weekday the period opens on is exactly what it was",
+    read.period.starts_on === "mon" && read.period.days === 7 && read.period.kind === "matchup",
+    JSON.stringify(read.period))
+
+  /* THE YEAR IS CHECKED, NOT ASSUMED. Read in January, the same row is about the season just
+     gone, because Sep 27 is a Sunday in 2026 and not in 2027. */
+  t("a page read after the season resolves to the season it is about",
+    deriveScoringPeriod(rows, "2027-01-15").period.ends_on === "2026-09-27",
+    String(deriveScoringPeriod(rows, "2027-01-15").period.ends_on))
+
+  /* A WEEKDAY THAT DISAGREES WITH THE DATE is a row this cannot read, and it says so rather
+     than picking one of the two. */
+  const wrong = { ...rows, Playoffs: "6 teams - Week 24, 25 and 26 (ends Sunday, Sep 26)" }
+  const bad = deriveScoringPeriod(wrong, "2026-09-18")
+  t("a weekday that disagrees with the date yields no end at all",
+    bad.period.ends_on === null, String(bad.period.ends_on))
+  t("…and says so, quoting the row",
+    bad.needsReview.some(r => /when your league stops scoring/.test(r)), JSON.stringify(bad.needsReview))
+
+  /* NON-CONSECUTIVE WEEKS are a shape nobody here has seen. The end date still stands on its
+     own — it is read from the date, not from the numbers — and the week grid does not. */
+  const gappy = deriveScoringPeriod(
+    { ...rows, Playoffs: "4 teams - Week 24 and 26 (ends Sunday, Sep 27)" },
+    "2026-09-18"
+  )
+  t("a week list with a gap in it is refused while the end date stands",
+    gappy.period.ends_on === "2026-09-27" && gappy.period.week === null,
+    JSON.stringify(gappy.period))
+
+  /* A LEAGUE THAT STATES NO PLAYOFFS states nothing here either, and that is unchanged. */
+  const none = deriveScoringPeriod({ ...rows, Playoffs: "No playoffs" }, "2026-09-18")
+  t("a league with no playoffs claims no end and no week",
+    none.period.ends_on === null && none.period.week === null, JSON.stringify(none.period))
+}
+
+/*
+ * AND WHICH WEEK IT IS — claimed only where walking back from the printed end lands exactly on
+ * the period this app resolved, which is inside the weeks Yahoo listed and nowhere else.
+ */
+{
+  const shipped = cfg.leagues["yahoo:228947"]
+  const league = {
+    ...shipped,
+    scoring_period: deriveScoringPeriod(shipped.league_rules.raw_settings, "2026-09-18").period
+  }
+  const at = day => {
+    const p = resolvePeriod(league, day, "2026-10-31")
+    return { week: leagueWeek(league, p), start: p.periodStart, end: p.periodEnd }
+  }
+  t("the week of the season is read for the last of the playoff weeks",
+    JSON.stringify(at("2026-09-24").week) === JSON.stringify({ number: 26, of: 26 }),
+    JSON.stringify(at("2026-09-24")))
+  t("and for the one before it",
+    JSON.stringify(at("2026-09-18").week) === JSON.stringify({ number: 25, of: 26 }),
+    JSON.stringify(at("2026-09-18")))
+  /* In August the walk-back is six weeks and the answer would be a count of sevens across a
+     season whose first week this app has never seen. Null, and no screen says a word. */
+  t("and nothing at all in a week the page does not anchor",
+    at("2026-08-01").week === null, JSON.stringify(at("2026-08-01")))
+
+  /* THE HORIZON. "The rest of the season" was baseball's; it is his league's where his league
+     says, and the league's date only ever pulls it in. */
+  t("the rest-of-season horizon stops where the league stops scoring",
+    scoringEnd(league, "2026-10-31") === "2026-09-27")
+  t("…and never extends past the games there are data for",
+    scoringEnd(league, "2026-09-20") === "2026-09-20")
+  t("a league that states no end keeps the horizon it had",
+    scoringEnd({ scoring_period: { ends_on: null } }, "2026-10-31") === "2026-10-31" &&
+      scoringEnd(null, "2026-10-31") === "2026-10-31")
 }
 
 // --- the public seed carries nobody's league ---------------------------------

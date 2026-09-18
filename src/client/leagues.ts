@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import { stored, storageFor } from "./stores.ts"
 import { Config, League } from "../schema.ts"
+import { deriveScoringPeriod } from "../import.ts"
 import { ApiError } from "./api.ts"
 import { lineupStore, type StoredLineup } from "./lineup.ts"
 import { pool, type StoredPool } from "./pool.ts"
@@ -56,6 +57,46 @@ const storage = (): Storage => storageFor("your leagues", StoreError)
  * error with the cause removed is an error nobody can report; what goes is the key, the
  * word JSON and the file extension.
  */
+/**
+ * WHAT A LEAGUE STORED BEFORE TODAY IS STILL MISSING, filled in from what it already carries.
+ *
+ * Yahoo prints the day a league stops scoring inside its Playoffs row, and every league read
+ * before 2026-09-18 has that row stored verbatim and the date nowhere — so the board went on
+ * ranking past the end of his season until he happened to read his league again. He should not
+ * have to: the sentence is in his browser, unparsed.
+ *
+ * Derived on read rather than written back, because a migration that rewrites storage can fail
+ * halfway and a derivation cannot. It costs one regex per league per read. A league whose row
+ * says nothing this understands is left exactly as it is.
+ */
+const upgrade = (config: Config): Config => {
+	let touched = false
+	const leagues: Record<string, League> = {}
+	for (const [key, league] of Object.entries(config.leagues)) {
+		const rows = (league.league_rules as { raw_settings?: Record<string, string> } | undefined)
+			?.raw_settings
+		const period = league.scoring_period
+		if (!rows || !period || period.kind === null || period.ends_on !== undefined) {
+			leagues[key] = league
+			continue
+		}
+		const { period: derived } = deriveScoringPeriod(rows)
+		if (derived.ends_on === null && derived.week === null) {
+			leagues[key] = league
+			continue
+		}
+		touched = true
+		/* Only the two new fields. Everything else on a stored period was decided when it was
+		   read, possibly by a different route, and re-deriving it here would silently replace a
+		   read with a guess. */
+		leagues[key] = {
+			...league,
+			scoring_period: { ...period, ends_on: derived.ends_on, week: derived.week }
+		}
+	}
+	return touched ? { ...config, leagues } : config
+}
+
 const parse = (raw: string, source: string): Config => {
 	let parsed: unknown
 	try {
@@ -66,7 +107,7 @@ const parse = (raw: string, source: string): Config => {
 	const out = Config(parsed)
 	if (out instanceof type.errors)
 		throw new StoreError(`${source} is not in a shape this page can read:\n${out}`)
-	return out
+	return upgrade(out)
 }
 
 /**

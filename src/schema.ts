@@ -82,6 +82,28 @@ export const ScoringPeriod = type({
 	 *  current period is actionable. `period` means the lineup is locked for the
 	 *  period, so the next one is what a streaming decision is really about. */
 	lineup_lock: "'daily' | 'period' | null",
+	/**
+	 * THE LAST DAY THIS LEAGUE SCORES, as an ISO date, where its own page says so.
+	 *
+	 * Yahoo prints it inside the Playoffs row — "6 teams - Week 24, 25 and 26 (ends Sunday,
+	 * Sep 27)" — and the app read that row only for the weekday, to work out which day a
+	 * period opens on. So every screen that ranks "the rest of the season" ranked past the
+	 * end of the reader's own season: on 2026-09-18 his league stops scoring in nine days and
+	 * the Stash board was holding men for October.
+	 *
+	 * Optional and nullable, so a league stored before this reads exactly as it did.
+	 */
+	"ends_on?": "string | null",
+	/**
+	 * WHICH OF ITS OWN NUMBERED WEEKS THIS IS, where that is checkable.
+	 *
+	 * Yahoo numbers weeks and names which of them are the playoffs, so the last listed week
+	 * plus the end date fix the whole grid by subtraction. Claimed ONLY where walking back
+	 * from the stated end lands exactly on the resolved period's first day — inside the
+	 * listed playoff weeks, that is one or two subtractions from a printed anchor; everywhere
+	 * else it is null and no screen says a word.
+	 */
+	"week?": type({ number: "number | null", of: "number | null" }).or("null"),
 	/** Where this came from, quoted, so a wrong value can be traced to its source
 	 *  rather than argued about. */
 	source: "string | null"

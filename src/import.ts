@@ -596,7 +596,12 @@ export const deriveEspnPeriod = (
  * it in a test without a network call: those are the strings Yahoo actually printed,
  * and a fixture written here would only prove the fixture matches the parser.
  */
-export const deriveScoringPeriod = (settings: Record<string, string>): DerivedPeriod => {
+export const deriveScoringPeriod = (
+	settings: Record<string, string>,
+	/** Today, for resolving the year Yahoo does not print beside "ends Sunday, Sep 27".
+	 *  Defaulted so every caller that had one argument still has one. */
+	today: string = new Date().toISOString().slice(0, 10)
+): DerivedPeriod => {
 	const needsReview: string[] = []
 	// Each entry names what it established as well as quoting itself, so a value that
 	// turns out wrong can be traced to the line that produced it.
@@ -672,6 +677,72 @@ export const deriveScoringPeriod = (settings: Record<string, string>): DerivedPe
 		)
 	}
 
+	/*
+	   THE DAY THE LEAGUE STOPS SCORING, off the row this function already reads.
+	
+	   "6 teams - Week 24, 25 and 26 (ends Sunday, Sep 27)" was read for one thing: the weekday,
+	   so the day a period OPENS could be worked out. The date beside it was thrown away — and
+	   with it the only statement on any page of when the reader's season ends. Every screen
+	   that ranks "the rest of the season" therefore ranked past it: on 2026-09-18 this league
+	   stops scoring in nine days and the Stash board was holding men for October.
+	
+	   YAHOO DOES NOT PRINT THE YEAR, so it is inferred and then CHECKED: of this year and last,
+	   take the first whose date falls on the weekday Yahoo printed and lands within about a
+	   year of today. Sep 27 is a Sunday in 2026 and a Monday in 2027, so a page read in January
+	   resolves to the season just gone rather than to a date nobody stated — and a month name
+	   Yahoo restyles resolves to nothing at all, which is the honest answer.
+	*/
+	const MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split(" ")
+	const endsOn = (() => {
+		const m = playoffs?.match(
+			/\bends\s+(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s*,\s*([A-Za-z]{3,9})\.?\s+(\d{1,2})\b/i
+		)
+		if (!m) return null
+		const month = MONTHS.indexOf(m[2]!.slice(0, 3).toLowerCase())
+		const day = Number(m[3])
+		if (month < 0 || !(day >= 1 && day <= 31)) return null
+		const wanted = WEEKDAY_NAMES.indexOf(m[1]!.toLowerCase())
+		const thisYear = Number(today.slice(0, 4))
+		for (const year of [thisYear, thisYear - 1]) {
+			const at = Date.UTC(year, month, day)
+			if (new Date(at).getUTCDay() !== wanted) continue
+			/* Within about a year of today, in either direction: a settings page read in the
+			   off-season is about the season just gone, and one read mid-season is about this
+			   one. Anything further away is a parse nobody should act on. */
+			if (Math.abs(at - Date.parse(`${today}T00:00:00Z`)) > 370 * 86_400_000) continue
+			return new Date(at).toISOString().slice(0, 10)
+		}
+		return null
+	})()
+	if (playoffs && /\bends\b/i.test(playoffs) && !endsOn)
+		needsReview.push(
+			`"Playoffs" is "${playoffs}", and the date it ends on could not be read, so nothing ` +
+				`here knows when your league stops scoring.`
+		)
+
+	/*
+	   AND WHICH WEEK IS WHICH. The row numbers the league's own weeks, so the last listed one
+	   plus the date it ends fix the whole grid by subtraction. Required to be ascending and
+	   consecutive: "Week 24 and 26" is a row this has never seen and is not one to guess at.
+	   The team count in front of the weeks is dropped before any digit is read, which is why
+	   "6 teams" never becomes week 6.
+	*/
+	const weekNumbers = (() => {
+		if (!playoffs || days !== 7) return null
+		const at = playoffs.search(/\bWeek\b/i)
+		if (at < 0) return null
+		const found = (playoffs.slice(at).split("(")[0]!.match(/\d+/g) ?? []).map(Number)
+		if (!found.length) return null
+		for (let i = 1; i < found.length; i++) if (found[i] !== found[i - 1]! + 1) return null
+		return found
+	})()
+	const week =
+		endsOn && weekNumbers?.length ? { number: null as number | null, of: weekNumbers.at(-1)! } : null
+	if (endsOn)
+		source.push(
+			`Playoffs "${playoffs}" names ${weekNumbers?.length ? `week ${weekNumbers.at(-1)} as the last of them and ` : ""}${endsOn} as the last day this league scores`
+		)
+
 	return {
 		period: {
 			kind,
@@ -680,6 +751,8 @@ export const deriveScoringPeriod = (settings: Record<string, string>): DerivedPe
 			// Yahoo's periods fall on a fixed weekday, so there is nothing to pin.
 			anchor: null,
 			lineup_lock: lineupLock,
+			ends_on: endsOn,
+			week,
 			source:
 				source.length || lockSource ?
 					`league settings: ${[...source, ...(lockSource ? [lockSource] : [])].join("; ")}`

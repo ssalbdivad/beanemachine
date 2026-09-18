@@ -3,7 +3,7 @@ import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { isReserveSlot, ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
-import { resolvePeriod, windowFrom } from "../engine/period.ts"
+import { resolvePeriod, scoringEnd, windowFrom } from "../engine/period.ts"
 import { scoreStats, tableFor } from "../engine/points.ts"
 import {
 	activeSlots, freezeShut, isBench, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
@@ -1013,7 +1013,10 @@ export const Decide = ({
 			return new Set<string>()
 		const h = hydrate(snapshot)
 		const today = localDate()
-		const w = windowFrom(h.slate ?? [], today, h.seasonEnd)
+		/* Capped at the last day his league scores, where its own page says one — see
+		   `scoringEnd`. Nothing to rank past it: those games happen and his league does not
+		   pay for them. */
+		const w = windowFrom(h.slate ?? [], today, scoringEnd(league, h.seasonEnd))
 		if (!w.games.size) return new Set<string>()
 		const rows = rateAll({
 			players: h.players, league, available: wireTest, availablePositions: wirePositions ?? undefined,

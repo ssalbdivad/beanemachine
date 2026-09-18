@@ -6,7 +6,7 @@ import {
 	type OwnershipCut, type Ranked
 } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
-import { resolvePeriod, windowFrom, withinDays } from "../engine/period.ts"
+import { resolvePeriod, scoringEnd, windowFrom, withinDays } from "../engine/period.ts"
 import { localDate } from "../data/today.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { normalizeName } from "../data/names.ts"
@@ -569,7 +569,11 @@ export const useBoard = (
 			new Date(Date.parse(d) + n * 86400_000).toISOString().slice(0, 10)
 		return {
 			fortnight: windowFrom(slate, today, days(today, 14)),
-			rest: windowFrom(slate, today, seasonEnd),
+			/* THE END OF HIS LEAGUE'S SEASON, WHERE IT STATES ONE. Yahoo prints it in the
+			   Playoffs row; "the rest of the season" was the rest of BASEBALL's, so a Stash
+			   board held men for games his league will not score — nine days past the end, on
+			   the shipped league. `scoringEnd` only ever pulls the horizon in. */
+			rest: windowFrom(slate, today, scoringEnd(league, seasonEnd)),
 			/**
 			 * The dates those two were built from, RETURNED rather than recomputed by
 			 * whoever wants to name them.
@@ -589,7 +593,7 @@ export const useBoard = (
 			 */
 			span: {
 				fortnight: { start: today, end: days(today, 14) },
-				rest: { start: today, end: seasonEnd }
+				rest: { start: today, end: scoringEnd(league, seasonEnd) }
 			}
 		}
 	}, [snapshot])

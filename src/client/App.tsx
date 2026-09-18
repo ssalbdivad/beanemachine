@@ -2026,10 +2026,26 @@ const Status = ({
 			    understating its own staleness next to the number that contradicts it.
 			    `freshness` calls anything past thirty-six hours stale, so the smallest true
 			    version of this is still one day. */}
+			{/*
+			  AND THE CLAUSE IS THE FIRST THING A PHONE LOSES, so it is the first thing hidden
+			  there rather than the first thing cut in half.
+			
+			  This row scrolls sideways at phone width by design — wrapping it was tried and
+			  rejected — and the age chip is the last thing in it. Measured on the published
+			  build at 390px: the chip runs to 511px in a 346px row, so what a reader sees is
+			  "player data 10d ago — 9 days of games si", and with a league in front of it the
+			  chip starts off screen entirely. A sentence cut mid-word is worse than a sentence
+			  left out: the number he has to have is the age, and the clause is the elaboration.
+			
+			  Hidden by CSS rather than dropped from the DOM, so it is still read out on a
+			  screen reader and still there the moment the row has room for it.
+			*/}
 			<span className={data.className}>
 				player data <b>{data.value}</b>
 				{age.stale && !snapshotError && snapshot ?
-					` — ${age.days === 1 ? "a day" : `${age.days} days`} of games since`
+					<span className="chip-aside">
+						{` — ${age.days === 1 ? "a day" : `${age.days} days`} of games since`}
+					</span>
 				:	""}
 			</span>
 			<WireChip

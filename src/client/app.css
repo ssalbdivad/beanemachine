@@ -1146,6 +1146,13 @@ kbd{
   }
   .wrap>.chips::-webkit-scrollbar{display:none}
   .wrap>.chips>*{flex:none}
+  /* The elaboration on a chip, at the width where the row is already scrolling: see the note
+     in App.tsx. `clip` rather than `display:none` keeps it in the accessibility tree, so a
+     screen reader still reads the whole sentence while a thumb sees the part that matters. */
+  .chip-aside{
+    position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+    overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0
+  }
 }
 
 /* Billy's pick as a strip: robot, name, number, and whether you can have him, on one

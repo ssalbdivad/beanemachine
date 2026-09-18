@@ -2497,6 +2497,44 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
 
 /*
  * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE AGE OF THE DATA FITS ON A PHONE.
+ *
+ * The chip row scrolls sideways at phone width by design, and the capture's age is the last
+ * chip in it. Measured before this: at 390px the chip ran to 511px in a 346px row, so a
+ * reader saw "player data 10d ago — 9 days of games si" — and with a league chip in front of
+ * it, the age started off screen entirely. The number he has to have is the age; the clause
+ * after it is elaboration, and a sentence cut mid-word is worse than one left out.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const ph = await b.newPage({ viewport: { width: 390, height: 844 } })
+  await ph.goto(BASE, { waitUntil: "domcontentloaded" })
+  await ph.waitForSelector("nav button", { timeout: 30000 })
+  await ph.waitForTimeout(2500)
+  const row = await ph.$eval(".wrap > .chips", e => {
+    const r = e.getBoundingClientRect()
+    return { width: Math.round(r.width), scroll: Math.round(e.scrollWidth) }
+  })
+  t("the chips fit the phone rather than running off it",
+    row.scroll <= row.width + 2, JSON.stringify(row))
+  const chip = await ph.$$eval(".wrap > .chips > *", els =>
+    els.map(e => {
+      const r = e.getBoundingClientRect()
+      return { text: (e.innerText || "").replace(/\s+/g, " ").trim(), right: Math.round(r.right) }
+    })
+  )
+  const age = chip.find(c => /player data/i.test(c.text))
+  t("the capture's age is on the screen, not past its right edge",
+    !!age && age.right <= row.width + 24, JSON.stringify(chip))
+  /* Hidden by clipping rather than removed, so a screen reader still reads the whole
+     sentence — the elaboration is lost to the eye, not to the tree. */
+  t("…and the clause is still in the page for a reader who cannot see the row",
+    !!age && /games since/.test(age.text), JSON.stringify(age))
+  await ph.close()
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
  * "ADD YOUR PLAYERS" OPENS THE THING THAT ADDS PLAYERS.
  *
  * It is the primary call to action on the first screen a stranger sees, and it navigated to

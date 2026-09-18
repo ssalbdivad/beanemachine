@@ -1556,10 +1556,26 @@ const Line = ({
 		   * than left standing. The claim it was making holds and is stronger with the
 		   * league's own cut in it.
 		   */}
+		{/*
+		   THE TWO NUMBERS SAY WHAT THEY ARE, to a reader who cannot see the column they are in.
+		
+		   `LineLegend` explains them once above the list, which is the right answer for a
+		   reader who can see both at once and no answer at all for one hearing a row read out:
+		   "Aaron Judge, OF, NYY, 12.3, 45.6". The visible text is unchanged — a column of
+		   sentences would be a worse screen for everybody — and the label carries the same
+		   words the legend uses.
+		*/}
 		{r.rateable ?
 			<>
-				<span className={`r bs${r.bscore < 0 ? " neg" : ""}`}>{r.bscore}</span>
-				<span className="r proj">{pts(r.points)}</span>
+				<span
+					className={`r bs${r.bscore < 0 ? " neg" : ""}`}
+					aria-label={`${r.bscore} points above what would be left at his spot`}
+				>
+					{r.bscore}
+				</span>
+				<span className="r proj" aria-label={`${pts(r.points)} projected points`}>
+					{pts(r.points)}
+				</span>
 			</>
 		:	<span className="r none">no projection</span>
 		}

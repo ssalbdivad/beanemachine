@@ -1692,6 +1692,22 @@ main#main:focus{outline:none}
    text selection and is not hidden from a screen reader. */
 .step-address { font-family: var(--mono); user-select: all; color: var(--ink) }
 .connect-note { margin: 0 0 var(--sp-3); color: var(--muted); font-size: var(--fs-2) }
+/* Off screen and still in the accessibility tree — `display:none` and `visibility:hidden`
+   both take an element OUT of that tree, which would leave a live region that announces
+   nothing. The clip-rect shape is the one that has worked in every screen reader since the
+   practice started. */
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
 /* The arrow and the words it points at, on one line, arrow first — its head is at the
    bottom right, so an arrow drawn after the words ends in empty space. Measured at 390px:
    the head landed 40px clear of the facsimile before this. */

@@ -1462,6 +1462,83 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
   await phone.close()
 }
 
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * A CONTROL THAT DESTROYS PART OF THE TEAM SAYS WHICH MAN, AND SAYS SO AFTERWARDS.
+ *
+ * Every Remove button on the roster fold had the same accessible name — "Remove" — because
+ * its only name was its own text and the player's name sat in a sibling element associated
+ * by nothing. A reader on a screen reader heard "Remove, button" once per player, pressed one
+ * at random, and the app said nothing at all: no toast, no live region, and focus dropped to
+ * the document body with the row that had it.
+ *
+ * The scoring editor on the same screen has named its × buttons correctly for months. This
+ * was the one list without it.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	/* Seeded the same way the lineup block above seeds one: this screen's roster fold only
+	   exists once the browser holds a team, and the eleven keys are real men in the committed
+	   capture. */
+	const TEAM = [
+		"665489:hitting", "660271:hitting", "545361:hitting", "608369:hitting", "571448:hitting",
+		"547180:hitting", "656941:hitting", "676475:hitting", "695505:pitching", "677952:pitching",
+		"801139:pitching"
+	]
+	const page = await browser.newPage({ viewport: { width: 1280, height: 1100 } })
+	page.on("dialog", d => d.accept())
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+	const seededTeam = await page.evaluate(team => {
+		const c = JSON.parse(localStorage.getItem("beanemachine:config") ?? "{}")
+		const key = Object.keys(c.leagues ?? {})[0]
+		if (!key) return null
+		localStorage.setItem("beanemachine:roster", JSON.stringify({ [key]: team }))
+		return key
+	}, TEAM)
+	t("there is a league to seed a team into at all", !!seededTeam, "no league in this browser")
+	await page.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await page.waitForSelector(".views button", { timeout: 30000 })
+	await toScreen(page, SCREEN.setup)
+	await page.waitForSelector(".trade-owned-fold summary", { timeout: 30000 })
+	await page.click(".trade-owned-fold summary")
+	await page.waitForTimeout(400)
+	const named = await page.$$eval(".trade-owned-fold .trade-line", rows =>
+		rows.slice(0, 6).map(row => {
+			const b = row.querySelector("button.act")
+			const who = row.querySelector(".who b")?.textContent?.trim() ?? ""
+			return { label: b?.getAttribute("aria-label") ?? b?.textContent?.trim() ?? "", who }
+		})
+	)
+	t("there is a roster to remove from", named.length > 0, JSON.stringify(named).slice(0, 120))
+	t("every Remove button names the man it removes",
+		named.every(x => x.who && x.label === `Remove ${x.who}`), JSON.stringify(named).slice(0, 300))
+	t("…so no two of them share a name",
+		new Set(named.map(x => x.label)).size === named.length, JSON.stringify(named.map(x => x.label)))
+
+	/* THE LIVE REGION IS MOUNTED BEFORE IT HAS ANYTHING TO SAY. A region inserted at the same
+	   moment it gets its text is not reliably announced — a screen reader watches a region for
+	   CHANGES, and one that did not exist a moment ago has nothing to change from. */
+	const region = await page.$$eval('[role="status"][aria-live]', els =>
+		els.map(e => ({ text: e.textContent?.trim() ?? "", hidden: e.getAttribute("aria-hidden") }))
+	)
+	t("the app has a live region standing ready, not conjured with its message",
+		region.length === 1 && region[0].text === "" && region[0].hidden === null,
+		JSON.stringify(region))
+
+	const first = named[0]
+	await page.click(`.trade-owned-fold button.act[aria-label="Remove ${first.who}"]`)
+	await page.waitForTimeout(600)
+	const said = await page.$eval('[role="status"][aria-live]', e => e.textContent?.trim() ?? "")
+	t("and removing a man says which man, where a screen reader will hear it",
+		said === `${first.who} removed from your team.`, said)
+	t("…and he is gone from the list",
+		!(await page.$(`.trade-owned-fold button.act[aria-label="Remove ${first.who}"]`)), first.who)
+	await page.close()
+}
+
 await browser.close()
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

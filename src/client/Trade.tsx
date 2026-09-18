@@ -98,11 +98,22 @@ export interface TradeProps {
 	leagueKey: string | null
 	/** Snapshot load failure, passed straight through the way `Board` takes it. */
 	error: string | null
+	/**
+	 * SAY WHAT JUST HAPPENED, for the reader who cannot see the row vanish.
+	 *
+	 * Removing a player from this screen changed a store and said nothing: no toast, no live
+	 * region, and focus dropped to the document body because the button that had it was
+	 * unmounted with its row. On a screen reader that is a destructive action with no
+	 * confirmation, no name on the control, and no account of itself afterwards.
+	 *
+	 * Optional so the component still renders in a test harness that passes nothing.
+	 */
+	say?: (message: string, bad?: boolean) => void
 	/** Takes the reader to the card that actually answers "what should I add" — this
 	 *  page used to answer it too, worse, and the two could disagree. */
 }
 
-export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
+export const Trade = ({ snapshot, league, leagueKey, error, say }: TradeProps) => {
 	/* The browser reader, when there is one. See src/client/read-yahoo.ts — the same two
 	   asks the setup sheet makes, so a league read from this screen and a league read from
 	   that one cannot come out different. */
@@ -1167,6 +1178,10 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 								onAction={() => {
 									persist(() => store.add(leagueKey, rosterKey(r.player)))
 									setOwnQuery("")
+									/* Said as well as shown: the list this row is in disappears when the
+									   query is cleared, so a reader who cannot see the roster grow has
+									   nothing at all to go on otherwise. */
+									say?.(`${r.player.name} added to your team.`)
 								}}
 							/>
 						))}
@@ -1208,7 +1223,14 @@ export const Trade = ({ snapshot, league, leagueKey, error }: TradeProps) => {
 										r={r}
 										className="trade-own"
 										action="Remove"
-										onAction={() => persist(() => store.remove(leagueKey, rosterKey(r.player)))}
+										onAction={() => {
+											persist(() => store.remove(leagueKey, rosterKey(r.player)))
+											/* WHICH MAN WENT. The row vanishes, which is the whole of the
+											   feedback for a reader who can see it and none at all for a
+											   reader who cannot — and this control destroys part of the
+											   team every other screen is priced against. */
+											say?.(`${r.player.name} removed from your team.`)
+										}}
 									/>
 								))}
 						</details>
@@ -1524,7 +1546,25 @@ const Line = ({
 			</>
 		:	<span className="r none">no projection</span>
 		}
-		<button type="button" className="chip-btn act" onClick={onAction}>
+		{/*
+		   THE BUTTON SAYS WHICH MAN IT IS ABOUT, and it did not.
+		
+		   Its only accessible name was its own text — "Remove", or "Add" in the search
+		   results — so a reader on a screen reader tabbing a roster heard "Remove, button"
+		   once per player, with the name in a sibling span associated by nothing. He pressed
+		   one at random and a player left his team. The scoring editor on the same screen has
+		   done this correctly for months (`aria-label={`Remove ${code}`}`), and so has the
+		   deal builder two hundred lines down; this was the one list without it.
+		
+		   The visible text stays a single word, because a column of full sentences is a worse
+		   screen for everybody else.
+		*/}
+		<button
+			type="button"
+			className="chip-btn act"
+			aria-label={`${action} ${r.player.name}`}
+			onClick={onAction}
+		>
 			{action}
 		</button>
 	</div>

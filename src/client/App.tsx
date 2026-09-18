@@ -1191,6 +1191,7 @@ export const App = () => {
 							league={league ?? null}
 							leagueKey={key}
 							error={snapshotError}
+							say={show}
 						/>
 					</div>
 					{league && key ?
@@ -1514,7 +1515,28 @@ export const App = () => {
 			*/}
 			<Colophon own={!!league && league.provenance.verified} />
 
-			{toast && <div className={`toast on${toast.bad ? " bad" : ""}`} role="status">{toast.message}</div>}
+			{/*
+			  THE LIVE REGION IS ALWAYS THERE, and it used to arrive with its own message.
+			
+			  A `role="status"` element that is inserted into the document at the same moment it
+			  gets its text is not reliably announced: a screen reader watches a live region for
+			  CHANGES, and a region that did not exist a moment ago has nothing to change from.
+			  This was the app's only live region, so every toast it has ever shown — a league
+			  saved, a player removed, a read that failed — was a message announced to nobody.
+			
+			  Two elements now: a permanently mounted region that holds the words, and the
+			  visible toast, which is still conditional because a bubble on screen with nothing
+			  in it is a bubble on screen. `aria-hidden` on the visible one so the announcement
+			  is made once rather than twice.
+			*/}
+			<div className="visually-hidden" role="status" aria-live="polite">
+				{toast?.message ?? ""}
+			</div>
+			{toast && (
+				<div className={`toast on${toast.bad ? " bad" : ""}`} aria-hidden="true">
+					{toast.message}
+				</div>
+			)}
 		</div>
 	)
 }

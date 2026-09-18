@@ -406,6 +406,17 @@ const slotsAsked = (want: string[] | undefined): string[] => {
  * Both are per-tab and per-page-load: not stored, not shared, gone when the tab is closed.
  * A fact about what this script is doing right now is the only thing it is allowed to
  * remember — see PRIVACY.md, where that is a promise rather than an implementation note.
+ *
+ * WHICH MEANS THE CEILING IS PER TAB, and a reader with three Yahoo tabs open has three
+ * ceilings. That is a real limit on what this can promise and it is the right trade: the
+ * alternative is a shared counter, which means either storage — a thing this add-on does not
+ * have and says it does not have — or a service worker that the browser restarts whenever it
+ * feels like it, taking the count with it. Neither is worth a promise they cannot keep.
+ *
+ * It still bounds the failure it was written for: a script injected into the app's own page
+ * can only reach the tab the ROUTER picks for it, which is one tab per ask (`pickTab` in
+ * background.ts), so driving three tabs at once means three real Yahoo pages the reader has
+ * open on three different leagues.
  */
 let reading: null | "league" | "pool" = null
 /**

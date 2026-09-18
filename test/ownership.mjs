@@ -725,10 +725,32 @@ t("and a league that seats nobody there is not told he is eligible there",
     honest.pool.players.length === 225 && !honest.notes.some(n => /same list/.test(n)),
     `${honest.pool.players.length} men, notes ${JSON.stringify(honest.notes)}`)
 
-  /* THE COINCIDENCE THAT IS NOT A BUG. In a deep league a position can genuinely have three
-     free agents who are the same three men as another position's — two catchers who also
-     qualify at first base, say. Refusing that would refuse a true answer, so the identical-set
-     check has a floor of ten rows and this stays a complete read. */
+  /*
+     ONE ROW DIFFERENT IS THE SAME FAILURE.
+     
+     The check compared the two id sets for EQUALITY, which a single differing row defeats —
+     and a differing row is exactly what an unfiltered page looks like when Yahoo's own
+     ordering shifts between two requests a quarter-second apart. Twenty-four of twenty-five
+     shared is not a coincidence.
+  */
+  const drifted = readGrabs(
+    [
+      grab("C", page(sameRows)),
+      grab("1B", page([...sameRows.slice(0, 24), row(5999, "One Different", "1B")]))
+    ],
+    snapshot
+  )
+  t("two pages that differ by one row out of twenty-five are still the same page",
+    drifted.pool.positionsRead.length === 1, JSON.stringify(drifted.pool.positionsRead))
+
+  /* THE COINCIDENCE THAT IS NOT A BUG. In a deep league a position can genuinely have a
+     dozen free agents who are the same dozen as another position's — catchers who also
+     qualify at first base is an ordinary thing. The floor is twenty of twenty-five rather
+     than the ten it was written with, which was chosen against a three-man example. */
+  const dozen = Array.from({ length: 12 }, (_, i) => row(7100 + i, `Both Ways ${i}`, "C,1B"))
+  const shared = readGrabs([grab("C", page(dozen)), grab("1B", page(dozen))], snapshot)
+  t("two positions that genuinely share a dozen free agents are both read",
+    shared.pool.positionsRead.length === 2, JSON.stringify(shared.pool.positionsRead))
   const few = [row(7001, "Both Ways", "C,1B"), row(7002, "Also Both", "C,1B"), row(7003, "Third", "C,1B")]
   const deep = readGrabs(
     [grab("C", page(few)), grab("1B", page(few))],

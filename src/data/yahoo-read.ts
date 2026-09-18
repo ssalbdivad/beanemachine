@@ -395,7 +395,7 @@ export const readGrabs = (
 		   arrived on, and throwing them away would turn a mislabelled read into an empty one.
 		   What is refused is the CLAIM that the position was read.
 		*/
-		const idsPerPosition = new Map<string, string>()
+		const idsPerPosition = new Map<string, Set<string>>()
 		/* The two checks are two different sentences. "Yahoo sent the same list for 1B as for
 		   another position" is a statement about two pages and is false of a page that was
 		   refused for carrying the wrong men; saying it anyway would send a reader looking for
@@ -406,14 +406,33 @@ export const readGrabs = (
 			const got = parsePage(g.html!)
 			const pos = posOf(g.url)
 			if (!got.length) continue
-			const ids = got.map(p => p.yahooId).sort().join(",")
+			const ids = new Set(got.map(p => p.yahooId))
 			let honoured = true
 			if (pos) {
-				for (const [other, otherIds] of idsPerPosition)
-					if (other !== pos && otherIds === ids && got.length >= 10) {
+				for (const [other, otherIds] of idsPerPosition) {
+					if (other === pos) continue
+					/*
+					   NEARLY THE SAME LIST, not exactly the same list.
+					
+					   This compared the two id sets for equality, which a single differing row
+					   defeats — and a differing row is what an unfiltered page LOOKS like when
+					   Yahoo's own ordering has shifted between two requests a quarter-second
+					   apart. Nine pages that are 24-of-25 identical are the same failure as nine
+					   that are 25-of-25, and only the second was caught.
+					
+					   The floor is twenty rather than ten. Ten was chosen against a three-man
+					   example and is too low for the coincidence it is meant to allow: in a deep
+					   league two positions can genuinely share a dozen free agents — a page of
+					   catchers who also qualify at first base is an ordinary thing — while twenty
+					   of twenty-five shared, at two different positions, is not.
+					*/
+					const shared = [...otherIds].filter(id => ids.has(id)).length
+					const smaller = Math.min(otherIds.size, ids.size)
+					if (smaller >= 20 && shared >= smaller * 0.9) {
 						honoured = false
 						if (!duplicated.includes(pos)) duplicated.push(pos)
 					}
+				}
 				const named = got.filter(p => p.positions.length)
 				if (honoured && pos !== "Util" && named.length >= got.length / 2) {
 					const ofPos = named.filter(p => p.positions.includes(pos)).length

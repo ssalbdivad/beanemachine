@@ -85,11 +85,13 @@ export interface ExpectedOf {
 	 * and `readLeagueHere` writes it under the screen's key: a rival league's nine men land
 	 * in this league's roster store with nothing anywhere saying so.
 	 *
-	 * NOT YET PASSED BY ANYTHING. src/client/read-yahoo.ts calls `readGrabs(grabs, snapshot)`
-	 * with two arguments, so this check is available and unused; the same mismatch IS caught
-	 * for a sweep, by the router, which refuses a tab whose league is not the one asked for
-	 * (see `pickTab` in extension/src/background.ts). The unguarded hole is a `league` press,
-	 * which names no league at all.
+	 * PASSED BY `readLeagueHere` (src/client/read-yahoo.ts) AND DELIBERATELY NOT BY THE
+	 * ONBOARDING SHEET. On the first route the screen's league is authority, so a tab showing
+	 * another one is a mistake and is refused; on the sheet the tab is what the reader is
+	 * ADOPTING, and checking it against the screen would refuse the thing he pressed the
+	 * button to do. The same mismatch is caught for a sweep by the router, which refuses a tab
+	 * whose league is not the one asked for (see `pickTab` in extension/src/background.ts) —
+	 * the hole this closes is a `league` press, which names no league at all.
 	 */
 	leagueKey?: string
 	/**

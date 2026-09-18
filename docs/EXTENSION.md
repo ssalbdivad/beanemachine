@@ -239,9 +239,20 @@ compromise of that origin includes his Yahoo fantasy pages. It does not include 
 account: the content script's reach is `*.fantasysports.yahoo.com` and nothing wider, and
 mail, photos and finance are not on that host.
 
-The local origins stay in the shipped build on purpose. An add-on that only spoke to the
-hosted copy could not be exercised by the person changing it, which is how a bridge ends
-up shipped broken — and it is exactly how `test/extension.mjs` drives it.
+The local origins are NOT in the shipped build, and this paragraph used to say they were —
+four lines under a paragraph that said the opposite, in the direction that makes the
+add-on sound worse than it is. `appMatches(dev)` (src/data/extension.ts) adds
+`http://127.0.0.1/*` and `http://localhost/*` only when `BM_EXT_DEV=1`, and that build goes
+to `dist-ext/dev`, which is the one `test/extension.mjs` loads. The store build beside it
+speaks to `beanemachine.com` and nothing else.
+
+The same split now covers Yahoo. The content script is injected on
+`https://*.fantasysports.yahoo.com/*` in a shipped build; the plaintext form is added only
+by the dev build, because the test serves a fake Yahoo over http on 127.0.0.1 and points
+the browser's resolver at it. Yahoo itself answers over http with a 200 rather than a
+redirect, so `*://` was a capability rather than a formality: it let the reader run on a
+page a network could have written, on the host whose cookies it then sends with every
+fetch it makes.
 
 ---
 

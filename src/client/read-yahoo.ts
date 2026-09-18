@@ -110,7 +110,7 @@ export const refreshPool = async (
  * ABOUT the seats that were read, it arrived with them, and a fourth store holding one
  * string per league would be a fourth thing to clear, migrate and explain.
  */
-const knownTeamId = (leagueKey: string | null): string | null => {
+export const knownTeamId = (leagueKey: string | null): string | null => {
 	if (!leagueKey) return null
 	try {
 		return lineupStore.of(leagueKey)?.teamId ?? null

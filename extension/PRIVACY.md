@@ -71,9 +71,17 @@ That is the complete list.
 ## What it does not read
 
 It does not read any page outside Yahoo's fantasy site and beanemachine.com. Those are
-the only two places it runs at all: the match patterns in `manifest.json` are
-`*://*.fantasysports.yahoo.com/*` and beanemachine.com plus `localhost`, and a browser
-will not inject it anywhere else. Your mail, your finances, your search history and the
+the only two places it runs at all: the match patterns in the `manifest.json` inside the
+file you installed are `https://*.fantasysports.yahoo.com/*`, `https://beanemachine.com/*`
+and `https://*.beanemachine.com/*` — that is the whole list, and a browser will not inject
+it anywhere else.
+
+This paragraph used to say the list included `localhost`, and a later paragraph of this
+same document said it did not. The later one was right: local addresses are added only by
+a build made for developing the add-on, which is not the build any store distributes. A
+document that promises every sentence can be checked against a line of code cannot leave a
+sentence in it that fails its own check, and the way to check this one is to open
+`manifest.json` in the installed add-on and read the two `matches` lists. Your mail, your finances, your search history and the
 rest of your Yahoo account are on other hosts and are not matched.
 
 It does not read anything on beanemachine.com. The part of it that runs there passes

@@ -10,6 +10,7 @@ import { typingStore, type Box } from "./typing.ts"
 import { Connect, browserOf, takesExtension } from "./Connect.tsx"
 import { extensionHere, useExtension } from "./extension.ts"
 import { readGrabs } from "../data/yahoo-read.ts"
+import { knownTeamId } from "./read-yahoo.ts"
 import { pool as poolStore } from "./pool.ts"
 import { opponentStore } from "./opponent.ts"
 import type { GrabFailure } from "../data/extension.ts"
@@ -274,7 +275,26 @@ export const Onboard = ({
 			setReadFailure(answer.failure ?? null)
 			return
 		}
-		const reading = readGrabs(answer.grabs, snapshot)
+		/*
+		   THE GUARD THE OTHER READ ROUTE HAS, AND THIS ONE DID NOT.
+		
+		   `readLeagueHere` hands `readGrabs` what the app already knows, so a press made from
+		   another manager's roster page — one click from the standings, a page this app parses
+		   perfectly — is refused instead of replacing the reader's own team. This route called
+		   `readGrabs(grabs, snapshot)` with two arguments, so it was refused by nothing, AND it
+		   stored the seats without the team id they came from. The second half is the worse
+		   half: `knownTeamId` then answered null for ever after, so the guard on the OTHER route
+		   could never arm either. A reader whose first read was this sheet was unguarded on
+		   every read he would ever make.
+		
+		   Only the team is checked here, not the league. On the other route the screen's league
+		   is authority and a tab showing a different one is a mistake; on this one the tab IS
+		   what he is adopting — that is what the sheet is for — so a league key from the screen
+		   would refuse the very thing he pressed the button to do.
+		*/
+		const reading = readGrabs(answer.grabs, snapshot, undefined, {
+			teamId: knownTeamId(leagueKey) ?? undefined
+		})
 		if (reading.league && reading.leagueKey) {
 			/* `onCreateLeague` is what the paste route calls, so an extension read lands in
 			   exactly the same place a pasted settings page does, with the same validation
@@ -287,7 +307,15 @@ export const Onboard = ({
 			try {
 				roster.set(key, reading.roster.keys)
 				if (reading.roster.spots.length)
-					lineupStore.set(key, reading.roster.spots, reading.at ?? new Date().toISOString())
+					lineupStore.set(
+						key,
+						reading.roster.spots,
+						reading.at ?? new Date().toISOString(),
+						/* Stored so the NEXT press can be checked against it — see above. Passing
+						   three arguments here is what left every reader who onboarded through
+						   this sheet permanently unguarded. */
+						reading.teamId
+					)
 			} catch (e) {
 				setReadFailure({
 					step: "store",

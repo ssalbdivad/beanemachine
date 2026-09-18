@@ -17,7 +17,12 @@
  *   dist-ext/beanemachine-chrome.zip / -firefox.zip   what a store takes
  */
 import { build } from "vite"
-import { appMatches, YAHOO_MATCHES } from "../src/data/extension.ts"
+import { appMatches } from "../src/data/extension.ts"
+/* The hosts the reader runs on are written from the platform records, not from a constant
+   beside them: a platform that needs a reader and is missing from the manifest is a feature
+   that silently does nothing, and the failure is invisible because the extension installs
+   perfectly and simply never runs anywhere. See `needsReader` in src/data/platforms.ts. */
+import { readerMatches } from "../src/data/platforms.ts"
 import { cp, mkdir, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
@@ -44,6 +49,9 @@ const run = promisify(execFile)
  * store will accept read it, and a dev build beside it, which is the one the browser loads.
  */
 const DEV = process.env.BM_EXT_DEV === "1"
+
+/** Every host a content script reads, from the platform records themselves. */
+const READS = readerMatches(DEV)
 const out = resolve(here, "..", process.env.BM_EXT_OUT ?? "dist-ext")
 
 /**
@@ -81,9 +89,9 @@ const common = {
 	   of src/background.ts. A permission nobody uses is a permission somebody has to
 	   justify, to a store reviewer and to a reader. */
 	permissions: ["tabs"],
-	host_permissions: YAHOO_MATCHES,
+	host_permissions: READS,
 	content_scripts: [
-		{ matches: YAHOO_MATCHES, js: ["yahoo.js"], run_at: "document_idle", all_frames: false },
+		{ matches: READS, js: ["yahoo.js"], run_at: "document_idle", all_frames: false },
 		{ matches: appMatches(DEV), js: ["bridge.js"], run_at: "document_start", all_frames: false }
 	],
 	action: { default_title: "Open beanemachine" },

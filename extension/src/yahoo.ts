@@ -87,6 +87,31 @@ const renderedText = (html: string): string =>
 		.replace(/[ \t]+\n/g, "\n")
 		.replace(/\n{3,}/g, "\n\n")
 
+/**
+ * THE SAME PAGE, WITHOUT ITS SCRIPTS.
+ *
+ * `renderedText` above strips script and style bodies FIRST, for an unrelated reason — a
+ * Yahoo page's inline script contains the string `login.yahoo.com`, which `wallIn` would read
+ * as a sign-in wall on a page the reader is perfectly well signed in to. The MARKUP path had
+ * no such step, and the markup path has a deliberate fail-safe: when `rowsOnly` finds no row
+ * marker it sends the whole page, so that a Yahoo redesign costs bandwidth and never costs a
+ * row.
+ *
+ * Those two facts meet badly. The day Yahoo moves the row marker is the day the entire
+ * players page crosses `postMessage` to the app origin — and a signed-in Yahoo fantasy page's
+ * inline script is not neutral: it carries session-scoped values, the request crumb among
+ * them. Nothing on the app side wants them, `parsePage` reads only `data-ys-playerid` and
+ * `title=` off anchors, and the day it happens is precisely the day nobody notices, because
+ * the parse still works through the fallback.
+ *
+ * So the same strip runs on both paths. It costs one pass over a string that is about to be
+ * cut up anyway, and it cannot remove a row: a row is an anchor, not a script.
+ */
+const withoutScripts = (html: string): string =>
+	html
+		.replace(/<script[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style[\s\S]*?<\/style>/gi, " ")
+
 const grabHere = (): Grab => {
 	const kind = pageKind(location.href)
 	/* HTML for the player table alone. `parsePage` reads `data-ys-playerid` and the row's
@@ -100,7 +125,7 @@ const grabHere = (): Grab => {
 	   in test/extension.mjs, which serves the 25 rows and ~90 KB footer the real page was
 	   measured to have. `rowsOnly` returns null on anything it does not recognise, and then
 	   the whole page goes over exactly as it did before. */
-	const markup = kind === "players" ? document.documentElement.outerHTML : null
+	const markup = kind === "players" ? withoutScripts(document.documentElement.outerHTML) : null
 	return {
 		url: location.href,
 		kind,
@@ -201,7 +226,12 @@ const sweep = async (
 			/* Same-origin, from inside the reader's own signed-in tab, so his cookies go
 			   with it exactly as they would if he clicked the link himself. `credentials`
 			   is spelled out rather than left to the default because the default differs
-			   between the two browsers this has to work in. */
+			   between the two browsers this has to work in.
+
+			   Counted against this tab's per-minute ceiling as it is spent rather than reserved
+			   up front, so a sweep that stops at position four leaves five requests' worth of
+			   room behind it instead of holding them until the window rolls. */
+			spend()
 			const res = await fetch(samePath(url), { credentials: "include" })
 			if (!res.ok)
 				return {
@@ -237,7 +267,12 @@ const sweep = async (
 				url,
 				kind: "players",
 				text: "",
-				html: rowsOnly(html) ?? html,
+				html: (() => {
+					/* Scripts out FIRST, so the `?? page` fail-safe below cannot hand the app a
+					   signed-in page's inline session values — see `withoutScripts`. */
+					const page = withoutScripts(html)
+					return rowsOnly(page) ?? page
+				})(),
 				at: now(),
 				swept: true,
 				/* The whole list this sweep set out to get, on every page of it — see `asked`
@@ -302,10 +337,104 @@ const slotsAsked = (want: string[] | undefined): string[] => {
 	return kept.length ? kept : POSITIONS
 }
 
-/** Whether a sweep is running in THIS tab. Not stored, not shared, and gone with the page —
- *  it is a fact about what this script is doing right now, which is the only thing it is
- *  allowed to remember. See the note where it is set. */
-let sweeping = false
+/**
+ * WHAT THIS TAB IS DOING RIGHT NOW, AND HOW HARD IT HAS BEEN ASKING.
+ *
+ * ── what this used to be ──────────────────────────────────────────────────────────────
+ *
+ * `let sweeping = false`, held over the free-agent sweep alone, because a sweep is nine
+ * requests and two interleaved sweeps are eighteen in the time budgeted for nine. That was
+ * true and it was half the problem. The `league` press had no flag, no spacing and no cap at
+ * all, and it makes network requests too: twenty `{ask:"league"}` posts from a page script
+ * produced FORTY fetches of the reader's signed-in Yahoo in 68 milliseconds, measured against
+ * the real unpacked extension. Nothing in the app does that, but the app is a static site
+ * whose whole threat model is a script injected into a page of it, and the consequence lands
+ * on the reader rather than on this project: it is HIS Yahoo account that gets throttled, and
+ * uninstalling the extension afterwards does not un-throttle it.
+ *
+ * Neither did anything stop sweeps running back to back for ever — three in a row measured at
+ * 27 requests in 6.9 seconds, a sustained four a second, with no refusal and no counter.
+ *
+ * ── what it is now ────────────────────────────────────────────────────────────────────
+ *
+ * Two rules, both about REQUESTS rather than about presses, because requests are what the
+ * other site sees:
+ *
+ *   ONE AT A TIME. Any ask that fetches claims `reading` and gives it back in a `finally`.
+ *   The second press is refused with a sentence rather than queued — queueing makes a reader
+ *   wait twice as long for a list he is about to be handed anyway, and a sentence he can read
+ *   beats a spinner that is secretly two spinners.
+ *
+ *   A CEILING PER MINUTE. `ALLOWANCE` requests in any rolling `WINDOW`, counted as they are
+ *   spent. A sweep is nine and a league press is two or three, so a reader pressing both
+ *   buttons as fast as he can read them never comes near it, and a loop hits it in under a
+ *   second and is told so in words. The number is deliberately close to what a real session
+ *   costs: two full sweeps and a couple of presses in a minute is already more than any
+ *   reader does, and the ceiling is a bound on abuse, not a rationing of use.
+ *
+ * Both are per-tab and per-page-load: not stored, not shared, gone when the tab is closed.
+ * A fact about what this script is doing right now is the only thing it is allowed to
+ * remember — see PRIVACY.md, where that is a promise rather than an implementation note.
+ */
+let reading: null | "league" | "pool" = null
+const WINDOW = 60_000
+/* Five full sweeps in a minute. A reader pressing every button on the screen as fast as he
+   can read them does not come near it — a sweep paces itself at a quarter-second a position
+   and takes about three seconds, and there is nothing to press while it runs. A loop reaches
+   it in well under a second and is told, in a sentence, when it may ask again. The number is
+   a bound on abuse rather than a ration: it is set where a reader cannot feel it and a script
+   cannot get past it. */
+const ALLOWANCE = 45
+/** When each request this tab has made was made, oldest first, trimmed to the window. */
+const spent: number[] = []
+const trim = (): void => {
+	const cut = Date.now() - WINDOW
+	while (spent.length && spent[0]! < cut) spent.shift()
+}
+/** Milliseconds until `n` more requests would be within the ceiling, or 0 if they are now. */
+const waitFor = (n: number): number => {
+	trim()
+	if (spent.length + n <= ALLOWANCE) return 0
+	/* The request whose expiry makes room for the nth one. */
+	const need = spent.length + n - ALLOWANCE
+	return Math.max(0, spent[need - 1]! + WINDOW - Date.now())
+}
+/** Called once per request actually made, by the only two places that make them. */
+const spend = (): void => {
+	trim()
+	spent.push(Date.now())
+}
+
+/**
+ * THE TWO REFUSALS THE GATE CAN GIVE, in the reader's words rather than in the gate's.
+ *
+ * He is never told about a mutex or an allowance. He is told that something is already
+ * running, or that this has asked Yahoo a lot in the last minute and should wait — both of
+ * which are true sentences about his league rather than about this file, and both of which
+ * tell him what to do next. The `detail` field is where the machine's account goes; the app
+ * prints it only where it prints everything.
+ */
+const alreadyBusy = (step: "pool" | "league"): { kind: "failed"; failure: GrabFailure } => ({
+	kind: "failed",
+	failure: {
+		step,
+		what:
+			reading === "pool" ?
+				"your free agents are being read right now"
+			:	"your league is being read right now",
+		fix: "Wait for that to finish — it takes a few seconds — and it will be here."
+	}
+})
+
+const askedTooHard = (step: "pool" | "league", ms: number): { kind: "failed"; failure: GrabFailure } => ({
+	kind: "failed",
+	failure: {
+		step,
+		what: `this has asked Yahoo a lot in the last minute, so it is giving your league a rest`,
+		fix: `Try again in about ${Math.max(1, Math.ceil(ms / 1000))} seconds.`,
+		detail: `${spent.length} requests in the last ${WINDOW / 1000}s, which is the ceiling.`
+	}
+})
 
 /**
  * EVERY WAY OUT OF THIS LISTENER ENDS IN A REPLY, INCLUDING THE ONES NOBODY THOUGHT OF.
@@ -411,10 +540,30 @@ chrome.runtime.onMessage.addListener(
 				teamId: teamIdFrom(location.href),
 				sport
 			})
+			/*
+			   THIS PRESS FETCHES, SO IT QUEUES BEHIND THE ONE RULE EVERY FETCHING ASK OBEYS.
+			
+			   It did not, and that was the hole: a `league` ask reached the fetch loop below with
+			   no flag, no spacing and no ceiling, so a loop on the app origin drove the reader's
+			   own signed-in Yahoo as fast as the browser would go. The page in hand is sent back
+			   either way — `here` was read from the DOM and cost nobody a request — so a refusal
+			   here is never an empty answer; it is the same read without the extra pages.
+			*/
+			if (reading) {
+				reply(alreadyBusy("league"))
+				return true
+			}
+			const hold = waitFor(plan.length)
+			if (hold > 0) {
+				reply(askedTooHard("league", hold))
+				return true
+			}
+			reading = "league"
 			/** A page fetched from the reader's own signed-in tab, as the text a browser would
 			 *  have rendered — see `renderedText`. Empty string when Yahoo would not serve it,
 			 *  which the caller treats as "not read" rather than as "empty". */
 			const asText = async (url: string): Promise<string> => {
+				spend()
 				const res = await fetch(samePath(url), { credentials: "include" })
 				if (!res.ok) return ""
 				return renderedText(await res.text())
@@ -448,6 +597,11 @@ chrome.runtime.onMessage.addListener(
 					reply({ kind: "grabs", grabs: [here, ...extra], failure: wall ?? undefined })
 				} catch {
 					reply({ kind: "grabs", grabs: [here] })
+				} finally {
+					/* Given back on every path, including the ones that threw: a gate that is not
+					   released is an extension that has quietly stopped working, which is worse
+					   than the burst it was put there to stop. */
+					reading = null
 				}
 			})()
 			return true
@@ -481,22 +635,32 @@ chrome.runtime.onMessage.addListener(
 			   is about to be given anyway, and a sentence he can read is better than a spinner
 			   that is secretly two spinners.
 			*/
-			if (sweeping) {
-				reply({
-					kind: "failed",
-					failure: {
-						step: "pool",
-						what: "your free agents are being read right now",
-						fix: "Wait for that to finish — it takes a few seconds — and the list will be here."
-					}
-				})
+			if (reading) {
+				reply(alreadyBusy("pool"))
 				return true
 			}
-			sweeping = true
+			/*
+			   AND NOT BACK TO BACK FOR EVER, EITHER.
+			
+			   The flag above blocks OVERLAP, which is exactly what its comment claimed and no
+			   more: three sweeps run in sequence were 27 requests in 6.9 seconds, a sustained
+			   four a second, refused by nothing. The ceiling is what makes a sweep a thing a
+			   reader does and not a thing a loop does. Checked for the WHOLE sweep up front —
+			   nine requests are asked for as nine — because a sweep that stops at position four
+			   is the partial list `poolIsPartial` exists to refuse, and refusing before it starts
+			   costs the reader a sentence instead of a wrong wire.
+			*/
+			const slots = slotsAsked(msg.positions)
+			const hold = waitFor(slots.length)
+			if (hold > 0) {
+				reply(askedTooHard("pool", hold))
+				return true
+			}
+			reading = "pool"
 			void sweep(
 				leagueId,
 				sport,
-				slotsAsked(msg.positions),
+				slots,
 				(say, done, total) => {
 					/* Progress goes to the background rather than back down the reply
 					   channel, which can only be used once. The app renders `say`
@@ -533,7 +697,7 @@ chrome.runtime.onMessage.addListener(
 					})
 				)
 				.finally(() => {
-					sweeping = false
+					reading = null
 				})
 			return true
 		}

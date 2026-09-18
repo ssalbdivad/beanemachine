@@ -1333,9 +1333,22 @@ await walled.close()
 		Number.parseInt(firefox.browser_specific_settings?.gecko?.strict_min_version ?? "0", 10) >= 127,
 		firefox.browser_specific_settings?.gecko?.strict_min_version)
 	for (const [name, m] of [["chrome", chrome], ["firefox", firefox]]) {
-		t(`${name} asks for the Yahoo host and nothing wider`,
-			JSON.stringify(m.host_permissions) === JSON.stringify(["*://*.fantasysports.yahoo.com/*"]),
+		/* THIS USED TO REQUIRE `*://`, WHICH INCLUDES PLAINTEXT http.
+		
+		   Yahoo answers over http with a 200 rather than a redirect, so that was not a
+		   formality: it let the reader be injected into a page a network could have written,
+		   on the host whose cookies the same script then sends with every fetch it makes. The
+		   shipped build is https only; the plaintext form is added by the dev build alone,
+		   which is what serves this suite's fake Yahoo on 127.0.0.1 — see `readerMatches(dev)`
+		   in src/data/platforms.ts. Both builds are asserted, below and here, so the narrowing
+		   cannot be undone by a build flag. */
+		t(`${name} asks for the Yahoo host over https and nothing wider`,
+			JSON.stringify(m.host_permissions) === JSON.stringify(["https://*.fantasysports.yahoo.com/*"]),
 			JSON.stringify(m.host_permissions))
+		t(`${name} does not ask for plaintext Yahoo`,
+			!(m.host_permissions ?? []).some(h => h.startsWith("http://")) &&
+				!(m.content_scripts ?? []).some(c => c.matches.some(x => x.startsWith("http://"))),
+			JSON.stringify(m.host_permissions) + " " + JSON.stringify(m.content_scripts?.map(c => c.matches)))
 		/* A permission nobody uses is a permission somebody has to justify — to a store
 		   reviewer and to a reader reading the install prompt. Nothing is stored, so
 		   `storage` is not asked for. */
@@ -1374,10 +1387,25 @@ await walled.close()
 			dev.content_scripts.some(c => c.matches.includes("https://beanemachine.com/*")),
 		JSON.stringify(dev.content_scripts.map(c => c.matches)))
 
-	const withoutMatches = m => ({ ...m, content_scripts: (m.content_scripts ?? []).map(c => ({ ...c, matches: null })) })
+	/* `host_permissions` is blanked alongside the content-script matches, and it did not used
+	   to be, because the two builds used to ask for the same Yahoo hosts. They no longer do:
+	   the dev build adds the plaintext form so this suite's fake Yahoo on 127.0.0.1 can be
+	   read, and the shipped build is https only. Blanking both is what keeps this assertion
+	   saying what it has always meant — the two builds differ in WHERE they run and in nothing
+	   else — and the lists themselves are asserted above, for both builds, rather than left to
+	   this comparison. */
+	const withoutHosts = m => ({
+		...m,
+		host_permissions: null,
+		content_scripts: (m.content_scripts ?? []).map(c => ({ ...c, matches: null }))
+	})
 	t("and they are otherwise the same manifest, down to the permissions",
-		JSON.stringify(withoutMatches(dev)) === JSON.stringify(withoutMatches(chrome)),
-		JSON.stringify(withoutMatches(dev)) === JSON.stringify(withoutMatches(chrome)) ? "" : "manifests differ beyond the matches")
+		JSON.stringify(withoutHosts(dev)) === JSON.stringify(withoutHosts(chrome)),
+		JSON.stringify(withoutHosts(dev)) === JSON.stringify(withoutHosts(chrome)) ? "" : "manifests differ beyond the matches")
+	t("and the dev build is the ONLY one that reads plaintext Yahoo",
+		dev.host_permissions.includes("http://*.fantasysports.yahoo.com/*") &&
+			!chrome.host_permissions.includes("http://*.fantasysports.yahoo.com/*"),
+		JSON.stringify(dev.host_permissions))
 
 	/* The scripts themselves carry no build flag at all — the router reads its match list
 	   back out of the manifest at runtime rather than being compiled with one — so these
@@ -1512,6 +1540,155 @@ await walled.close()
 
 
 
+
+/* ── HOW HARD A PAGE CAN DRIVE THE READER'S OWN YAHOO SESSION ───────────────────────
+   
+   SECOND-TO-LAST, because it deliberately spends this tab's whole per-minute allowance and
+   the only clean way to give it back is to reload the page — which is what this block does
+   when it is finished, and which is also the honest statement of how the ceiling works: it
+   is per tab and per page load, held in the content script and in nothing else.
+   
+   The hole this closes was measured against the real unpacked extension before it existed:
+   twenty `{ask:"league"}` posts from a page script produced forty fetches of the reader's
+   signed-in Yahoo inside 68 milliseconds. Nothing the app does looks like that. But the app
+   is a static site whose entire threat model is a script injected into a page of it, and the
+   damage lands on the reader rather than on this project — it is HIS account that gets
+   throttled, and uninstalling afterwards does not un-throttle it.
+   
+   What is asserted is the property, not the mechanism: a burst cannot turn into requests,
+   and what comes back instead is a sentence with a number of seconds in it. */
+{
+	/* A tab of its own, opened last so the router routes to it — the same pattern every other
+	   block here uses, and the reason it matters is that the ceiling is per tab. */
+	const gate = await context.newPage()
+	await gate.goto(yahoo, { waitUntil: "domcontentloaded" })
+	await app.waitForTimeout(400)
+	const before = asked.length
+
+	/* Twenty at once, from the page, exactly as a loop in injected script would. */
+	const burst = await app.evaluate(
+		n =>
+			Promise.all(
+				Array.from({ length: n }, (_, i) => {
+					const id = `burst-${i}`
+					return new Promise(resolve => {
+						const on = e => {
+							if (e.source !== window || e.data?.from !== "beanemachine-extension") return
+							if (e.data.id !== id || e.data.kind === "progress") return
+							window.removeEventListener("message", on)
+							resolve(e.data)
+						}
+						window.addEventListener("message", on)
+						window.postMessage({ from: "beanemachine-page", id, ask: "league" }, location.origin)
+						setTimeout(() => resolve({ kind: "timeout" }), 30000)
+					})
+				})
+			),
+		20
+	)
+	await app.waitForTimeout(1200)
+	const made = asked.length - before
+
+	/* One press is two pages. Twenty presses unguarded were forty. The bound asserted is
+	   generous on purpose — it is not trying to pin the exact number of requests a single
+	   press makes, which the descriptor decides, but to say that nineteen of the twenty
+	   never reached Yahoo at all. */
+	t("twenty presses at once do not become twenty presses' worth of requests",
+		made <= 6, `${made} requests to Yahoo from 20 simultaneous presses`)
+	t("and every press that was refused came back with a sentence rather than a silence",
+		burst.every(b => b.kind === "grabs" || (b.kind === "failed" && b.failure?.what)),
+		JSON.stringify(burst.map(b => b.kind)))
+	const refused = burst.filter(b => b.kind === "failed").map(b => b.failure)
+	t("nineteen of the twenty are refused",
+		refused.length >= 19, `${refused.length} refused of 20`)
+	t("…and the refusal says what to do about it, in seconds, with no word about this app",
+		refused.every(f => /wait|try again/i.test(`${f.what} ${f.fix}`)) &&
+			refused.every(f => !/mutex|allowance|ceiling|protocol/i.test(`${f.what} ${f.fix}`)),
+		JSON.stringify(refused[0]))
+
+	/*
+	   A REFUSAL COSTS NOTHING, which is what makes the ceiling usable at all.
+	
+	   The first version of this block assumed the burst above would exhaust the allowance and
+	   that the next honest press would be refused. It is not, and that is the correct
+	   behaviour rather than a weaker one: what is spent is REQUESTS, and nineteen presses that
+	   never reached Yahoo never spent anything. A reader whose page is being driven by a loop
+	   is not thereby locked out of his own board.
+	*/
+	const afterBurst = asked.length
+	const honest = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	t("an honest sweep straight after a refused burst still runs, because a refusal costs nothing",
+		honest.kind === "grabs" && asked.length - afterBurst === 9,
+		`${asked.length - afterBurst} requests, kind ${honest.kind}`)
+
+	/*
+	   AND THE SUSTAINED BOUND, which is the other half of the finding: the old flag stopped
+	   sweeps OVERLAPPING and nothing stopped them running back to back for ever — measured at
+	   27 requests in 6.9 seconds, refused by nothing. Five sweeps is the whole minute's
+	   allowance, so the sixth is the one that must be told to wait. It is asked for all nine
+	   up front, because a sweep that stops at position four is the partial list `poolIsPartial`
+	   exists to refuse, and refusing before it starts costs a sentence instead of a wrong wire.
+	*/
+	for (let i = 0; i < 4; i++) await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	const spentAll = asked.length
+	const denied = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	t("the sixth sweep inside a minute makes no requests at all",
+		asked.length === spentAll, `${asked.length - spentAll} requests`)
+	t("and says the list is not coming yet rather than coming back empty",
+		denied.kind === "failed" && /rest|wait|again/i.test(`${denied.failure?.what} ${denied.failure?.fix}`),
+		JSON.stringify(denied).slice(0, 200))
+
+	/* Given back by a page load, which is the whole lifetime of the thing that holds it. */
+	await gate.reload({ waitUntil: "domcontentloaded" })
+	await app.waitForTimeout(400)
+	const fresh = await askFor("league")
+	t("a reloaded tab is a fresh allowance, because that is all the tab remembers",
+		fresh.kind === "grabs" && fresh.grabs?.length > 0,
+		JSON.stringify({ kind: fresh.kind, grabs: fresh.grabs?.length }))
+	await gate.close()
+}
+
+/* ── WHAT A SIGNED-IN PAGE'S OWN SCRIPTS NEVER GET TO DO ─────────────────────────────
+   
+   The markup path has a deliberate fail-safe: when `rowsOnly` finds no row marker it sends
+   the whole page, so that a Yahoo redesign costs bandwidth and never costs a row. The day
+   that fires is the day the entire players page crosses `postMessage` to the app origin —
+   and a signed-in Yahoo fantasy page's inline script is not neutral. This fixture's head
+   script carries `login.yahoo.com` and a beacon id, which is exactly the shape of the thing
+   nobody wants handed over: session-scoped values in a page that parses fine without them.
+   
+   `parsePage` reads `data-ys-playerid` and `title=` off anchors and has never read a script,
+   so stripping them costs nothing and is asserted on BOTH paths — the swept page and the
+   page the reader is standing on. */
+{
+	const listed = await context.newPage()
+	await listed.goto(
+		`http://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/players?status=A&pos=SP&count=0`,
+		{ waitUntil: "domcontentloaded" }
+	)
+	await app.waitForTimeout(400)
+	const here = await askFor("page")
+	const html = here.grabs?.[0]?.html ?? ""
+	t("the page in hand comes across with its rows",
+		/data-ys-playerid="\d+"/.test(html), html.slice(0, 120))
+	t("and with no script of Yahoo's in it",
+		!/<script/i.test(html) && !html.includes("geo.yahoo.com") && !html.includes("login.yahoo.com"),
+		html.slice(0, 200))
+
+	const swept = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	const pages = (swept.grabs ?? []).filter(g => g.html)
+	t("nine swept pages, and not one of them carries a script either",
+		pages.length === 9 && pages.every(g => !/<script/i.test(g.html) && !g.html.includes("geo.yahoo.com")),
+		`${pages.length} pages, ${pages.filter(g => /<script/i.test(g.html)).length} with script`)
+	/* `parsePage`'s own marker is the id followed by a `title=` — the fixture's rows carry the
+	   id twice, on the anchor and on a note span, and only the anchor is a row. Counting the
+	   marker rather than the attribute is what makes this a statement about ROWS. */
+	const ROWS = /data-ys-playerid="\d+"[^>]*title="/g
+	t("…and every one of them still parses to the rows it was fetched for",
+		pages.every(g => (g.html.match(ROWS) ?? []).length === PAGE_ROWS),
+		JSON.stringify(pages.map(g => (g.html.match(ROWS) ?? []).length)))
+	await listed.close()
+}
 
 /* ── WHEN IT GOES AWAY UNDER AN OPEN PAGE ────────────────────────────────────────────
    LAST, BECAUSE IT DESTROYS THE THING UNDER TEST. `chrome.runtime.reload()` is what the

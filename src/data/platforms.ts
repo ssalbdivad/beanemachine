@@ -147,7 +147,18 @@ export const YAHOO: Platform = {
 	   `access-control-allow-*` header of any kind on any page the importer reads. A web page
 	   is never handed a Yahoo league, however politely it asks. */
 	needsReader: true,
-	matches: ["*://*.fantasysports.yahoo.com/*"],
+	/*
+	   HTTPS ONLY, AND IT USED TO BE `*://`.
+	
+	   Yahoo answers over plaintext http — measured, a 200 rather than a redirect — so `*://`
+	   was not a formality: it let the content script be injected into a page a network could
+	   have written, on a host whose cookies the same script then sends with every fetch it
+	   makes. Nothing in this project ever wanted that page. The one place http is genuinely
+	   needed is the test, which serves a fake Yahoo on 127.0.0.1 and tells the browser to
+	   believe it, and that is what `readerMatches(dev)` is for — the same shape `appMatches`
+	   has always used for the bridge's own origins.
+	*/
+	matches: ["https://*.fantasysports.yahoo.com/*"],
 	owns: url => {
 		try {
 			return YAHOO_HOST.test(new URL(url).hostname)
@@ -219,14 +230,21 @@ export const SLEEPER: Platform = {
 	id: "sleeper",
 	label: "Sleeper",
 	/*
-	 * Sleeper's read API takes no key, no session and no origin: `api.sleeper.app` answers
-	 * any page on the internet, and this repository already reads it — see `src/import.ts`
-	 * and the committed fixtures in test/fixtures/sleeper-*.json.
+	 * THE RIGHT ANSWER FOR THE WRONG REASON, until this comment was corrected.
 	 *
-	 * So a reader adds NOTHING here, and offering one would be asking somebody to install
-	 * software to solve a problem he does not have. The descriptor exists so that the answer
-	 * is written down rather than rediscovered, and so the install walkthrough can be told to
-	 * stay out of his way.
+	 * It said a reader adds nothing here because `api.sleeper.app` answers any page on the
+	 * internet — which is true, re-measured 2026-09-18 with `Origin: https://beanemachine.com`
+	 * on `/v1/state/mlb`, and beside the point. The actual reason is bigger: SLEEPER DOES NOT
+	 * RUN FANTASY BASEBALL. `src/import.ts` refuses every Sleeper URL outright and sets out
+	 * four independent verifications of that, `src/data/rosters.ts` records that the Sleeper
+	 * reader was deleted, and the MLB player payload still carries `fantasy_positions: null`
+	 * on Judge, Ohtani and Skubal.
+	 *
+	 * The distinction matters because the two reasons expire differently. "It is CORS-open"
+	 * stops being a reason the day Sleeper closes it; "there is no baseball to read" stops
+	 * being a reason the day Sleeper launches baseball, and on that day this descriptor needs
+	 * a parser rather than a host permission. A comment that gives the shallower reason sends
+	 * whoever reads it next to solve the wrong problem.
 	 */
 	needsReader: false,
 	matches: [],
@@ -248,8 +266,18 @@ export const PLATFORMS: Platform[] = [YAHOO, SLEEPER]
 export const platformOf = (url: string): Platform | null =>
 	PLATFORMS.find(p => p.owns(url)) ?? null
 
-/** Every match pattern a content script needs, across the platforms that need a reader.
- *  The manifest is written from this, so a platform cannot be added to the app and left out
- *  of the extension. */
-export const readerMatches = (): string[] =>
-	PLATFORMS.filter(p => p.needsReader).flatMap(p => p.matches)
+/**
+ * Every match pattern a content script needs, across the platforms that need a reader.
+ * The manifest is written from this, so a platform cannot be added to the app and left out
+ * of the extension.
+ *
+ * `dev` adds the plaintext form of each pattern and is the ONLY thing that does. The test
+ * serves a fake Yahoo over http on 127.0.0.1 and points the browser's resolver at it, so a
+ * build that spoke https alone could not be exercised by the person changing it — which is
+ * how a reader ends up shipped broken. It is the same bargain `appMatches(dev)` strikes for
+ * the bridge, and it is struck in the same place, so nobody has to remember it twice.
+ */
+export const readerMatches = (dev = false): string[] =>
+	PLATFORMS.filter(p => p.needsReader).flatMap(p =>
+		dev ? [...p.matches, ...p.matches.map(m => m.replace(/^https:/, "http:"))] : p.matches
+	)

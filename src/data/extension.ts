@@ -119,6 +119,19 @@ export const DEV_MATCHES = ["http://127.0.0.1/*", "http://localhost/*"]
 
 export const appMatches = (dev: boolean): string[] => (dev ? [...APP_MATCHES, ...DEV_MATCHES] : [...APP_MATCHES])
 
+/**
+ * ASKING WHICH TABS ARE YAHOO'S — and nothing else.
+ *
+ * This is the pattern the router hands `chrome.tabs.query` to find an open league tab. It is
+ * NOT what the content script is injected into: that list is `readerMatches(dev)` in
+ * src/data/platforms.ts, and it is `https` only in a shipped build, because Yahoo answers
+ * over plaintext http and a page a network could have written is not one this should run on.
+ *
+ * Both schemes stay here on purpose, and the asymmetry is safe in the only direction that
+ * matters: a query is a question, an injection is a capability, and the browser answers the
+ * question only for tabs the extension already has permission for. Narrowing it would cost
+ * the test its fake Yahoo — served over http on 127.0.0.1 — and buy nothing.
+ */
 export const YAHOO_MATCHES = ["*://*.fantasysports.yahoo.com/*"]
 
 /** The only sport this app knows. Everything else Yahoo runs fantasy for is a page that

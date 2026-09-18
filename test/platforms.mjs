@@ -123,6 +123,26 @@ t("so it asks for no host permission",
 t("and the manifest is written from the platforms that DO need one",
 	readerMatches().length > 0 && readerMatches().every(m => !/sleeper/i.test(m)),
 	readerMatches().join(" "))
+/*
+   HTTPS ONLY IN THE BUILD A READER INSTALLS.
+   
+   This list is what the content script is injected into. Yahoo answers over plaintext http
+   with a 200 rather than a redirect, so `*://` — which is what this was — let the reader run
+   on a page a network could have written, on the host whose cookies the same script then
+   sends with every fetch it makes. The plaintext form exists for one caller: the extension
+   suite, which serves a fake Yahoo over http on 127.0.0.1 and points the browser's resolver
+   at it. Same bargain as `appMatches(dev)`, struck in the same place.
+*/
+t("a shipped reader is injected over https and nothing else",
+	readerMatches().every(m => m.startsWith("https://")), readerMatches().join(" "))
+t("the dev build adds the plaintext form, and adds nothing else",
+	readerMatches(true).length === readerMatches().length * 2 &&
+		readerMatches().every(m => readerMatches(true).includes(m)) &&
+		readerMatches(true).filter(m => m.startsWith("http://")).length === readerMatches().length,
+	readerMatches(true).join(" "))
+t("and the two lists name the same hosts",
+	new Set(readerMatches(true).map(m => m.replace(/^https?:/, ""))).size ===
+		new Set(readerMatches().map(m => m.replace(/^https?:/, ""))).size)
 t("every platform that needs a reader names the hosts it reads",
 	PLATFORMS.filter(p => p.needsReader).every(p => p.matches.length > 0))
 t("and a URL is owned by at most one of them",

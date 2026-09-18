@@ -227,6 +227,28 @@ export const deriveSlotAccepts = (
 	}
 	if ("BN" in slots) accepts["BN"] = "any"
 	for (const il of IL_SLOTS) if (il in slots) accepts[il] = "injured_only"
+	/*
+	   A SEAT THAT NAMES THE TWO POSITIONS IT TAKES.
+	
+	   Yahoo prints none of these, so this function never needed them. ESPN does: its lineup
+	   slot table carries `2B/SS` and `1B/3B`, and the map in src/data/rosters.ts names them
+	   exactly that way because that is what they are. Left out, an ESPN league's middle-infield
+	   seat accepted NOBODY — and a seat nobody can fill is a seat the replacement bar prices as
+	   if the league did not have it, which moves every row on the board.
+	
+	   Read off the name rather than from a table of known compounds, because the name is the
+	   evidence: a slot called `2B/SS` takes second basemen and shortstops whoever published it,
+	   and a compound this has never seen still reads correctly. Only positions this league
+	   actually rosters are kept, the same rule `Util` follows one line up.
+	*/
+	for (const name of Object.keys(slots)) {
+		if (name in accepts || !name.includes("/")) continue
+		const parts = name
+			.split("/")
+			.map(x => x.trim())
+			.filter(x => batterPositions.includes(x) || ["SP", "RP"].includes(x))
+		if (parts.length > 1) accepts[name] = parts
+	}
 	return accepts
 }
 
@@ -938,8 +960,21 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 			*/
 			slot_order: slotOrder.length ? slotOrder : null,
 			counts: slotOrder.length ? { ...rosterCounts(slots), total: slotOrder.length } : null,
-			slot_accepts: null
+			/*
+			   WHICH MEN MAY SIT WHERE, from the seat names ESPN already published.
+			
+			   Null here meant "there is nothing to derive from", and that was false:
+			   `deriveSlotAccepts` takes slot NAMES, and `ESPN_MLB_SLOT` has been turning ESPN's
+			   numeric ids into exactly those names for months. The board's replacement bar is
+			   computed per seat, so a league with no seat rules is a league in which every man is
+			   priced against the wrong bar. It is the same function the Yahoo side uses, so the
+			   two routes cannot disagree about what a Util seat takes.
+			*/
+			slot_accepts: deriveSlotAccepts(slots)
 		},
+		/* ESPN states each man's own eligibility in `gamesPlayedByPosition`, on a player read
+		   this import does not make. Null is the truth, and the board falls back to each man's
+		   primary position exactly as it does for any league that states none. */
 		eligibility: null,
 		league_rules: { raw_settings: settings },
 		provenance: {

@@ -15,6 +15,7 @@ import {
   deriveScoringPeriod,
   deriveMoveLimit,
   deriveInningsMinimum,
+  deriveSlotAccepts,
   importableInBrowser,
   importLeague,
   IN_BROWSER,
@@ -804,6 +805,47 @@ t("a schedule this cannot read yields no period rather than a guess",
 t("and so does a payload with no scheduleSettings at all",
   deriveEspnPeriod({}).period.kind === null)
 
+
+/*
+ * THE SEAT RULES AN ESPN LEAGUE PUBLISHES AND THIS APP CALLED UNKNOWABLE.
+ *
+ * `roster.slot_accepts` was null for every imported ESPN league, and null is the caller's cue
+ * that there is nothing to derive from. There was: `deriveSlotAccepts` takes slot NAMES, and
+ * `ESPN_MLB_SLOT` has been turning ESPN's numeric lineup-slot ids into exactly those names for
+ * months. The board's replacement bar is computed per seat, so a league with no seat rules is
+ * a league in which every man is priced against the wrong bar.
+ *
+ * The compound seats are the part Yahoo never needed. ESPN's table carries `2B/SS` and
+ * `1B/3B`; left out of the derivation, an ESPN league's middle-infield seat accepted NOBODY —
+ * a seat nobody can fill is priced as if the league did not have it.
+ */
+{
+  const accepts = deriveSlotAccepts({
+    C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1, OF: 5, "2B/SS": 1, "1B/3B": 1, Util: 1, P: 9, BN: 4, IL: 3
+  })
+  t("a middle-infield seat takes second basemen and shortstops",
+    JSON.stringify(accepts["2B/SS"]) === JSON.stringify(["2B", "SS"]), JSON.stringify(accepts["2B/SS"]))
+  t("and a corner-infield seat takes first and third basemen",
+    JSON.stringify(accepts["1B/3B"]) === JSON.stringify(["1B", "3B"]), JSON.stringify(accepts["1B/3B"]))
+  t("nobody is seated in a compound slot who is not one of the positions it names",
+    ["2B/SS", "1B/3B"].every(s => accepts[s].every(p => s.includes(p))), JSON.stringify(accepts))
+  /* Read off the NAME, not from a table of the two compounds ESPN happens to use today: a
+     compound this project has never seen still reads correctly, and a compound naming a
+     position the league does not roster keeps only the part it does. */
+  const odd = deriveSlotAccepts({ C: 1, OF: 3, "C/OF": 1, BN: 2 })
+  t("a compound nobody here has seen before is read off its own name",
+    JSON.stringify(odd["C/OF"]) === JSON.stringify(["C", "OF"]), JSON.stringify(odd))
+  const partial = deriveSlotAccepts({ "1B": 1, OF: 3, "2B/SS": 1, BN: 1 })
+  t("and a compound naming positions this league does not roster is left alone rather than invented",
+    partial["2B/SS"] === undefined, JSON.stringify(partial))
+  /* Everything the Yahoo side depends on is untouched — this is an addition, not a rewrite. */
+  const yahooish = deriveSlotAccepts({ C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1, OF: 3, Util: 1, SP: 2, RP: 2, P: 4, BN: 2, IL: 2 })
+  t("a Yahoo-shaped league derives exactly what it always did",
+    JSON.stringify(yahooish.Util) === JSON.stringify(["C", "1B", "2B", "3B", "SS", "OF"]) &&
+      JSON.stringify(yahooish.P) === JSON.stringify(["SP", "RP"]) &&
+      yahooish.BN === "any" && yahooish.IL === "injured_only",
+    JSON.stringify(yahooish))
+}
 
 // --- the public seed carries nobody's league ---------------------------------
 //

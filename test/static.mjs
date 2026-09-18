@@ -2497,6 +2497,38 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
 
 /*
  * ═══════════════════════════════════════════════════════════════════════════════════
+ * "ADD YOUR PLAYERS" OPENS THE THING THAT ADDS PLAYERS.
+ *
+ * It is the primary call to action on the first screen a stranger sees, and it navigated to
+ * My league — which holds the roster editor only once a real league exists. So for the reader
+ * this button is FOR, it landed on a screen whose main region held "import or configure a
+ * league first" and not one focusable element: a keyboard reader pressed the one thing on the
+ * page and arrived somewhere he could do nothing, with focus on the document body.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+  const cta = await b.newPage({ viewport: { width: 1100, height: 900 } })
+  await cta.goto(BASE, { waitUntil: "domcontentloaded" })
+  await cta.waitForSelector("nav button", { timeout: 30000 })
+  await cta.waitForTimeout(2000)
+  const button = await cta.$("button.decide-cta")
+  t("the first screen offers to take his players", !!button)
+  if (button) {
+    await button.click()
+    await cta.waitForTimeout(800)
+    t("and lands on something that can take them",
+      (await cta.locator(".dock-sheet .onboard textarea").count()) === 1,
+      `${await cta.locator(".dock-sheet .onboard").count()} sheets, ${await cta.locator(".dock-sheet .onboard textarea").count()} boxes`)
+    /* The box he is meant to type in is on screen, not below a fold or behind a fold. */
+    const box = await cta.$(".dock-sheet .onboard textarea")
+    const seen = box ? await box.isVisible() : false
+    t("…and the box is visible without hunting for it", seen)
+  }
+  await cta.close()
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
  * A BROWSER THAT WILL KEEP NOTHING STILL GETS THE BOARD.
  *
  * `leagues.load` read storage, fetched the starter file, and then WROTE it — so a browser

@@ -1158,7 +1158,25 @@ export const App = () => {
 						leagueKey={key}
 						error={snapshotError}
 						matchup={matchup}
-						onOpenTeam={() => go({ view: "trade" })}
+						/*
+						  "ADD YOUR PLAYERS" NOW OPENS THE THING THAT ADDS PLAYERS.
+						
+						  It navigated to My league, which holds the roster editor only once a real
+						  league exists — so for the reader this button is FOR, the one who has told
+						  the app nothing, it landed on a screen whose main region had nothing on it
+						  but "import or configure a league first" and not one focusable element. The
+						  app's own first-run surface for entering a team is the dock sheet, and the
+						  button did not open it.
+						
+						  The sheet, then, for a reader with no league; My league for a reader who has
+						  one, where the editor he wants is already mounted and where the same press
+						  has always taken him.
+						*/
+						onOpenTeam={() => {
+							if (league) return go({ view: "trade" })
+							setOnboarding(true)
+							go({ sheet: true })
+						}}
 					/>
 					{hasTeam && (
 						<Recap snapshot={snapshot} league={shown} leagueKey={key} matchup={matchup} />

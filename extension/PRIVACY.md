@@ -18,8 +18,11 @@ you press a button, and hands what it read to beanemachine.com in that same brow
 of this. The only network requests it makes are to Yahoo, from your own tab, for pages you
 could open yourself by clicking.
 
-It keeps nothing. It has no storage permission and no database, and when you remove it
-there is nothing of yours left behind in it, because there never was anything in it.
+It keeps nothing of yours. It has no storage permission and no database, and when you
+remove it there is nothing of yours left behind in it, because there never was anything in
+it. Three small facts about what it is doing right now live in memory while your browser is
+open — a tab number, whether a read is running, and the times of the last minute's requests
+— and they are set out in full below rather than tucked under this sentence.
 
 ---
 
@@ -51,11 +54,23 @@ over. (`rowsOnly`, applied in `src/yahoo.ts`.)
 the right tab. Your browser is asked for that list at the moment it is needed, rather than a
 list being kept — nothing about your tabs is stored between one request and the next.
 
-One thing is remembered, and it is worth saying plainly rather than leaving it to be
-discovered: when you switch tabs, the add-on notes the number of the tab you switched to and
-the time, so that when you have two leagues open it can tell which one you were last looking
-at. It is the tab's number and a timestamp — not its address, not its contents — it is held
-in memory only, and it goes when your browser closes. (`lastSeen` in `src/background.ts`.)
+Three things are remembered, and they are worth saying plainly rather than leaving them to
+be discovered. All three are held in memory only and all three go when your browser closes.
+
+When you switch tabs, the add-on notes the number of the tab you switched to and the time,
+so that when you have two leagues open it can tell which one you were last looking at. It is
+the tab's number and a timestamp — not its address, not its contents. (`lastSeen` in
+`src/background.ts`.)
+
+Inside a Yahoo tab, it remembers whether a read is running in that tab right now, and when
+it started, so that a second press is told to wait rather than making the same requests
+twice over. (`reading` and `readingSince` in `src/yahoo.ts`.)
+
+And in that same tab it keeps the TIMES of the requests it has made in the last minute — a
+list of timestamps and nothing else, no addresses — so that it can refuse to ask Yahoo more
+than forty-five times in any minute. That limit exists for your sake rather than ours: it is
+your signed-in session making the requests, and a page driving it too hard is your account
+that gets throttled. (`spent` in `src/yahoo.ts`.)
 
 **Which of your open tabs are beanemachine.com**, so that a progress line ("reading
 shortstops") reaches the page that asked for it, and so that the toolbar button can put

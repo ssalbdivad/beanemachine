@@ -93,6 +93,39 @@ const text = asPasted(real)
   */
   t("…and the stat it could not price is named, with the page's own code",
     read.unpriced.includes("HR"), JSON.stringify(read.unpriced))
+  /*
+     AND A CODE THAT IS ON BOTH SIDES SAYS WHICH SIDE.
+     
+     "K" is a strikeout for a batter and for a pitcher, scored differently and usually with
+     opposite signs. A page whose batting K read fine and whose pitching K did not was
+     reporting "K could not be read" over a K that had been — so the sentence was wrong about
+     a stat this app had priced correctly.
+  */
+  const bothSides = leagueFromSettingsText(
+    [
+      "Setting\tValue",
+      "Max Teams\t10",
+      "Batters Stat Category\tValue",
+      "Home Runs (HR)\t4",
+      "Strikeouts (K)\t-1",
+      "Pitchers Stat Category\tValue",
+      "Wins (W)\t5",
+      /* The pitchers' strikeout row, with a cell wedged between label and value — the same
+         shape as the column insertion above, on a code the batters' table also uses. */
+      "Strikeouts (K)\tmodified\t1"
+    ].join("\n")
+  )
+  t("a code that is priced on one side names the side that failed",
+    bothSides.unpriced.includes("K (pitching)"), JSON.stringify(bothSides.unpriced))
+  t("…and the side that read fine is still priced",
+    bothSides.batting.K === -1, JSON.stringify(bothSides.batting))
+  t("…and the other side keeps the stats it could read",
+    bothSides.pitching.W === 5 && bothSides.pitching.K === undefined,
+    JSON.stringify(bothSides.pitching))
+  /* And a code that appears once needs no qualifier — adding one everywhere would make the
+     common case harder to read for the sake of the rare one. */
+  t("a code that appears once is named plainly", read.unpriced.includes("HR"), JSON.stringify(read.unpriced))
+
   t("…and is NOT filed as something the page did not carry, because the page carried it",
     !read.missing.some(m => /HR/.test(m)), JSON.stringify(read.missing))
   /* The rest of the table is unharmed: this is a guard on one row, not a refusal of the page. */

@@ -125,6 +125,14 @@ of somebody's league would be a second place his data lives, with its own lifeti
 own staleness and its own uninstall story. The app already has stores built for this, in
 his browser, stamped with when each was read.
 
+What it does hold, in memory, for as long as the browser is open: `lastSeen` in the router
+(a tab number and a timestamp), and in each Yahoo tab `reading`/`readingSince` (whether a
+read is running there) and `spent` (the times of that tab's requests in the last minute,
+which is what the per-minute ceiling is counted from). None of it is a copy of anything of
+his, none of it survives a restart, and PRIVACY.md sets out all three by name — a document
+that says "it keeps nothing" while the code keeps three things is the kind of sentence this
+project treats as a defect.
+
 ### `extension/src/bridge.ts` — the half inside beanemachine
 
 A content script on the app's own origin, at `document_start`, top frame only. It is a

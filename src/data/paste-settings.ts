@@ -95,6 +95,11 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 	 * list that stops the app making it silently.
 	 */
 	const unpriced: string[] = []
+	/** The same, before the labels are worked out: a code and the side of the ball it was
+	 *  listed on. Kept apart because "K" is a strikeout for a batter and for a pitcher, scored
+	 *  differently and usually with opposite signs, and a page whose batting K read fine and
+	 *  whose pitching K did not was reporting "K could not be read" over a K that was. */
+	const unpricedOn: { code: string; side: "batting" | "pitching" }[] = []
 	const settings: Record<string, string> = {}
 	let side: Record<string, number> | null = null
 
@@ -149,7 +154,9 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 			}
 			/* Listed on the page, inside a stat table, and not priced. Named rather than
 			   dropped — see `unpriced` below. */
-			if (!unpriced.includes(code)) unpriced.push(code)
+			const group = side === batting ? "batting" : "pitching"
+			if (!unpricedOn.some(u => u.code === code && u.side === group))
+				unpricedOn.push({ code, side: group })
 		}
 
 		/*
@@ -200,6 +207,19 @@ export const leagueFromSettingsText = (text: string): PastedLeague => {
 		}
 	}
 
+	/*
+	   NAMED WITH THE SIDE OF THE BALL, but only where it would otherwise be ambiguous.
+	
+	   A code that was priced on the other side needs the qualifier or the sentence is wrong
+	   about a stat this app read perfectly well: "K could not be read" over a league whose
+	   batting K is -1 and whose pitching K is +1 and whose pitching row is the one that failed.
+	   A code that appears once needs nothing, and adding "(batting)" to every line would make
+	   the common case harder to read for the sake of the rare one.
+	*/
+	for (const { code, side } of unpricedOn) {
+		const other = side === "batting" ? pitching : batting
+		unpriced.push(code in other ? `${code} (${side})` : code)
+	}
 	const missing: string[] = []
 	if (!Object.keys(batting).length) missing.push("batting scoring")
 	if (!Object.keys(pitching).length) missing.push("pitching scoring")

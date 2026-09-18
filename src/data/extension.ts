@@ -316,11 +316,24 @@ export const pageKind = (url: string): PageKind => {
 	if (/\/settings\b/i.test(path)) return "settings"
 	if (/\/players\b/i.test(path)) return "players"
 	if (/\/matchup\b/i.test(path)) return "matchup"
-	const seg = path.split("/").filter(Boolean)
-	// b1 / <leagueId> / <teamId>
-	if (seg.length >= 3 && /^\d+$/.test(seg[2]!)) return "team"
-	if (seg.length >= 2 && /^\d+$/.test(seg[1]!)) return "league"
-	return "unknown"
+	/*
+	   OFF THE SAME DERIVATION THE IDS COME FROM, and it did not used to be.
+	
+	   This tested `seg[2]` for digits and `seg[1]` for digits — fixed positions — while
+	   `leagueIdFrom` a few lines down takes the number that FOLLOWS a non-number, precisely
+	   so that a season in the path cannot be read as a league. On `/2024/b1/228947` the two
+	   disagreed: `leagueIdFrom` correctly said the league is 228947, and this said the page
+	   was a TEAM page, because the third segment is digits. A team page is the one kind whose
+	   text gets written into the roster store, so the disagreement pointed at the most
+	   expensive parse there is.
+	
+	   Found by test/platforms.mjs, which asserts the platform descriptor against these
+	   functions on a table of URLs and would not let the two sides differ.
+	*/
+	const found = leagueAt(url)
+	if (!found) return "unknown"
+	const next = found.seg[found.at + 1]
+	return next && /^\d+$/.test(next) ? "team" : "league"
 }
 
 /**

@@ -619,6 +619,16 @@ t("before is the lineup total the page already showed", Math.abs(before - twoTot
 const why = (await page.textContent(".verdict-why")) ?? ""
 t("the verdict explains the mechanism and states the net", /Net [+-]?\d/.test(why), why)
 t("the explanation names the player arriving", why.includes(got.split(" ").pop()), `${got}: ${why}`)
+/* THE ROWS NOBODY READ. "Trade Review: League Votes" with "Trade Reject Time: 2 days"
+   have been stored verbatim since the first real read, and the number above is priced
+   on the players changing hands the moment both managers press yes. The card now says
+   the date the deal would actually be his. */
+const settles = (await page.textContent(".verdict-settles")) ?? ""
+t("the verdict says when a deal agreed today would actually clear review",
+  /clears review on \d{4}-\d{2}-\d{2}/.test(settles), settles)
+t("…and quotes the rows it read that from, rather than asserting the delay",
+  /Trade Reject Time/.test((await page.getAttribute(".verdict-settles", "title")) ?? ""),
+  (await page.getAttribute(".verdict-settles", "title")) ?? "")
 const changes = await page.$$eval(".slot-change", n => n.length)
 t("the spots that changed hands are listed", changes > 0, String(changes))
 

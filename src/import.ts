@@ -610,6 +610,21 @@ export const deriveScoringPeriod = (
 
 	const deadline = settings["Weekly Deadline"]
 	let lineupLock: "daily" | "period" | null = null
+	/*
+	   THE HALF OF THE ROW THAT WAS DISCARDED.
+
+	   Yahoo writes "Daily - Today", and `/^daily\b/i` matched and then dropped everything
+	   after the word. Both daily forms therefore read as the same lock, and a league whose
+	   deadline is TOMORROW's lineup was planned as if tonight's were still open.
+
+	   `Today` is the only qualifier mapped, because it is the only one this project has
+	   read off a real page. Anything else after the dash yields null and quotes itself into
+	   needs_review — the parser does not invent a second meaning for a string nobody here
+	   has seen, and `locks: "tomorrow"` is deliberately unreachable from it. The separator
+	   tolerates -, en dash, em dash and a colon, and any trailing words, so "Daily — Today's
+	   games" still resolves.
+	*/
+	let locks: "today" | "tomorrow" | null = null
 	if (deadline === undefined) {
 		needsReview.push(
 			'No "Weekly Deadline" row on the settings page, so lineup_lock is null: the ' +
@@ -618,6 +633,14 @@ export const deriveScoringPeriod = (
 	} else if (/^daily\b/i.test(deadline)) {
 		lineupLock = "daily"
 		lockSource = `Weekly Deadline "${deadline}" is the lineup lock, not the period`
+		const qualifier = /^daily\b\s*(?:[-–—:]\s*(.+))?$/i.exec(deadline.trim())?.[1]?.trim()
+		if (qualifier && /^today\b/i.test(qualifier)) locks = "today"
+		else if (qualifier)
+			needsReview.push(
+				`"Weekly Deadline" is "${deadline}". Lineups change daily, but which day's ` +
+					"lineup is still open is not something this recognises, so Today plans " +
+					"tonight. Set it under Lineups lock on My league."
+			)
 	} else if (WEEKDAY_NAMES.includes(deadline.trim().toLowerCase())) {
 		// A weekday deadline is Yahoo's weekly lock: the lineup is set once for the
 		// period, so the period a decision can still act on is the next one.
@@ -751,6 +774,7 @@ export const deriveScoringPeriod = (
 			// Yahoo's periods fall on a fixed weekday, so there is nothing to pin.
 			anchor: null,
 			lineup_lock: lineupLock,
+			locks,
 			ends_on: endsOn,
 			week,
 			source:
@@ -1264,6 +1288,86 @@ export const deriveMoveLimit = (
 		return { perPeriod: null, source: `Max Acquisitions per Week "${row}"` }
 	}
 	return { perPeriod: n, source: `Max Acquisitions per Week "${row}"` }
+}
+
+/**
+ * WHEN A MOVE IN THIS LEAGUE ACTUALLY LANDS.
+ *
+ * Yahoo prints the whole waiver regime on the settings page and this app has been
+ * storing it verbatim and reading none of it: "Waiver Time: 1 day", "Waiver Type:
+ * Continual rolling list", "Waiver Mode: Standard", "Post Draft Players: Follow Waiver
+ * Rules" have sat in `league_rules.raw_settings` since the first real read on
+ * 2026-09-04, and `grep` for any of those labels outside scoring.json returned nothing.
+ *
+ * What that cost: the daily card prints "Add X, drop Y" as an instruction that lands
+ * NOW, and prices the gain from today. In a league with a one-day waiver period the man
+ * he claims is not his tonight, so a whole day of games is credited to somebody he does
+ * not own yet — and on the last day of a scoring period that is the entire gain. The
+ * same fact is already relied on elsewhere in this repo, in a comment: `read-yahoo.ts`
+ * sets `STALE_POOL_HOURS = 24` because a dropped man is claimable for a day.
+ *
+ * ONLY THE SHAPE THIS PROJECT HAS MEASURED IS PARSED. The label must be exactly "Waiver
+ * Time" — `Waiver Time (WT)` is a real variant in test/settings.mjs and its value "2"
+ * carries no unit, so reading days off it would print a number the league never stated.
+ * The value is read only as `N day` / `N days`. "No waivers", "None", a phrase, a
+ * rename, an ESPN league's nested JSON: all yield null, and the row survives quoted in
+ * `sources` whenever it existed at all.
+ *
+ * `0 days` is null on purpose. A league with no waiver period is the instant-add case
+ * every screen already implies, and "clears in 0 days" is not a sentence.
+ *
+ * `type` and `mode` are carried VERBATIM and parsed by nothing. They say which currency
+ * a claim costs — a rolling priority position rather than FAAB dollars — which is the
+ * caveat model.json's `waivers.why` and docs/METHODOLOGY.md both hand the reader as an
+ * instruction the app could not follow itself. Quoting them is as far as this goes:
+ * pricing priority is a claim this repo has measured nothing about.
+ */
+export const deriveWaiverRule = (
+	settings: Record<string, string>
+): { days: number | null; type: string | null; mode: string | null; sources: string[] } => {
+	const time = settings["Waiver Time"]
+	const type = settings["Waiver Type"] ?? null
+	const mode = settings["Waiver Mode"] ?? null
+	const sources = [
+		time === undefined ? null : `Waiver Time "${time}"`,
+		type === null ? null : `Waiver Type "${type}"`,
+		mode === null ? null : `Waiver Mode "${mode}"`
+	].filter((x): x is string => x !== null)
+	if (time === undefined) return { days: null, type, mode, sources }
+	const m = /^(\d+)\s*days?$/i.exec(time.trim())
+	if (!m) return { days: null, type, mode, sources }
+	const n = Number(m[1])
+	return { days: Number.isInteger(n) && n > 0 ? n : null, type, mode, sources }
+}
+
+/**
+ * HOW LONG AN AGREED TRADE SITS BEFORE IT IS REAL.
+ *
+ * "Trade Review: League Votes" with "Trade Reject Time: 2 days" means an accepted deal
+ * in this league does not process for two days and can be vetoed inside them. Both rows
+ * are stored and neither was read, so `Trade.tsx` priced every deal as if the players
+ * changed hands the moment both managers pressed yes — and a deal struck in the last two
+ * days of the trade window was priced on a transfer that could not complete at all.
+ *
+ * Same rule as the waiver row: the label is exact, the value is read only in the shape
+ * this project has seen (`N day` / `N days`), and everything else returns null with the
+ * row quoted. `review` is carried verbatim and parsed by nothing — "League Votes",
+ * "Commissioner", "None" are three different regimes and this repo has measured one.
+ */
+export const deriveTradeReview = (
+	settings: Record<string, string>
+): { days: number | null; review: string | null; sources: string[] } => {
+	const time = settings["Trade Reject Time"]
+	const review = settings["Trade Review"] ?? null
+	const sources = [
+		review === null ? null : `Trade Review "${review}"`,
+		time === undefined ? null : `Trade Reject Time "${time}"`
+	].filter((x): x is string => x !== null)
+	if (time === undefined) return { days: null, review, sources }
+	const m = /^(\d+)\s*days?$/i.exec(time.trim())
+	if (!m) return { days: null, review, sources }
+	const n = Number(m[1])
+	return { days: Number.isInteger(n) && n > 0 ? n : null, review, sources }
 }
 
 /**

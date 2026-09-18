@@ -30,7 +30,9 @@ const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const
 
 const iso = (t: number) => new Date(t).toISOString().slice(0, 10)
 const at = (d: string) => Date.parse(`${d}T00:00:00Z`)
-const shift = (d: string, days: number) => iso(at(d) + days * DAY)
+/** Exported so a screen can say WHEN a move lands rather than only that it is delayed —
+ *  the waiver period and the trade-review window are both stated in days. */
+export const shift = (d: string, days: number) => iso(at(d) + days * DAY)
 /** Inclusive, so a single date spans one day rather than zero. */
 export const datesBetween = (start: string, end: string) =>
 	Math.floor((at(end) - at(start)) / DAY) + 1

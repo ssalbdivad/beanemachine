@@ -2513,6 +2513,30 @@ const ScoringPeriodPanel = ({
 						<option value="period">for the whole period</option>
 					</select>
 				</label>
+				{/*
+				  ONLY WHERE IT IS A QUESTION. Yahoo prints "Daily - Today" and the parser now
+				  reads the qualifier, so a read league answers this already and the select
+				  simply shows what it said. It exists for the other daily form: a league whose
+				  deadline is the NEXT day's lineup, where the card was planning a night that
+				  had already locked. The label asks the reader's question, not Yahoo's wording,
+				  because nothing here has read Yahoo's wording for that case.
+				*/}
+				{stated?.lineup_lock === "daily" && (
+					<label className="ctl">
+						<span>The lineup you can still change</span>
+						<select
+							value={stated?.locks ?? ""}
+							aria-label="Which day's lineup this league still lets you change"
+							onChange={e =>
+								patch({ locks: (e.currentTarget.value || null) as Period["locks"] })
+							}
+						>
+							<option value="">not stated</option>
+							<option value="today">tonight's</option>
+							<option value="tomorrow">tomorrow's</option>
+						</select>
+					</label>
+				)}
 			</div>
 
 			<p className="sub period-reads">{reads}</p>
@@ -2581,7 +2605,8 @@ const periodSummary = (draft: League): string => {
 	const days = p.days ? `${p.days}-day ` : ""
 	const from = p.starts_on ? ` from ${p.starts_on[0]!.toUpperCase()}${p.starts_on.slice(1)}` : ""
 	const lock =
-		p.lineup_lock === "daily" ? ", lineups lock daily"
+		p.lineup_lock === "daily" && p.locks === "tomorrow" ? ", lineups lock daily (tomorrow's)"
+		: p.lineup_lock === "daily" ? ", lineups lock daily"
 		: p.lineup_lock === "period" ? ", lineups lock for the period"
 		: ""
 	return `${days}${p.kind}${from}${lock}`

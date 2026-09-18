@@ -13,6 +13,8 @@ import { lineupStore } from "./lineup.ts"
 import { playersInText, rosterFromPaste } from "../data/paste.ts"
 import { slotsFor, type OwnershipCut } from "../engine/bscore.ts"
 import { localDate } from "../data/today.ts"
+import { shift } from "../engine/period.ts"
+import { deriveTradeReview, leagueTradeDeadline } from "../import.ts"
 import { extensionHere, useExtension } from "./extension.ts"
 import { readLeagueHere } from "./read-yahoo.ts"
 import { browserOf, takesExtension } from "./Connect.tsx"
@@ -298,6 +300,29 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 		() => tradesClosed(league, localDate()),
 		[league]
 	)
+	/**
+	 * WHEN A DEAL STRUCK TODAY WOULD ACTUALLY BE HIS.
+	 *
+	 * "Trade Review: League Votes" with "Trade Reject Time: 2 days" is printed on the
+	 * settings page and stored verbatim, and nothing read either row — so every verdict
+	 * on this screen was priced on a transfer that happens the moment both managers press
+	 * yes. The number itself is left exactly as it is: re-rating a deal over a window that
+	 * starts in two days is a change to the engine, and what a reader needs first is the
+	 * date, which the app can state and could not.
+	 *
+	 * The second clause is the one that can change a decision: where the review would land
+	 * PAST the league's own trade deadline, a deal agreed today cannot complete at all, and
+	 * that is a fact about his league rather than about this app.
+	 */
+	const settles = useMemo(() => {
+		const raw = ((league?.league_rules as { raw_settings?: Record<string, string> } | undefined)
+			?.raw_settings ?? {}) as Record<string, string>
+		const rule = deriveTradeReview(raw)
+		if (rule.days === null) return null
+		const on = shift(localDate(), rule.days)
+		const deadline = leagueTradeDeadline(league).date
+		return { days: rule.days, on, sources: rule.sources, pastDeadline: !!deadline && on > deadline }
+	}, [league])
 	const gettable = useMemo(
 		() =>
 			pool?.size ?
@@ -1530,6 +1555,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			{verdict && (
 				<Verdict
 					v={verdict}
+					settles={settles}
 					leaving={give.flatMap(k => (byKey.has(k) ? [byKey.get(k)!] : []))}
 					arriving={take.flatMap(k => (byKey.has(k) ? [byKey.get(k)!] : []))}
 				/>
@@ -2019,10 +2045,14 @@ const LineupCard = ({
  *  sentence; nothing is added to it here, and nothing it could not read is hidden. */
 const Verdict = ({
 	v,
+	settles,
 	leaving,
 	arriving
 }: {
 	v: TradeVerdict
+	/** When a deal agreed today would actually process, where the league states a review
+	 *  period. Null is "it did not say", never "immediately". */
+	settles: { days: number; on: string; sources: string[]; pastDeadline: boolean } | null
 	leaving: Ranked[]
 	arriving: Ranked[]
 }) => {
@@ -2054,6 +2084,16 @@ const Verdict = ({
 			</span>
 		</div>
 		<p className="verdict-why">{v.explanation}</p>
+		{/* The number above is priced on the players changing hands now. This says when
+		    they actually would, in his league's own words, and — where the review would
+		    land past his league's own trade deadline — that they would not. */}
+		{settles && (
+			<p className="tiny-note verdict-settles" title={settles.sources.join(" · ")}>
+				{settles.pastDeadline ?
+					`A deal agreed today clears review on ${settles.on}, after your league's trade deadline.`
+				:	`A deal agreed today clears review on ${settles.on}.`}
+			</p>
+		)}
 		{(idle.length > 0 || spare.length > 0) && (
 			<div className="verdict-idle">
 				{idle.map(r => (

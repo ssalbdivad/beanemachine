@@ -76,22 +76,36 @@ const upgrade = (config: Config): Config => {
 		const rows = (league.league_rules as { raw_settings?: Record<string, string> } | undefined)
 			?.raw_settings
 		const period = league.scoring_period
-		if (!rows || !period || period.kind === null || period.ends_on !== undefined) {
+		if (
+			!rows ||
+			!period ||
+			period.kind === null ||
+			(period.ends_on !== undefined && period.locks !== undefined)
+		) {
 			leagues[key] = league
 			continue
 		}
 		const { period: derived } = deriveScoringPeriod(rows)
-		if (derived.ends_on === null && derived.week === null) {
+		if (derived.ends_on === null && derived.week === null && derived.locks === null) {
 			leagues[key] = league
 			continue
 		}
 		touched = true
-		/* Only the two new fields. Everything else on a stored period was decided when it was
-		   read, possibly by a different route, and re-deriving it here would silently replace a
-		   read with a guess. */
+		/* Only the derived-from-raw_settings fields. Everything else on a stored period was
+		   decided when it was read, possibly by a different route, and re-deriving it here
+		   would silently replace a read with a guess.
+
+		   `locks` is the exception that proves it: a reader can set it himself on My league,
+		   so a stored value is HIS and must not be overwritten by the row. Only an absent one
+		   is filled in. */
 		leagues[key] = {
 			...league,
-			scoring_period: { ...period, ends_on: derived.ends_on, week: derived.week }
+			scoring_period: {
+				...period,
+				ends_on: period.ends_on ?? derived.ends_on,
+				week: period.week ?? derived.week,
+				locks: period.locks === undefined ? derived.locks : period.locks
+			}
 		}
 	}
 	return touched ? { ...config, leagues } : config

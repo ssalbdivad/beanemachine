@@ -1230,6 +1230,37 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		text.slice(0, 300))
 	t("and the moves are still priced over the period, which is what an add accrues over",
 		/Make these moves/.test(text), text.slice(0, 300))
+	/* HIS LEAGUE'S OWN WAIVER ROW, read at last. The gain beside every move is accrued
+	   from today, and in this league a claimed man is not his tonight: five waiver rows
+	   have been stored verbatim since the first real read and nothing looked at one. */
+	t("…and the card says when a move he makes tonight actually lands",
+		/waivers clear in 1 day\b/.test(text), text.slice(0, 400))
+	t("…and does not explain itself while doing it",
+		!/rolling list|which means|because/i.test(text.split("waivers clear")[1]?.slice(0, 120) ?? ""),
+		text.split("waivers clear")[1]?.slice(0, 120) ?? "")
+	await page.close()
+}
+
+/*
+ * THE NIGHT THE CARD IS ABOUT, WHICH IS NOT ALWAYS TONIGHT.
+ *
+ * Yahoo prints "Daily - Today" and the parser discarded everything after the word, so
+ * both daily forms read as the same lock. On the other one, tonight's lineup locked at
+ * yesterday's deadline and the only lineup a reader can still change is tomorrow's —
+ * and every sentence on this card was about a night he could no longer act on, with no
+ * hedge. `locks` is the field, and only the reader can set it to "tomorrow", because
+ * nothing in this repo has read that string off a real page.
+ */
+{
+	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
+	cfg.leagues["yahoo:228947"].scoring_period.locks = "tomorrow"
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
+	const text = await page.$eval(".decide", e => e.innerText)
+	t("a league that locks tonight's lineup gets a card headed Tomorrow",
+		/\bTomorrow\b/.test(text) && !/^Today$/m.test(text), text.slice(0, 300))
+	t("…and one instruction saying which lineup to set",
+		/set tomorrow.s lineup .* tonight.s is closed/i.test(text.replace(/\s+/g, " ")),
+		text.slice(0, 400))
 	await page.close()
 }
 

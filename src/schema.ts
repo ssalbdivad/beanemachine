@@ -83,6 +83,22 @@ export const ScoringPeriod = type({
 	 *  period, so the next one is what a streaming decision is really about. */
 	lineup_lock: "'daily' | 'period' | null",
 	/**
+	 * WHICH DAY'S LINEUP IS STILL OPEN, where a daily league said.
+	 *
+	 * `lineup_lock` says how OFTEN a lineup can be changed. This says which day the change
+	 * he makes right now applies to. Yahoo prints it in the same row — "Daily - Today" —
+	 * and the parser tested `/^daily\b/i` and threw the qualifier away, so a league whose
+	 * daily deadline is the NEXT day's lineup got tonight's card: advice for a lineup that
+	 * locked yesterday, printed with no hedge.
+	 *
+	 * Null is NOT "today". It means the page did not say, or said something this has never
+	 * seen, and the card then plans tonight and says which night it is planning.
+	 *
+	 * Optional so every league already stored reads unchanged — `leagues.ts` re-validates
+	 * each one on read, and a required key would discard them all.
+	 */
+	"locks?": "'today' | 'tomorrow' | null",
+	/**
 	 * THE LAST DAY THIS LEAGUE SCORES, as an ISO date, where its own page says so.
 	 *
 	 * Yahoo prints it inside the Playoffs row — "6 teams - Week 24, 25 and 26 (ends Sunday,

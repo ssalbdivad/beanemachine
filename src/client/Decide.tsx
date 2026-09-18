@@ -3,12 +3,12 @@ import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
 import { isReserveSlot, ownershipCut, rateAll, slotsFor } from "../engine/bscore.ts"
-import { resolvePeriod, scoringEnd, windowFrom } from "../engine/period.ts"
+import { resolvePeriod, scoringEnd, shift, windowFrom } from "../engine/period.ts"
 import { scoreStats, tableFor } from "../engine/points.ts"
 import {
 	activeSlots, freezeShut, isBench, planLineup, planSwaps, seatedInnings, DEFAULTS, type PlanInput
 } from "../auto/plan.ts"
-import { deriveInningsMinimum, deriveMoveLimit, leagueLimits } from "../import.ts"
+import { deriveInningsMinimum, deriveMoveLimit, deriveWaiverRule, leagueLimits } from "../import.ts"
 import { freshness, tab } from "./panels.tsx"
 import { canReadPool, api, poolIsPartial, type AvailablePool } from "./api.ts"
 import { lineupStore } from "./lineup.ts"
@@ -119,7 +119,22 @@ export const Decide = ({
 	   to the shipped capture, which is the right behaviour and the wrong thing to do silently.
 	   The fix landed for the failed case and not for the pending one.
 	*/
-	const { slate, error: slateError, loading: slateLoading } = useSlate()
+	/**
+	 * THE NIGHT THIS CARD IS ABOUT, which is not always tonight.
+	 *
+	 * Yahoo prints "Daily - Today" and some leagues run the other daily form: the lineup
+	 * you can still change is TOMORROW's, because tonight's locked at yesterday's deadline.
+	 * On one of those, every sentence on this card was about a lineup nobody could change
+	 * any more — a true reason about the wrong day, with no hedge on it.
+	 *
+	 * Null means the league did not say and nothing is assumed: the card plans tonight,
+	 * exactly as it always has.
+	 */
+	const planning = league?.scoring_period?.locks ?? null
+	const planningDay = planning === "tomorrow" ? shift(localDate(), 1) : localDate()
+	/* The live schedule is read for the night being PLANNED, not for the night in progress.
+	   This replaces the request rather than adding one. */
+	const { slate, error: slateError, loading: slateLoading } = useSlate(planningDay)
 	/**
 	 * The capture's injured list, brought up to date.
 	 *
@@ -541,7 +556,7 @@ export const Decide = ({
 		   A slate is a local-calendar thing: a 7pm Eastern game is tonight's game to
 		   somebody in California too. See the note on `localDate` in src/data/today.ts.
 		*/
-		const day = localDate()
+		const day = planningDay
 		/*
 		   TONIGHT'S OWN SLATE RATES TONIGHT, where the live read succeeded.
 		   
@@ -841,6 +856,10 @@ export const Decide = ({
 			/** Nobody has said whether this league locks daily, so these changes are
 			 *  offered on the assumption that it does — which the heading states. */
 			assumedDaily: !league.scoring_period?.lineup_lock,
+			/** Which night these changes are for. "tomorrow" means tonight's lineup has
+			 *  already locked in this league, so the heading says so rather than claiming
+			 *  a night the reader cannot act on. */
+			planning,
 			/** Every man rated for TODAY, so the seats nobody you own can fill can be
 			 *  offered somebody who is actually on a card tonight. */
 			ratedToday: rows,
@@ -1253,8 +1272,12 @@ export const Decide = ({
 			?.raw_settings ?? {}) as Record<string, string>
 		const floor = deriveInningsMinimum(raw).perPeriod
 		const cap = deriveMoveLimit(raw).perPeriod
+		/* When a move he makes tonight actually lands. Read here rather than in the view
+		   so the early return below — the no-lineup path — carries it too: the moves list
+		   renders on that path and the rule is about the moves, not about the innings. */
+		const waivers = deriveWaiverRule(raw)
 		if (floor === null || !rated || !lineup?.starters.length)
-			return { floor, cap, projected: null, after: null }
+			return { floor, cap, waivers, projected: null, after: null }
 		/**
 		 * Only the men in SEATS, because only they throw innings that count.
 		 *
@@ -1311,7 +1334,7 @@ export const Decide = ({
 			})
 			after = inningsOf(post.starters)
 		}
-		return { floor, cap, projected, after }
+		return { floor, cap, waivers, projected, after }
 	}, [league, rated, lineup, plan, seats, wire])
 
 	/**
@@ -1753,7 +1776,10 @@ export const Decide = ({
 				<>
 					<style href="decide-assumed" precedence="default">{ASSUMED_CSS}</style>
 					<h3 className="decide-head">
-						Today
+						{/* The night this card is about. A league whose daily deadline is the next
+						    day's lineup has already locked tonight, so calling this Today would be
+						    naming a night the reader cannot act on. */}
+						{today.planning === "tomorrow" ? "Tomorrow" : "Today"}
 						<span className="decide-gain">
 							{/* "have a game" is not what this counts. A starting pitcher on his club's
 							    off-turn HAS a game — his club is playing — and cannot score in it,
@@ -1872,6 +1898,14 @@ export const Decide = ({
 						    this, and nobody has told us which kind this is — so the changes below
 						    are offered on the commoner of the two and the reader is told that in
 						    the same breath. Answering it is a chip on My league. */}
+						{/* One instruction, and only where it changes what he does: tonight's
+						    lineup is shut in this league, and the one he is looking at is
+						    tomorrow's. */}
+						{today.planning === "tomorrow" && (
+							<span className="decide-gain decide-assumed">
+								set tomorrow&rsquo;s lineup &mdash; tonight&rsquo;s is closed
+							</span>
+						)}
 						{today.assumedDaily && (
 							<span className="decide-gain decide-assumed">
 								if your league lets you change the lineup every day &mdash;{" "}
@@ -2503,6 +2537,16 @@ export const Decide = ({
 						     know how the number was arrived at will find it. */
 							`stopping at ${plan.swaps.moves.length}`}
 						{rules.cap !== null && ` · your league allows ${rules.cap}`}
+						{/* WHEN, not why. The gain above is accrued from today, and in a league
+						    with a waiver period the claimed man is not his tonight — so the one
+						    thing the reader needs beside the instruction is the day it lands.
+						    The rows it was read from sit in the title, which is where this app
+						    already sends provenance. */}
+						{rules.waivers.days !== null && (
+							<span title={rules.waivers.sources.join(" · ")}>
+								{` · waivers clear in ${rules.waivers.days} day${rules.waivers.days === 1 ? "" : "s"}`}
+							</span>
+						)}
 					</span>
 				)}
 			</h3>

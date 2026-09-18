@@ -15,6 +15,8 @@ import {
   deriveScoringPeriod,
   deriveMoveLimit,
   deriveInningsMinimum,
+  deriveTradeReview,
+  deriveWaiverRule,
   deriveSlotAccepts,
   importableInBrowser,
   importLeague,
@@ -499,6 +501,74 @@ t("a missing weekly deadline is unknown and said so, never assumed daily",
   deriveScoringPeriod(noDeadline).period.lineup_lock === null &&
     deriveScoringPeriod(noDeadline).needsReview.length > 0,
   JSON.stringify(deriveScoringPeriod(noDeadline).needsReview))
+
+// ── THE HALF OF THE DEADLINE ROW THAT WAS THROWN AWAY ────────────────────────
+//
+// `/^daily\b/i` matched "Daily - Today" and dropped everything after the word, so
+// both daily forms read as the same lock and a league whose deadline is TOMORROW's
+// lineup was planned as if tonight's were open.
+t("the shipped league says which day's lineup is still open, and it is today's",
+  derived.period.locks === "today", JSON.stringify(derived.period.locks))
+{
+  const dash = deriveScoringPeriod(withSettings({ "Weekly Deadline": "Daily \u2014 Today's games" }))
+  t("an em dash and a trailing word still resolve to today's lineup",
+    dash.period.locks === "today" && dash.period.lineup_lock === "daily",
+    JSON.stringify(dash.period))
+  /* THE ONE THAT MUST NOT BE GUESSED. Nothing in this repo has read a non-Today
+     qualifier off a real page, so the parser refuses to invent a meaning for one and
+     quotes it instead. `locks: "tomorrow"` is unreachable from the parser by design —
+     only the reader can state it, on My league. */
+  const other = deriveScoringPeriod(withSettings({ "Weekly Deadline": "Daily - Tomorrow" }))
+  t("a qualifier this has never read is refused rather than mapped",
+    other.period.locks === null && other.period.lineup_lock === "daily",
+    JSON.stringify(other.period))
+  t("…and it is quoted verbatim so the first real one can be recognised later",
+    other.needsReview.some(l => l.includes('"Daily - Tomorrow"')),
+    JSON.stringify(other.needsReview))
+  const bare = deriveScoringPeriod(withSettings({ "Weekly Deadline": "Daily" }))
+  t("a bare Daily locks daily, says nothing about which night, and adds no sentence",
+    bare.period.lineup_lock === "daily" && bare.period.locks === null &&
+      !bare.needsReview.some(l => l.includes("which day")),
+    JSON.stringify([bare.period.locks, bare.needsReview]))
+}
+
+// ── WHEN A MOVE IN THIS LEAGUE ACTUALLY LANDS ────────────────────────────────
+//
+// Five waiver rows and two trade-review rows have been stored verbatim since the
+// first real read and nothing read any of them, so every "Add X, drop Y" was priced
+// and phrased as if it landed tonight.
+{
+  const w = deriveWaiverRule(shippedRaw)
+  t("his league's waiver period is read off the row that states it",
+    w.days === 1, JSON.stringify(w))
+  t("…and the rows it came from are quoted, so a screen can show its working",
+    w.sources.some(x => x.includes('Waiver Time "1 day"')) &&
+      w.sources.some(x => x.includes("Continual rolling list")),
+    JSON.stringify(w.sources))
+  t("the currency a claim costs is carried verbatim and parsed by nothing",
+    w.type === "Continual rolling list" && w.mode === "Standard", JSON.stringify(w))
+  /* `Waiver Time (WT)` is a real variant and its value carries no unit — see
+     test/settings.mjs. Reading days off it would print a number the league never said. */
+  t("a renamed label is not read, because the value under it states no unit",
+    deriveWaiverRule({ "Waiver Time (WT)": "2" }).days === null)
+  t("a league that states no waiver period says nothing rather than zero",
+    deriveWaiverRule({ "Waiver Time": "No waivers" }).days === null &&
+      deriveWaiverRule({ "Waiver Time": "No waivers" }).sources.length === 1)
+  t("and zero days is the instant-add case, which is an absence of a sentence",
+    deriveWaiverRule({ "Waiver Time": "0 days" }).days === null)
+  t("a missing row yields nothing to quote at all",
+    deriveWaiverRule({}).days === null && deriveWaiverRule({}).sources.length === 0)
+
+  const r = deriveTradeReview(shippedRaw)
+  t("the review an agreed trade has to clear is read the same way",
+    r.days === 2 && r.review === "League Votes", JSON.stringify(r))
+  t("…and quotes both rows it read",
+    r.sources.length === 2 && r.sources.some(x => x.includes('"2 days"')),
+    JSON.stringify(r.sources))
+  t("a league with no reject time states a regime and no delay",
+    deriveTradeReview({ "Trade Review": "None" }).days === null &&
+      deriveTradeReview({ "Trade Review": "None" }).review === "None")
+}
 
 // A league that evidences no matchup period gets null, not a Monday-to-Sunday guess.
 const roto = deriveScoringPeriod(withSettings({ "Scoring Type": "Rotisserie" }))

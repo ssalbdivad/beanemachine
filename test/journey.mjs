@@ -1393,13 +1393,31 @@ t("the seats read on the other screen survived the reload, and are still dated",
  * folding it in would make "accounts for every seat the paste carried" pass on
  * strangers.
  */
-const seated = await page.$$eval(".decide", cards => {
+/*
+   AND THE SEATS THE PLATFORM HAS ALREADY SHUT, which this used to miss.
+
+   Measured: run in the evening, this failed "13 of 14: Jared Jones" — and it failed
+   at HEAD as well, so it is the clock and not a change. A man whose own first pitch
+   has passed is `frozen`: the card deliberately offers no change to his seat and
+   names him in its own sentence instead ("his game was due to start at 7:05 …, so it
+   is no longer offered"). He IS accounted for — in the one list this assertion did
+   not read — so the assertion was reporting the time of day.
+
+   `.decide-locked` and `.decide-stuck` are prose, not lists, so the names are matched
+   out of their text against the roster that was pasted. That is weaker than a
+   selector and is the honest reading of a sentence.
+*/
+const seated = await page.$$eval(".decide", (cards, mineNames) => {
 	const card = cards[0]
 	const starters = [...card.querySelectorAll(".decide-today li:not(.decide-empty) b")].map(b => b.textContent.trim())
 	const benched = [...card.querySelectorAll(".decide-bench-group b")].map(b => b.textContent.trim())
 	const moved = [...card.querySelectorAll(".decide-changes li:not(.decide-bench-group) b")].map(b => b.textContent.trim())
-	return [...new Set([...starters, ...benched, ...moved])]
-})
+	const shut = [...card.querySelectorAll(".decide-locked, .decide-stuck")]
+		.map(n => n.innerText)
+		.join(" ")
+	const frozen = mineNames.filter(n => shut.includes(n))
+	return [...new Set([...starters, ...benched, ...moved, ...frozen])]
+}, mine.map(m => m.name))
 t("the card accounts for every seat the paste carried, and invents none",
 	seated.length === mine.length && mine.every(m => seated.includes(m.name)),
 	`${seated.length} of ${mine.length}: ${mine.filter(m => !seated.includes(m.name)).map(m => m.name).join(", ")}`)

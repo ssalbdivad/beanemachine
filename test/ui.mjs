@@ -1499,6 +1499,71 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await ctx.close()
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE QUESTION HIS OWN LEAGUE PAGE ANSWERS.
+ *
+ * "How many teams are in your league?" was asked of a reader with the add-on installed and
+ * a Yahoo tab open — and Yahoo prints "Max Teams" on the settings page, which is in every
+ * press the reader makes. The chips stay for everyone who cannot press: a phone, a browser
+ * without the add-on, and a press already made that came back without the row.
+ *
+ * Presence is driven by the ATTRIBUTE rather than by a real extension, which is what
+ * `useExtension` watches for on a two-second poll — see the note there about a page that
+ * was already open when the reader installed it.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+	const ap = await ctx.newPage()
+	await stubSlate(ap)
+	await ap.route("**/scoring.json", async route => {
+		const j = await (await route.fetch()).json()
+		j.leagues = {}
+		j.active_league = null
+		await route.fulfill({ json: j })
+	})
+	await ap.goto(BASE, { waitUntil: "domcontentloaded" })
+	await ap.waitForSelector(".dock-bar button", { timeout: 30000 })
+	if ((await ap.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
+		await ap.click(".dock-bar button")
+	await ap.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
+	/* A team typed in is what creates the preset league, which is the one case that must
+	   still be asked: its ten is borrowed from somebody else's league. */
+	const names = await ap.getAttribute('.onboard textarea[data-ctl="onboard-team"]', "placeholder")
+	await ap.fill("[data-ctl=onboard-team]", names)
+	await ap.click(".onboard-go button")
+	await ap.waitForSelector(".onboard-got", { timeout: 20000 })
+	const chips = ap.locator(".onboard-teams .chip-btn")
+	t("with no reader in the browser the team count is still asked, as chips",
+		(await chips.count()) === 5, `${await chips.count()} chips`)
+	t("…and nothing offers to read a number off a page nothing here can open",
+		(await ap.locator(".onboard-teams-read").count()) === 0)
+
+	await ap.evaluate(() =>
+		document.documentElement.setAttribute("data-beanemachine-extension", "0.0.0-test")
+	)
+	await ap.waitForSelector(".onboard-teams-read button", { timeout: 15000 })
+	t("the moment the reader is there, the press replaces the question",
+		(await ap.locator(".onboard-teams .chip-btn").count()) === 0,
+		`${await ap.locator(".onboard-teams .chip-btn").count()} chips still up`)
+	t("…and the button names what it reads and where from",
+		/team count/i.test(await ap.textContent(".onboard-teams-read button")),
+		await ap.textContent(".onboard-teams-read button"))
+	/* And it is the SAME door, not a second one: both this and the offer at the top of the
+	   sheet open the walkthrough, so the two entry points cannot disagree about what the
+	   reader is being asked to do. */
+	await ap.click(".onboard-teams-read button")
+	await ap.waitForSelector(".connect", { timeout: 10000 })
+	t("…and it opens the one walkthrough this app has",
+		(await ap.locator(".connect").count()) === 1)
+	t("…and the question is not asked underneath its own walkthrough",
+		(await ap.locator(".onboard-teams").count()) === 0,
+		`${await ap.locator(".onboard-teams").count()} team questions behind the sheet`)
+	await ap.close()
+	await ctx.close()
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

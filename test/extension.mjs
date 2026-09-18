@@ -151,8 +151,14 @@ const PAGE_ROWS = 25
    caller passes the position the page was served for; the one row built by hand further down
    keeps its own, and says why there.
 */
-const row = (id, name, pct, pos = "SP,RP") =>
+/* `status` is INFERRED, not measured: the class pair `F-injury, ysf-player-status` is what
+   src/auto/roster.ts reads off the TEAM page, and whether Yahoo prints the same badge in the
+   players table has never been captured. Every third row carries one so the parser is
+   exercised on both shapes — a green suite here means the parser handles the badge, not that
+   the badge is on the page. docs/EXTENSION.md records that gap. */
+const row = (id, name, pct, pos = "SP,RP", status = id % 3 === 0 ? "DTD" : null) =>
 	`<tr><td><a href="/players/${id}" data-ys-playerid="${id}" class="name" title="${name}">${name}</a>` +
+	(status ? `<span class="F-injury">${status}</span>` : "") +
 	`<span data-ys-playerid="${id}" class="note"></span>` +
 	`<span class="Nowrap">MIL - ${pos}</span>${TOOLTIP}` +
 	`<td class="Alt Ta-end"><div >984.40</div></td>` +
@@ -1246,7 +1252,13 @@ await walled.close()
 			pool: pool?.players?.length ?? 0,
 			asked: pool?.positionsRequested?.length ?? 0,
 			note: pool?.note ?? "",
-			stamped: !!pool?.at
+			stamped: !!pool?.at,
+			/* The two columns the sweep already fetched and used to throw away at the store —
+			   Yahoo's own roster share and its own status badge. Both are what the board now
+			   prices and marks a row from, so the round trip is what is asserted, not the
+			   parser, which test/ownership.mjs pins on its own. */
+			priced: pool?.players?.filter(p => typeof p.rosteredPct === "number").length ?? 0,
+			flagged: pool?.players?.filter(p => p.status).length ?? 0
 		}
 	}, KEY)
 	t("one press puts his team in this browser, with the seat each man is in",
@@ -1257,6 +1269,10 @@ await walled.close()
 		/read off your league in this browser/.test(got.note), got.note)
 	t("and records which positions it asked for, so a throttled sweep is refused as partial",
 		got.asked === 9, String(got.asked))
+	t("and every man carries the rostered share his own league page printed for him",
+		got.priced === got.pool && got.pool > 0, JSON.stringify(got))
+	t("and the status badge on the rows that had one, and nothing on the rows that did not",
+		got.flagged > 0 && got.flagged < got.pool, JSON.stringify(got))
 	t("with nothing thrown on the way", uiErrs.length === 0, uiErrs.join(" | "))
 	await ui.close()
 }

@@ -39,6 +39,21 @@ export type BoardRow = Ranked & {
 	 * not zero and must never render as one.
 	 */
 	deltaMine: number | null
+	/**
+	 * What the reader's OWN league page printed beside this man, where it printed
+	 * anything: "IL", "IL60", "DTD", "NA".
+	 *
+	 * Null is "no badge", never "healthy" — MLB's list is consulted independently and
+	 * an absence here is an absence, not a clearance. It marks a row and it hides one
+	 * under `hideInjured`; it never changes a rating.
+	 */
+	yahooStatus: string | null
+	/**
+	 * Whether `rosteredPct` on this row came off his own wire rather than off the
+	 * capture — the difference between "rostered in 41% of Yahoo leagues" and the same
+	 * sentence with "read 3m ago" on the end.
+	 */
+	fromWire: boolean
 }
 
 /**
@@ -447,7 +462,26 @@ export const useBoard = (
 	/** Your own men, by normalised name, so a row can be priced against the seat it
 	 *  would actually take rather than against the league's generic bar. Empty or
 	 *  absent means no roster has been entered and the column stays blank. */
-	myNames?: Set<string> | null
+	myNames?: Set<string> | null,
+	/**
+	 * Yahoo's own "% Ros" for the men on the reader's own wire, by normalised name.
+	 *
+	 * It replaces the capture's figure per player wherever it exists. The capture is a
+	 * whole-board sweep dated by its own file; this is his league's page, read minutes
+	 * ago, and the screens that print "rostered in 35% of leagues" to a reader who has
+	 * just read his own wire were printing the older of the two.
+	 */
+	poolOwnership?: Map<string, number> | null,
+	/**
+	 * Yahoo's status badge for those same men — "IL", "IL60", "DTD", "NA".
+	 *
+	 * A second, independent source from MLB's list, and the only one that names the
+	 * day-to-day, the minors and the suspended: `fetchInjuries` keeps only `^D\d+`
+	 * codes. It MARKS. It never ranks — see `hideInjured` below.
+	 */
+	poolStatus?: Map<string, string> | null,
+	/** When that wire was read, so a row can say how old its own figure is. */
+	poolReadAt?: string | null
 ) => {
 	/**
 	 * The injured list, brought up to date from MLB rather than read off a capture.
@@ -733,6 +767,36 @@ export const useBoard = (
 		   It was made here, and the dates the board printed were derived from
 		   `snapshot.horizon` in Board.tsx, which is how a board rated over Sep 12 → Sep 26
 		   came to be headed "Sep 8 → Sep 22". Same booleans, one source. */
+		/*
+		   HIS OWN LEAGUE PAGE, JOINED ONTO THE SNAPSHOT BY NAME.
+
+		   The pool is keyed by Yahoo's ids and the ranking by MLB's, so the only join
+		   available is the normalised name — the same one `gettable` and `availableNames`
+		   already make. A name matching no snapshot player is DROPPED and nothing is
+		   stated: a free agent this capture has never heard of cannot be ranked anyway,
+		   and a sentence about him would be a sentence about the capture.
+		*/
+		const byName = new Map<string, number>()
+		if (poolOwnership?.size || poolStatus?.size)
+			for (const p of h.players) byName.set(normalizeName(p.name), p.id)
+		const wire = ((): Map<number, number> | undefined => {
+			if (!poolOwnership?.size) return undefined
+			const out = new Map<number, number>()
+			for (const [name, pct] of poolOwnership) {
+				const id = byName.get(name)
+				if (id !== undefined) out.set(id, pct)
+			}
+			return out.size ? out : undefined
+		})()
+		const flagged = ((): Map<number, string> | undefined => {
+			if (!poolStatus?.size) return undefined
+			const out = new Map<number, string>()
+			for (const [name, token] of poolStatus) {
+				const id = byName.get(name)
+				if (id !== undefined) out.set(id, token)
+			}
+			return out.size ? out : undefined
+		})()
 		const usingWeek = using === "period"
 		const usingRest = using === "rest"
 		const long = longWindows?.fortnight
@@ -802,8 +866,18 @@ export const useBoard = (
 				teams: league.meta.max_teams
 				})
 			),
-			h.ownership
-		)
+			h.ownership,
+			wire
+		).map(r => ({
+			/** What the reader's own league prints beside this man, where it printed
+			 *  anything. Null is "no badge", never "healthy". */
+			yahooStatus: flagged?.get(r.player.id) ?? null,
+			/** Whether the figure on this row came off his own wire rather than off the
+			 *  capture — the difference between "rostered in 41%" and "rostered in 41%,
+			 *  read 3m ago". */
+			fromWire: wire?.has(r.player.id) ?? false,
+			...r
+		}))
 		/* `contact` is in here, so the board RE-RATES when the expected-stats rows land.
 		   Measured in node on the committed capture: the whole
 		   rateAll + withUndervaluation + withMarketEdge pass over 1,446 rated players is a
@@ -814,7 +888,7 @@ export const useBoard = (
 		   disagreeing about a number is the worst failure this page can produce. Nothing
 		   re-orders — the proof above is that the ranking is byte-identical either way — so
 		   what the reader sees change is only the numbers that were waiting on the file. */
-	}, [snapshot, league, filters.mode, using, week, longWindows, gettable, injuries, contact, availability.basis, positionsRead])
+	}, [snapshot, league, filters.mode, using, week, longWindows, gettable, injuries, contact, availability.basis, positionsRead, poolOwnership, poolStatus])
 
 	/**
 	 * Can the reader actually add this man — and how sure is the answer.
@@ -1182,7 +1256,14 @@ export const useBoard = (
 			// byte-identical, against Stash's 1,446 → 1,245. Scoped here rather than
 			// merely unrendered, because this page has already shipped a filter that went
 			// on filtering after its checkbox stopped being drawn.
-			if (filters.mode === "stash" && filters.hideInjured && r.injury) return false
+			/* `yahooStatus` counts here and NOWHERE else. It is his own league's badge, and
+			   it names men MLB's feed never does — the day-to-day, the minors, the
+			   suspended — so it belongs in the control that says "hide anyone flagged". It
+			   is deliberately kept out of `injuryPolicy`, which drops a man from the
+			   ranking entirely: a DTD beside a name is not grounds for that. The badge
+			   marks; it does not rank. */
+			if (filters.mode === "stash" && filters.hideInjured && (r.injury || r.yahooStatus))
+				return false
 			/**
 			 * Only players he can get.
 			 *
@@ -1246,7 +1327,11 @@ export const useBoard = (
 		/* Both halves, because the drill-down needs to say which state it is in AND be
 		   able to leave it. `contactStatus` is the sentence; `askForContact` is what the
 		   open row calls on mount. */
-		contactStatus, askForContact
+		contactStatus, askForContact,
+		/* When the wire behind `fromWire` was read, so a row carrying his own league's
+		   figure can say how old it is in the same words the pool chip uses. Null when
+		   nothing on the board came off a wire. */
+		wireAt: poolOwnership?.size ? (poolReadAt ?? null) : null
 	}
 }
 

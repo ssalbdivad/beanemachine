@@ -219,7 +219,9 @@ const readExtras = async (league: League, leagueId: string): Promise<Extras> => 
 				yahooId: p.yahooId,
 				name: p.name,
 				team: p.team,
-				positions: p.positions
+				positions: p.positions,
+				rosteredPct: p.rosteredPct,
+				status: p.status
 			})),
 			positionsRead: pool.positionsRead,
 			note: pool.note

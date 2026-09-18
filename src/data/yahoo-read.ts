@@ -23,7 +23,7 @@ import { leagueIdFrom, sportFrom, teamIdFrom, SPORT, type Grab } from "./extensi
 import { leagueFromPastedSettings } from "./paste-settings.ts"
 import { rosterFromPaste, type PastedRoster } from "./paste.ts"
 import { normalizeName } from "./names.ts"
-import { parsePage, type PoolEntry } from "./yahoo-pool.ts"
+import { looksLeaked, parsePage, type PoolEntry } from "./yahoo-pool.ts"
 
 export interface YahooReading {
 	/** `yahoo:<id>`, the key this app has always stored a Yahoo league under, so a read
@@ -478,6 +478,25 @@ export const readGrabs = (
 
 		   The URLs remain the fallback, for grabs made before the sweep carried its list.
 		*/
+		/*
+		   THE TRIPWIRE, RUN OVER THE WHOLE SWEEP.
+
+		   `parsePage` identifies Yahoo's roster-share cell positively — `<td><div>98%`,
+		   a shape the AccuWeather tooltip nested in each row has no equivalent of — so
+		   this should never fire. It is here for the day Yahoo's markup moves and the
+		   column starts reading as something per-GAME, which is the failure argued at
+		   length on `leakedByTeam` and which reorders the whole board rather than
+		   degrading one cell.
+
+		   When it fires the percentages go and the pool STAYS: who is free is a separate
+		   claim off the same page and is unaffected by what the ownership column did. The
+		   absence is then stated in the reader's own note rather than left to look like a
+		   league nobody owns anybody in.
+		*/
+		if (looksLeaked(rows)) {
+			for (const r of rows) r.rosteredPct = null
+			notes.push("Yahoo's rostered column came back unreadable this time.")
+		}
 		const asked = players.find(g => g.asked?.length)?.asked
 		const requested = players.map(g => posOf(g.url)).filter((p): p is string => !!p)
 		out.pool = {

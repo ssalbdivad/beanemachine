@@ -43,7 +43,19 @@ const Player = type({
 	yahooId: "string > 0",
 	name: "string > 0",
 	team: "string | null",
-	positions: "string[]"
+	positions: "string[]",
+	/**
+	 * Yahoo's own "% Ros" for this man, as his own league's page printed it.
+	 *
+	 * OPTIONAL is load-bearing, and so is it on the key below: `read()` discards a
+	 * whole pool that fails validation, so a required field would silently empty
+	 * every pool already sitting in every browser and every carried scoring.json.
+	 * An absent key is "not read", which is exactly what the screen says.
+	 */
+	"rosteredPct?": "number | null",
+	/** Yahoo's status token beside the name. Absent on a paste, which is text with no
+	 *  markup in it to read one from, and on every pool written before this existed. */
+	"status?": "string | null"
 })
 
 const Entry = type({

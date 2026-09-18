@@ -901,7 +901,20 @@ const BUCKETS = 10
 
 export const withMarketEdge = (
 	rated: (Rated & { undervaluation: number | null })[],
-	ownership: Map<number, number> | undefined
+	ownership: Map<number, number> | undefined,
+	/**
+	 * The same quantity, read off the reader's OWN league page minutes ago.
+	 *
+	 * It overrides the capture per player and deliberately does NOT build the curve.
+	 * The bar every row is measured against stays a whole-board median off a capture
+	 * that passed the leak tripwire; a wire sweep is ~225 free agents, which is the
+	 * bottom of the market by construction, and a decile curve built from it would put
+	 * par where the unowned live and call every rostered man a bargain.
+	 *
+	 * One number then feeds `rosteredPct`, `uscore` and the `parAt` lookup, so the row
+	 * and its drill-down cannot disagree about how owned a man is.
+	 */
+	wire?: Map<number, number>
 ): Ranked[] => {
 	const priced = rated.flatMap(r => {
 		const pct = ownership?.get(r.player.id)
@@ -938,7 +951,7 @@ export const withMarketEdge = (
 	}
 
 	return rated.map(r => {
-		const pct = ownership?.get(r.player.id) ?? null
+		const pct = wire?.get(r.player.id) ?? ownership?.get(r.player.id) ?? null
 		const par = pct === null || !r.rateable ? null : parAt(pct)
 		return {
 			...r,

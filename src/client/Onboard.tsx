@@ -5,7 +5,7 @@ import { leagueFromPastedSettings } from "../data/paste-settings.ts"
 import { rosterFromPaste, type PastedRoster } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
-import { leagueGaps, tab } from "./panels.tsx"
+import { isPreset, leagueGaps, tab } from "./panels.tsx"
 import { typingStore, type Box } from "./typing.ts"
 import { Connect, browserOf, takesExtension } from "./Connect.tsx"
 import { extensionHere, useExtension } from "./extension.ts"
@@ -240,7 +240,29 @@ export const Onboard = ({
 	   pinning it is what the note below argues for.
 	*/
 	const [teamsAnswered, setTeamsAnswered] = useState(false)
-	const answered = teamsAnswered
+
+	/*
+	   THE QUESTION HIS OWN LEAGUE PAGE ANSWERS.
+
+	   Yahoo prints "Max Teams" on the settings page and every press of the reader fetches
+	   that page, so a reader with the add-on installed is being asked for a number that is
+	   two requests away and that he has already given the app permission to go and read.
+	   Where the press is available it is offered INSTEAD of the chips, and where it is not
+	   — no add-on, or a press already made that came back without the row — the chips are
+	   exactly what they were.
+
+	   `readTried` is the whole fallback. A settings page that is not what we think (label
+	   renamed, value non-numeric, scoring missing so `leagueFromPastedSettings` returns no
+	   league) leaves `max_teams` null, so the question would otherwise offer the same press
+	   for ever. One press, then the chips.
+	*/
+	const [readTried, setReadTried] = useState(false)
+	const asksTeams = !!league && (league.meta.max_teams === null || isPreset(league))
+	const offerPress = asksTeams && ext.present && !readTried
+
+	/* Nothing below the button to answer means the button is the finish, and pinning it is
+	   what the note above argues for. A league that has said its own size never asks. */
+	const answered = !asksTeams || teamsAnswered
 
 	/*
 	   THE MOMENT A LEAGUE APPEARS, THE REST OF THE SHEET IS BELOW THE FOLD.
@@ -337,6 +359,9 @@ export const Onboard = ({
 	const readLeague = async () => {
 		if (!snapshot) return
 		setReadFailure(null)
+		/* Before the await, not after: a press that throws has still been made, and the
+		   question must not go on offering a route the reader has already taken. */
+		setReadTried(true)
 		const answer = await ext.ask("league")
 		if (!answer.grabs?.length) {
 			setReadFailure(answer.failure ?? null)
@@ -433,7 +458,9 @@ export const Onboard = ({
 						yahooId: p.yahooId,
 						name: p.name,
 						team: p.team,
-						positions: p.positions
+						positions: p.positions,
+						rosteredPct: p.rosteredPct,
+						status: p.status
 					})),
 					positionsRead: got.pool.positionsRead,
 					positionsRequested: got.pool.positionsRequested,
@@ -809,25 +836,41 @@ export const Onboard = ({
 				  else's league, which is exactly what the sheet exists to replace, and
 				  `provenance.method` is where that is recorded.
 				*/}
-				{league && (league.meta.max_teams === null || league.provenance.method.startsWith("preset:")) && (
+				{league && asksTeams && !connecting && (
 					<div className="onboard-teams">
-						<h3>How many teams are in your league?</h3>
-						<div className="chips">
-							{[8, 10, 12, 14, 16].map(n => (
+						{offerPress ?
+							/* Its own class beside the shared one: the platform offer higher up this
+							   sheet is already `.onboard-offer`, and two buttons under one hook is how
+							   a suite silently asserts the wrong one. */
+							<p className="onboard-offer onboard-teams-read">
 								<button
-									key={n}
 									type="button"
-									className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
-									aria-pressed={league.meta.max_teams === n}
-									onClick={() => {
-										setTeamsAnswered(true)
-										onTeamCount(n)
-									}}
+									className="as-link"
+									onClick={() => setConnecting(true)}
 								>
-									{n}
+									Read the team count off my Yahoo league
 								</button>
-							))}
-						</div>
+							</p>
+						:	<>
+								<h3>How many teams are in your league?</h3>
+								<div className="chips">
+									{[8, 10, 12, 14, 16].map(n => (
+										<button
+											key={n}
+											type="button"
+											className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
+											aria-pressed={league.meta.max_teams === n}
+											onClick={() => {
+												setTeamsAnswered(true)
+												onTeamCount(n)
+											}}
+										>
+											{n}
+										</button>
+									))}
+								</div>
+							</>
+						}
 					</div>
 				)}
 

@@ -220,7 +220,16 @@ const direct = async <T,>(what: string, read: () => Promise<T>): Promise<T> => {
 }
 
 export interface AvailablePool {
-	players: { yahooId: string; name: string; team: string | null; positions: string[] }[]
+	players: {
+		yahooId: string
+		name: string
+		team: string | null
+		positions: string[]
+		/** Yahoo's "% Ros" off the reader's own league page, when the sweep read it. */
+		rosteredPct?: number | null
+		/** Yahoo's status badge beside the name, when it printed one. */
+		status?: string | null
+	}[]
 	positionsRead: string[]
 	/**
 	 * Every position the sweep asked for. Absent on an older carried file, which is

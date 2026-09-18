@@ -13,6 +13,7 @@ import {
 import {
 	canReadPool, api, ApiError, getMode, poolIsPartial, type AvailablePool
 } from "./api.ts"
+import { since } from "./pool.ts"
 import { useEffect } from "react"
 import { datesBetween, leagueWeek, type ResolvedPeriod } from "../engine/period.ts"
 import { purpose, tab } from "./panels.tsx"
@@ -826,6 +827,45 @@ export const Board = ({
 	)
 
 	/**
+	 * WHAT YOUR OWN LEAGUE PAGE PRINTS BESIDE A FREE AGENT, joined the same way.
+	 *
+	 * Two columns, both read off the nine pages the sweep already fetches and both
+	 * thrown away until now: Yahoo's "% Ros" and Yahoo's status badge. The first
+	 * replaces a number from a capture — every "rostered in 35% of leagues" sentence
+	 * on this screen came from data/snapshot.json, dated, printed to a reader who read
+	 * his own wire thirty seconds ago. The second is the only source in the app for a
+	 * man who is day-to-day, in the minors or suspended: `fetchInjuries` keeps only
+	 * `^D\d+` codes and drops 513 of 709 non-active entries.
+	 *
+	 * Gated on `pool.players.length` and deliberately NOT on `poolIsPartial`. Partiality
+	 * invalidates "who is free" — a sweep walled at the fifth position leaves real free
+	 * agents looking owned — but each ROW's own percentage and own badge are
+	 * independent facts about that man and stay true on a four-position sweep.
+	 */
+	const poolOwnership = useMemo(
+		() =>
+			pool?.players.length ?
+				new Map(
+					pool.players
+						.filter(p => typeof p.rosteredPct === "number")
+						.map(p => [normalizeName(p.name), p.rosteredPct as number] as const)
+				)
+			:	null,
+		[pool]
+	)
+	const poolStatus = useMemo(
+		() =>
+			pool?.players.length ?
+				new Map(
+					pool.players
+						.filter(p => !!p.status)
+						.map(p => [normalizeName(p.name), p.status as string] as const)
+				)
+			:	null,
+		[pool]
+	)
+
+	/**
 	 * A partial read is not this league's free-agent list, so it does not become one.
 	 *
 	 * Yahoo throttles by serving an empty page rather than an error, so a sweep that
@@ -877,7 +917,10 @@ export const Board = ({
 		/* The expected-stats rows are a SECOND file now and the board does not wait for
 		   them — see `useContact` in useBoard.ts. Two things come back: which state that
 		   file is in, and the call that asks for it. Only the drill-down asks. */
-		contactStatus, askForContact
+		contactStatus, askForContact,
+		/* When the wire the rows were priced off was read. Null when no row carries his
+		   own league's figure, in which case nothing says anything about age. */
+		wireAt
 	} = useBoard(
 		snapshot,
 		league,
@@ -888,8 +931,21 @@ export const Board = ({
 		/* What the sweep actually reached. See the note on the parameter: an unread position
 		   used to put a replacement bar of 0 under every man who plays it. */
 		pool && !poolIsPartial(pool) ? pool.positionsRead : null,
-		myNames
+		myNames,
+		/* Yahoo's own two columns off the reader's own league page — the roster share and
+		   the status badge — which used to die in the store. See the note above. */
+		poolOwnership,
+		poolStatus,
+		pool?.readAt ?? null
 	)
+	/** How old the figures that came off his own league page are, in the words the pool
+	 *  chip already uses. Computed once for the whole list rather than per row: every row
+	 *  that carries a wire figure carries it from the same read. */
+	const wireAge = useMemo(
+		() => (wireAt ? since(wireAt, Date.now()).label : null),
+		[wireAt]
+	)
+
 	/** What "only players I can add" is doing right now — the reader may not have
 	 *  said, in which case the tab has answered for him. */
 	/** What this league lets you spend in a week, where it says. Null is "it did not
@@ -1982,6 +2038,7 @@ export const Board = ({
 							rank={i + 1}
 							r={r}
 							stream={filters.mode === "stream"}
+							wireAge={wireAge}
 							starts={startsFor(r)}
 							mine={mine}
 							/* the reader's budget, counted down the ranking he is actually
@@ -2615,7 +2672,9 @@ const rowLabel = (
 		:	"no scheduled games on record",
 		/* Same reason as the `worry` string above: this clause joins a comma list, so it
 		   reads "14 team games scheduled, MLB lists him optioned to the minors". */
-		...(r.injury ? [`MLB lists him ${r.injury.toLowerCase()}`] : [])
+		...(r.injury ? [`MLB lists him ${r.injury.toLowerCase()}`] : []),
+		/* Only where MLB said nothing, so the two flags never read as two conditions. */
+		...(!r.injury && r.yahooStatus ? [`your league lists him ${r.yahooStatus}`] : [])
 	].join(", ")
 
 /**
@@ -2678,7 +2737,8 @@ const Row = ({
 	open,
 	onToggle,
 	contactStatus,
-	askForContact
+	askForContact,
+	wireAge
 }: {
 	rank: number
 	r: BoardRow
@@ -2689,6 +2749,8 @@ const Row = ({
 	/** On the Streaming tab, where the row answers a different question and
 	 *  therefore carries different columns — see STREAM_GRID_CSS. */
 	stream: boolean
+	/** How old the reader's own wire read is, where a row's figure came off it. */
+	wireAge: string | null
 	/** His schedule in this window, on the streaming tab. Null everywhere else. */
 	starts: Starts | null
 	open: boolean
@@ -2733,6 +2795,11 @@ const Row = ({
 							title={
 								r.rosteredPct === null ?
 									"Yahoo listed no rostered share for him. He is counted as gettable because the sweep reads about 200 deep per position and never reached him — an estimate, and the one place it is weakest."
+								: r.fromWire && wireAge ?
+									/* It says WHEN, and it does not say "in your league": "% Ros" is
+									   Yahoo's share across every league it runs, and reading it off his
+									   own page makes it current rather than local. */
+									`Rostered in ${r.rosteredPct}% of Yahoo leagues, read ${wireAge}.`
 								:	`Rostered in ${r.rosteredPct}% of Yahoo leagues.`
 							}
 						>
@@ -2740,7 +2807,15 @@ const Row = ({
 							{r.rosteredPct === null ? "not listed" : `${r.rosteredPct}% owned`}
 						</span>
 					)}
-					{r.injury && <em className="hurt">{r.injury}</em>}
+					{/* MLB first where both spoke: it says "10-Day IL" where Yahoo says "IL", and
+					    the longer answer is the more useful one. Yahoo's badge is the only source
+					    for the day-to-day, the minors and the suspended, none of which MLB's feed
+					    keeps. */}
+					{r.injury ?
+						<em className="hurt">{r.injury}</em>
+					: r.yahooStatus ?
+						<em className="hurt">{r.yahooStatus}</em>
+					:	null}
 				</span>
 				{starts && <StartLine s={starts} />}
 			</span>

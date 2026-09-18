@@ -83,7 +83,9 @@ export const refreshPool = async (
 				yahooId: p.yahooId,
 				name: p.name,
 				team: p.team,
-				positions: p.positions
+				positions: p.positions,
+				rosteredPct: p.rosteredPct,
+				status: p.status
 			})),
 			positionsRead: got.pool.positionsRead,
 			positionsRequested: got.pool.positionsRequested,

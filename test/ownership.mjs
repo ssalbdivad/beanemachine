@@ -40,7 +40,7 @@
  * 119.
  */
 import { readFileSync } from "node:fs"
-import { leakedByTeam, pageUrl, parsePage } from "../src/data/yahoo-pool.ts"
+import { leakedByTeam, looksLeaked, pageUrl, parsePage } from "../src/data/yahoo-pool.ts"
 
 let pass = 0, fail = 0
 const t = (n, ok, x = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${n}${ok ? "" : "  " + x}`) }
@@ -103,8 +103,13 @@ t("the free-agent reader pages the same way", pageUrl("228947", "baseball", "OF"
  * footer after the last row is deliberately longer than the 9000-character span
  * the old matcher allowed, because that is exactly what dropped the 25th row.
  */
-const row = (id, name, pct, weather = true) =>
+const row = (id, name, pct, weather = true, status = null) =>
   `<tr><td><a href="/players/${id}" data-ys-playerid="${id}" class="name" title="${name}">${name}</a>` +
+  /* INFERRED, not measured. The class pair is what src/auto/roster.ts:41 reads off the
+     TEAM page; whether Yahoo prints the same badge in the players table has never been
+     captured. A green suite here means the parser handles the shape, not that the shape
+     is on the page — see docs/EXTENSION.md. */
+  (status ? `<span class="F-injury">${status}</span>` : "") +
   `<span data-ys-playerid="${id}" class="note"></span>` +
   `<span class="Nowrap">MIL - SP,RP</span>` +
   (weather ?
@@ -137,6 +142,52 @@ t("the two-way player's slot qualifier is stripped from his name",
 t("the player-note link's repeat of the id does not become a second row",
   new Set(parsed.map(p => p.yahooId)).size === 5)
 t("the position line is still read", parsed[0].positions.join(",") === "SP,RP", parsed[0].positions.join(","))
+
+// --- Yahoo's own status badge ------------------------------------------------
+//
+// It is read from the CLASS and never from the word: "IL" and "NA" are roster SLOT
+// tokens in src/data/paste.ts, so a text match would read a seat as an injury.
+const flagged = parsePage(
+  `<table>` + row(11, "Hurt Man", 40, false, "IL60") + row(12, "Fine Man", 41, false) + `</table>`
+)
+t("the status badge is read off the row", flagged[0].status === "IL60", String(flagged[0].status))
+t("a row with no badge is null, not an empty string and not \"healthy\"",
+  flagged[1].status === null, JSON.stringify(flagged[1].status))
+t("the badge does not disturb anything else on its own row",
+  flagged[0].rosteredPct === 40 && flagged[0].name === "Hurt Man", JSON.stringify(flagged[0]))
+t("a badge on one row is not attributed to the next man",
+  flagged[1].status === null && flagged[1].rosteredPct === 41)
+t("every row of the long page still parses with the badge present",
+  parsePage(`<table>` + row(21, "A", 10, true, "DTD") + row(22, "B", 11) +
+    `</table>` + "<footer>".padEnd(90000, "x")).length === 2)
+
+// --- the sweep-wide tripwire -------------------------------------------------
+//
+// `leakedByTeam` needs ten men from ONE club and a sweep is ~225 men over 30 clubs,
+// so it is structurally blind to the read the browser makes. This is the same
+// question asked of the whole sweep.
+const pct = v => ({ rosteredPct: v })
+t("a real-looking sweep is not called leaked",
+  !looksLeaked(Array.from({ length: 200 }, (_, i) => pct(i % 97 === 0 ? 0 : (i % 97) + 1))))
+t("a sweep collapsed onto four per-game values is",
+  looksLeaked(Array.from({ length: 200 }, (_, i) => pct([47, 54, 20, 51][i % 4]))))
+t("a sweep where one value covers more than a third of the priced rows is",
+  looksLeaked(
+    Array.from({ length: 200 }, (_, i) => pct(i < 90 ? 51 : ((i % 90) + 1)))
+  ))
+t("a small sweep is left alone rather than judged on a handful of rows",
+  !looksLeaked(Array.from({ length: 40 }, () => pct(51))))
+t("zeros are exempt, because the bottom of Yahoo's list is full of men nobody owns",
+  !looksLeaked(Array.from({ length: 300 }, (_, i) => (i < 250 ? pct(0) : pct(i - 249)))))
+// The committed capture is the calibration sample: 651 nonzero of 880, 95 distinct
+// values, modal nonzero share 0.135. It must read as honest or the floor is wrong.
+{
+  const capture = JSON.parse(
+    readFileSync(new URL("../data/snapshot.json", import.meta.url), "utf8")
+  ).players.map(p => ({ rosteredPct: p.rosteredPct ?? null }))
+  t("the committed capture reads as honest, which is what the floor was set against",
+    !looksLeaked(capture))
+}
 
 // The forecast alone must never be mistaken for a price: a row with weather and no
 // stat cell reads as unknown rather than as the chance of rain.

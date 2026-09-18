@@ -23,6 +23,17 @@ export interface PoolEntry {
 	 *  Null when the cell was absent; never assumed to be zero, because "nobody owns
 	 *  him" and "we could not read it" are opposite claims. */
 	rosteredPct: number | null
+	/**
+	 * Yahoo's own status token beside the name — "IL", "IL60", "DTD", "NA", "P".
+	 *
+	 * Null is "the league printed nothing", never "he is healthy": MLB's list is
+	 * consulted independently and an absence here is an absence, not a clearance.
+	 * It matters because `fetchInjuries` keeps only `^D\d+` codes — of 709
+	 * non-active entries, 513 are minors or reassignments and are dropped — so a
+	 * free agent who is day-to-day, in the minors or suspended is otherwise
+	 * recommended as an add with no flag on him at all.
+	 */
+	status: string | null
 }
 
 /**
@@ -103,6 +114,29 @@ export const parsePage = (htmlText: string): PoolEntry[] => {
 		 * text scan produced a third of the board's percentages from the forecast.
 		 */
 		const pct = /<td[^>]*>\s*<div[^>]*>\s*(?:<span[^>]*>\s*)?(\d{1,3})%/.exec(block)
+		/**
+		 * Yahoo's status badge, keyed on the CLASS and never on the word.
+		 *
+		 * The pair `F-injury, ysf-player-status` is what `src/auto/roster.ts:41` reads
+		 * off the same component on the team page, so there is one place in this repo
+		 * that knows Yahoo's status class and this reads from it rather than guessing a
+		 * second time. If the pair moves, both move together.
+		 *
+		 * Matching the WORDS "IL"/"DTD" in the row text is the thing that must not be
+		 * done: `src/data/paste.ts` reads those exact strings as roster SLOTS, and a
+		 * status read that way would collide with a seat.
+		 *
+		 * Bounded at 40 characters because a token is two to four; an unbounded lazy
+		 * match runs to the next tag on a row where the class sits on a wrapper. The
+		 * whole search is inside `block`, already capped at 9000, so it can never reach
+		 * the next player's cell.
+		 */
+		const status =
+			cellText(
+				/<[^>]+class="[^"]*(?:F-injury|ysf-player-status)[^"]*"[^>]*>([\s\S]{0,40}?)<\//.exec(
+					block
+				)?.[1] ?? ""
+			).trim() || null
 		out.push({
 			yahooId,
 			// Yahoo lists a two-way player twice, as "Shohei Ohtani (Batter)" and
@@ -111,7 +145,8 @@ export const parsePage = (htmlText: string): PoolEntry[] => {
 			name: cellText(rawName ?? "").replace(/\s*\((?:Batter|Pitcher)\)\s*$/, ""),
 			team: meta?.[1] ?? null,
 			positions: (meta?.[2] ?? "").split(",").map((x: string) => x.trim()).filter(Boolean),
-			rosteredPct: pct?.[1] ? Number(pct[1]) : null
+			rosteredPct: pct?.[1] ? Number(pct[1]) : null,
+			status
 		})
 	}
 	return out
@@ -260,6 +295,43 @@ export const leakedByTeam = (
 		if (bestVal !== 0 && best / vals.length > 0.5) leaked.set(team, bestVal)
 	}
 	return leaked
+}
+
+/**
+ * The same tripwire, for a sweep rather than for a club.
+ *
+ * `leakedByTeam` needs ten players from one club before it will say anything, and a
+ * free-agent sweep is roughly 225 men spread over 30 clubs — seven or eight apiece —
+ * so it is structurally blind to exactly the read the browser makes. This asks the
+ * same question of the whole sweep at once: a roster share VARIES, and a column that
+ * has collapsed onto a handful of per-game numbers has stopped being one.
+ *
+ * Calibrated in-repo against data/snapshot.json's 880 prices: 651 nonzero, 95
+ * distinct values, modal nonzero share 0.135. The leak argued at `leakedByTeam`
+ * collapses twenty clubs onto one of four per-game values, which lands at four to
+ * eight distinct — an order of magnitude below the floor set here.
+ *
+ * Honest caveat, because the floor is a judgement and not a measurement: the
+ * calibration sample is a whole-board capture, not a free-agent-only sweep, and this
+ * repo stores no leaked HTML to re-derive the leaked distribution from. So the floor
+ * is set conservatively at ten distinct values, and when it fires the percentages are
+ * dropped and their absence is STATED rather than quietly blanked.
+ *
+ * Zero is excluded from the test for the reason `leakedByTeam` argues at length: it
+ * is the modal honest share, because the bottom of Yahoo's list is full of men nobody
+ * owns, and a weather leak is always a nonzero per-game number.
+ */
+export const looksLeaked = (rows: readonly { rosteredPct?: number | null }[]): boolean => {
+	const priced = rows
+		.map(r => r.rosteredPct)
+		.filter((v): v is number => typeof v === "number" && v !== 0)
+	if (priced.length < 50) return false
+	const counts = new Map<number, number>()
+	for (const v of priced) counts.set(v, (counts.get(v) ?? 0) + 1)
+	if (counts.size < 10) return true
+	let most = 0
+	for (const n of counts.values()) if (n > most) most = n
+	return most / priced.length > 0.35
 }
 
 /** Re-exported so every existing importer of this module keeps working; the function

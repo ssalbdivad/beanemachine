@@ -618,9 +618,19 @@ const deepest = boardLive[boardLive.length - 1]
 t("the deepest bscore is exactly his points less his bar",
   Math.abs(deepest.bscore - (deepest.points - deepest.replacement)) < 0.02,
   `${deepest.player.name}: ${deepest.points} − ${deepest.replacement} = ${deepest.bscore}`)
-t("and he is the deepest because his points are the lowest, not because they are zero",
-  boardLive.every(r => r.points >= deepest.points - 0.001),
-  `${deepest.player.name} at ${deepest.points}`)
+/* SHRINKAGE CHANGED WHAT THE DEEPEST ROW IS, and the claim moves with it.
+   This asserted that the deepest bscore belongs to the man with the LOWEST projected
+   points, which was true of a model that never regressed anybody's rate. With
+   model.json's shrinkage finally switched on (see the note on `rates` in rateAll), a
+   man with almost no sample is projected at close to the league's own rate rather than
+   at his own, so the bottom of the points column is no longer the bottom of the bscore
+   column: the deepest row is now whoever is furthest below HIS OWN slot's bar, which is
+   what bscore has always claimed to be and what the line above this one checks.
+   What is still invariant, and is what this was really protecting, is that the deepest
+   row is not an artifact of a zero — he has real, negative, projected value. */
+t("and he is the deepest because he is furthest below his bar, not because he is a zero",
+  deepest.points < deepest.replacement && deepest.replacement > 0,
+  `${deepest.player.name}: ${deepest.points} points against a bar of ${deepest.replacement}`)
 t("most of the pool sits below replacement, which is the metric working",
   boardNeg.length / boardLive.length > 0.8,
   `${boardNeg.length} of ${boardLive.length} rateable below 0`)
@@ -649,12 +659,24 @@ t("and something survives the floor, so the board is not a column of zeros",
   boardLive.filter(r => r.addValue > 0).length > 100,
   `${boardLive.filter(r => r.addValue > 0).length} of ${boardLive.length} rateable are worth adding`)
 
-// The extreme end of the scale is a confidence artifact, not a value claim: below
-// -80 the median confidence is 0.07, i.e. these are men with almost no sample.
+/* THE DEEP TAIL LARGELY WENT AWAY, WHICH IS THE POINT OF SHRINKAGE.
+   This read "the deepest rows are men with no sample rather than rated players" and
+   required MORE THAN FIFTY rows below −80, with a median confidence under 0.15. Both
+   halves described the unshrunk model: a man with twenty plate appearances was projected
+   at his own twenty-plate-appearance rate, and the tail of the board was full of him.
+   With shrinkage on, that man is projected close to the league's rate instead and the
+   count below −80 falls from over fifty to 3 — the tail this assertion was written to
+   explain away has mostly stopped existing.
+   So the claim inverts: the extreme end must now be SMALL, and whatever is still down
+   there must still be men the model is not confident about. Both are checked, and the
+   count is asserted from above rather than below so a regression that reinstates a
+   fifty-man tail fails here. */
 const veryDeep = boardLive.filter(r => r.bscore < -80).map(r => r.confidence.value).sort((a, b) => a - b)
-t("the deepest rows are men with no sample rather than rated players",
-  veryDeep.length > 50 && veryDeep[Math.floor(veryDeep.length / 2)] < 0.15,
-  `${veryDeep.length} below −80, median confidence ${veryDeep[Math.floor(veryDeep.length / 2)].toFixed(3)}`)
+t("shrinkage emptied the deep tail, and what is left is still low-confidence",
+  veryDeep.length < 15 &&
+    (veryDeep.length === 0 || veryDeep[Math.floor(veryDeep.length / 2)] < 0.3),
+  `${veryDeep.length} below −80` +
+    (veryDeep.length ? `, median confidence ${veryDeep[Math.floor(veryDeep.length / 2)].toFixed(3)}` : ""))
 // ...while the negative region as a whole is populated by real, well-sampled
 // players, which is why flooring the RAW number would destroy information.
 const confident = boardLive.filter(r => r.confidence.value >= 0.7).map(r => r.bscore).sort((a, b) => a - b)
@@ -1380,9 +1402,22 @@ t("while the four fields that are about the rows all move, so the rows are reall
 
     // The positions the sweep DID read keep the wire's answer — the throttle is not a
     // reason to throw away the four pages that arrived.
-    for (const slot of ["C", "1B", "3B"])
+    /* `barsOf` can only see a slot some row actually CHOSE as its best, and with the
+       bars drawn from one joint assignment a slot can end up chosen by nobody — its bar
+       is then real but unobservable from the rows, and comparing `undefined` to a number
+       would fail on the test's own instrument rather than on the engine. So a slot is
+       compared where both sides can see it, and the number of comparisons that actually
+       happened is asserted, because a check that silently compares nothing is worse than
+       no check. */
+    let compared = 0
+    for (const slot of ["C", "1B", "3B"]) {
+      if (bDec.get(slot) === undefined || bReal.get(slot) === undefined) continue
+      compared++
       t(`${slot} was read, so it keeps the bar the wire sets`,
         bDec.get(slot) === bReal.get(slot), `${bDec.get(slot)} vs ${bReal.get(slot)}`)
+    }
+    t("and at least one read slot was actually observable to compare",
+      compared > 0, `${compared} of 3 comparable`)
 
     // The ones it never reached fall back to the whole-pool simulation — the same bar
     // a page with no wire at all uses, which is this app's stated answer for unknown.

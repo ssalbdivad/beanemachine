@@ -242,6 +242,18 @@ export interface ProjectOptions {
 	 */
 	recentRateK?: number
 	/**
+	 * A MULTIPLIER ON THE SHRINKAGE CONSTANTS, for asking the season how hard to pull.
+	 *
+	 * `SHRINK_K` and `DEFAULT_K` come from model.json and decide how much of a man's own
+	 * rate survives against the league's. They were fitted on ranking correlations. This
+	 * lets a season of real roster decisions ask the same question, without replacing the
+	 * measured SHAPE of the per-stat table — triples regress twenty times harder than
+	 * strikeouts and that stays true at every scale.
+	 *
+	 * 1 is the shipped table.
+	 */
+	shrinkScale?: number
+	/**
 	 * Recent-rate weight for a pitcher who mostly relieves.
 	 *
 	 * A reliever's fantasy value is almost entirely a ROLE — whether he is getting
@@ -378,6 +390,7 @@ export const project = (
 		recentStats = null,
 		recentRateWeight = 0,
 		recentRateK = 0,
+		shrinkScale = MODEL.shrinkage.scale,
 		qualityLambda = MODEL.statcast.lambda,
 		qualityScope = MODEL.statcast.scope,
 		matchupIndex = null,
@@ -595,7 +608,7 @@ export const project = (
 			// little volume backs it. Without this a 90-PA hot streak projects forward
 			// at face value, which is the single biggest source of bad recommendations.
 			const leagueRate = rates?.perUnit[key]
-			const k = SHRINK_K[key] ?? DEFAULT_K
+			const k = (SHRINK_K[key] ?? DEFAULT_K) * shrinkScale
 			let perUnit =
 				leagueRate === undefined ?
 					value / volume

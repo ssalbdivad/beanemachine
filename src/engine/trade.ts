@@ -1,5 +1,5 @@
 import type { League } from "../schema.ts"
-import { RESERVE_SLOTS, slotsFor, startableSeats, type Rated } from "./bscore.ts"
+import { jointReplacement, RESERVE_SLOTS, slotsFor, startableSeats, type Rated } from "./bscore.ts"
 
 /**
  * What a trade is actually worth.
@@ -128,16 +128,29 @@ export const replacementBySlot = (
 			bars.set(slot, Number((men[0]?.points ?? 0).toFixed(2)))
 		return bars
 	}
-	for (const [slot, count] of Object.entries(league.roster.slots)) {
-		if (UNSTARTABLE.has(slot)) continue
-		const eligible = pool
-			.filter(r => r.rateable && r.slots.includes(slot))
-			.sort((a, b) => b.points - a.points)
+	/*
+	   THE THIRD COPY OF THE RULE, AND IT NOW CALLS THE FIRST.
+	
+	   This walked each slot's own eligible list down to `teams x count` and read off the
+	   next name — the same arithmetic `rateAll` used, written out a second time, so the
+	   two could and did drift the moment one of them was corrected. It has the same
+	   defect the corrected one measured: a man who qualifies at three positions is
+	   counted as taken at all three, so every bar but catcher's comes out 10 to 24 points
+	   too high, and this screen priced every player in a trade against them.
+	
+	   `jointReplacement` is that rule with the men seated once between the slots instead
+	   of once per slot each. Same inputs, same depth, one assignment — and one
+	   implementation, so a correction to it cannot leave this page behind again.
+	*/
+	const rateable = pool.filter(r => r.rateable)
+	const startable = Object.fromEntries(
+		Object.entries(league.roster.slots).filter(([slot]) => !UNSTARTABLE.has(slot))
+	)
+	for (const [slot, bar] of jointReplacement(rateable, startable, (_sl, count) => teams * count)) {
 		// no eligible player means the bar is unknown, not zero — the slot is left
 		// out of the map and any spot it leaves empty is reported as a hole
-		if (!eligible.length) continue
-		const depth = Math.min(teams * count, eligible.length - 1)
-		bars.set(slot, Number((eligible[depth]?.points ?? 0).toFixed(2)))
+		if (!rateable.some(r => r.slots.includes(slot))) continue
+		bars.set(slot, Number(bar.toFixed(2)))
 	}
 	return bars
 }

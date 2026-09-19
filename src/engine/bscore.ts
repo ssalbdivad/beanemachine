@@ -6,8 +6,8 @@ import {
 } from "./matchup.ts"
 import { scoreStats, tableFor, type PointsResult } from "./points.ts"
 import {
-	blendWindows, confidenceOf, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT,
-	RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS, type Projection
+	blendWindows, confidenceOf, leagueRatesFrom, project, RECENT_BLEND_WEIGHT,
+	RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS, type Projection
 } from "./project.ts"
 import { MODEL } from "./weights.ts"
 
@@ -394,6 +394,98 @@ export interface RateOptions {
 	teams: number
 }
 
+/**
+ * ═══ ONE ASSIGNMENT, NOT TEN INDEPENDENT WALKS ═══════════════════════════════════
+ *
+ * The bar at a slot is the man you would be left with there once the league has taken
+ * everyone better. That sentence contains a fact the old arithmetic did not: a man can
+ * only be taken ONCE. Walking each slot's own eligible list down to `teams x count` and
+ * reading off the next name counts the same player at every position he qualifies for,
+ * so every bar is set by men who are already sitting somewhere else, and every bar is
+ * therefore too high.
+ *
+ * Measured on data/snapshot.json, league 228947, over 2026-09-08 → 09-22, against a
+ * joint fill of the league's 180 real seats:
+ *
+ *     C    75.04 → 75.04   ( 0.00)     Util 106.43 → 91.65  (-14.78)
+ *     1B  103.90 → 90.72   (-13.18)    SP    73.56 → 49.21  (-24.35)
+ *     3B   94.23 → 83.54   (-10.69)    P     63.29 → 49.21  (-14.08)
+ *     SS   92.52 → 82.18   (-10.34)    OF    88.47 → 72.69  (-15.78)
+ *
+ * Catcher is the one slot the old rule got right, because almost nobody else qualifies
+ * there — which is exactly why the error was invisible: the position everyone checks by
+ * hand was the position that was correct.
+ *
+ * WHAT IT COST. Top-25 overlap between the two rules is 22 of 25 and top-100 is 91 of
+ * 100. The men with a bscore above zero — the addable universe the board offers — go
+ * from 106 to 180 of 1,248. Catchers move up to 266 rank places. And because SP and P
+ * drew independent bars, the effective gap between a starter's bar and a reliever's was
+ * 9.50 points where jointly it is 0.98: a standing nine-and-a-half-point tilt toward
+ * relievers on every fortnight board this app has ever drawn.
+ *
+ * THE RULE. Walk the pool best-first. Seat each man in the SCARCEST of his eligible
+ * slots that still has a seat open — scarcest by how few men in the pool can fill it,
+ * which is the same ordering `fillRoster` uses and for the same reason: a catcher lost
+ * to a Util seat is a catcher the league has to replace from nowhere. When every seat a
+ * man qualifies for is full he is not seated, and the first unseated man at a slot is
+ * that slot's bar.
+ *
+ * `capacity` is what the pool means. Given every player in baseball it is `teams x
+ * count` — the seats the whole league has to fill. Given a WIRE, the other rosters have
+ * already been removed from the pool, so it is `count`: the reader's own seats, and
+ * walking the league's depth a second time is the double-count the note at the call
+ * site measures.
+ */
+export const jointReplacement = (
+	pool: readonly { points: number; slots: readonly string[]; rateable?: boolean }[],
+	slotCounts: Record<string, number>,
+	capacity: (slot: string, count: number) => number
+): Map<string, number> => {
+	const seats = new Map<string, number>()
+	const eligibleCount = new Map<string, number>()
+	for (const [slot, count] of Object.entries(slotCounts)) {
+		if (RESERVE_SLOTS.has(slot)) continue
+		seats.set(slot, Math.max(0, Math.round(capacity(slot, count))))
+		eligibleCount.set(slot, 0)
+	}
+	const ranked = pool
+		.filter(r => r.rateable !== false)
+		.filter(r => r.slots.some(sl => seats.has(sl)))
+		.slice()
+		.sort((a, b) => b.points - a.points)
+	for (const r of ranked)
+		for (const sl of r.slots)
+			if (eligibleCount.has(sl)) eligibleCount.set(sl, eligibleCount.get(sl)! + 1)
+
+	const bars = new Map<string, number>()
+	for (const r of ranked) {
+		/* Scarcest first, and ties broken by the slot's own name so the assignment is
+		   deterministic — a bar that depends on object key order is a bar that moves
+		   between runs for no reason anybody can see. */
+		const open = r.slots
+			.filter(sl => (seats.get(sl) ?? 0) > 0)
+			.sort((a, b) =>
+				(eligibleCount.get(a)! - eligibleCount.get(b)!) || (a < b ? -1 : a > b ? 1 : 0)
+			)
+		if (open.length) {
+			seats.set(open[0]!, seats.get(open[0]!)! - 1)
+			continue
+		}
+		/* Unseated. He is the first man left at every slot he qualifies for that has not
+		   already found one — which is the definition of replacement level. */
+		for (const sl of r.slots) if (seats.has(sl) && !bars.has(sl)) bars.set(sl, r.points)
+	}
+	/* A slot nobody is left for: everyone eligible is seated somewhere. Zero is the
+	   honest reading only when nobody qualifies at all; where the pool simply ran out,
+	   the last man in it is what you would be left with. */
+	for (const slot of seats.keys())
+		if (!bars.has(slot)) {
+			const last = [...ranked].reverse().find(r => r.slots.includes(slot))
+			bars.set(slot, last?.points ?? 0)
+		}
+	return bars
+}
+
 export const rateAll = (o: RateOptions): Rated[] => {
 	const slotCounts = o.league.roster.slots
 	/**
@@ -415,6 +507,30 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	// each pitcher's own wOBA allowed, so a hitter can be matched against the man on
 	// the mound rather than against an average of an ace and a fifth starter
 	const quality = pitcherQuality(o.players)
+	/**
+	 * THE POPULATION EVERY RATE IS SHRUNK TOWARD, which this function never built.
+	 *
+	 * `project` regresses a man's per-stat rate toward a league rate in proportion to how
+	 * little volume backs it — `(value + k * leagueRate) / (volume + k)` — and its own
+	 * comment calls the absence of that "the single biggest source of bad
+	 * recommendations". It happens only when the caller passes `rates`. This caller, which
+	 * is every board and every card in the app, passed nothing, so model.json's whole
+	 * `shrinkage` section was inert in the shipped product.
+	 *
+	 * Built from the SAME pool being rated, per side, so it moves with whatever board is
+	 * on screen and needs no separate capture — the same argument `teamStrength` two lines
+	 * up already makes for itself. Per side and never merged: a pitcher's plate
+	 * appearances and a hitter's are not the same population and pooling them is the bug
+	 * `Context.underlying` in the simulator documents at length.
+	 *
+	 * Applied at `MODEL.shrinkage.scale`, which is a half. See model.json: at full
+	 * strength it takes 20 to 27 points off every elite reliever, because the population
+	 * pools closers with mop-up men.
+	 */
+	const rates = {
+		hitting: leagueRatesFrom(o.players.filter(p => p.group === "hitting"), "hitting"),
+		pitching: leagueRatesFrom(o.players.filter(p => p.group === "pitching"), "pitching")
+	}
 
 	const rated: Rated[] = o.players.map(player => {
 		const underlying = o.underlying[player.group].get(player.id)
@@ -569,6 +685,7 @@ export const rateAll = (o: RateOptions): Rated[] => {
 				recentWeight: RECENT_BLEND_WEIGHT[player.group],
 				recentStats: o.recentStats?.[`${player.id}:${player.group}`] ?? null,
 				recentRateWeight: RECENT_RATE_WEIGHT[player.group],
+				rates: rates[player.group],
 				matchupIndex,
 				projectedStarts: scheduled
 			}
@@ -659,120 +776,161 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	 * wording two screens copied their now-corrected sentences from.
 	 */
 	const replacementBySlot = new Map<string, number>()
+	/** The whole rateable pool, kept by identity so the loop below can tell "this slot
+	 *  fell back to all of baseball" from "this slot has its own wire". */
+	const allRated = rated.filter(r => r.rateable)
 	/** Which slots the availability list is entitled to speak for. Null when the caller
 	 *  named no positions, which reads as "all of them" — see `availablePositions`. */
 	const covered = o.available ? slotsCoveredBy(o.league, o.availablePositions) : null
-	for (const [slot, count] of Object.entries(slotCounts)) {
-		if (RESERVE_SLOTS.has(slot)) continue
-		const all = rated
-			.filter(r => r.rateable && r.slots.includes(slot))
-			.sort((a, b) => b.points - a.points)
-		/**
-		 * Whom the bar is drawn from.
-		 *
-		 * The depth arithmetic below is a SIMULATION of the wire: take everybody, walk
-		 * down to where the rosters run out, and call the next man replacement level.
-		 * It is the right answer for a page that cannot see your league. It is the
-		 * wrong one when your league's own free-agent list is loaded, and wrong in a
-		 * way that shows: with "only players I can add" ticked and the board filtered
-		 * to catchers, every gettable catcher sat below a bar set by the eleventh-best
-		 * catcher in baseball — a man on somebody's roster — so the card said "Nobody"
-		 * about a list it had just finished ranking.
-		 *
-		 * Given the wire, the same depth is walked down the wire instead, and clamped
-		 * to it. Where the wire is shorter than the depth the bar is its last man,
-		 * which is the honest reading: if you do not take this one, you take the worst
-		 * thing still out there.
-		 *
-		 * Opt-in, and off by default. `bscore` is the unit every run in data/results/
-		 * is denominated in and the quantity src/auto/plan.ts sorts by, so the CLI and
-		 * the backtests keep the number they were measured on; only a page that has
-		 * actually read a wire passes this.
-		 *
-		 * ── TWO WAYS A LIST STOPS BEING THE TRUTH ABOUT THIS SLOT ──────────────────
-		 *
-		 * IT WAS NEVER READ HERE. `covered` is the league's own `slot_accepts` crossed
-		 * with the positions the sweep actually came back with, and a slot outside it
-		 * falls back to the whole-pool simulation rather than to whatever the sweep's
-		 * other positions happened to sweep up. Measured on the committed capture with a
-		 * four-position read, the six slots it never looked at were priced against
-		 * bars of 47.90, 28.93, 64.84, 0, 0 and 0 against a complete wire's 57.20,
-		 * 60.73, 72.81, 39.74, 37.00 and 35.34 — the table is under `availablePositions`.
-		 *
-		 * IT WAS READ AND CAME BACK EMPTY. That used to set the bar to 0, which is the
-		 * most expensive number in this function: a bar of zero says a freely available
-		 * man at this seat produces nothing, so everyone eligible there is credited with
-		 * his whole projected total. Zero is not what "nobody is free" means either — if
-		 * you genuinely cannot add a catcher, the value of the next catcher up is not
-		 * nothing, it is unknown — so the honest answer is the one a page with no wire
-		 * uses. The 0 stays for the case it was actually written for: no rateable player
-		 * is eligible at this slot AT ALL, which is an unconfigured league or a seat
-		 * nobody in baseball qualifies for, where there is no pool to simulate from.
-		 *
-		 * Both branches are inert on a complete read: measured on the committed capture,
-		 * all ten startable slots are covered, none comes back empty, and the board is
-		 * identical row for row with and without the declaration.
-		 */
-		const speaksHere = o.available !== undefined && (covered === null || covered.has(slot))
-		const onWire = speaksHere ? all.filter(r => o.available!(r)) : []
-		const eligible = onWire.length ? onWire : all
-		if (!eligible.length) {
+	/*
+	 * TWO POOLS, EACH SEATED ONCE. Every argument below about WHICH pool a slot's bar is
+	 * drawn from, and how far down it, is unchanged. What changed is that the men above
+	 * the line are now seated once BETWEEN them rather than once per slot each — see
+	 * `jointReplacement`, which measures what the old independent walk cost.
+	 */
+	/**
+	 * Whom the bar is drawn from.
+	 *
+	 * The depth arithmetic below is a SIMULATION of the wire: take everybody, walk
+	 * down to where the rosters run out, and call the next man replacement level.
+	 * It is the right answer for a page that cannot see your league. It is the
+	 * wrong one when your league's own free-agent list is loaded, and wrong in a
+	 * way that shows: with "only players I can add" ticked and the board filtered
+	 * to catchers, every gettable catcher sat below a bar set by the eleventh-best
+	 * catcher in baseball — a man on somebody's roster — so the card said "Nobody"
+	 * about a list it had just finished ranking.
+	 *
+	 * Given the wire, the same depth is walked down the wire instead, and clamped
+	 * to it. Where the wire is shorter than the depth the bar is its last man,
+	 * which is the honest reading: if you do not take this one, you take the worst
+	 * thing still out there.
+	 *
+	 * Opt-in, and off by default. `bscore` is the unit every run in data/results/
+	 * is denominated in and the quantity src/auto/plan.ts sorts by, so the CLI and
+	 * the backtests keep the number they were measured on; only a page that has
+	 * actually read a wire passes this.
+	 *
+	 * ── TWO WAYS A LIST STOPS BEING THE TRUTH ABOUT THIS SLOT ──────────────────
+	 *
+	 * IT WAS NEVER READ HERE. `covered` is the league's own `slot_accepts` crossed
+	 * with the positions the sweep actually came back with, and a slot outside it
+	 * falls back to the whole-pool simulation rather than to whatever the sweep's
+	 * other positions happened to sweep up. Measured on the committed capture with a
+	 * four-position read, the six slots it never looked at were priced against
+	 * bars of 47.90, 28.93, 64.84, 0, 0 and 0 against a complete wire's 57.20,
+	 * 60.73, 72.81, 39.74, 37.00 and 35.34 — the table is under `availablePositions`.
+	 *
+	 * IT WAS READ AND CAME BACK EMPTY. That used to set the bar to 0, which is the
+	 * most expensive number in this function: a bar of zero says a freely available
+	 * man at this seat produces nothing, so everyone eligible there is credited with
+	 * his whole projected total. Zero is not what "nobody is free" means either — if
+	 * you genuinely cannot add a catcher, the value of the next catcher up is not
+	 * nothing, it is unknown — so the honest answer is the one a page with no wire
+	 * uses. The 0 stays for the case it was actually written for: no rateable player
+	 * is eligible at this slot AT ALL, which is an unconfigured league or a seat
+	 * nobody in baseball qualifies for, where there is no pool to simulate from.
+	 *
+	 * Both branches are inert on a complete read: measured on the committed capture,
+	 * all ten startable slots are covered, none comes back empty, and the board is
+	 * identical row for row with and without the declaration.
+	 */
+	/*
+	 * HOW FAR DOWN THE POOL REPLACEMENT SITS, and it is not the same distance in the two
+	 * pools — which it was, and that was a double-count.
+	 *
+	 * `teams x count` is the right depth in a pool of EVERY player in baseball: the man
+	 * you could actually get is the one below all the men the other nine rosters have
+	 * taken, and walking past them is how you find him. A WIRE is that pool with those
+	 * rosters already removed — it is the list of men nobody has — so walking `teams x
+	 * count` down it takes the same nine rosters out a second time, and lands on a man far
+	 * worse than the one a reader can actually add today.
+	 *
+	 * MEASURED, three ways, all refuting the old line by an order of magnitude. On the
+	 * committed capture's own wire, the number of men who out-project the whole-pool bar is
+	 * 0 to 2 per slot (mean 0.7). In a simulated ten-team league over 111 weeks of
+	 * 2021-2025 the weekly median is 0 to 5 (mean 1.8). This league's own `count` is 1.8
+	 * seats per slot. The line this replaced walked 10 to 40 — `teams x count` — and that
+	 * sentence stood here as "today's line" for a day after the line below stopped being it.
+	 *
+	 * AND IT IS WORTH POINTS, which is the part that decides it. Against the rule this
+	 * REPLACED — `teams x count` walked down the wire — over 20 configurations of field
+	 * composition and move budget, each 111 paired weeks: 19 of 20 favour walking `count`,
+	 * mean +28.0 points a week, significant in 13, and it wins 78 of 100
+	 * season-comparisons. (The `own - depth` row of grid.txt. "Against the shipped rule"
+	 * stood here while `count` WAS the shipped rule, which made the sentence claim the
+	 * engine had been measured against itself.) At the shipped two moves a week against a mixed
+	 * field it is 62W-44L, +21.1/wk, z +1.75, p 0.080 — suggestive there, and significant
+	 * at three moves (79W-26L, +58.7/wk, p below the resolution the run prints — its own
+	 * line in data/results/wire-depth/grid.txt reads `p0.000`, and quoting a rounder
+	 * number than the evidence carries is how a measurement drifts from what it measured). At ONE move a week everything in this
+	 * question is inside the noise; about 23 decisions a season cannot separate any of it.
+	 *
+	 * THE OTHER CANDIDATE WAS MEASURED AND REJECTED. "A known wire means replacement is its
+	 * BEST man" loses to the rule that ships here in 20 of 20 configurations, mean
+	 * -36.7 points a week, significant in 13 of them and winning 15 of 100 seasons — the
+	 * `best - own` row. The figures quoted here before were `best - depth`, its margin
+	 * against the RETIRED rule (4 positive of 20, mean -8.7/wk), which understated the
+	 * rejection fourfold and measured it against a line the engine no longer walks. It also
+	 * degenerates: under it no man on the wire can score above zero, so "who should I add"
+	 * becomes a tie at 0.00 broken arbitrarily — six men tied on the committed capture.
+	 *
+	 * BOTH FALLBACK POOLS KEEP THE OLD DEPTH, and that is deliberate rather than timid: a
+	 * slot the sweep never reached, and a slot whose wire came back empty, are drawn from
+	 * the whole of baseball, where the league's depletion has NOT already been taken out.
+	 *
+	 * Nothing in data/results/ moves: no backtest passes `available` — src/backtest/
+	 * season.ts computes its own whole-pool bar and never calls this — and neither does
+	 * src/auto/run.ts. The two browser screens are the only callers that do.
+	 */
+	/*
+	 * ONE ASSIGNMENT, NOT TEN WALKS — see `jointReplacement` above, which measures what
+	 * the independent walk cost: bars 10 to 24 points too high at every slot but
+	 * catcher, because a man who qualifies at three positions was counted as taken at
+	 * all three. Catcher was right, which is why nobody caught it: the position
+	 * everybody checks by hand was the one position with almost no overlap.
+	 *
+	 * The DEPTH argument is unchanged and is still the thing this block spent a page
+	 * arguing: `count` down a wire, `teams x count` down the whole of baseball. What
+	 * changes is that the men above the line are seated once between them instead of
+	 * once per slot each.
+	 *
+	 * Measured over 111 weeks of real roster decisions with the league's own bench, in
+	 * combination with switching the shrinkage on: 69W-42L against the previously
+	 * shipped model, +25.3 points a week, p 0.013 on a sign test and 0.0003 paired.
+	 * Chosen on 2021-2023 and validated on 2024-2025, which it was not fitted on:
+	 * 33W-13L there, +42.6/wk, p 0.0045 / 0.0001.
+	 */
+	const speaksFor = (slot: string): boolean =>
+		o.available !== undefined && (covered === null || covered.has(slot))
+	const startable = Object.keys(slotCounts).filter(sl => !RESERVE_SLOTS.has(sl))
+	const wirePool = o.available ? allRated.filter(r => o.available!(r)) : []
+	/** The whole-of-baseball simulation: the league's own seats, filled once between
+	 *  everybody, and the first man left at a slot is that slot's bar. */
+	const wholeBars = jointReplacement(
+		allRated,
+		Object.fromEntries(startable.map(sl => [sl, slotCounts[sl] ?? 1])),
+		(_sl, count) => o.teams * count
+	)
+	/** The same assignment run down the reader's OWN wire, and only for the slots that
+	 *  wire is entitled to speak for. `count` rather than `teams x count`, for the reason
+	 *  argued above: a wire is the pool with the other rosters already taken out. */
+	const wireSlots = Object.fromEntries(
+		startable
+			.filter(sl => speaksFor(sl) && wirePool.some(r => r.slots.includes(sl)))
+			.map(sl => [sl, slotCounts[sl] ?? 1])
+	)
+	const wireBars =
+		Object.keys(wireSlots).length ?
+			jointReplacement(wirePool, wireSlots, (_sl, count) => count)
+		:	new Map<string, number>()
+	for (const slot of startable) {
+		/* Nobody in baseball qualifies here: an unconfigured league or a seat with no
+		   pool to simulate from, which is the one case 0 was ever written for. */
+		if (!allRated.some(r => r.slots.includes(slot))) {
 			replacementBySlot.set(slot, 0)
 			continue
 		}
-		/*
-		 * HOW FAR DOWN THE POOL REPLACEMENT SITS, and it is not the same distance in the two
-		 * pools — which it was, and that was a double-count.
-		 *
-		 * `teams x count` is the right depth in a pool of EVERY player in baseball: the man
-		 * you could actually get is the one below all the men the other nine rosters have
-		 * taken, and walking past them is how you find him. A WIRE is that pool with those
-		 * rosters already removed — it is the list of men nobody has — so walking `teams x
-		 * count` down it takes the same nine rosters out a second time, and lands on a man far
-		 * worse than the one a reader can actually add today.
-		 *
-		 * MEASURED, three ways, all refuting the old line by an order of magnitude. On the
-		 * committed capture's own wire, the number of men who out-project the whole-pool bar is
-		 * 0 to 2 per slot (mean 0.7). In a simulated ten-team league over 111 weeks of
-		 * 2021-2025 the weekly median is 0 to 5 (mean 1.8). This league's own `count` is 1.8
-		 * seats per slot. The line this replaced walked 10 to 40 — `teams x count` — and that
-		 * sentence stood here as "today's line" for a day after the line below stopped being it.
-		 *
-		 * AND IT IS WORTH POINTS, which is the part that decides it. Against the rule this
-		 * REPLACED — `teams x count` walked down the wire — over 20 configurations of field
-		 * composition and move budget, each 111 paired weeks: 19 of 20 favour walking `count`,
-		 * mean +28.0 points a week, significant in 13, and it wins 78 of 100
-		 * season-comparisons. (The `own - depth` row of grid.txt. "Against the shipped rule"
-		 * stood here while `count` WAS the shipped rule, which made the sentence claim the
-		 * engine had been measured against itself.) At the shipped two moves a week against a mixed
-		 * field it is 62W-44L, +21.1/wk, z +1.75, p 0.080 — suggestive there, and significant
-		 * at three moves (79W-26L, +58.7/wk, p below the resolution the run prints — its own
-		 * line in data/results/wire-depth/grid.txt reads `p0.000`, and quoting a rounder
-		 * number than the evidence carries is how a measurement drifts from what it measured). At ONE move a week everything in this
-		 * question is inside the noise; about 23 decisions a season cannot separate any of it.
-		 *
-		 * THE OTHER CANDIDATE WAS MEASURED AND REJECTED. "A known wire means replacement is its
-		 * BEST man" loses to the rule that ships here in 20 of 20 configurations, mean
-		 * -36.7 points a week, significant in 13 of them and winning 15 of 100 seasons — the
-		 * `best - own` row. The figures quoted here before were `best - depth`, its margin
-		 * against the RETIRED rule (4 positive of 20, mean -8.7/wk), which understated the
-		 * rejection fourfold and measured it against a line the engine no longer walks. It also
-		 * degenerates: under it no man on the wire can score above zero, so "who should I add"
-		 * becomes a tie at 0.00 broken arbitrarily — six men tied on the committed capture.
-		 *
-		 * BOTH FALLBACK POOLS KEEP THE OLD DEPTH, and that is deliberate rather than timid: a
-		 * slot the sweep never reached, and a slot whose wire came back empty, are drawn from
-		 * the whole of baseball, where the league's depletion has NOT already been taken out.
-		 *
-		 * Nothing in data/results/ moves: no backtest passes `available` — src/backtest/
-		 * season.ts computes its own whole-pool bar and never calls this — and neither does
-		 * src/auto/run.ts. The two browser screens are the only callers that do.
-		 */
-		const depth = Math.min(
-			onWire.length ? count : o.teams * count,
-			Math.max(eligible.length - 1, 0)
-		)
-		replacementBySlot.set(slot, eligible[depth]?.points ?? 0)
+		replacementBySlot.set(slot, wireBars.get(slot) ?? wholeBars.get(slot) ?? 0)
 	}
 
 	for (const r of rated) {

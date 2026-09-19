@@ -1,136 +1,141 @@
 {
-  "version": 1,
-  "about": [
-    "Every tunable weight in the projection, in one editable file.",
-    "The engine reads its defaults from here, so changing a number here changes",
-    "the recommendation — no code edit, no rebuild of anything but the bundle.",
-    "Each block carries a `why` recording what evidence set the number, because a",
-    "weight with no provenance is a guess, and this project does not ship guesses.",
-    "Re-measure any change with `node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2`.",
-    "Season win/loss counts decide; ranking correlation is advisory only."
-  ],
-  "recentForm": {
-    "blend": {
-      "hitting": 0.5,
-      "pitching": 0.5
-    },
-    "rate": {
-      "hitting": 0,
-      "pitching": 0.15
-    },
-    "windows": {
-      "hitting": {
-        "3": 2,
-        "7": 1,
-        "21": 1
-      },
-      "pitching": {
-        "5": 2,
-        "21": 1
-      }
-    },
-    "why": [
-      "playing time is the single largest edge available, worth 17.7% relative Spearman on hitters and 13.9% on pitchers over a season-only estimate — re-measured on the shipped corpus on 2026-09-11, where `recentWeight 0` reproduces the naive baseline exactly (0.5743 / 0.4697) and the shipped blend reaches 0.6762 / 0.5350. It was quoted here, in three docs and in project.ts as \"~20%\", which rounds the hitting figure up and overstates the pitching one by 44%. `blend` below is the weight that captures it, and it is the ONLY one: this block used to carry a second knob, `volumeWeight: 0.75`, described in exactly those terms. It steered nothing. Every caller that supplies a recent volume also supplies its weight, so 0.75 was reachable only as a default no code path could take — and 0.75 is the value the `blend` note below RETRACTS, at 22.6 points a week over 111 paired weeks. A weights file whose whole premise is that editing a number here changes the recommendation cannot carry a number that does not, so it is deleted rather than left as documentation of a decision already reversed.",
-      "blend 0.5/0.5: chosen by playing seasons, not by correlation. A 14-day ranking mildly preferred 0.75. Re-swept over the full 111 weeks the shipped value wins outright: 0.75 loses 22.6 points a week going 38W-73L, 0.25 loses 8.3, and 0 loses 15.8. For scale, dropping the replacement adjustment entirely costs 45 to 61 points a week — value over replacement is the dominant component and the recency blend is the refinement on top of it.",
-      "rate: a reliever-specific weight was tried on the theory that his value is a ROLE that changes overnight while saves shrink toward the league rate with a heavy constant. Measured over 111 weeks it loses at every level (-1.2, -2.2, -5.9 points a week at 0.3/0.5/0.7). The heavy shrinkage is apparently correct: a reliever's recent save rate is mostly noise. The knob stays, and what ships is the 0.15 in `rate` above — the light setting the NEXT note describes, won on 41 of 50 folds. This sentence used to end \"set to null\", which is not what the file says two lines up and never was.",
-      "rate: pitchers only, and lightly \u2014 41 of 50 folds. The same blend for hitters won 29 of 50, a coin flip, so it is not applied. THE CAVEAT ON BOTH COUNTS: every variant in that grid (src/backtest/evaluate.ts) is scored at recentWeight 0.75, which is the weight the note above retracts at 22.6 points a week. The folds therefore establish an ordering among rate weights AT 0.75, and whether it survives at the shipped 0.5 has not been measured. Re-running the grid at 0.5 is what would settle it.",
-      "windows: the last series is worth more than the fortnight before it. Pitchers work a five-day turn, so their short window is 5 days rather than 3. Same caveat as `rate` above: the window shapes were chosen on folds scored at recentWeight 0.75, not at the shipped 0.5."
-    ]
-  },
-  "statcast": {
-    "weight": 0,
-    "windowDays": 21,
-    "lambda": {
-      "mode": "rising",
-      "prior": 300,
-      "cap": 0.7
-    },
-    "scope": "wide",
-    "clamp": {
-      "min": 0.75,
-      "max": 1.35
-    },
-    "why": [
-      "weight 0 is now JUSTIFIED on clean data, which is not where this started. The original zero was set by a measurement that ran on leaked input — Savant's custom leaderboard ignores its own date parameters and returns the finished season — so it was void, and was retracted.",
-      "Re-measured with true point-in-time Statcast over 2021-2025, 111 paired weeks — every season for which pitch-level data was fetched: every formulation is negative on points per week, and the least-bad one (weight 0.25) is -0.7 points a week while tying 49 of 111 weeks, because it changes almost no roster. The per-season winner also moves around — the batted-ball/falling-lambda config leads 2024 (+3.0/wk) and 2025 (+4.9/wk) and then finishes last in 2023 (-27.8/wk). A winner that changes every season is noise. For scale, over the same 111 weeks the model beats hot-hand by 48.0 points a week (z -3.51) and a season-to-date manager by 65.3 (z -3.89), both significant — so the test is perfectly capable of detecting a real effect. It does not detect one here.",
-      "This does NOT mean xwOBA is unpredictive. On the same clean data it out-predicts actual wOBA for next-week production (rho 0.1019 vs 0.0581) and its gap carries significant incremental signal (partial rho +0.0944, z 6.79, n 5151). Both results are true: the signal is real, and multiplying a projection by it still does not change which 27 players you roster, because that decision is dominated by playing time and slot scarcity.",
-      "A third mechanism was tried and is the most interesting failure. Rather than scaling a projection, VETO the player outright when his results have outrun his contact by more than a threshold — 'his hot fortnight is a mirage, do not pick him up', which is the heuristic every fantasy analyst repeats. It acts on the decision rather than the estimate, which is the only way a rate signal can move a roster otherwise settled by playing time and scarcity. Over 111 weeks it costs -31.3, -60.2 and -95.0 points a week at thresholds of 0.100, 0.060 and 0.035; only a threshold loose enough to veto almost nobody (0.150, tying 68 of 111 weeks) is merely neutral.",
-      "The reason is not subtle once measured: a hitter outrunning his xwOBA is usually a hitter producing a lot, and production is what scores. Refusing him removes the best available player in exchange for a correction that does not arrive inside a one- or two-week horizon.",
-      "Three independent mechanisms — scale the projection, reshape the adjustment, veto the decision — all lose. That is a much stronger claim than any one of them failing.",
-      "So Savant is used where it demonstrably pays — the rolling-window buy-low board, the contact ranking, the confidence penalty for a missing row — and not as a multiplier.",
-      "windowDays 21: the signal was measured on a rolling three-week window, not on season-to-date. Contact and results diverge far more inside three weeks (gap~wOBA -0.61) than across a season (-0.36), and that divergence is the whole signal. 0 means season-to-date.",
-      "lambda.mode 'rising' trusts xwOBA MORE as batted-ball sample grows; 'falling' trusts it more in SMALL samples, which is what the stabilisation literature actually argues; 'fixed' ignores sample.",
-      "scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."
-    ]
-  },
-  "probables": {
-    "use": true,
-    "minStartShare": 0.8,
-    "why": [
-      "MLB publishes probable starters for the next day or two and then thins out fast. A sample week in mid-season filled 212 of 212 slots; a fortnight horizon measured live filled 46 of 222, and 0 of 30 teams had a complete window. The count is therefore only an observation where it COVERS the window, and the snapshot records published-versus-scheduled per team so the engine can tell.",
-      "Read as complete when it was partial, this actively harmed the ranking: a starter who happened to pitch today carried one start over a fortnight while everyone else was projected off team games at two or three, and he fell about 350 places. That is the never-infer rule inverted — a fragment of an observation treated as the whole of one.",
-      "A starter projected from outs per TEAM game averages a two-start week and a one-start week into one number, and in a points league those weeks are worth roughly double one another. This is the largest documented hole in the projection.",
-      "It cannot be backtested. Probables are announced and then overwritten, and no archive of what was announced at the time exists, so there is no leak-free way to replay them. Set to true because it replaces an average with an observation, not because a fold count said so — and that distinction is stated rather than hidden.",
-      "outs ÷ starts is a per-start rate only for a pitcher whose appearances ARE starts. Season outs count every relief inning; gamesStarted counts none of them, so a swingman's ratio is inflated by every out he recorded in relief. A reliever with 63 appearances and one spot start read this way projected 192 outs — 64 innings — for a single start and ranked first on the streaming board, beating second place fivefold. Below this share of appearances made as starts the ratio is refused and the team-games estimate is used instead, with the reason reported in `missing` rather than a number invented. 0.8 keeps 31 of the 48 starts-based pitchers on the measured capture; the strictest version needs no constant at all (gamesPitched === gamesStarted) and this is the looser, stated one."
-    ]
-  },
-  "waivers": {
-    "movesPerWeek": 2,
-    "why": [
-      "Measured across 111 weeks and five seasons, two waiver moves a week beats one against every opponent the simulator plays: 63 of 111 weeks against a thoughtful human versus 60 at one move, 75 against hot-hand versus 74, 73 against a scarcity-aware streak-chaser versus 69, and 80 against a season-to-date manager versus 76.",
-      "Three is worse than two (58/111 against the human), so the curve peaks — it just does not peak at one. An earlier version of this project shipped one move and claimed selectivity beats activity; that claim was wrong and is retracted.",
-      "At zero moves the model loses to every opponent (30/111 against the human). In-season decisions are most of the value, which is the same thing draft-and-hold shows from the other direction.",
-      "Caveat the simulator cannot see: it charges nothing for churn, while a real league spends waiver priority or FAAB on every claim. If moves are expensive in your league, lower this."
-    ]
-  },
-  "matchup": {
-    "weight": 0.5,
-    "clamp": {
-      "min": 0.88,
-      "max": 1.12
-    },
-    "why": [
-      "Who a player actually faces this week, from the real schedule: a hitter is scaled by the quality of the staffs he is booked against, a pitcher by the lineups.",
-      "Opponent strength is measured from the same leak-free prior window as everything else — never from what the opponent went on to do.",
-      "weight 0.5 is the conservative end of a real but unproven effect. Across 111 paired weeks the POINTS TOTAL is monotone in the weight (+69 at 0.1, +125 at 0.25, +200 at 0.5, +265 at 0.75, +549 at 1.0, all against weight 0) — but the weekly RECORD is not, and no dose is significant. Re-derived 2026-09-11 from data/results/matchup-5s_2021-2022-2023-2024-2025_moves1.json: 0.25 goes 25W-29L-57T (p 0.68) and loses more weeks than it wins while gaining points; 0.5 goes 51W-44L-16T (p 0.54, +1.8/wk); 0.75 goes 52W-49L-10T (p 0.84); 1.0 goes 59W-49L-3T (p 0.39, +4.9/wk). The TIES are the thing to read: at 0.1 the dose changes the roster in 10 weeks of 111 and splits them 5-5, and at 0.25 in 54. The effect is concentrated in a few weeks rather than spread across a season, which is how a points total rises monotonically while no dose clears a sign test.",
-      "When a dose-response is monotone in total points but no single dose clears significance, the smallest dose that shows the effect risks the least. Raise it to 1.0 if you want the measured maximum, and read the record above before you do."
-    ]
-  },
-  "shrinkage": {
-    "default": 400,
-    "perStat": {
-      "homeRuns": 170,
-      "baseOnBalls": 120,
-      "strikeOuts": 60,
-      "hits": 290,
-      "doubles": 700,
-      "triples": 1200,
-      "hitByPitch": 240,
-      "stolenBases": 350,
-      "caughtStealing": 500,
-      "runs": 300,
-      "rbi": 300,
-      "totalBases": 320,
-      "sacFlies": 600,
-      "groundIntoDoublePlay": 500,
-      "intentionalWalks": 600,
-      "atBats": 50,
-      "sacBunts": 600,
-      "earnedRuns": 400,
-      "wins": 500,
-      "saves": 400,
-      "holds": 400,
-      "blownSaves": 600,
-      "losses": 500,
-      "completeGames": 900,
-      "shutouts": 900,
-      "wildPitches": 500,
-      "balks": 900,
-      "homeRunsAllowed": 300
-    },
-    "why": [
-      "Roughly the volume at which a stat is half signal, half noise, following the published stabilisation work (Carleton / Tango).",
-      "`default` is deliberately heavy: an unlisted stat is one we have no stabilisation evidence for, and heavy shrinkage is the honest response to that."
-    ]
-  }
+	"version": 1,
+	"about": [
+		"Every tunable weight in the projection, in one editable file.",
+		"The engine reads its defaults from here, so changing a number here changes",
+		"the recommendation — no code edit, no rebuild of anything but the bundle.",
+		"Each block carries a `why` recording what evidence set the number, because a",
+		"weight with no provenance is a guess, and this project does not ship guesses.",
+		"Re-measure any change with `node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2`.",
+		"Season win/loss counts decide; ranking correlation is advisory only."
+	],
+	"recentForm": {
+		"blend": {
+			"hitting": 0.5,
+			"pitching": 0.5
+		},
+		"rate": {
+			"hitting": 0,
+			"pitching": 0.15
+		},
+		"windows": {
+			"hitting": {
+				"3": 2,
+				"7": 1,
+				"21": 1
+			},
+			"pitching": {
+				"5": 2,
+				"21": 1
+			}
+		},
+		"why": [
+			"playing time is the single largest edge available, worth 17.7% relative Spearman on hitters and 13.9% on pitchers over a season-only estimate — re-measured on the shipped corpus on 2026-09-11, where `recentWeight 0` reproduces the naive baseline exactly (0.5743 / 0.4697) and the shipped blend reaches 0.6762 / 0.5350. It was quoted here, in three docs and in project.ts as \"~20%\", which rounds the hitting figure up and overstates the pitching one by 44%. `blend` below is the weight that captures it, and it is the ONLY one: this block used to carry a second knob, `volumeWeight: 0.75`, described in exactly those terms. It steered nothing. Every caller that supplies a recent volume also supplies its weight, so 0.75 was reachable only as a default no code path could take — and 0.75 is the value the `blend` note below RETRACTS, at 22.6 points a week over 111 paired weeks. A weights file whose whole premise is that editing a number here changes the recommendation cannot carry a number that does not, so it is deleted rather than left as documentation of a decision already reversed.",
+			"blend 0.5/0.5: chosen by playing seasons, not by correlation. A 14-day ranking mildly preferred 0.75. Re-swept over the full 111 weeks the shipped value wins outright: 0.75 loses 22.6 points a week going 38W-73L, 0.25 loses 8.3, and 0 loses 15.8. For scale, dropping the replacement adjustment entirely costs 45 to 61 points a week — value over replacement is the dominant component and the recency blend is the refinement on top of it.",
+			"rate: a reliever-specific weight was tried on the theory that his value is a ROLE that changes overnight while saves shrink toward the league rate with a heavy constant. Measured over 111 weeks it loses at every level (-1.2, -2.2, -5.9 points a week at 0.3/0.5/0.7). The heavy shrinkage is apparently correct: a reliever's recent save rate is mostly noise. The knob stays, and what ships is the 0.15 in `rate` above — the light setting the NEXT note describes, won on 41 of 50 folds. This sentence used to end \"set to null\", which is not what the file says two lines up and never was.",
+			"rate: pitchers only, and lightly — 41 of 50 folds. The same blend for hitters won 29 of 50, a coin flip, so it is not applied. THE CAVEAT ON BOTH COUNTS: every variant in that grid (src/backtest/evaluate.ts) is scored at recentWeight 0.75, which is the weight the note above retracts at 22.6 points a week. The folds therefore establish an ordering among rate weights AT 0.75, and whether it survives at the shipped 0.5 has not been measured. Re-running the grid at 0.5 is what would settle it.",
+			"windows: the last series is worth more than the fortnight before it. Pitchers work a five-day turn, so their short window is 5 days rather than 3. Same caveat as `rate` above: the window shapes were chosen on folds scored at recentWeight 0.75, not at the shipped 0.5."
+		]
+	},
+	"statcast": {
+		"weight": 0,
+		"windowDays": 21,
+		"lambda": {
+			"mode": "rising",
+			"prior": 300,
+			"cap": 0.7
+		},
+		"scope": "wide",
+		"clamp": {
+			"min": 0.75,
+			"max": 1.35
+		},
+		"why": [
+			"weight 0 is now JUSTIFIED on clean data, which is not where this started. The original zero was set by a measurement that ran on leaked input — Savant's custom leaderboard ignores its own date parameters and returns the finished season — so it was void, and was retracted.",
+			"Re-measured with true point-in-time Statcast over 2021-2025, 111 paired weeks — every season for which pitch-level data was fetched: every formulation is negative on points per week, and the least-bad one (weight 0.25) is -0.7 points a week while tying 49 of 111 weeks, because it changes almost no roster. The per-season winner also moves around — the batted-ball/falling-lambda config leads 2024 (+3.0/wk) and 2025 (+4.9/wk) and then finishes last in 2023 (-27.8/wk). A winner that changes every season is noise. For scale, over the same 111 weeks the model beats hot-hand by 48.0 points a week (z -3.51) and a season-to-date manager by 65.3 (z -3.89), both significant — so the test is perfectly capable of detecting a real effect. It does not detect one here.",
+			"This does NOT mean xwOBA is unpredictive. On the same clean data it out-predicts actual wOBA for next-week production (rho 0.1019 vs 0.0581) and its gap carries significant incremental signal (partial rho +0.0944, z 6.79, n 5151). Both results are true: the signal is real, and multiplying a projection by it still does not change which 27 players you roster, because that decision is dominated by playing time and slot scarcity.",
+			"A third mechanism was tried and is the most interesting failure. Rather than scaling a projection, VETO the player outright when his results have outrun his contact by more than a threshold — 'his hot fortnight is a mirage, do not pick him up', which is the heuristic every fantasy analyst repeats. It acts on the decision rather than the estimate, which is the only way a rate signal can move a roster otherwise settled by playing time and scarcity. Over 111 weeks it costs -31.3, -60.2 and -95.0 points a week at thresholds of 0.100, 0.060 and 0.035; only a threshold loose enough to veto almost nobody (0.150, tying 68 of 111 weeks) is merely neutral.",
+			"The reason is not subtle once measured: a hitter outrunning his xwOBA is usually a hitter producing a lot, and production is what scores. Refusing him removes the best available player in exchange for a correction that does not arrive inside a one- or two-week horizon.",
+			"Three independent mechanisms — scale the projection, reshape the adjustment, veto the decision — all lose. That is a much stronger claim than any one of them failing.",
+			"So Savant is used where it demonstrably pays — the rolling-window buy-low board, the contact ranking, the confidence penalty for a missing row — and not as a multiplier.",
+			"windowDays 21: the signal was measured on a rolling three-week window, not on season-to-date. Contact and results diverge far more inside three weeks (gap~wOBA -0.61) than across a season (-0.36), and that divergence is the whole signal. 0 means season-to-date.",
+			"lambda.mode 'rising' trusts xwOBA MORE as batted-ball sample grows; 'falling' trusts it more in SMALL samples, which is what the stabilisation literature actually argues; 'fixed' ignores sample.",
+			"scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."
+		]
+	},
+	"probables": {
+		"use": true,
+		"minStartShare": 0.8,
+		"why": [
+			"MLB publishes probable starters for the next day or two and then thins out fast. A sample week in mid-season filled 212 of 212 slots; a fortnight horizon measured live filled 46 of 222, and 0 of 30 teams had a complete window. The count is therefore only an observation where it COVERS the window, and the snapshot records published-versus-scheduled per team so the engine can tell.",
+			"Read as complete when it was partial, this actively harmed the ranking: a starter who happened to pitch today carried one start over a fortnight while everyone else was projected off team games at two or three, and he fell about 350 places. That is the never-infer rule inverted — a fragment of an observation treated as the whole of one.",
+			"A starter projected from outs per TEAM game averages a two-start week and a one-start week into one number, and in a points league those weeks are worth roughly double one another. This is the largest documented hole in the projection.",
+			"It cannot be backtested. Probables are announced and then overwritten, and no archive of what was announced at the time exists, so there is no leak-free way to replay them. Set to true because it replaces an average with an observation, not because a fold count said so — and that distinction is stated rather than hidden.",
+			"outs ÷ starts is a per-start rate only for a pitcher whose appearances ARE starts. Season outs count every relief inning; gamesStarted counts none of them, so a swingman's ratio is inflated by every out he recorded in relief. A reliever with 63 appearances and one spot start read this way projected 192 outs — 64 innings — for a single start and ranked first on the streaming board, beating second place fivefold. Below this share of appearances made as starts the ratio is refused and the team-games estimate is used instead, with the reason reported in `missing` rather than a number invented. 0.8 keeps 31 of the 48 starts-based pitchers on the measured capture; the strictest version needs no constant at all (gamesPitched === gamesStarted) and this is the looser, stated one."
+		]
+	},
+	"waivers": {
+		"movesPerWeek": 2,
+		"why": [
+			"Measured across 111 weeks and five seasons, two waiver moves a week beats one against every opponent the simulator plays: 63 of 111 weeks against a thoughtful human versus 60 at one move, 75 against hot-hand versus 74, 73 against a scarcity-aware streak-chaser versus 69, and 80 against a season-to-date manager versus 76.",
+			"Three is worse than two (58/111 against the human), so the curve peaks — it just does not peak at one. An earlier version of this project shipped one move and claimed selectivity beats activity; that claim was wrong and is retracted.",
+			"At zero moves the model loses to every opponent (30/111 against the human). In-season decisions are most of the value, which is the same thing draft-and-hold shows from the other direction.",
+			"Caveat the simulator cannot see: it charges nothing for churn, while a real league spends waiver priority or FAAB on every claim. If moves are expensive in your league, lower this."
+		]
+	},
+	"matchup": {
+		"weight": 0.5,
+		"clamp": {
+			"min": 0.88,
+			"max": 1.12
+		},
+		"why": [
+			"Who a player actually faces this week, from the real schedule: a hitter is scaled by the quality of the staffs he is booked against, a pitcher by the lineups.",
+			"Opponent strength is measured from the same leak-free prior window as everything else — never from what the opponent went on to do.",
+			"weight 0.5 is the conservative end of a real but unproven effect. Across 111 paired weeks the POINTS TOTAL is monotone in the weight (+69 at 0.1, +125 at 0.25, +200 at 0.5, +265 at 0.75, +549 at 1.0, all against weight 0) — but the weekly RECORD is not, and no dose is significant. Re-derived 2026-09-11 from data/results/matchup-5s_2021-2022-2023-2024-2025_moves1.json: 0.25 goes 25W-29L-57T (p 0.68) and loses more weeks than it wins while gaining points; 0.5 goes 51W-44L-16T (p 0.54, +1.8/wk); 0.75 goes 52W-49L-10T (p 0.84); 1.0 goes 59W-49L-3T (p 0.39, +4.9/wk). The TIES are the thing to read: at 0.1 the dose changes the roster in 10 weeks of 111 and splits them 5-5, and at 0.25 in 54. The effect is concentrated in a few weeks rather than spread across a season, which is how a points total rises monotonically while no dose clears a sign test.",
+			"When a dose-response is monotone in total points but no single dose clears significance, the smallest dose that shows the effect risks the least. Raise it to 1.0 if you want the measured maximum, and read the record above before you do."
+		]
+	},
+	"shrinkage": {
+		"default": 400,
+		"perStat": {
+			"homeRuns": 170,
+			"baseOnBalls": 120,
+			"strikeOuts": 60,
+			"hits": 290,
+			"doubles": 700,
+			"triples": 1200,
+			"hitByPitch": 240,
+			"stolenBases": 350,
+			"caughtStealing": 500,
+			"runs": 300,
+			"rbi": 300,
+			"totalBases": 320,
+			"sacFlies": 600,
+			"groundIntoDoublePlay": 500,
+			"intentionalWalks": 600,
+			"atBats": 50,
+			"sacBunts": 600,
+			"earnedRuns": 400,
+			"wins": 500,
+			"saves": 400,
+			"holds": 400,
+			"blownSaves": 600,
+			"losses": 500,
+			"completeGames": 900,
+			"shutouts": 900,
+			"wildPitches": 500,
+			"balks": 900,
+			"homeRunsAllowed": 300
+		},
+		"why": [
+			"Roughly the volume at which a stat is half signal, half noise, following the published stabilisation work (Carleton / Tango).",
+			"`default` is deliberately heavy: an unlisted stat is one we have no stabilisation evidence for, and heavy shrinkage is the honest response to that.",
+			"TURNED ON, 2026-09-19. It had never run. `project` shrinks a per-stat rate toward the population only when the caller hands it one, and neither `rateAll` in src/engine/bscore.ts nor the season simulator did — so this whole section was inert in the shipped product and in every stored result, while project.ts's own comment called its absence 'the single biggest source of bad recommendations'.",
+			"It is applied at HALF the constants above, and the half is measured rather than chosen for comfort. Full strength takes 20 to 27 points off every elite reliever on a fourteen-day projection (Mason Miller 72.2 to 45.2, Josh Hader 43.9 to 23.1) because the population it regresses toward pools closers with mop-up men, and a closer's save rate has no business regressing toward a pitcher who never sees the ninth.",
+			"Measured with the league's own bench and two moves a week, together with the joint replacement bars: chosen on 2021-2023 and validated on 2024-2025, which it had not been fitted on. On those 46 held-out weeks the pair beats the previously shipped model 33W-13L, +42.6 points a week, 95% CI [+21.3, +62.2], sign-test p 0.0045 and paired-t p 0.0001. Over all 111 weeks it is 69W-42L, +25.3/wk, p 0.013 / 0.0003.",
+			"Scales 0.25, 0.5, 1 and 2 were all run. 2 is worse than off; 0.5 is the peak on both halves of the split."
+		],
+		"scale": 0.5
+	}
 }

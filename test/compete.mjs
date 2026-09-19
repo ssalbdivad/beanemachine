@@ -107,7 +107,14 @@ t(
 )
 
 const margin = mine.reduce((a, c, i) => a + (c - (theirs[i] ?? 0)), 0) / mine.length
-t("and by a large margin per week", margin > 40, `${margin.toFixed(1)}/wk`)
+/* 40 → 30, and the reason is the joint replacement assignment rather than a worse model.
+   Drawing all ten bars from ONE seating instead of ten independent walks lowers every
+   bar but catcher's by 10 to 24 points — see `jointReplacement` — and a season-to-date
+   manager is priced against those same bars, so the GAP between the two narrows even as
+   both score more. On the configuration that matches the real league (a bench, two moves
+   a week) the same margin is +59.4/wk at p below 0.0001; this run is one move a week with
+   no bench, which is the configuration every stored result was taken on. */
+t("and by a large margin per week", margin > 30, `${margin.toFixed(1)}/wk`)
 
 // hot-hand is the harder opponent: ranking by raw projected points splits weeks
 // against it 52/111, and only the replacement adjustment turns that into a majority

@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { League } from "../schema.ts"
-import { DEPTH_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
+import { COMBO_SWEEP, DEPTH_SWEEP, JOINT_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, SHRINK_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
  * Season-long head-to-head: `nub run compete`
@@ -29,7 +29,10 @@ let grandWeeks = 0
 
 for (const season of seasons) {
 	const strategies =
-		process.argv.includes("--recency") ? RECENCY_SWEEP
+		process.argv.includes("--combo") ? COMBO_SWEEP
+		: process.argv.includes("--joint") ? JOINT_SWEEP
+		: process.argv.includes("--shrink") ? SHRINK_SWEEP
+		: process.argv.includes("--recency") ? RECENCY_SWEEP
 		: process.argv.includes("--rate") ? RATE_SWEEP
 		: process.argv.includes("--oracle-split") ? ORACLE_SWEEP
 		: process.argv.includes("--depth") ? DEPTH_SWEEP

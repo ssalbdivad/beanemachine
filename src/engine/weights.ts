@@ -37,7 +37,13 @@ export const ModelWeights = type({
 	probables: { use: "boolean", minStartShare: "0 <= number <= 1", why: Why },
 	waivers: { movesPerWeek: "number >= 0", why: Why },
 	matchup: { weight: "0 <= number <= 1", clamp: Clamp, why: Why },
-	shrinkage: { default: "number > 0", perStat: { "[string]": "number" }, why: Why }
+	shrinkage: {
+		default: "number > 0",
+		perStat: { "[string]": "number" },
+		/** A multiplier on every constant above. Half, measured — see the `why` notes. */
+		scale: "number >= 0",
+		why: Why
+	}
 })
 
 export type ModelWeights = typeof ModelWeights.infer

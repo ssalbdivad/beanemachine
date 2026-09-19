@@ -1,8 +1,8 @@
 import { scoreStats } from "../engine/points.ts"
 import { matchupIndexFor, teamStrength, type TeamStrength } from "../engine/matchup.ts"
 import { MODEL } from "../engine/weights.ts"
-import { isReserveSlot } from "../engine/bscore.ts"
-import { blendWindows, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS } from "../engine/project.ts"
+import { isReserveSlot, jointReplacement } from "../engine/bscore.ts"
+import { blendWindows, leagueRatesFrom, project, RECENT_BLEND_WEIGHT, RECENT_RATE_WEIGHT, RECENT_WINDOW_WEIGHTS, SHORT_WINDOW_WEIGHTS } from "../engine/project.ts"
 import type { League } from "../schema.ts"
 import { mapPlayerSeasons, windowStatsUrl, type PlayerSeason } from "../data/statsapi.ts"
 import type { Underlying } from "../data/savant.ts"
@@ -274,6 +274,42 @@ export const makeBscoreStrategy = (
 		 */
 		recentPointsWeight?: number
 		/**
+		 * HOW HARD EVERY PER-STAT RATE IS PULLED TOWARD THE LEAGUE, as a multiplier on the
+		 * shipped shrinkage constants.
+		 *
+		 * `model.json` sets a default of 400 plate appearances and a per-stat table on top
+		 * of it — 170 for home runs, 60 for strikeouts, 1200 for triples — and those are the
+		 * numbers that decide how much of a man's own line the model believes. They have
+		 * never been swept against a season. They were also fitted while every denominator
+		 * in the project was 2% too large, which is exactly the kind of thing that moves a
+		 * shrinkage constant.
+		 *
+		 * 1 is the control and is the shipped table.
+		 */
+		shrinkScale?: number
+		/**
+		 * SHRINK EVERY RATE TOWARD THE LEAGUE'S, which neither this simulator nor the app
+		 * has ever actually done.
+		 *
+		 * `project` shrinks a man's per-stat rate toward a population rate — `(value + k *
+		 * leagueRate) / (volume + k)` — and its own comment calls the absence of that "the
+		 * single biggest source of bad recommendations". It only happens when the caller
+		 * passes `rates`, and the two callers that decide anything, `rateAll` in
+		 * src/engine/bscore.ts and this strategy, both pass nothing. So model.json's entire
+		 * `shrinkage` section has been inert in the shipped product and in every stored run.
+		 *
+		 * Turning it on is not obviously right, which is why it is a sweep arm and not a
+		 * fix. Measured on the committed capture over fourteen days it moves 550 of 651
+		 * hitters and 691 of 795 pitchers, and it takes 20 to 27 points off every elite
+		 * reliever — Mason Miller 72.2 to 45.2, Josh Hader 43.9 to 23.1 — because the
+		 * population it regresses toward pools closers with mop-up men, and a closer's save
+		 * rate has no business regressing toward a pitcher who never gets the ninth.
+		 * `reliefRateWeight` exists in the same file for exactly that reason.
+		 *
+		 * So the season decides it.
+		 */
+		useRates?: boolean
+		/**
 		 * Demote anyone whose results have outrun his contact by more than this much
 		 * wOBA over the window.
 		 *
@@ -289,8 +325,18 @@ export const makeBscoreStrategy = (
 	} = {}
 ): Strategy => ({
 	name,
-	rank: ctx =>
-		ctx.prior
+	rank: ctx => {
+		/* One population per side per week, from the same pool the ranking is over. Built
+		   once rather than per player: it is a fold over every prior line and is identical
+		   for everyone in the group. */
+		const rates =
+			opts.useRates ?
+				{
+					hitting: leagueRatesFrom(ctx.prior.filter(p => p.group === "hitting"), "hitting"),
+					pitching: leagueRatesFrom(ctx.prior.filter(p => p.group === "pitching"), "pitching")
+				}
+			:	null
+		return ctx.prior
 			.map(p => {
 				const gAhead = p.teamId ? (ctx.gamesAhead.get(p.teamId) ?? 0) : 0
 				const gBehind = p.teamId ? (ctx.priorGames.get(p.teamId) ?? 0) : 0
@@ -307,6 +353,8 @@ export const makeBscoreStrategy = (
 								: (rec?.stats.outs ?? 0)) / rg
 				}
 				const proj = project(p, ctx.underlying[p.group].get(p.id), gBehind, gAhead, {
+					shrinkScale: opts.shrinkScale ?? 1,
+					rates: rates?.[p.group] ?? undefined,
 					// default to what model.json ships, so the regression test measures the
 					// model the app actually runs; a sweep overrides explicitly
 					qualityWeight: opts.qualityWeight ?? MODEL.statcast.weight,
@@ -350,6 +398,7 @@ export const makeBscoreStrategy = (
 				return { p, score: points }
 			})
 			.sort((a, b) => b.score - a.score)
+	}
 })
 
 /**
@@ -377,19 +426,30 @@ const applyVorp = (
 	 *
 	 * Swept here rather than argued about. 1 is the control.
 	 */
-	depthScale = 1
+	depthScale = 1,
+	/** Draw all the bars from ONE assignment instead of ten independent walks — see
+	 *  `jointReplacement` in src/engine/bscore.ts, which measured the old rule's bars as
+	 *  10 to 24 points too high because a man was counted at every slot he qualifies for. */
+	joint = false
 ): { p: PlayerSeason; score: number }[] => {
 	const teams = league.meta.max_teams ?? 10
-	const replacement = new Map<string, number>()
-	for (const [slot, count] of Object.entries(league.roster.slots)) {
-		if (isReserveSlot(slot)) continue
-		const eligible = ranked.filter(r => slotsFor(r.p).includes(slot))
-		const depth = Math.min(
-			Math.round(teams * count * depthScale),
-			Math.max(eligible.length - 1, 0)
-		)
-		replacement.set(slot, eligible[depth]?.score ?? 0)
-	}
+	const replacement = joint
+		? jointReplacement(
+				ranked.map(r => ({ points: r.score, slots: slotsFor(r.p) })),
+				league.roster.slots,
+				(_slot, count) => teams * count * depthScale
+			)
+		: new Map<string, number>()
+	if (!joint)
+		for (const [slot, count] of Object.entries(league.roster.slots)) {
+			if (isReserveSlot(slot)) continue
+			const eligible = ranked.filter(r => slotsFor(r.p).includes(slot))
+			const depth = Math.min(
+				Math.round(teams * count * depthScale),
+				Math.max(eligible.length - 1, 0)
+			)
+			replacement.set(slot, eligible[depth]?.score ?? 0)
+		}
 	return ranked
 		.map(r => {
 			let best = -Infinity
@@ -420,9 +480,30 @@ export const projectedPointsStrategy = makeBscoreStrategy("projected-points")
  * above is the control that answers the question, and re-running it is how the cost
  * gets a figure again.
  */
+/**
+ * SHIPPED, 2026-09-19: the joint replacement assignment and the league-rate shrinkage.
+ *
+ * Both were structural defects rather than knobs. The bars were drawn slot by slot in
+ * isolation, so a man who qualifies at three positions was counted as taken at all
+ * three and every bar but catcher's came out 10 to 24 points too high. And
+ * model.json's entire `shrinkage` section had never run, in the simulator or in the
+ * app, because `project` applies it only when handed a population and neither caller
+ * handed it one.
+ *
+ * Chosen on 2021-2023 and validated on 2024-2025, which the setting was not fitted on:
+ * 33W-13L against the previously shipped model over those 46 held-out weeks, +42.6
+ * points a week, 95% CI [+21.3, +62.2], sign-test p 0.0045, paired-t p 0.0001. Over all
+ * 111 weeks, 69W-42L, +25.3/wk, p 0.013 / 0.0003.
+ */
 export const bscoreStrategy: Strategy = {
 	name: "bscore",
-	rank: ctx => applyVorp(makeBscoreStrategy("_").rank(ctx), ctx.league)
+	rank: ctx =>
+		applyVorp(
+			makeBscoreStrategy("_", { useRates: true, shrinkScale: MODEL.shrinkage.scale }).rank(ctx),
+			ctx.league,
+			1,
+			true
+		)
 }
 
 /** "He'll keep doing what he's been doing" — the strategy most managers actually use. */
@@ -498,7 +579,9 @@ export const humanStrategy: Strategy = {
  */
 export const draftAndHoldStrategy: Strategy = {
 	name: "draft-and-hold",
-	rank: ctx => applyVorp(makeBscoreStrategy("_").rank(ctx), ctx.league)
+	/* The same ranking bscore uses, so the control isolates the in-season decisions and
+	   not a second model. */
+	rank: ctx => bscoreStrategy.rank(ctx)
 }
 
 export const STRATEGIES = [
@@ -508,10 +591,26 @@ export const STRATEGIES = [
 
 type VariantOpts = Parameters<typeof makeBscoreStrategy>[1]
 
-const vorpVariant = (name: string, opts: VariantOpts, depthScale = 1): Strategy => ({
+const vorpVariant = (name: string, opts: VariantOpts, depthScale = 1, joint = false): Strategy => ({
 	name,
-	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league, depthScale)
+	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league, depthScale, joint)
 })
+
+/**
+ * TEN INDEPENDENT BARS AGAINST ONE ASSIGNMENT.
+ *
+ * `jointReplacement` measured the shipped rule's bars as 10 to 24 points too high on the
+ * committed capture, because a man who qualifies at three slots is counted as taken at
+ * all three. This is the arm that says whether the correct arithmetic is worth points
+ * over 111 weeks of real roster decisions, which is the only currency this project pays
+ * a model change in.
+ */
+export const JOINT_SWEEP: Strategy[] = [
+	vorpVariant("independent", {}),
+	vorpVariant("joint", {}, 1, true),
+	humanStrategy,
+	seasonToDateStrategy
+]
 
 /**
  * ═══ THE DECOMPOSITION ═══════════════════════════════════════════════════════════
@@ -665,6 +764,39 @@ export const RECENCY_SWEEP: Strategy[] = [
 	vorpVariant("recency.40", { recentPointsWeight: 0.4 }),
 	vorpVariant("recency.50", { recentPointsWeight: 0.5 }),
 	vorpVariant("recency.65", { recentPointsWeight: 0.65 }),
+	humanStrategy
+]
+
+/**
+ * IS THE SHRINKAGE SECTION OF model.json WORTH TURNING ON.
+ *
+ * It has never run: `project` applies it only when handed a population, and neither
+ * `rateAll` nor this simulator hands it one. See `useRates`. The arms ask both whether
+ * it helps at all and, if it does, how hard to pull.
+ */
+export const SHRINK_SWEEP: Strategy[] = [
+	vorpVariant("rates-off", {}),
+	vorpVariant("rates-k0.25", { useRates: true, shrinkScale: 0.25 }),
+	vorpVariant("rates-k0.5", { useRates: true, shrinkScale: 0.5 }),
+	vorpVariant("rates-k1", { useRates: true }),
+	vorpVariant("rates-k2", { useRates: true, shrinkScale: 2 }),
+	humanStrategy
+]
+
+/**
+ * THE TWO STRUCTURAL CORRECTIONS, TOGETHER.
+ *
+ * They are independent — one is how the replacement bar is drawn, the other is whether
+ * a man's own rate is believed in full — and each on its own beat both the shipped model
+ * and the thoughtful human over 111 weeks. This asks whether they add.
+ */
+export const COMBO_SWEEP: Strategy[] = [
+	vorpVariant("shipped", {}),
+	vorpVariant("joint", {}, 1, true),
+	vorpVariant("rates.25", { useRates: true, shrinkScale: 0.25 }),
+	vorpVariant("both.25", { useRates: true, shrinkScale: 0.25 }, 1, true),
+	vorpVariant("both.5", { useRates: true, shrinkScale: 0.5 }, 1, true),
+	vorpVariant("both1", { useRates: true }, 1, true),
 	humanStrategy
 ]
 

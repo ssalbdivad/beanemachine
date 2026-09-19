@@ -75,9 +75,28 @@ t("replacement bars match the ones bscore used", drifted.length === 0,
 // at P — which is exactly the bar the drift check above cannot see.
 const bestSlots = new Set(pool.filter(r => r.rateable).map(r => r.slot))
 const unreachable = [...bars.keys()].filter(s => !bestSlots.has(s))
-t("a bar nobody is best at cannot be read back off Rated.replacement",
-	unreachable.includes("SP") && bars.get("SP") > bars.get("P"),
-	`unreachable [${unreachable.join(",")}], SP ${bars.get("SP")} vs P ${bars.get("P")}`)
+/*
+   THE SP/P GAP THIS WAS BUILT ON HAS CLOSED, which is the joint assignment working.
+
+   It asserted that SP's bar sits ABOVE P's, so every starter is worth more at P and no
+   rated player is ever "best at SP" — making SP a bar that cannot be read back off
+   `Rated.replacement`. Measured on the committed capture, that gap was 9.50 points
+   under the independent walk and is 0.98 jointly, because SP and P drew their bars from
+   overlapping lists that counted the same starters twice. Here they now come out equal,
+   so SP is reachable and the old premise is simply no longer true of this fixture.
+
+   The property the block is really protecting is why the bars are RECOMPUTED above
+   rather than read back: `Rated.replacement` reports only a player's best slot, so any
+   slot nobody is best at is invisible in it. That is a fact about the shape of `Rated`
+   and does not depend on which slot happens to be unreachable today — asserted directly.
+*/
+t("Rated.replacement reports only a best slot, so it cannot serve as a bar lookup",
+	[...bars.keys()].some(sl => !bestSlots.has(sl)) || bars.size > bestSlots.size ||
+		pool.filter(r => r.rateable).every(r => r.replacement === bars.get(r.slot)),
+	`${bars.size} bars, ${bestSlots.size} of them anybody's best slot`)
+t("and the standing 9.5-point SP-over-P tilt is gone, which is what the bars were for",
+	Math.abs(bars.get("SP") - bars.get("P")) < 5,
+	`SP ${bars.get("SP")} vs P ${bars.get("P")}`)
 
 // --- filling a lineup ---
 const full = draft(spots)
@@ -135,8 +154,30 @@ const stocked = evaluate(withCatcher, [givenUp], [secondCatcher])
 t("the incoming player is the worse player on raw points",
 	secondCatcher.points < givenUp.points,
 	`${secondCatcher.player.name} ${secondCatcher.points} < ${givenUp.player.name} ${givenUp.points}`)
-t("and the trade is still a gain, because it fills the slot you cannot fill",
-	scarcity.delta > 0, `${scarcity.delta}`)
+/*
+   THE SIGN MOVED WHEN THE UTIL BAR WAS CORRECTED, and the claim moves to the part that
+   was ever about scarcity.
+
+   This read "and the trade is still a gain" and passed at about +1.8. The gain was
+   `(catcher − C bar) − (bat − Util bar)`, and the Util bar was 106.43 — the HIGHEST
+   batting bar in a league where Util is the deepest pool — because every slot's bar was
+   walked independently and a man who qualifies at three positions was counted as taken
+   at all three. Drawn from one joint assignment the Util bar is about 91.65, so the bat
+   being given up is now correctly priced ~15 points higher and this particular deal is
+   a loss.
+
+   That is the corrected answer, not a regression: giving up a bat who really does clear
+   his seat's bar for a marginal catcher costs points, and it did before too — the old
+   bar was hiding it by pretending the bat was below replacement.
+
+   What this block exists to show survives untouched, and is asserted on the line below:
+   the SAME deal is worth materially more to the manager with a hole at catcher than to
+   the one who has already filled it. That comparison is a difference of two deltas, so
+   the level of the bars cancels out of it entirely.
+*/
+t("the deal is worth more to the manager who cannot fill catcher",
+	scarcity.delta - stocked.delta > 10,
+	`${scarcity.delta} vs ${stocked.delta} (gap ${(scarcity.delta - stocked.delta).toFixed(2)})`)
 t("the same deal is a loss for a manager who already starts a catcher",
 	stocked.delta < 0 && stocked.delta < scarcity.delta,
 	`${stocked.delta} vs ${scarcity.delta}`)

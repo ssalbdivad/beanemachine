@@ -567,6 +567,27 @@ it is published at a URL.
 
 ---
 
+## 7a. Which command runs which suite
+
+`npm test` runs the node suites and the five browser suites that only need the dev
+server. Two suites were in NO npm target at all and had to be remembered:
+`test/extension.mjs`, which builds both extensions and drives a real Chromium with one
+loaded — the only thing in this repo that exercises the extension end to end — and
+`test/static.mjs`, which drives the PUBLISHED build.
+
+`npm run test:all` runs everything, and it is the one to run before a release. Its
+requirements are real and are the reason the two were left out:
+
+| suite | needs |
+|---|---|
+| `npm run test:node` | nothing; fully offline against the disk cache |
+| `npm test` | a dev server on `127.0.0.1:5299` (`npm run dev:web`) |
+| `node test/compete.mjs` | nothing; five seasons replayed offline, about two minutes |
+| `npm run test:ext` | builds its own extension; serves its own fake Yahoo; needs 5299 |
+| `npm run test:static` | `npm run build` then a preview on `127.0.0.1:4173` (`npm run preview`) |
+
+Never port 5173. It belongs to a different live application on this machine.
+
 ## 8. What is not verified
 
 This is the section to read twice. Everything above describes code that works against

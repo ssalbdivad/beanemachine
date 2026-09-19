@@ -1,3 +1,14 @@
+// RUN `node logo/build-pick.mjs` FIRST. It writes logo/pick.html, which this file
+// screenshots; neither is in the repo any more.
+//
+// pick.html used to be committed — 250,107 bytes, 296 lines, 55% of everything tracked
+// under logo/ (451,858 bytes total). It was pure build output: on 2026-09-19 the committed
+// copy was diffed against a fresh `node logo/build-pick.mjs` and the two were byte-identical,
+// so the repo was carrying a quarter of a megabyte that one command reproduces exactly.
+// Its siblings were already treated that way — .gitignore ignores logo/sheet*.html and
+// logo/pick.png — and pick.html escaped only because the pattern is `sheet*`, not `pick*`.
+// logo/finalists.json is NOT build output: nothing writes it, it is the hand-curated
+// shortlist, and it stays.
 import { chromium } from "playwright-core"
 import { readFileSync, writeFileSync } from "node:fs"
 const b = await chromium.launch({ executablePath: readFileSync("/tmp/bc-chrome.txt","utf8").trim(), args:["--no-sandbox"] })

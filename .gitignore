@@ -8,6 +8,7 @@ data/yahoo-session.json
 dist/
 logo/.preview.html
 logo/candidates*.json
+logo/pick.html
 logo/pick.png
 logo/sheet*.html
 logo/sheet*.png

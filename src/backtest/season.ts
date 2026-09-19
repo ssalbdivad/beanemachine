@@ -249,7 +249,7 @@ export type Strategy = {
 		 * season at all.
 		 */
 		held?: PlayerSeason[]
-	) => { p: PlayerSeason; score: number }[]
+	) => { p: PlayerSeason; score: number; points?: number }[]
 }
 
 const tableFor = (league: League, g: "hitting" | "pitching") =>
@@ -422,7 +422,7 @@ export const makeBscoreStrategy = (
  * is right even when the catcher scores fewer points.
  */
 const applyVorp = (
-	ranked: { p: PlayerSeason; score: number }[],
+	ranked: { p: PlayerSeason; score: number; points?: number }[],
 	league: League,
 	/**
 	 * WHERE THE REPLACEMENT LINE IS DRAWN, as a multiple of the starting depth.
@@ -472,7 +472,9 @@ const applyVorp = (
 				if (repl === undefined) continue
 				best = Math.max(best, r.score - repl)
 			}
-			return { p: r.p, score: best === -Infinity ? r.score : best }
+			/* The RAW projected total rides through, because the two decisions this ranking
+			   drives want different numbers — see `lineupBy` in `playSeason`. */
+			return { p: r.p, score: best === -Infinity ? r.score : best, points: r.points ?? r.score }
 		})
 		.sort((a, b) => b.score - a.score)
 }
@@ -873,6 +875,44 @@ export const HEADLINE_SWEEP: Strategy[] = [
 	seasonToDateStrategy
 ]
 
+/**
+ * RE-TUNING THE KNOBS ON THE MODEL THAT NOW SHIPS.
+ *
+ * Every weight in model.json was fitted against a model this one no longer is. Three
+ * things changed underneath them on 2026-09-19: the postponed-game denominator (2.02% of
+ * every game count was a game nobody played), the replacement bars (drawn independently
+ * per slot, so each was 10 to 24 points too high), and the league-rate shrinkage (which
+ * had never run at all). A weight fitted on top of three defects is not a weight.
+ *
+ * So every arm here carries the shipped corrections and varies exactly one thing. The
+ * control is the shipped value and is named so.
+ */
+const shipped = { useRates: true, shrinkScale: MODEL.shrinkage.scale } as const
+const tuned = (name: string, opts: VariantOpts): Strategy =>
+	vorpVariant(name, { ...shipped, ...opts }, 1, true)
+
+export const RETUNE_SWEEP: Strategy[] = [
+	tuned("rw0", { recentWeight: 0 }),
+	tuned("rw.25", { recentWeight: 0.25 }),
+	tuned("rw.5-shipped", {}),
+	tuned("rw.75", { recentWeight: 0.75 }),
+	tuned("rw1", { recentWeight: 1 }),
+	humanStrategy
+]
+
+export const MATCHUP_RETUNE: Strategy[] = [
+	tuned("mu0", { matchupWeight: 0 }),
+	/* 0.5 IS the shipped value, so this arm and the one below are the same configuration
+	   run twice. Kept deliberately: two identical arms are the cheapest check that the
+	   simulator is deterministic, and on the run that named them they came back equal to
+	   the point — 84,517 both. The original labelling called the second one "mu1", which
+	   was a guess at the shipped value rather than a reading of it. */
+	tuned("mu.5-shipped", { matchupWeight: 0.5 }),
+	tuned("mu.5-again", {}),
+	tuned("mu2", { matchupWeight: 2 }),
+	humanStrategy
+]
+
 export const ORACLE_SWEEP: Strategy[] = [
 	bscoreStrategy,
 	volumeOracle,
@@ -1045,6 +1085,21 @@ export const playSeason = async (
 		/** Carry the league's own bench and choose a lineup from it every week — see
 		 *  `benchSize`. Off by default so stored results keep their meaning. */
 		bench?: boolean
+		/**
+		 * WHICH NUMBER PICKS THE LINEUP, which is not the number that picks a waiver move.
+		 *
+		 * A ranking by value over replacement is the right answer to "who should I ACQUIRE":
+		 * you have to fill every seat, so a scarce catcher who scores less is worth more
+		 * than an outfielder who scores more. It is the wrong answer to "who should I
+		 * START from the men I already hold" — the seats are already covered by the
+		 * assignment, and once the catcher is in the catcher's seat the Util seat simply
+		 * wants whoever scores most.
+		 *
+		 * Ranking the lineup by VORP therefore seats a scarce man over a better one at an
+		 * open seat, and the simulator did it because one ranking served both decisions.
+		 * "points" asks the second question with the second number.
+		 */
+		lineupBy?: "vorp" | "points"
 	} = {
 		movesPerWeek: 2,
 		warmupDays: 28
@@ -1236,11 +1291,18 @@ export const playSeason = async (
 			   byte-identical to what it always was.
 			*/
 			const order = new Map(ranked.map((r, i) => [r.p.id, i]))
+			const rawPoints = new Map(ranked.map(r => [r.p.id, r.points ?? r.score]))
 			const lineup =
 				bench ?
 					fillRoster(
 						[...roster]
-							.map(r => ({ p: r.p, score: -(order.get(r.p.id) ?? 1e9) }))
+							.map(r => ({
+								p: r.p,
+								score:
+									options.lineupBy === "points" ?
+										(rawPoints.get(r.p.id) ?? -Infinity)
+									:	-(order.get(r.p.id) ?? 1e9)
+							}))
 							.sort((a, b) => b.score - a.score),
 						slots
 					)

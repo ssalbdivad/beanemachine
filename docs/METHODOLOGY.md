@@ -1548,6 +1548,57 @@ tab and every worked example use, not a limit of the data.
 > reachable ceiling is 101,262 rather than 155,213, and bscore sits at 82.8% of it. And
 > the remaining gap splits about **2.7 to 1 in favour of rate over playing time**.
 
+> ### AND THEN IT WAS REPAIRED — where the model actually stands, 2026-09-19
+>
+> The retraction above left bscore level with a thoughtful human. Three structural
+> defects were then found and fixed, none of them a knob:
+>
+> 1. **The replacement bars were drawn slot by slot in isolation**, so a man who qualifies
+>    at three positions was counted as taken at all three and every bar but catcher's came
+>    out 10 to 24 points too high. Catcher was right, which is why it survived: the one
+>    position everybody checks by hand was the one position with almost no overlap.
+> 2. **model.json's `shrinkage` section had never run.** `project` applies it only when
+>    handed a population, and neither `rateAll` nor the simulator handed it one — so the
+>    thing project.ts calls "the single biggest source of bad recommendations" was absent
+>    from the shipped product and from every stored result.
+> 3. **The simulator carried no bench**, so a strategy's only decision all season was two
+>    waiver swaps. That is why every sweep in this document reads as static.
+>
+> With the league's own five bench spots and two moves a week, the first two together,
+> chosen on 2021-2023 and validated on 2024-2025 — 46 weeks the setting was not fitted on:
+>
+> | comparison | W-L | per week | 95% CI | p(sign) / p(t) |
+> |---|---|---|---|---|
+> | vs the previously shipped model, **holdout** | 33-13 | +42.6 | [+21.3, +62.2] | 0.0045 / 0.0001 |
+> | vs the previously shipped model, all 111 wk | 69-42 | +25.3 | [+9.5, +41.2] | 0.013 / 0.0003 |
+> | vs thoughtful-human, all 111 wk | 62-49 | +18.8 | [−3.0, +37.8] | 0.25 / 0.036 |
+> | vs season-to-date | 77-34 | +59.4 | [+39.0, +76.3] | 0.0001 / 0.0000 |
+> | vs hot-hand | 83-28 | +75.0 | [+51.2, +95.3] | 0.0000 / 0.0000 |
+>
+> **The honest headline: bscore beats every naive manager decisively and is ahead of a
+> thoughtful human on the total and on the margin, but not yet on the sign test.** Every
+> p in this box comes from `src/backtest/paired.ts`, which prints a sign test, a paired t
+> and a seeded bootstrap interval side by side and says which of the three carries a
+> claim.
+>
+> **What the model's edge is worth, per decision.** Against the thoughtful human it is
+> +1,252 points at one waiver move a week, +2,084 at two and +2,791 at three. The margin
+> scales with the number of decisions the model is given, which is the most useful single
+> sentence about what it is for.
+>
+> **Knobs re-swept on the corrected model and left where they were**, so nobody spends a
+> night on them again: the volume blend (0.5 is the peak; 0.75 and 1 are clearly worse),
+> the matchup weight (0.5 is the peak; 0 costs 179, 2 costs 989), the move budget (two is
+> real over one, three is inside noise), the replacement DEPTH (teams × starters, peaked),
+> and picking the weekly lineup by raw points instead of by value over replacement (worse
+> by 157 — the assignment already handles scarcity, so the hypothesis was wrong).
+>
+> **And the app's headline recommendation was ranked by the wrong number.** The one pick
+> the board leads with is chosen by `deltaMine` — points less the raw points of the worst
+> man the reader owns — with bscore demoted to a gate. Put in the simulator for the first
+> time, roster-relative, exactly as the board ranks: bscore beats it 65-46, +21.5/wk,
+> paired-t p 0.0053, and delta-mine finishes below the thoughtful human.
+
 `node src/backtest/compete.ts` plays whole seasons. Each strategy drafts from the same pool, sets a
 legal roster every week, makes waiver moves on what it believed at the time, and is
 scored on what those players actually produced. Rosters may overlap, so the comparison

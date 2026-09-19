@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { League } from "../schema.ts"
-import { COMBO_SWEEP, DEPTH_SWEEP, HEADLINE_SWEEP, JOINT_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, SHRINK_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
+import { COMBO_SWEEP, DEPTH_SWEEP, HEADLINE_SWEEP, MATCHUP_RETUNE, RETUNE_SWEEP, JOINT_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, SHRINK_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
  * Season-long head-to-head: `nub run compete`
@@ -29,7 +29,9 @@ let grandWeeks = 0
 
 for (const season of seasons) {
 	const strategies =
-		process.argv.includes("--headline") ? HEADLINE_SWEEP
+		process.argv.includes("--retune") ? RETUNE_SWEEP
+		: process.argv.includes("--matchup-retune") ? MATCHUP_RETUNE
+		: process.argv.includes("--headline") ? HEADLINE_SWEEP
 		: process.argv.includes("--combo") ? COMBO_SWEEP
 		: process.argv.includes("--joint") ? JOINT_SWEEP
 		: process.argv.includes("--shrink") ? SHRINK_SWEEP
@@ -51,6 +53,9 @@ for (const season of seasons) {
 		/* Carry the league's own bench and choose a lineup from it every week. Off by
 		   default: every stored run was measured without one. */
 		bench: process.argv.includes("--bench"),
+		/* Pick the lineup by raw projected points rather than by value over replacement —
+		   see `lineupBy`. The two decisions want different numbers. */
+		lineupBy: process.argv.includes("--lineup-points") ? "points" : "vorp",
 		swapMargin: Number(process.argv.find(a => a.startsWith("--margin="))?.slice(9) ?? 0)
 	})
 	const best = Math.max(...results.map(r => r.total))
@@ -172,7 +177,10 @@ if (cheated.length) {
 }
 
 const stamp = process.env.RESULT_STAMP ?? new Date().toISOString().replace(/[:.]/g, "-")
-const label = seasons.join("-") + (process.argv.includes("--bench") ? "-bench" : "")
+const label =
+	seasons.join("-") +
+	(process.argv.includes("--bench") ? "-bench" : "") +
+	(process.argv.includes("--lineup-points") ? "-lineuppts" : "")
 mkdirSync("data/results", { recursive: true })
 const path = `data/results/${cheated.length ? "diagnostic-" : ""}${stamp}_${label}_moves${movesPerWeek}.json`
 writeFileSync(

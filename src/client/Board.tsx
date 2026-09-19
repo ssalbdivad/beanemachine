@@ -988,7 +988,7 @@ export const Board = ({
 	 * actually priced.
 	 */
 	const {
-		rows, scored, slotsRanked, period, streaming, teamNames, availability, sort, desc, mine,
+		rows, scored, slotsRanked, period, leaguePeriod, streaming, teamNames, availability, sort, desc, mine,
 		injuryError,
 		/* The window the rows were actually rated over. Read rather than derived here: this
 		   file used to derive it from `snapshot.horizon` and printed a window four days
@@ -1444,9 +1444,15 @@ export const Board = ({
 					{MODES.map(([id, fixedLabel, fixedWhy]) => {
 					// The standing board is named by the window it ranks; the other two name
 					// their own question and never move. See `standingBoard`.
+					/* `leaguePeriod`, not `period`: the strip names all three horizons at once,
+					   including the two the reader is not standing on, and `period` carries the
+					   day-count a reader may have set on STREAMING. With a chip set it comes
+					   back `kind: "days"`, which fails `periodScoped`'s matchup test, so this
+					   tab read "This fortnight" over a board that would rank the league's week
+					   — the narrowing does not even apply on the tab being named. */
 					const { label, why } =
 						id === "board" ?
-							standingBoard(period, filters.mode === "board" ? ratedOver.kind : null)
+							standingBoard(leaguePeriod, filters.mode === "board" ? ratedOver.kind : null)
 						:	{ label: fixedLabel, why: fixedWhy }
 					return (
 						<button

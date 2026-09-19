@@ -594,18 +594,38 @@ export const useBoard = (
 	const injuries = liveInjuries ?? captured ?? new Map<number, string>()
 	// The reader's today, not the capture's. A snapshot is a set of games; which of
 	// them are still ahead of you is a question only the clock can answer.
-	const period = useMemo(() => {
+	/**
+	 * THE LEAGUE'S OWN PERIOD, BEFORE ANY CONTROL NARROWS IT.
+	 *
+	 * Split out because two different questions were being answered from one value. The
+	 * narrowed period is what the ROWS are rated over and is right for that; the tab STRIP
+	 * names all three horizons at once, including the two the reader is not standing on,
+	 * and naming them from a window he chose on a different tab is how a tab comes to lie
+	 * about itself.
+	 *
+	 * Measured: with a Streaming day-chip set, `withinDays` returns `kind: "days"`, so the
+	 * standing board's own label fell through `periodScoped`'s matchup test and read "This
+	 * fortnight" — while the board it names would rank over the league's week, because the
+	 * narrowing only applies on the streaming tab in the first place. A label about a tab
+	 * the reader is not on, wrong for as long as the chip is set.
+	 */
+	const leaguePeriod = useMemo(() => {
 		if (!snapshot || !league) return null
 		const slate = snapshot.slate ?? []
 		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
-		const p = resolvePeriod(league, localDate(), seasonEnd)
+		return resolvePeriod(league, localDate(), seasonEnd)
+	}, [snapshot, league])
+	const period = useMemo(() => {
+		if (!snapshot || !league || !leaguePeriod) return null
+		const slate = snapshot.slate ?? []
+		const seasonEnd = slate.reduce((a, g) => (g.date > a ? g.date : a), snapshot.horizon.end)
 		// A day count is a STREAMING control. Applying it on the other two tabs would
 		// silently retitle their horizons — "This fortnight" ranked over three days —
 		// so it is read here and nowhere else, and leaving the tab restores the period.
 		return filters.mode === "stream" && filters.days !== null ?
-				withinDays(p, filters.days, seasonEnd)
-			:	p
-	}, [snapshot, league, filters.mode, filters.days])
+				withinDays(leaguePeriod, filters.days, seasonEnd)
+			:	leaguePeriod
+	}, [snapshot, league, leaguePeriod, filters.mode, filters.days])
 
 	/**
 	 * The window itself, lifted out of `rated` because the ROW needs it too.
@@ -1442,6 +1462,9 @@ export const useBoard = (
 		   able to leave it. `contactStatus` is the sentence; `askForContact` is what the
 		   open row calls on mount. */
 		contactStatus, askForContact,
+		/* Unnarrowed, for the tab strip — see the note on `leaguePeriod`. The rows are
+		   rated over `period`; the strip names windows the reader is not standing in. */
+		leaguePeriod,
 		/* When the wire behind `fromWire` was read, so a row carrying his own league's
 		   figure can say how old it is in the same words the pool chip uses. Null when
 		   nothing on the board came off a wire. */

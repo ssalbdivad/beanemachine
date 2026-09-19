@@ -1,3 +1,4 @@
+import { since } from "./ago.ts"
 import { useEffect, useRef } from "react"
 import type { League } from "../schema.ts"
 import { tradeWindow } from "../import.ts"
@@ -1200,12 +1201,21 @@ export const freshness = (
 ): { label: string; stale: boolean; days: number } => {
 	const hours = capturedAt == null ? NaN : (now - Date.parse(capturedAt)) / 3_600_000
 	if (!Number.isFinite(hours)) return { label: "age unknown", stale: true, days: 0 }
-	if (hours < 1) return { label: "just now", stale: false, days: 0 }
-	if (hours < 36) return { label: `${Math.round(hours)}h ago`, stale: false, days: 0 }
+	/*
+	   THE LABEL COMES FROM `since` AND THE VERDICT STAYS HERE.
+	
+	   This carried its own arithmetic and switched to days at its own staleness line, so a
+	   forty-hour capture read "2d ago" here and "40h ago" on the screens that use `since` —
+	   one instant, two labels, in one product. What is genuinely this function's to decide
+	   is whether a capture is STALE and how many whole days of baseball have happened since,
+	   and both of those are still decided here, on the same thirty-six-hour line they always
+	   were. What forty hours is CALLED is not a judgement about captures.
+	*/
+	if (hours < 36) return { label: since(capturedAt!, now).label, stale: false, days: 0 }
 	/* `days` is returned so the chip's own sentence can count rather than say "a day" about
 	   every stale capture — it understated an 84-hour-old one by three days, beside a label
 	   already reading "4d ago". FLOORED, not rounded, because the sentence is about days of
 	   games that have actually finished: 84.3 hours is three whole days since, and the label
 	   rounds to four for a different and equally honest reason. */
-	return { label: `${Math.round(hours / 24)}d ago`, stale: true, days: Math.floor(hours / 24) }
+	return { label: since(capturedAt!, now).label, stale: true, days: Math.floor(hours / 24) }
 }

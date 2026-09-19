@@ -181,25 +181,10 @@ const clear = (league: string): null => {
 	return null
 }
 
-/**
- * How long ago, in words, plus the raw hours so a caller can decide what to do
- * about it.
- *
- * Deliberately NOT `freshness` from panels.tsx, which answers the same question
- * for the MLB capture and calls 36 hours the line. That number was chosen for
- * observed player data, which changes once a day when the games end. A free-agent
- * list changes whenever anybody in the league clicks Add, so the two would want
- * different thresholds — and rather than have this file assert a threshold it
- * cannot measure, it returns the age and states no verdict. The one caller that
- * wants a verdict (the masthead chip) declares its own line and says what it is.
- */
-export const since = (at: string, now: number): { label: string; hours: number } => {
-	const hours = (now - Date.parse(at)) / 3_600_000
-	if (!Number.isFinite(hours)) return { label: "at an unreadable time", hours: NaN }
-	if (hours < 0) return { label: "just now", hours: 0 }
-	if (hours < 1) return { label: `${Math.max(1, Math.round(hours * 60))}m ago`, hours }
-	if (hours < 48) return { label: `${Math.round(hours)}h ago`, hours }
-	return { label: `${Math.round(hours / 24)}d ago`, hours }
-}
+/* `since` moved to ./ago.ts and is re-exported here, because three screens had grown
+   three different answers for one instant — see the note on it. Re-exported rather than
+   relocated at every call site: this module's own consumers ask it for a pool AND for an
+   age, and splitting that import buys nothing. */
+export { since } from "./ago.ts"
 
 export const pool = { of, byLeagueId, set, clear }

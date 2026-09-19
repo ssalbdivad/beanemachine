@@ -1,3 +1,4 @@
+import { since } from "./ago.ts"
 import type { GrabFailure } from "../data/extension.ts"
 import type { ExtensionState } from "./extension.ts"
 
@@ -499,15 +500,9 @@ export const Connect = ({
 	)
 }
 
-/** "6h ago", "just now" — the same shape the rest of the app uses for an age, written here
- *  rather than imported to keep this component free of the stores. */
-const ago = (iso: string): string => {
-	const ms = Date.now() - Date.parse(iso)
-	if (!Number.isFinite(ms) || ms < 0) return "just now"
-	const mins = Math.floor(ms / 60_000)
-	if (mins < 2) return "just now"
-	if (mins < 60) return `${mins}m ago`
-	const hours = Math.floor(mins / 60)
-	if (hours < 24) return `${hours}h ago`
-	return `${Math.floor(hours / 24)}d ago`
-}
+/** "6h ago" — the app's one age label, from ./ago.ts. This file used to carry its own
+ *  copy, with a comment explaining that it was written here rather than imported "to keep
+ *  this component free of the stores"; the reason was sound and the fix was to move the
+ *  function out of the store rather than to copy it. Floored against rounded, the two
+ *  disagreed from ninety minutes upward. */
+const ago = (iso: string): string => since(iso, Date.now()).label

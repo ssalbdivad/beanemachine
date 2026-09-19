@@ -148,6 +148,38 @@ export const fetchWindowStats = async (
 
 /** Games each team actually has scheduled in a window — the real denominator for
  *  any "next N days" projection, instead of assuming a uniform slate. */
+/**
+ * DID THIS GAME ACTUALLY GET PLAYED.
+ *
+ * MLB reports a POSTPONED game as `abstractGameState: "Final"`. Not "Postponed", not
+ * "Cancelled" — Final, with `codedGameState: "D"`, and the real answer hidden one field
+ * over in `detailedState`. Every count in this repo tested the abstract field, so every
+ * rained-out game was counted as played.
+ *
+ * Measured across the whole backtest cache on 2026-09-19: 5,788 cached schedule
+ * responses, 1,798,000 game rows, of which 36,343 are Postponed and 56 Cancelled and
+ * every one of them was being counted. That is 2.02% of the games this project has ever
+ * divided by.
+ *
+ * It is a DENOMINATOR, which is what makes 2% matter. A recent-form rate is plate
+ * appearances over team games, and `model.json` gives the three-day window half the
+ * recent blend weight — so one rainout inside a three-day window inflates that
+ * denominator by a third to a half and understates the man's per-game volume by the
+ * same. The docblock on `fetchSchedule` below already measured exactly this failure for
+ * a different cause (a game scheduled but not yet played, 25% understatement) and fixed
+ * that one; this is the same error arriving through a status field nobody read.
+ *
+ * A POSITIVE LIST, never a blocklist. "Final" and "Completed Early" are the two states
+ * in which men actually batted — Completed Early is a game called after it became
+ * official, and those plate appearances are real and are in the stat lines. Anything
+ * else, including a state this has never seen, is not counted, because a denominator
+ * that grows on an unrecognised string is the bug this function exists to end.
+ */
+export const wasPlayed = (game: {
+	status?: { detailedState?: string } | null
+}): boolean =>
+	game.status?.detailedState === "Final" || game.status?.detailedState === "Completed Early"
+
 export const fetchSchedule = async (
 	startDate: string,
 	endDate: string,
@@ -162,6 +194,11 @@ export const fetchSchedule = async (
 	 *
 	 * A forward-looking horizon wants the opposite: every game on the schedule,
 	 * played or not. So this is a parameter rather than a policy.
+	 *
+	 * And the rule for "finished" is `wasPlayed` — see the note above it. This line used
+	 * to test `abstractGameState`, which MLB sets to "Final" on a POSTPONED game, so the
+	 * 25% understatement measured below was being fixed for the scheduled-but-not-played
+	 * case and reintroduced for every rainout.
 	 */
 	playedOnly = false
 ): Promise<{ counts: Map<number, number>; opponents: Map<number, number[]> }> => {
@@ -188,7 +225,10 @@ export const fetchSchedule = async (
 			const home = game.teams?.home?.team?.id
 			const away = game.teams?.away?.team?.id
 			if (typeof home !== "number" || typeof away !== "number") continue
-			if (playedOnly && game.status?.abstractGameState !== "Final") continue
+			/* `wasPlayed`, not `abstractGameState === "Final"`, which a postponed game also
+			   says. See the note on that predicate: 2.02% of every game row in this
+			   project's cache is a game nobody played. */
+			if (playedOnly && !wasPlayed(game)) continue
 			add(home, away)
 			add(away, home)
 		}

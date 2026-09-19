@@ -2,7 +2,7 @@ import { mapPlayerSeasons, windowStatsUrl, type PlayerSeason } from "../data/sta
 import type { Underlying } from "../data/savant.ts"
 import { cachedFetch, stats as cacheStats } from "./cache.ts"
 import { parseUnderlyingCsv, underlyingWindowUrl } from "./harness.ts"
-import { addDays, foldsFor, gamesPlayedIn, seasonRange } from "./seasons.ts"
+import { addDays, foldsFor, gamesPlayedIn, gamesScheduledIn, seasonRange } from "./seasons.ts"
 
 /**
  * Assembles the evaluation corpus: for each (season, as-of date, side) a fold
@@ -65,7 +65,9 @@ export const buildFold = async (
 		underlyingWindow(season, group === "hitting" ? "batter" : "pitcher", seasonStart, asOf),
 		windowStats(season, group, addDays(asOf, 1), end),
 		gamesPlayedIn(seasonStart, asOf),
-		gamesPlayedIn(addDays(asOf, 1), end)
+		/* The horizon is what was BOOKED, the same distinction `countGamesScheduled`
+		   argues: an evaluation fold must be scored on the slate a manager could see. */
+		gamesScheduledIn(addDays(asOf, 1), end)
 	])
 	const recent: Record<number, PlayerSeason[]> = {}
 	const recentGames: Record<number, Map<number, number>> = {}

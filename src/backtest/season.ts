@@ -8,7 +8,7 @@ import { mapPlayerSeasons, windowStatsUrl, type PlayerSeason } from "../data/sta
 import type { Underlying } from "../data/savant.ts"
 import { aggregateStatcast } from "../data/statcast-window.ts"
 import { cachedFetch } from "./cache.ts"
-import { addDays, gamesPlayedIn, scheduleUrl, seasonRange } from "./seasons.ts"
+import { addDays, gamesPlayedIn, gamesScheduledIn, scheduleUrl, seasonRange } from "./seasons.ts"
 
 /**
  * Season-long competition.
@@ -256,6 +256,24 @@ export const makeBscoreStrategy = (
 		 *  before a man's recent rate is believed in full. 0 is the shipped behaviour. */
 		rateK?: number
 		/**
+		 * HOW MUCH OF THE LAST FORTNIGHT'S ACTUAL SCORING TO BLEND IN, at the POINTS level.
+		 *
+		 * This is the one thing `thoughtful-human` does that this model does not, and it
+		 * is now the reason the human is level with it: the human scores a man as half his
+		 * season rate and half his last-fourteen-days rate, both in the league's own
+		 * points, and that beat a model with a far better volume estimate underneath it.
+		 *
+		 * It is NOT the same as `recentRateWeight`, which blends recent form into each
+		 * per-stat rate INSIDE the projection and has measured as worthless twice. This
+		 * blends the finished number, in the unit the league actually pays in, and it
+		 * carries something the per-stat path structurally cannot: the recent term is
+		 * points per CALENDAR day, so a man who missed a week is discounted by the
+		 * arithmetic rather than by a model of why he missed it.
+		 *
+		 * 0 is the control and is the shipped model.
+		 */
+		recentPointsWeight?: number
+		/**
 		 * Demote anyone whose results have outrun his contact by more than this much
 		 * wOBA over the window.
 		 *
@@ -305,7 +323,19 @@ export const makeBscoreStrategy = (
 					recentRateK: opts.rateK ?? 0,
 					reliefRateWeight: opts.reliefRateWeight ?? null
 				})
-				const points = scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points
+				let points = scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points
+				if (opts.recentPointsWeight) {
+					/* The human's own term, verbatim: the league's points over the last
+					   fourteen days, per calendar day, scaled to the week ahead. Written the
+					   same way `humanStrategy` writes it so the comparison is of where the
+					   term sits rather than of two slightly different terms. */
+					const rec = ctx.recent[14]?.find(r => r.id === p.id)
+					const recentPoints =
+						rec ?
+							(scoreStats(rec.stats, tableFor(ctx.league, p.group), p.group).points / 14) * 7
+						:	0
+					points = (1 - opts.recentPointsWeight) * points + opts.recentPointsWeight * recentPoints
+				}
 				if (opts.mirage != null) {
 					const u = ctx.underlying[p.group].get(p.id)
 					// positive gap = contact better than results. The mirage is the other
@@ -614,6 +644,30 @@ export const RATE_SWEEP: Strategy[] = [
 	humanStrategy
 ]
 
+/**
+ * THE ONE THING THE HUMAN DOES THAT THIS MODEL DOES NOT.
+ *
+ * With the postponed-game denominator fixed, `thoughtful-human` is level with bscore —
+ * 58-53, +6.6 a week, p 0.70 on a sign test. The human is a two-line strategy: half the
+ * season rate, half the last fourteen days, both in the league's own points. bscore has
+ * a measured volume model, shrinkage toward league rates, a matchup index and a
+ * replacement bar under it, and that is what it buys.
+ *
+ * So the question is not whether recency helps — the human says it does — but where the
+ * term belongs. Blended into each per-stat rate inside the projection it has now
+ * measured as worthless twice (`RATE_SWEEP`, and the flat-weight sweep before it). This
+ * sweep puts it where the human puts it: on the finished points, after the projection.
+ */
+export const RECENCY_SWEEP: Strategy[] = [
+	vorpVariant("recency0", {}),
+	vorpVariant("recency.15", { recentPointsWeight: 0.15 }),
+	vorpVariant("recency.30", { recentPointsWeight: 0.3 }),
+	vorpVariant("recency.40", { recentPointsWeight: 0.4 }),
+	vorpVariant("recency.50", { recentPointsWeight: 0.5 }),
+	vorpVariant("recency.65", { recentPointsWeight: 0.65 }),
+	humanStrategy
+]
+
 export const ORACLE_SWEEP: Strategy[] = [
 	bscoreStrategy,
 	volumeOracle,
@@ -834,7 +888,11 @@ export const playSeason = async (
 			windowStats(season, "hitting", range.start, priorEnd),
 			windowStats(season, "pitching", range.start, priorEnd),
 			gamesPlayedIn(range.start, priorEnd),
-			gamesPlayedIn(week.start, week.end),
+			/* SCHEDULED, not played. This is the week AHEAD: a manager setting a lineup on
+			   Monday sees the slate as booked and cannot know which game will be rained out,
+			   so counting only the ones that survived would be hindsight. The backward count
+			   one line up is the opposite question and takes the opposite rule. */
+			gamesScheduledIn(week.start, week.end),
 			// A ROLLING window, not season-to-date: the signal was measured over three
 			// weeks, and a season-long xwOBA has already regressed most of the way to
 			// the wOBA it is supposed to disagree with.

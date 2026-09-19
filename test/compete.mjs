@@ -85,9 +85,24 @@ t("bscore beats hot-hand over five seasons", bscore > hot, `${bscore} vs ${hot}`
 const mine = weekly.get("bscore") ?? []
 const theirs = weekly.get("season-to-date") ?? []
 const wins = mine.filter((v, i) => v > (theirs[i] ?? Infinity)).length
+/*
+   THE NUMBER CAME DOWN, AND THE REASON IS A BUG THIS TEST HELPED HIDE.
+ 
+   It read `> 0.65` and passed at 73/111. It now passes at 65/111 (0.586, exact
+   two-sided p 0.0087) because the denominator every projection in this model divides
+   by was wrong: MLB reports a POSTPONED game as `abstractGameState: "Final"`, and both
+   this project's game counters tested that field, so 36,399 of 1,798,000 cached game
+   rows — 2.02% — were counted as played by nobody.
+ 
+   The error flattered exactly the strategies built on projections and left the
+   streak-chasers untouched, because those never divide by a game count at all. So the
+   threshold was not measuring the model's edge, it was measuring the bug's size. It is
+   set from the corrected run and the old value is written here rather than deleted, so
+   the next person to see it move knows which way it moved and why.
+*/
 t(
 	"bscore wins a clear majority of individual weeks vs season-to-date",
-	wins / mine.length > 0.65,
+	wins / mine.length > 0.55,
 	`${wins}/${mine.length}`
 )
 
@@ -118,14 +133,44 @@ console.log(
 )
 
 t("bscore beats a streak-chaser who also understands scarcity", bscore > sharp, `${bscore} vs ${sharp}`)
-t("bscore beats a thoughtful human blending season and recent form", bscore > human, `${bscore} vs ${human}`)
+/*
+   THE CLAIM AGAINST THE HUMAN IS RETRACTED TO WHAT IT ACTUALLY IS.
+ 
+   This asserted `bscore > human` and passed, and the assertion was true of a run whose
+   denominators were inflated — see the note on the season-to-date threshold above. With
+   the postponed-game count fixed the two are level: on this configuration bscore leads
+   on the total by 889 points of 78,345 and the paired weekly test is 58-53, p 0.318,
+   which is a coin flip printed as a win. On the configuration that matches the real
+   league — with its five bench spots, so a lineup is chosen every week — the human is
+   ahead by 728 and the paired test is 58-53 the other way, p 0.70.
+ 
+   So the assertion becomes the claim the evidence supports: bscore is LEVEL with a
+   thoughtful human and is not behind him by a margin that would matter. The tolerance
+   is one percent of the total, which is well inside the +-1000-point band that separate
+   runs of adjacent model settings move by. A real regression — the model falling off a
+   cliff against the one opponent that is actually trying — still fails this.
+ 
+   The strict wins above stay strict: against season-to-date, hot-hand, hot-hand+vorp
+   and draft-and-hold the margins are 40 to 130 points a week at p < 0.001, and those
+   are the claims this project is entitled to make loudly.
+*/
+t(
+	"bscore is at least level with a thoughtful human blending season and recent form",
+	bscore > human * 0.99,
+	`${bscore} vs ${human}`
+)
 
 // The closest opponent, so it gets the paired test rather than the aggregate one —
 // and the paired test gets its strength quoted with it. This is the one comparison
 // in the file where the majority is thin enough that the difference matters.
 const humanWeeks = weekly.get("thoughtful-human") ?? []
 const vsHuman = mine.filter((v, i) => v > (humanWeeks[i] ?? Infinity)).length
-t("and wins the majority of individual weeks against them", vsHuman / mine.length > 0.52, `${vsHuman}/${mine.length}`)
+/* Not a majority any more, and asserting one would be asserting noise: 58-53 is p 0.318
+   and the sign of it moves with the week grid. What is asserted is that the weeks are
+   not LOST — a model that had gone properly wrong would show up here as 40-71 rather
+   than as a coin flip, and that is the regression this line is for. The count and its
+   strength are printed below either way. */
+t("and is not losing the weekly head-to-head against them", vsHuman / mine.length > 0.45, `${vsHuman}/${mine.length}`)
 
 const human5 = signTest(mine, humanWeeks)
 console.log(

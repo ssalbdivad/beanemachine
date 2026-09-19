@@ -1507,6 +1507,47 @@ tab and every worked example use, not a limit of the data.
 
 ## 9. Does it actually win? — five seasons played out
 
+> ### RETRACTION, 2026-09-19 — every figure in this section was measured against an inflated denominator
+>
+> MLB's schedule endpoint reports a **postponed** game as `abstractGameState: "Final"`.
+> The real answer sits one field over, in `detailedState`. Both of this project's game
+> counters — `countGamesPlayed` in the backtest and `fetchSchedule(playedOnly)` in the
+> live app — tested the abstract field, so a rained-out game was counted as played.
+>
+> Measured across the whole backtest cache: 5,788 cached schedule responses, 1,798,000
+> game rows, of which **36,399 (2.02%)** are Postponed or Cancelled and every one was
+> being counted. It is a DENOMINATOR — every per-game rate in this model divides by it —
+> and it is asymmetric: the strategies built on projections (`bscore`, `projected-points`)
+> divide by it, and the streak-chasers do not divide by anything. So the error flattered
+> precisely the model this section exists to evaluate.
+>
+> **What it cost, re-measured on the same cache with a one-line predicate change:**
+>
+> | configuration | before | after |
+> |---|---|---|
+> | 1 move/wk, no bench — bscore vs thoughtful-human | 63W-47L, +16.9/wk, p 0.15 | 58W-53L, +8.0/wk, p 0.318 |
+> | 2 moves/wk, with the league's five bench spots | 66W-44L, +20.5/wk, p 0.045 | 58W-53L **to the human**, −6.6/wk, p 0.70 |
+>
+> **The honest claim is now: bscore is LEVEL with a thoughtful human, and beats the three
+> naive managers decisively.** The old claim — that it beats him — was the size of the bug.
+>
+> What SURVIVES unchanged: every margin against `season-to-date` (+40.7/wk), `hot-hand`
+> (+56.2/wk), `hot-hand+vorp` (+34.1/wk) and `draft-and-hold` (+123.3/wk) is still there
+> at p < 0.001, and the replacement adjustment still beats ranking by raw projected
+> points. Those were never close enough for 2% to decide.
+>
+> The numbers below are **not deleted**. They are what those runs said, they are still in
+> `data/results/`, and a measurement that is quietly rewritten cannot be audited. Read
+> every figure in this section as carrying a systematic bias in bscore's favour of roughly
+> the size shown above, and read §9's conclusion from this box rather than from them.
+>
+> Two further things the same audit established, recorded here so they are not re-derived:
+> the printed **"% of perfect" ceiling is unreachable** — it is the best legal roster each
+> week with no continuity constraint, i.e. a team that replaces seventeen men every
+> Monday. Bounded properly by a diagnostic that is handed the week it is deciding, the
+> reachable ceiling is 101,262 rather than 155,213, and bscore sits at 82.8% of it. And
+> the remaining gap splits about **2.7 to 1 in favour of rate over playing time**.
+
 `node src/backtest/compete.ts` plays whole seasons. Each strategy drafts from the same pool, sets a
 legal roster every week, makes waiver moves on what it believed at the time, and is
 scored on what those players actually produced. Rosters may overlap, so the comparison

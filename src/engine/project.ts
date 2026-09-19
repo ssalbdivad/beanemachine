@@ -254,6 +254,22 @@ export interface ProjectOptions {
 	 */
 	shrinkScale?: number
 	/**
+	 * THIS MAN'S OWN RATE LAST SEASON, to shrink toward instead of the league's.
+	 *
+	 * The shrinkage two hundred lines down pulls a thin sample toward a POPULATION rate —
+	 * the average of everyone being compared — which is the right prior when nothing else
+	 * is known about him and a poor one for a veteran with six hundred plate appearances
+	 * behind him last year. Every projection system worth the name shrinks toward the
+	 * player's own history first and the population only in its absence; this one had no
+	 * history to shrink toward at all.
+	 *
+	 * Per unit, the same shape `LeagueRates.perUnit` has, so it drops into the same
+	 * arithmetic. Null or a missing key falls through to the league rate, which is what a
+	 * rookie, a returning minor-leaguer and the first season of the corpus all get — and
+	 * is exactly today's behaviour.
+	 */
+	priorRates?: Record<string, number> | null
+	/**
 	 * Recent-rate weight for a pitcher who mostly relieves.
 	 *
 	 * A reliever's fantasy value is almost entirely a ROLE — whether he is getting
@@ -391,6 +407,7 @@ export const project = (
 		recentRateWeight = 0,
 		recentRateK = 0,
 		shrinkScale = MODEL.shrinkage.scale,
+		priorRates = null,
 		qualityLambda = MODEL.statcast.lambda,
 		qualityScope = MODEL.statcast.scope,
 		matchupIndex = null,
@@ -607,7 +624,11 @@ export const project = (
 			// Shrink the observed rate toward the population rate in proportion to how
 			// little volume backs it. Without this a 90-PA hot streak projects forward
 			// at face value, which is the single biggest source of bad recommendations.
-			const leagueRate = rates?.perUnit[key]
+			/* His own last season first, the population second. A key he has no history for
+			   — a stat he never recorded, a man who was not in the majors — falls through
+			   to the league rate rather than to zero, because "no prior" and "a prior of
+			   nothing" are opposite claims about a rate. */
+			const leagueRate = priorRates?.[key] ?? rates?.perUnit[key]
 			const k = (SHRINK_K[key] ?? DEFAULT_K) * shrinkScale
 			let perUnit =
 				leagueRate === undefined ?

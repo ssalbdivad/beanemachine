@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { League } from "../schema.ts"
-import { COMBO_SWEEP, DEPTH_SWEEP, HEADLINE_SWEEP, MATCHUP_RETUNE, QUALITY_RETUNE, RETUNE_SWEEP, JOINT_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, SHRINK_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
+import { CAREER_SWEEP, COMBO_SWEEP, DEPTH_SWEEP, HEADLINE_SWEEP, MATCHUP_RETUNE, QUALITY_RETUNE, RETUNE_SWEEP, JOINT_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, SHRINK_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
  * Season-long head-to-head: `nub run compete`
@@ -29,7 +29,8 @@ let grandWeeks = 0
 
 for (const season of seasons) {
 	const strategies =
-		process.argv.includes("--quality-retune") ? QUALITY_RETUNE
+		process.argv.includes("--career") ? CAREER_SWEEP
+		: process.argv.includes("--quality-retune") ? QUALITY_RETUNE
 		: process.argv.includes("--retune") ? RETUNE_SWEEP
 		: process.argv.includes("--matchup-retune") ? MATCHUP_RETUNE
 		: process.argv.includes("--headline") ? HEADLINE_SWEEP

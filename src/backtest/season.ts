@@ -198,6 +198,15 @@ export interface Context {
 	 * this fix was measured on polluted inputs.
 	 */
 	underlying: { hitting: Map<number, Underlying>; pitching: Map<number, Underlying> }
+	/**
+	 * LAST SEASON'S LINE for every man who had one — the prior a real projection system
+	 * shrinks toward before it reaches for the league average.
+	 *
+	 * Strictly the past, so it is not hindsight: replaying 2024, this is 2023 and 2023 was
+	 * over before the first pitch of the window being decided. Empty for the first season
+	 * of the corpus, which then behaves exactly as the model did before.
+	 */
+	lastSeason: { hitting: Map<number, PlayerSeason>; pitching: Map<number, PlayerSeason> }
 	gamesAhead: Map<number, number>
 	/** Who each team plays during the horizon, and how good those teams have been. */
 	oppAhead: Map<number, number[]>
@@ -324,6 +333,16 @@ export const makeBscoreStrategy = (
 		 */
 		useRates?: boolean
 		/**
+		 * SHRINK TOWARD THE MAN'S OWN LAST SEASON rather than toward the league.
+		 *
+		 * `useRates` turned the shrinkage on and it pulls every thin sample toward the
+		 * average of everyone in the pool — the right prior for a man nothing is known
+		 * about, and a poor one for a veteran with a full season behind him. This gives
+		 * each man his own prior where he has one, and leaves the league rate as the
+		 * fallback for a rookie, a call-up, and the first season of the corpus.
+		 */
+		useCareer?: boolean
+		/**
 		 * Demote anyone whose results have outrun his contact by more than this much
 		 * wOBA over the window.
 		 *
@@ -343,6 +362,27 @@ export const makeBscoreStrategy = (
 		/* One population per side per week, from the same pool the ranking is over. Built
 		   once rather than per player: it is a fold over every prior line and is identical
 		   for everyone in the group. */
+		/** Last season's per-unit rates, per man, in the shape `project` shrinks with. Built
+		 *  once per week rather than per player: it is a fold over one cached season. */
+		const priorOf = ((): Map<number, Record<string, number>> | null => {
+			if (!opts.useCareer) return null
+			const out = new Map<number, Record<string, number>>()
+			for (const group of ["hitting", "pitching"] as const)
+				for (const [id, p] of ctx.lastSeason[group]) {
+					const volume =
+						group === "hitting" ? (p.stats.plateAppearances ?? 0) : (p.stats.outs ?? 0)
+					/* A handful of plate appearances last year is not a prior, it is the same
+					   thin sample one season further away. The floor is the shrinkage constant
+					   itself: below the volume at which a rate would be half-believed anyway,
+					   his own history says less than the league's does. */
+					if (volume < MODEL.shrinkage.default / 4) continue
+					const per: Record<string, number> = {}
+					for (const [k, v] of Object.entries(p.stats))
+						if (typeof v === "number") per[k] = v / volume
+					out.set(id, per)
+				}
+			return out
+		})()
 		const rates =
 			opts.useRates ?
 				{
@@ -369,6 +409,7 @@ export const makeBscoreStrategy = (
 				const proj = project(p, ctx.underlying[p.group].get(p.id), gBehind, gAhead, {
 					shrinkScale: opts.shrinkScale ?? 1,
 					rates: rates?.[p.group] ?? undefined,
+					priorRates: priorOf?.get(p.id) ?? null,
 					// default to what model.json ships, so the regression test measures the
 					// model the app actually runs; a sweep overrides explicitly
 					qualityWeight: opts.qualityWeight ?? MODEL.statcast.weight,
@@ -940,6 +981,24 @@ export const QUALITY_RETUNE: Strategy[] = [
 	humanStrategy
 ]
 
+/**
+ * SHRINKING TOWARD THE MAN INSTEAD OF TOWARD THE LEAGUE.
+ *
+ * The shrinkage this model now runs pulls every thin sample toward the average of the
+ * pool. That is the right prior for somebody nothing is known about and a poor one for
+ * a veteran with a full season behind him — and shrinking toward a player's own history
+ * first is the thing every real projection system does that this one does not do at all.
+ *
+ * The prior is last season, which was over before the first pitch of any window being
+ * decided, so it needs none of the locks the hindsight diagnostics carry.
+ */
+export const CAREER_SWEEP: Strategy[] = [
+	tuned("league-prior", {}),
+	tuned("own-prior", { useCareer: true }),
+	tuned("own-prior-k2", { useCareer: true, shrinkScale: 1 }),
+	humanStrategy
+]
+
 export const ORACLE_SWEEP: Strategy[] = [
 	bscoreStrategy,
 	volumeOracle,
@@ -1156,6 +1215,45 @@ export const playSeason = async (
 
 	const slots = ACTIVE_SLOTS(league)
 	const bench = options.bench ? benchSize(league) : 0
+	/*
+	   LAST SEASON, READ ONCE, AND IT IS STRICTLY THE PAST.
+	
+	   Replaying 2024 this is 2023, which was over before the first pitch of any window
+	   being decided — so it is a prior, not hindsight, and it needs none of the locks the
+	   `Hindsight` channel carries.
+	
+	   The window asked for is the one the replay of THAT season already cached: its own
+	   last week's prior-end, which is a few days short of the full season and is the
+	   difference between an offline run and 4 live requests. The first season of the
+	   corpus has no predecessor cached and comes back empty, which every consumer reads
+	   as "no prior" and falls back to the league rate for.
+	*/
+	const lastSeason = await (async () => {
+		const empty = { hitting: new Map<number, PlayerSeason>(), pitching: new Map<number, PlayerSeason>() }
+		try {
+			const prev = await seasonRange(season - 1)
+			let cursor = addDays(prev.start, options.warmupDays)
+			let last = cursor
+			while (Date.parse(addDays(cursor, 7)) <= Date.parse(prev.end)) {
+				last = cursor
+				cursor = addDays(cursor, 7)
+			}
+			const end = addDays(last, -1)
+			const [h, p] = await Promise.all([
+				windowStats(season - 1, "hitting", prev.start, end),
+				windowStats(season - 1, "pitching", prev.start, end)
+			])
+			return {
+				hitting: new Map(h.map(x => [x.id, x])),
+				pitching: new Map(p.map(x => [x.id, x]))
+			}
+		} catch {
+			/* Not cached and no network, which is the ordinary case for the first season
+			   in a run. An absent prior is an absence, and the league rate is what it
+			   falls back to. */
+			return empty
+		}
+	})()
 	/** Everyone the strategy HOLDS. Without a bench this is the lineup, exactly as it
 	 *  always was; with one it is the lineup plus the men waiting on it. */
 	const rosters = new Map<string, { slot: string; p: PlayerSeason }[]>()
@@ -1220,7 +1318,8 @@ export const playSeason = async (
 			)
 
 		const ctx: Context = {
-			league, prior, priorGames, recent, recentGames, underlying, gamesAhead, oppAhead, strength
+			league, prior, priorGames, recent, recentGames, underlying, lastSeason,
+			gamesAhead, oppAhead, strength
 		}
 
 		for (const strategy of strategies) {

@@ -2926,21 +2926,37 @@ await phone.close()
    * heading, the working leads with the sentence about the reader's own bench, and the
    * bscore sentence is still there, second, unchanged.
    */
+  /* THE NUMBER THAT CHOOSES HIM WENT BACK TO BSCORE, and the badge with it.
+     This required `/for you$/` and refused `ahead by`, because the pick was made on the
+     reader's own bar. That ranking has since been played out over 111 paired weeks and
+     loses to bscore by 21.5 points a week (95% CI [+5.9, +36.3], paired-t p 0.0053) —
+     dropping the replacement subtraction drops slot scarcity out of the pick, which is
+     most of what the metric is for. The RULE this block protects is unchanged and is the
+     reason the badge had to move too: whichever number decided is the number shown,
+     named in the words of the column it lives in. */
   const badge = (await dm.textContent(".pick-score")).replace(/\s+/g, " ").trim()
   t("the pick's badge carries the number that chose him, named as the column names it",
-    /for you$/.test(badge) && !/bscore|ahead by/i.test(badge), badge)
+    /ahead by$/.test(badge) && !/for you/i.test(badge), badge)
   await dm.click(".card.pick details.pick-more > summary")
   await dm.waitForTimeout(200)
   const dmWhy = (await dm.textContent(".card.pick details.pick-more")).replace(/\s+/g, " ")
-  t("and the working leads on the reader's own bar, in a sentence about that bar",
+  /* Still asserted, and still first: what he gains over the reader's own bench is the
+     most useful sentence on the card once the man is chosen. It is no longer what CHOSE
+     him, which is why the badge above now reads the league's bar instead. */
+  t("and the working still leads on the reader's own bar, in a sentence about that bar",
     /worth [\d.]+ more points over .+ than the worst man you hold who could take one of his spots/.test(dmWhy),
     dmWhy.slice(0, 160))
   t("and the league's bar is still stated too, in its own words, not relabelled",
     /more points than the man left at .+ once every team has filled it/.test(dmWhy),
     dmWhy.slice(0, 200))
-  // The pick must be the top of the ordering it was chosen by, or the card and the table
-  // under it are answering two different questions again.
-  t("the pick is the man at the top of the column the board is in",
+  /* The pick must be the top of the ordering it was chosen BY, which is bscore — not the
+     top of whatever column the reader has since sorted into. This walk has re-sorted the
+     board by "for you", so row one is that column's best man and the pick is bscore's;
+     asserting they are the same man would be asserting that the two metrics agree, which
+     is the thing the season measured them NOT doing. Sorted back to bscore, they are the
+     same man, and that is the claim. */
+  await rankBy(dm, "bscore")
+  t("the pick is the man at the top of the ordering that chose him",
     (await dm.textContent(".pick-name")).startsWith(
       await dm.$eval(".board-row [data-col=who] b", e => e.textContent.trim())),
     `${(await dm.textContent(".pick-name")).slice(0, 30)} vs row one`)

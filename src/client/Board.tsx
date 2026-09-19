@@ -1240,13 +1240,42 @@ export const Board = ({
 	 * the pick must be the same man ascending and descending, because direction is a way
 	 * of looking at the board and not a change of question.
 	 */
-	const best = (c: BoardRow[]) =>
-		c.reduce((a, b) => {
-			if (a.deltaMine === null && b.deltaMine === null) return b.bscore > a.bscore ? b : a
-			if (a.deltaMine === null) return b
-			if (b.deltaMine === null) return a
-			return b.deltaMine > a.deltaMine ? b : a
-		})
+	/*
+	 * ═══ AND THEN A SEASON WAS PLAYED WITH IT, WHICH IS THE PART THAT WAS MISSING ═══
+	 *
+	 * Everything above is a measurement of one SCREEN, and it is still true: with sixteen
+	 * players typed in, the man this card picked by bscore was beaten on the reader's own
+	 * "for you" number by seven of the eight rows printed under him. That is a real
+	 * defect and ranking by `deltaMine` really does fix it.
+	 *
+	 * What nobody had done was ask whether `deltaMine` is the better METRIC.
+	 * `grep -rn deltaMine src/backtest src/auto` returned nothing: the number deciding
+	 * this app's single most prominent recommendation had never appeared in a simulator
+	 * arm or a stored result, while model.json calls value over replacement "the dominant
+	 * component". It is in one now — `deltaMineStrategy` in src/backtest/season.ts, which
+	 * ranks exactly as this reduce does, roster-relative, rebuilt every week. Over 111
+	 * paired weeks with the league's own bench and two moves a week:
+	 *
+	 *     bscore vs delta-mine   65W-46L   +21.5/wk   95% CI [+5.9, +36.3]   p(t) 0.0053
+	 *
+	 * and delta-mine also finishes below `thoughtful-human`, which bscore is ahead of.
+	 * Dropping the replacement subtraction drops slot scarcity out of the pick, and
+	 * scarcity is most of what the metric is for: it is why a catcher who scores less is
+	 * the right add. Twenty-one points a week is more than the model's entire margin over
+	 * a good human.
+	 *
+	 * SO THE PICK GOES BACK TO BSCORE, and the screen complaint above is answered the
+	 * other way round — by the pick and the board's own default ORDERING now agreeing,
+	 * both being bscore, so the row Billy names is the row at the top of the list the
+	 * reader is looking at. The "for you" column stays exactly where it is: it is the
+	 * right answer to "what does he gain ME", which is a different question from "who
+	 * should I add", and it is still the number a reader acts on once the man is chosen.
+	 *
+	 * Still a REDUCE and still not `rows[0]`, for the reason the long note above gives:
+	 * the pick must be the same man ascending and descending, because direction is a way
+	 * of looking at the board and not a change of question.
+	 */
+	const best = (c: BoardRow[]) => c.reduce((a, b) => (b.bscore > a.bscore ? b : a))
 	/**
 	 * The same three tiers, from the same place.
 	 *
@@ -2537,9 +2566,23 @@ const BillysPick = ({
 			  reader's own — the same class of disagreement, one layer up. Whichever number
 			  decided is the number shown, named in the words of the column it lives in.
 			*/}
+			{/*
+			  AND THE BADGE FOLLOWS THE PICK BACK TO BSCORE.
+
+			  The rule the note above states is the right one and is unchanged: whichever
+			  number decided is the number shown, named in the words of the column it lives
+			  in. What changed is which number decides. Ranking by "for you" was measured
+			  over 111 paired weeks and loses to bscore by 21.5 points a week (p 0.0053) —
+			  see the note on `best` — so the pick is bscore's again and so is the badge.
+
+			  "For you" has not gone anywhere: it is the column beside every row and the
+			  first line of this card's own working, because what a man gains over the
+			  reader's own bench is the right answer to "what does he do for ME" and the
+			  wrong answer to "who should I add".
+			*/}
 			<span className="pick-score">
-				<b>{r.deltaMine !== null ? (r.deltaMine > 0 ? `+${r.deltaMine}` : r.deltaMine) : r.bscore}</b>
-				<span>{r.deltaMine !== null ? "for you" : "ahead by"}</span>
+				<b>{r.bscore}</b>
+				<span>ahead by</span>
 			</span>
 		</section>
 	)

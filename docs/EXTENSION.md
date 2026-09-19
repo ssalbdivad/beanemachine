@@ -46,14 +46,34 @@ One source tree, three entry points, no shared chunk between them — content sc
 cannot be ES modules in either browser, so `extension/build.mjs` builds each as its own
 self-contained IIFE.
 
-Measured 2026-09-17 at 15:25 by `node extension/build.mjs && wc -c dist-ext/chrome/*.js`:
-`yahoo.js` 16,573 bytes, `background.js` 10,745, `bridge.js` 2,865 — 30,183 bytes in
-total, unminified. **Take that as a snapshot and re-run the command rather than quoting
-it.** The same figure was 12,278 / 5,790 / 2,865 = 20,933 bytes twenty minutes earlier in
-the same session; `src/data/extension.ts`, which all three entry points import from, was
-being extended while this was written. What the number is for is the order of magnitude:
-the whole add-on is tens of kilobytes of unminified source, small enough that a store
-reviewer can read all of it, and that is deliberate (§3).
+Measured 2026-09-19 by `node extension/build.mjs && wc -c dist-ext/chrome/*.js`:
+`yahoo.js` 10,273 bytes, `background.js` 3,975, `bridge.js` 1,763 — 16,011 bytes in total,
+**minified**, of which 885 is the four-line provenance banner the build prepends to each.
+**Take that as a snapshot and re-run the command rather than quoting it.**
+
+The earlier measurements are kept rather than replaced, because the trend is the point.
+Unminified, the same three files came to 16,573 / 10,745 / 2,865 = 30,183 bytes at
+2026-09-17 15:25, and to 12,278 / 5,790 / 2,865 = 20,933 bytes twenty minutes before that —
+`src/data/extension.ts`, which all three entry points import from, was being extended
+throughout. By 2026-09-19 the unminified total had reached 61,833.
+
+**AND THE ARGUMENT THAT PARAGRAPH USED TO MAKE HAS BEEN WITHDRAWN.** It read: "the whole
+add-on is tens of kilobytes of unminified source, small enough that a store reviewer can
+read all of it, and that is deliberate". Measured 2026-09-19 by tokenising each bundle:
+22,564 of `yahoo.js`'s 39,254 bytes were comment (57.5%), 11,057 of `background.js`'s
+16,685 (66.3%), 3,073 of `bridge.js`'s 5,468 (56.2%). The thing being shipped to two stores
+and downloaded by every reader was not readable code, it was this repository's comments —
+between 56% and 66% of every byte — and a reviewer who wants the argument wants it beside
+the code in the repository, not re-downloaded on every update by everyone.
+
+So the bundles are minified, and what carries the reviewability instead is three things,
+each stronger than a comment inside a bundle: a four-line banner at the top of every file
+naming the repository, the build command and the privacy policy; the AMO source submission,
+which a bundled add-on owes whether or not it is minified, and whose instructions have been
+*followed* rather than asserted (`extension/SUBMITTING.md`); and a deterministic build, so
+the bytes in the package can be reproduced and compared. That last one was checked on
+2026-09-19 in a clean directory from `git archive HEAD`: every file in `dist-ext/firefox/`
+and the `-store.zip` itself came out byte for byte identical.
 
 ### `extension/src/yahoo.ts` — the half inside Yahoo
 
@@ -288,10 +308,25 @@ The Firefox manifest also carries `browser_specific_settings.gecko`:
 
 - `id: "beanemachine@beanemachine.com"` — a stable id, so an update replaces the install
   rather than sitting beside it.
-- `strict_min_version: "128.0"` — not 109. MV3 has been generally available in Firefox
-  since 109, but **host permissions are only granted at install from 127**; before that
-  they sit ungranted, with nothing telling the reader why nothing works. 128 is the ESR,
-  which is what a cautious install actually runs.
+- `strict_min_version: "140.0"` — not 109 and no longer 128. MV3 has been generally
+  available in Firefox since 109, but **host permissions are only granted at install from
+  127**; before that they sit ungranted, with nothing telling the reader why nothing works.
+  That was the argument for 128 (the ESR at the time, which is what a cautious install
+  actually runs) and it is still true. It is no longer the binding constraint: the
+  `data_collection_permissions` key below is not read by Firefox until **140**, so at 128
+  the declaration AMO refuses a new submission without would have been ignored by every
+  browser from 128 to 139 and the consent screen never shown. 140 is itself the current
+  ESR, so raising the floor gave nothing up. Measured with `npx addons-linter` — §8.
+- `data_collection_permissions: { required: ["none"] }` — what AMO has refused a new
+  submission without since 2025-11-03. §8 has the argument for `none` and the conservative
+  alternative.
+
+And `browser_specific_settings.gecko_android`:
+
+- `strict_min_version: "142.0"` — a floor of its own, because `gecko.strict_min_version`
+  does not set the Android one and `data_collection_permissions` landed on Android two
+  releases later than on the desktop. Without the key the linter reports the Android case
+  as a second, separate warning.
 
 `chrome.*` is used throughout rather than `browser.*` because Chrome does not define
 `browser` and Firefox does define `chrome`. One global works in both. The callback style
@@ -365,10 +400,12 @@ at the point they bite:
   needs a display this machine may not have.
 - **The hello race in §2**, which timed out the suite before it was understood.
 
-**Count, measured 2026-09-17 at 15:25 by static count of the `t(…)` call sites in
-`test/extension.mjs`: 109 assertions — 105 call sites, several of which sit inside a
-two-iteration loop over the two built manifests.** It was 38 at 15:04, from 35 sites; the
-suite was being added to during the session this was written, so re-derive rather than
+**Count, measured 2026-09-19 from the run's own total: 189 assertions, from 167 `t(…)`
+call sites — several of them inside loops over the two built manifests and the two
+browsers' packages.** The commit immediately before that block, 91b03b0, printed 150 from
+145 sites on 2026-09-19 — so the block added 39, not the 80 an earlier draft of this line
+implied by quoting 2026-09-17 as the baseline. It was 109 from 105 sites on 2026-09-17 at
+15:25, and 38 from 35 sites at 15:04 the same day; the suite is added to constantly, so re-derive rather than
 quote:
 
 ```sh
@@ -378,8 +415,9 @@ console.log((s.match(/(^|[^a-zA-Z_.])t\(/gm)||[]).length, "call sites")'
 
 They cover, in order: the fixture being
 served at Yahoo's hostname; the page seeing the stamp; the handshake and its version; the
-Yahoo tab being visible to the background; one press bringing back three pages in the
-order team, settings, matchup; the team page arriving as text rather than markup; the
+Yahoo tab being visible to the background; one press bringing back four pages in the
+order team, settings, eligibility, matchup (the eligibility page was added when `onePress`
+learned to fetch his own team from a URL that does not name one); the team page arriving as text rather than markup; the
 settings page carrying a scoring table; the read landing on the league key the app already
 uses; the league's own scoring on both sides of the ball; the team count; nine seats with
 the men in them; the opponent told apart from his own team, with none of his own men on
@@ -388,7 +426,21 @@ one position at a time; `count=0` on every one of them, which is the bug that hi
 25 free agents at every position for a season; the pool being the union across positions
 (27 men, not three seen nine times); which positions came back; a throttle reported as a
 throttle; then the reader's own path through the setup sheet into the stores; then the two
-manifests.
+manifests; and, since 2026-09-19, **what the stores actually receive.**
+
+That last block is the one with no browser in it. It opens each of the four built zips by
+parsing the central directory (`unzip` is not on this machine, which is why `build.mjs`
+writes the archive itself), and asserts the entry list of each — the seven files a browser
+needs, plus `README.txt` in the two the site hands out and in neither of the two a store
+takes; that no file in either `-store` package contains the words "Developer mode", "Load
+unpacked", "Load Temporary Add-on" or "about:debugging"; that no entry is packed larger
+than the file it came from and the archive is well under the bytes it holds; that the
+manifest inside the zip is the manifest on disk. Then it decodes the four built PNGs and
+takes the bounding box of what is opaque: 16 and 48 full bleed, 128 as 96×96 of artwork
+inside 16 px of transparency, the promotional tile 440×280 and full bleed. Then the
+version's format, the description `extension/SUBMITTING.md` tells you to paste against the
+one the manifest carries, and every `dist-ext/` file that document names against the
+filesystem.
 
 **Last measured green — `passed 109, failed 0` — on 2026-09-17 at 17:56, two hours after
 the same command reported 20 of 38 with the run aborted. See §8 for both, and for what the
@@ -468,9 +520,16 @@ and must be rewritten before submission.
 ### Remote code
 
 > No. The extension executes no remotely hosted code. All three scripts are bundled into
-> the package by `extension/build.mjs` and are unminified; the only thing fetched at
-> runtime is the text of the user's own Yahoo pages, which is treated as data and parsed
-> by the website, never evaluated.
+> the package by `extension/build.mjs` and minified by Vite's own minifier — minification
+> only, no mangling beyond the default, no encoding, no runtime string assembly. Each file
+> opens with four lines naming the repository it was built from, the one command that
+> rebuilds it and the privacy policy URL, and the build is deterministic, so the bytes in
+> the package can be reproduced and compared. The only thing fetched at runtime is the text
+> of the user's own Yahoo pages, which is treated as data and parsed by the website, never
+> evaluated.
+
+(That paragraph said "and are unminified" until 2026-09-19, when 56–66% of every shipped
+byte turned out to be this repository's comments. §2 has the measurement and the argument.)
 
 ### Why there is no `storage` permission
 
@@ -587,15 +646,43 @@ extension from this harness, so what is asserted about it is the content of its 
 not its behaviour. The event-page background, the `gecko` id and the version floor are
 checked as JSON. Nothing has ever loaded `dist-ext/firefox` into a Firefox.
 
+What has now been run over it is **Mozilla's own validator**, which is a different thing
+from a browser and is worth having anyway, because it is the exact tool AMO runs on an
+upload. `npx addons-linter dist-ext/beanemachine-firefox-store.zip`, 2026-09-19: **0
+errors, 0 warnings, 0 notices.** The same command an hour earlier returned two warnings,
+and they were not cosmetic: `strict_min_version` was `128.0`, and
+`data_collection_permissions` — the key AMO refuses a new submission without — was not read
+by Firefox until **140**, or by Firefox for Android until **142**. At 128 the declaration
+would have been ignored by every browser between, so the consent screen Mozilla now
+requires would not have been shown to anyone on 128–139. The floor is 140 with
+`gecko_android` at 142. The original argument for 128 (host permissions are granted at
+install only from 127; 128 was the ESR) is still true and is no longer the binding one —
+and 140 is itself the current ESR, so nothing was given up.
+
 **The store install is unverifiable here.** Loading unpacked is the only route this
 repository can exercise. A store listing is reviewed and published by somebody else, and
-nothing in this directory can assert one exists. `src/client/Connect.tsx` links to each
-browser's store search page, which is what a reader who did not clone this repository
-follows.
+nothing in this directory can assert one exists.
 
-**The suite was green at 2026-09-17 17:56: `passed 109, failed 0`**, from `node
+This paragraph used to end "`src/client/Connect.tsx` links to each browser's store search
+page, which is what a reader who did not clone this repository follows", and that stopped
+being true on 2026-09-18: the search pages returned nothing (recorded at the foot of
+`extension/build.mjs`), so `IN_STORE` is `false` and the site hands the reader the zip
+instead. Which is itself untested from a reader's side — nobody has downloaded that file
+from the published site, unpacked it and loaded it. What is checked is that the file exists
+and is a valid archive of the right seven files (`test/extension.mjs`) and that the
+published site serves it (`test/static.mjs`).
+
+**The suite was green at 2026-09-19: `passed 189, failed 0`**, from `node
 extension/build.mjs && node --experimental-strip-types test/extension.mjs` with the dev
-server on 127.0.0.1:5299. `npx tsc --noEmit` was clean in the same minute.
+server on 127.0.0.1:5299. `npx tsc --noEmit` was clean in the same minute. It was **`passed
+150, failed 0` at 91b03b0**, the commit before the block that checks what the stores
+receive existed, and **`passed 109, failed 0` at 2026-09-17 17:56** two days earlier.
+
+One of the new assertions failed on its first run and the failure is kept here because the
+assertion was wrong rather than the code: it demanded the leading integer of the version be
+non-zero, and this add-on ships `0.2.0`. Chrome has no such rule. What it does have is a
+leading-ZERO rule inside each integer (`032` is invalid), which is what a hand-bumped
+`VERSION` can plausibly break, and that is what the line asserts now.
 
 That is a fact about one run and not a standing property, and the half hour before it is
 the reason to say so. At **15:05** the same command against a build of the same minute
@@ -644,21 +731,50 @@ Naming these is the deliverable; none of them is acquired here.
 - **A privacy policy at a URL.** Both stores require one for a listing that reads page
   content. `extension/PRIVACY.md` is written and true of the code; it is a file in a repo,
   not a URL, and Chrome's Privacy practices tab wants a link.
-- **Screenshots.** Chrome requires at least one, 1280×800 or 640×400, square corners, full
-  bleed, up to five. There are none in this repository and nothing in the build emits one.
-- **A small promo tile, 440×280.** Required by Chrome. Not emitted.
-- **A store icon at the size and shape Chrome asks for.** The build emits 16, 48 and 128
-  px PNGs, so the 128 exists — but Chrome asks for 96×96 of artwork inside 16 px of
-  transparent padding, and this one is full bleed. Measured 2026-09-17 by decoding
-  `dist-ext/chrome/icon-128.png`: alpha is 255 at (0, 64) and (64, 0), and there are zero
-  transparent columns before ink on row 64. The corners are rounded (alpha 0 at (0,0)) but
-  the edges are not padded. `extension/build.mjs` draws it and is outside this task's file
-  list.
-- ~~**A packaged zip.**~~ **Done, 2026-09-18.** The build shelled out to `/usr/bin/zip`,
-  which does not exist on this machine, so it printed "zip not available" and produced
-  none. It writes the archive itself now — stored entries, a fixed timestamp so two builds
-  of the same source are the same bytes — and copies both into `public/`, because the site
-  has to hand the add-on over while no store has it.
+- ~~**Screenshots.**~~ **Mostly done, 2026-09-18.** Chrome requires at least one, 1280×800
+  or 640×400, square corners, full bleed, up to five. `extension/shots.mjs` captures them
+  from the running preview, so a listing shows what the site does rather than a mock. Three
+  of the four are unconditional. The fourth, the install walkthrough, is **withheld while
+  `IN_STORE` in `src/client/Connect.tsx` is `false`**: the sheet then renders the sideload
+  route, and a Chrome listing may not instruct a reader to install from outside the Web
+  Store. `shots.mjs` reads the words on the rendered screen rather than the flag — the flag
+  is compiled into the bundle it is photographing — and prints what it skipped and why.
+- ~~**A small promo tile, 440×280.**~~ **Done, 2026-09-18.** Drawn procedurally from the
+  same two colours as the icons, full bleed, no text on it. `dist-ext/promo-440x280.png`;
+  the suite asserts both dimensions and the absence of a transparent border.
+- ~~**A store icon at the size and shape Chrome asks for.**~~ **Done, 2026-09-19.** Chrome
+  asks for 96×96 of artwork inside 16 px of transparent padding. Measured 2026-09-17 by
+  decoding `dist-ext/chrome/icon-128.png`: alpha 255 at (0, 64) and (64, 0), zero
+  transparent columns before ink on row 64 — full bleed, with only the corners rounded.
+  Padding was then added and **that measurement was wrong too**, which is the part worth
+  keeping: `inset` in `build.mjs` is a fraction of the edge PER SIDE, so 96 inside 128 is
+  1/8 and not 1/16, and at 1/16 the icon carried 112×112 of artwork at (8, 8). Measured
+  2026-09-19 by taking the bounding box of what is opaque: 96×96 at (16, 16). The suite
+  asserts the box at all three sizes now — full bleed at 16 and 48, padded at 128 — because
+  this is the class of error that survives review by looking approximately right.
+- ~~**A packaged zip.**~~ **Done, 2026-09-18; corrected 2026-09-19.** The build shelled out
+  to `/usr/bin/zip`, which does not exist on this machine, so it printed "zip not
+  available" and produced none. It writes the archive itself now, with a fixed timestamp so
+  two builds of the same source are the same bytes, and copies the download pair into
+  `public/`, because the site has to hand the add-on over while no store has it.
+
+  **The entries were STORED, and the comment beside the writer argued that they should be**
+  — "DEFLATE would save a few kilobytes at the cost of a second implementation to get
+  wrong". Measured 2026-09-19 on the built Chrome folder, before the bundles were minified:
+  64,169 bytes of payload stored against 24,405 deflated. Not a few kilobytes, and on the file the site hands to
+  every reader. The second implementation is `deflateRawSync`, from the same `node:zlib` the
+  PNG writer three hundred lines above already calls. It is chosen per entry, because
+  deflate does not always win: icon-16.png went 139 → 142 bytes and icon-48.png 305 → 310,
+  a PNG's IDAT being deflated already. With minification on top, the Chrome download is
+  **8,846 bytes** where it was 64,973.
+
+  **And there are four zips now, not two.** `beanemachine-<browser>-store.zip` is what gets
+  uploaded; `beanemachine-<browser>.zip` is what the site hands out. They differ by
+  `README.txt`, whose first instruction is "turn on Developer mode, press Load unpacked" —
+  true and necessary for a reader who downloaded the zip, and a sentence a Chrome Web Store
+  listing may not contain about itself. Nothing in this repository would have caught it: the
+  file is correct, the manifest is correct, and the zip they are in was going to two readers
+  who need opposite instructions.
 - **A Chrome Web Store developer account**, which needs a Google account and a one-time
   registration fee. Chrome's own registration page does not state the amount; check the
   dashboard.
@@ -666,15 +782,39 @@ Naming these is the deliverable; none of them is acquired here.
   since the EU Digital Services Act rules took effect on 2024-02-17. Declaring "trader"
   publishes a legal name, address, email and a phone number verified by SMS on the
   listing.
-- **Source code for Mozilla's reviewers.** AMO requires the pre-build source and
-  reproduction instructions whenever the shipped code is bundled by a tool like Vite, even
-  unminified — which this is. The repository is public and `node extension/build.mjs` is
-  the whole instruction, so this is a form to fill in rather than work to do.
+- ~~**Source code for Mozilla's reviewers.**~~ **Written and tested, 2026-09-19.** AMO
+  requires the pre-build source and reproduction instructions whenever the shipped code is
+  bundled — which this is, and now minified as well. The instructions in
+  `extension/SUBMITTING.md` **said esbuild**, which has never been installed in this
+  project: `pnpm ls` resolves `vite@8.2.2` onto `rolldown@1.2.6`, and a reviewer following
+  that text would have gone looking for a tool that is not in the lockfile. They now say
+  Vite 8 (Rolldown), name the Node and pnpm versions they were run on, and say how to make
+  the source zip (`git archive --format=zip HEAD`) so it excludes `node_modules/` and
+  reproducibly contains the tracked tree.
+
+  **They were followed rather than asserted.** On 2026-09-19, in a clean temporary
+  directory: `git archive HEAD` unpacked, `pnpm install --frozen-lockfile`, `node
+  extension/build.mjs` — and every file of `dist-ext/firefox/` plus
+  `beanemachine-firefox-store.zip` itself came out byte for byte identical to this
+  machine's. Both with and without `--ignore-scripts`. Still a form to fill in, but the form
+  now contains something a reviewer can act on.
 - **A verified publisher domain** is *not* required to list on either store. It is worth
-  naming as absent anyway: without it neither listing can say it is published by the
-  owner of beanemachine.com, and the app's walkthrough points readers at a store *search*
-  page (`src/client/Connect.tsx`) rather than at a listing, so whatever a reader finds
-  there is whatever the search returns.
+  naming as absent anyway: without it neither listing can *say* it is published by the
+  owner of beanemachine.com. The manifest gained `homepage_url` on 2026-09-19, which puts
+  the site on both listings as the developer's website and is the nearest thing available
+  without verification — a link a reviewer can follow, not a claim either store has
+  checked. (The clause that used to end this bullet, about the walkthrough pointing at a
+  store *search* page, is dealt with above: `IN_STORE` is `false` and the site hands over
+  the file instead.)
+- **Nobody has checked either store's trademark policy against the add-on's NAME.** It is
+  `beanemachine — read my Yahoo league`, and both stores forbid a listing name that uses
+  somebody else's trademark in a way implying affiliation. The reading this project is
+  working from is that "read my Yahoo league" is descriptive of what the add-on does and
+  claims nothing — the detailed description says "No website can read a Yahoo league on its
+  own", which is a statement about the web and not about a partnership — and that is a
+  reading, not a ruling. It is the likeliest thing a first review comes back about, and the
+  fix is a rename, so it costs nothing to have thought about it first. Neither store
+  publishes a decision a repository can assert against.
 
 ---
 

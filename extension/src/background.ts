@@ -234,6 +234,10 @@ const askYahoo = async (
 		   is needed, because a `rosters` ask names its league and the existing "only a tab
 		   on that league will do" therefore applies to it unchanged. */
 		teamIds?: string[]
+		/* For `league`: which team in it is the reader's own, which the app knows and a
+		   Yahoo URL does not say unless he happens to be standing on a team page. Same
+		   spread, same reason. */
+		teamId?: string
 	},
 	reply: (answer: unknown) => void
 ): Promise<void> => {
@@ -331,31 +335,25 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 		   rather than harmless. Asking for the four patterns the bridge is injected into
 		   sends it only where it can be heard. */
 		void chrome.tabs.query({ url: APP_MATCHES }, tabs => {
-			for (const t of tabs)
+			/* `?? []`: a refused query leaves `tabs` UNDEFINED and iterating it throws
+			   inside a listener, where a throw is not a crash anybody sees — the channel
+			   simply closes and the page waits out its patience. `extension/src` was
+			   outside tsconfig's include until 2026-09-19, so this was invisible to
+			   `npm run check`; typing that directory is what found it. An empty list is
+			   the honest answer to "which app tabs are open". */
+			for (const t of tabs ?? [])
 				if (typeof t.id === "number")
 					chrome.tabs.sendMessage(t.id, msg, () => void chrome.runtime.lastError)
 		})
 		return
 	}
 
-	/*
-	   NOTHING SENDS THIS TODAY, and saying so is the point of the comment.
-
-	   `openYahoo` in src/client/extension.ts posts `{ ask: "page", open: url }`; the bridge
-	   forwards the ASK and drops `open`, so what arrives here is an ordinary page read and
-	   this branch is never reached. The tab the reader sees is opened by the page's own
-	   `window.open`, which works because it happens inside his click.
-
-	   Left in place rather than deleted, because wiring it up is a two-line change somebody
-	   may want — and left with this warning, because wiring it up WITHOUT removing the
-	   `window.open` gives him two tabs on the same page, which is worse than the thing it
-	   was meant to fix.
-	*/
-	if (msg.kind === "open-yahoo") {
-		void chrome.tabs.create({ url: msg.url ?? "https://baseball.fantasysports.yahoo.com/" })
-		reply({ kind: "opened" })
-		return true
-	}
+	/* An `open-yahoo` branch stood here and was unreachable: nothing has ever sent that
+	   message, its own comment said so, and the tab the reader sees is opened by the page's
+	   own `window.open` inside his click — which is what makes it survive a popup blocker
+	   and what a tab created from here would not. Deleted along with the `ask: "page"` the
+	   page used to post beside it, which WAS reaching this file and was a real read of the
+	   reader's Yahoo tab for a press that meant "take me to Yahoo". */
 	return
 })
 
@@ -373,7 +371,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
  */
 chrome.action.onClicked.addListener(() => {
 	void chrome.tabs.query({ url: APP_MATCHES }, tabs => {
-		const open = tabs.find(t => typeof t.id === "number")
+		/* `?? []` for the same reason as the other two query sites: a refused query hands
+		   back undefined, and here that would throw on the reader's own press of the
+		   toolbar button — the one gesture where nothing else can report the failure. */
+		const open = (tabs ?? []).find(t => typeof t.id === "number")
 		if (open?.id !== undefined) void chrome.tabs.update(open.id, { active: true })
 		else void chrome.tabs.create({ url: "https://beanemachine.com/" })
 	})

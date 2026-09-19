@@ -23,18 +23,31 @@ exception, because it is not a cross-origin request at all.
 node extension/build.mjs
 ```
 
-Writes `dist-ext/chrome/` and `dist-ext/firefox/`, each a complete loadable folder, plus
-`beanemachine-chrome.zip` and `beanemachine-firefox.zip` **if `/usr/bin/zip` is present**
-— without it the build says "zip not available" and the folders are loadable as they are,
-but a store upload needs the zip, so install it before you go to publish. `dist-ext/` is
-gitignored; the build is quick and nothing depends on a committed copy of it.
+Writes `dist-ext/chrome/` and `dist-ext/firefox/`, each a complete loadable folder, and
+four zips. The build writes the archives itself — it used to shell out to `/usr/bin/zip`
+and print "zip not available" on a machine without it, which is this one, so the zips were
+built in CI and nowhere else. `dist-ext/` is gitignored; the build is quick and nothing
+depends on a committed copy of it.
 
-Three bundles, one entry each, unminified. Measured 2026-09-17 at 15:25 by `wc -c
-dist-ext/chrome/*.js`: `yahoo.js` 16,573 bytes, `background.js` 10,745, `bridge.js` 2,865.
-That figure moves whenever `src/data/extension.ts` does — all three entry points import
-from it — so re-run the command rather than quoting the number. The icons are drawn by the
-build rather than committed as three PNGs that can silently stop matching the wordmark
-they came from.
+**Two of the four zips are uploadable and two are not.** `beanemachine-<browser>.zip` is
+what the site hands a reader while no listing exists and carries a `README.txt` telling
+him to load it unpacked; `beanemachine-<browser>-store.zip` is the same package with that
+file removed, because a Chrome Web Store listing may not instruct a reader to install from
+outside the Web Store. `extension/SUBMITTING.md` says which goes where.
+
+Three bundles, one entry each, **minified**, each with a four-line banner naming the
+repository and the build command — which is all a reviewer can read in a minified file.
+Measured 2026-09-19 by `wc -c dist-ext/chrome/*.js`: `yahoo.js` 10,273 bytes,
+`background.js` 3,975, `bridge.js` 1,763. Unminified the same three came to 61,833, of
+which 57–66% was comment; the source stays commented and the shipped bytes do not carry
+the argument. The figure moves whenever `src/data/extension.ts` does — all three entry
+points import from it — so re-run the command rather than quoting the number. The icons
+are drawn by the build rather than committed as three PNGs that can silently stop matching
+the wordmark they came from.
+
+The zip entries are deflated, each entry keeping whichever of stored and deflated is
+smaller (a PNG is already compressed and grows). Measured 2026-09-19: the Chrome download
+is 8,846 bytes where the stored, unminified archive was 64,973.
 
 `VERSION` at the top of `build.mjs` is bumped by hand. The app reads it out of the
 manifest, so the two halves can say which of them is behind rather than "something went
@@ -70,11 +83,16 @@ build can opt out of — a permanent install has to be signed by Mozilla, and on
 Edition and Nightly will install an unsigned one permanently. For day-to-day use on
 Firefox, reload it after a restart or use a signed build.
 
-The Firefox manifest sets `strict_min_version: "128.0"`. Below 127 the host permissions
-are not granted at install, so the add-on loads and silently cannot read anything.
+The Firefox manifest sets `strict_min_version: "140.0"`, and `gecko_android` sets 142.0.
+It was 128, argued from host permissions — below 127 they are not granted at install, so
+the add-on loads and silently cannot read anything. The binding constraint is now the
+`data_collection_permissions` key AMO requires of a new submission, which Firefox did not
+read until 140 and Firefox for Android until 142. `npx addons-linter` on the built package
+says so in those words; see `extension/SUBMITTING.md`.
 
 Each built folder also carries a `README.txt` saying which of these two routes it wants, so
-a folder that has been copied somewhere still says how to load itself.
+a folder that has been copied somewhere still says how to load itself. It is in the zip the
+site hands out and **not** in the `-store` zip, for the reason above.
 
 ## Testing it
 
@@ -84,14 +102,13 @@ npm run dev:web                 # the app on :5299, which the suite drives
 npm run test:ext                # node --experimental-strip-types test/extension.mjs
 ```
 
-**109 assertions** against the real unpacked build in a real browser — the number the
-suite printed on 2026-09-17 at 17:56 (`passed 109, failed 0`). It was 39 earlier the same
-day, before a hardening pass; a count in prose goes stale the moment somebody adds a case,
-so take the run's own total over this sentence. The `t(…)` call sites in `test/extension.mjs`:
-105 of them, several
-inside a two-iteration loop over the two built manifests. The suite is grown regularly and
-that total was 38 the same afternoon, so take it from a run rather than from here. Yahoo
-is served by a local fixture server
+**189 assertions** against the real unpacked build in a real browser — the number the
+suite printed on 2026-09-19 (`passed 189, failed 0`). The block that checks what the
+stores receive added 39 of those: the commit before it printed 150 from 145 `t(…)` sites.
+It printed 109 on 2026-09-17 at 17:56 and 39 earlier that day; a count in prose goes stale the moment somebody adds a
+case, so take the run's own total over this sentence. The `t(…)` call sites in
+`test/extension.mjs`: 167 of them, several inside loops over the two built manifests and
+the two browsers' packages. Yahoo is served by a local fixture server
 and Chromium is told to believe it (`--host-resolver-rules=MAP *.fantasysports.yahoo.com
 <port>`), so the pages really are fetched at
 `http://baseball.fantasysports.yahoo.com/b1/228947/8`, the match patterns really do decide
@@ -108,13 +125,22 @@ Two things worth knowing before you debug a failure:
 
 The Firefox build is never loaded by any test. Firefox cannot be driven with an unpacked
 add-on from this harness, so what the suite asserts about it is the content of its
-manifest — that its background is an event page and never a service worker, which is the
-difference that otherwise fails silently.
+manifest and of its package — that its background is an event page and never a service
+worker, which is the difference that otherwise fails silently, and that both its zips hold
+the seven files a browser needs. What Mozilla itself would say about the package is a
+separate check and is not in this suite: `npx addons-linter
+dist-ext/beanemachine-firefox-store.zip`, which takes about a minute and needs the
+network.
+
+Since 2026-09-19 the suite also opens the built zips and decodes the built PNGs. Nothing
+had ever checked what a store actually receives — the zip writer and the icon drawing are
+both hand-rolled in `build.mjs`, and the first reader of either was going to be a
+reviewer.
 
 ## Before publishing
 
-Both stores refuse a listing that reads page content without a privacy policy, and both
-ask for the permission justifications in a text box. Those justifications are written out
-ready to paste in `docs/EXTENSION.md` §7, and the list of what a listing still needs that
-this repository does not have — screenshots, a promo tile, a padded store icon, a Firefox
-manifest key that AMO now requires of new submissions, a developer account — is §8.
+Read **[`SUBMITTING.md`](SUBMITTING.md)**. It has the exact text to paste into each store's
+form, which file to upload, and the one command that runs Mozilla's own linter over the
+package before you do. The permission justifications are there and in `docs/EXTENSION.md`
+§7; the list of what a listing still needs that this repository cannot produce — a
+developer account, a fee, a trader declaration — is §8.

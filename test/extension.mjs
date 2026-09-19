@@ -29,7 +29,8 @@
  */
 import { chromium } from "playwright-core"
 import { createServer } from "node:http"
-import { readFileSync, mkdtempSync } from "node:fs"
+import { existsSync, readFileSync, mkdtempSync } from "node:fs"
+import { inflateRawSync, inflateSync } from "node:zlib"
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -87,6 +88,40 @@ const settingsPage = league => {
 	/* Served as a real page, because the extension reads it the way a browser renders it:
 	   the tab-separated text above is what `innerText` gives back for a table. */
 	return `<!doctype html><meta charset="utf-8"><title>Settings</title><body><pre>${rows
+		.join("\n")
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")}</pre></body>`
+}
+
+/**
+ * THE POSITION-ELIGIBILITY PAGE, BUILT FROM THE VALUES THE REAL ONE GAVE.
+ *
+ * Not invented: `scoring.json`'s own league carries `eligibility` read off
+ * `/positioneligibility` for league 228947 by the Node importer — 5 games started or 10
+ * played, 3 starts for SP, 5 relief appearances for RP, and ten tracked positions ending
+ * in P. This page is written back out of those numbers and the parse is asserted against
+ * them, so the fixture and the assertion cannot agree on anything the real page did not
+ * say. The ORDER — the legend, then the tracked positions, then "Player" — is what the
+ * importer's own header expression implies about the page it was measured on.
+ *
+ * Until now no press asked for this page at all, so every league read in a browser carried
+ * `eligibility: null` while the editor for it sat on My league with nothing in it.
+ */
+const eligibilityPage = e => {
+	const rows = [
+		"Yahoo Fantasy Baseball\tMy Team\tLeague\tPlayers",
+		"Position Eligibility",
+		`Batters need either ${e.batters.games_started_at_position} Games Started or ${e.batters.games_played_at_position} Games Played at a position to gain eligibility.`,
+		`Pitchers need ${e.pitchers.SP.starts} Starts to gain SP eligibility, ${e.pitchers.RP.relief_appearances} Relief Appearances to gain RP eligibility.`,
+		"E Currently Eligible",
+		"P Games to Play Until Eligible",
+		"S Games to Start Until Eligible",
+		"- No Appearances Yet",
+		e.tracked_positions.join("\t"),
+		"Player\tTeam",
+		"Terms\tPrivacy\tHelp\tFeedback"
+	]
+	return `<!doctype html><meta charset="utf-8"><title>Position Eligibility</title><body><pre>${rows
 		.join("\n")
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")}</pre></body>`
@@ -346,6 +381,7 @@ const server = createServer((req, res) => {
 		res.end(html)
 	}
 	if (url.pathname.endsWith("/settings")) return send(settingsPage(real))
+	if (url.pathname.endsWith("/positioneligibility")) return send(eligibilityPage(real.eligibility))
 	if (url.pathname.endsWith("/matchup")) return send(matchupPage())
 	if (url.pathname.endsWith("/players")) {
 		playersServed++
@@ -570,11 +606,15 @@ const askWithProgress = (ask, opts = {}) =>
 		[ask, opts]
 	)
 
-/* ── one press: the team page and the settings page ──────────────────────────────── */
+/* ── one press: the pages a league is made of ─────────────────────────────────────── */
 const league = await askFor("league")
-t("one press brings back the three pages a league is made of",
-	league.kind === "grabs" && league.grabs.length === 3 &&
-		league.grabs.map(g => g.kind).join(",") === "team,settings,matchup",
+/* WAS THREE — team, settings, matchup. The fourth is `/positioneligibility`, which carries
+   the thresholds and is the only page that does: every league read in a browser carried
+   `eligibility: null` because no press had ever asked for it, while the Node importer had
+   been reading it off that URL since before the extension existed. */
+t("one press brings back the four pages a league is made of",
+	league.kind === "grabs" && league.grabs.length === 4 &&
+		league.grabs.map(g => g.kind).join(",") === "team,settings,eligibility,matchup",
 	(league.grabs ?? []).map(g => g.kind).join(",") || JSON.stringify(league).slice(0, 200))
 t("the team page comes back as text, not as 400 KB of markup",
 	league.grabs?.[0]?.kind === "team" && league.grabs[0].text.length > 40 && !league.grabs[0].html,
@@ -597,9 +637,30 @@ const read = await app.evaluate(async grabs => {
 		spots: out.roster?.spots.length ?? 0,
 		opponent: out.opponent?.length ?? 0,
 		mineOnBoth: (out.opponent ?? []).filter(k => (out.roster?.keys ?? []).includes(k)).length,
+		eligibility: out.eligibility,
+		onLeague: out.league?.eligibility ?? null,
 		notes: out.notes
 	}
 }, league.grabs)
+
+/* THE THRESHOLDS, WHICH THE APP HAS AN EDITOR FOR AND HAD NOTHING TO PUT IN IT. Compared
+   against the committed league, which got these numbers off the real page. */
+t("and the league's own eligibility thresholds, off the page that states them",
+	read.eligibility?.batters?.games_started_at_position ===
+		real.eligibility.batters.games_started_at_position &&
+		read.eligibility?.batters?.games_played_at_position ===
+			real.eligibility.batters.games_played_at_position &&
+		read.eligibility?.pitchers?.SP?.starts === real.eligibility.pitchers.SP.starts &&
+		read.eligibility?.pitchers?.RP?.relief_appearances ===
+			real.eligibility.pitchers.RP.relief_appearances,
+	JSON.stringify(read.eligibility))
+t("with the positions his league tracks, in order",
+	(read.eligibility?.tracked_positions ?? []).join(",") === real.eligibility.tracked_positions.join(","),
+	JSON.stringify(read.eligibility?.tracked_positions))
+/* On the league as well as beside it, so a screen that adopts what came back adopts these
+   without knowing they arrived on a page of their own. */
+t("and they are on the league the press produced, not only beside it",
+	read.onLeague?.source?.endsWith("/positioneligibility") === true, JSON.stringify(read.onLeague?.source))
 
 t("it lands on the league the reader is already in", read.leagueKey === KEY, read.leagueKey)
 t("with the league's own scoring, both sides of the ball",
@@ -903,10 +964,77 @@ await walled.close()
 	   team that is missing, and the absence used to be silent: the screen reported what it
 	   DID get and said nothing about the roster, which reads as a team that was read and had
 	   nobody in it. */
-	t("pressed from the league home, it says no team was read rather than saying nothing",
+	t("pressed from the league home by a browser that knows no team, it says no team was read",
 		saidHome.players === 0 && saidHome.notes.some(n => /not your team/.test(n)),
 		JSON.stringify(saidHome).slice(0, 200))
+
+	/*
+	   ONE PRESS BRINGS BACK HIS TEAM FROM A PAGE WHOSE URL DOES NOT NAME ONE.
+
+	   This is the whole of the fix and it is measured here rather than argued: the same tab,
+	   the same button, the only difference being that the app says which team is his. Before,
+	   `onePress` could not ask for a roster from any URL shape but the roster's own — so a
+	   reader pressing from the league home or the players page, which is where a manager
+	   spends his week, got his scoring and his matchup and a board priced against seats
+	   nothing had ever read.
+	*/
+	const knowing = await askFor("league", { teamId: "8" })
+	const saidKnowing = await app.evaluate(async grabs => {
+		const { readGrabs } = await import("/src/data/yahoo-read.ts")
+		const snap = await (await fetch("/snapshot.json")).json()
+		const out = readGrabs(grabs, snap, undefined, { teamId: "8" })
+		return { players: out.roster?.players.length ?? 0, spots: out.roster?.spots.length ?? 0, teamId: out.teamId }
+	}, knowing.grabs)
+	t("and told which team is his, the same press from the league home brings his roster back",
+		saidKnowing.players === seated.length && saidKnowing.spots === seated.length && saidKnowing.teamId === "8",
+		JSON.stringify(saidKnowing))
+	/* Five pages, four of them fetched: the one he is standing on costs nobody a request,
+	   and the other four are his own league's, from his own signed-in tab. */
+	t("…in five pages and no more",
+		knowing.grabs?.length === 5 &&
+			knowing.grabs.map(g => g.kind).join(",") === "league,team,settings,eligibility,matchup",
+		(knowing.grabs ?? []).map(g => g.kind).join(","))
 	await home.close()
+
+	/*
+	   THE PLAYERS PAGE, WHICH IS WHERE A MANAGER ACTUALLY STANDS.
+
+	   The page he is on while he decides who to add, and the one a press used to be worth
+	   least from: no roster, because its URL names no team. One press from here has to bring
+	   his team back AND still refuse to call one position of the player list a wire — the two
+	   pull in opposite directions, so they are asserted together.
+	*/
+	const onPlayers = await context.newPage()
+	await onPlayers.goto(
+		`http://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/players?status=A&pos=C&count=0`,
+		{ waitUntil: "domcontentloaded" }
+	)
+	await onPlayers.waitForTimeout(400)
+	const fromPlayers = await askFor("league", { teamId: "8" })
+	const saidPlayers = await app.evaluate(async grabs => {
+		const { readGrabs } = await import("/src/data/yahoo-read.ts")
+		const snap = await (await fetch("/snapshot.json")).json()
+		const out = readGrabs(grabs, snap, undefined, { teamId: "8" })
+		return {
+			kinds: grabs.map(g => g.kind).join(","),
+			players: out.roster?.players.length ?? 0,
+			scoring: out.league ? Object.keys(out.league.scoring.batting).length : 0,
+			thresholds: out.eligibility?.batters?.games_played_at_position ?? null,
+			pool: out.pool?.players.length ?? 0,
+			notes: out.notes
+		}
+	}, fromPlayers.grabs)
+	t("pressed from the players page, one press brings back his team, his scoring and his thresholds",
+		saidPlayers.players === seated.length &&
+			saidPlayers.scoring === Object.keys(real.scoring.batting).length &&
+			saidPlayers.thresholds === real.eligibility.batters.games_played_at_position,
+		JSON.stringify(saidPlayers).slice(0, 300))
+	/* And the page he is standing on is still one position of a list, not the wire. Promoting
+	   it would tell him nobody is free at the other eight positions. */
+	t("…and the one position he is looking at is not promoted to his whole wire",
+		saidPlayers.pool === 0 && saidPlayers.notes.some(n => /one position/.test(n)),
+		JSON.stringify(saidPlayers.notes))
+	await onPlayers.close()
 
 	/* SOMEBODY ELSE'S TEAM. A rival's roster page is the same page with different men on
 	   it, and the name-matcher cannot tell. Pressed from there, the app used to replace his
@@ -935,11 +1063,38 @@ await walled.close()
 	t("and told which team is his, it refuses to replace his own with it",
 		saidRival.guardedPlayers === 0 && saidRival.notes.some(n => /somebody else/.test(n)),
 		JSON.stringify(saidRival).slice(0, 200))
-	/* The unguarded call is the app as it ships today — nothing passes the team id yet, so
-	   this reads the rival's nine men and would store them. Asserted so the hole is a
-	   measured fact in this suite rather than a claim in a report. */
+	/* The unguarded call is a browser that has never read his team page: there is nothing to
+	   check the rival's id against, so his nine men are read and would be stored. That is
+	   still the honest fallback — refusing every first read would refuse the feature — and it
+	   is asserted so the remaining hole is a measured fact rather than a claim in a report.
+	   `readLeagueHere` passes the id as soon as this browser has one. */
 	t("and without being told, it still reads them — which is the hole that remains",
 		saidRival.blindPlayers > 0, String(saidRival.blindPlayers))
+
+	/*
+	   TOLD WHICH TEAM IS HIS, THE PRESS GOES AND GETS IT.
+
+	   The refusal above is the right answer to "this page is not yours" and it used to be the
+	   only answer: the reader who opened a rival's roster to see what he was up against, then
+	   pressed the button, was told no and had to go back to his own team page and press again.
+	   One press now returns both — the rival page he is standing on, which is refused, and his
+	   own, which is read — so the sentence and the roster arrive together.
+	*/
+	const knowingRival = await askFor("league", { teamId: "8" })
+	const saidKnowingRival = await app.evaluate(async grabs => {
+		const { readGrabs } = await import("/src/data/yahoo-read.ts")
+		const snap = await (await fetch("/snapshot.json")).json()
+		const out = readGrabs(grabs, snap, undefined, { teamId: "8" })
+		return {
+			kinds: grabs.map(g => g.kind).join(","),
+			teamId: out.teamId,
+			players: out.roster?.players.length ?? 0,
+			notes: out.notes
+		}
+	}, knowingRival.grabs)
+	t("standing on a rival's roster, one press still brings back his own",
+		saidKnowingRival.teamId === "8" && saidKnowingRival.players === seated.length,
+		JSON.stringify(saidKnowingRival).slice(0, 240))
 	await rival.close()
 
 	/* A LEAGUE THAT IS NOT THE ONE ON SCREEN, refused before anything is parsed. The router
@@ -1686,6 +1841,298 @@ await walled.close()
 		same.length === 3, same.join(", "))
 }
 
+/* ── WHAT THE STORES ACTUALLY RECEIVE ────────────────────────────────────────────────
+   Everything above this reads the built FOLDERS. Nobody uploads a folder. What goes to a
+   store is a zip and a handful of images, and until this block existed not one byte of any
+   of them was checked by anything: the zip writer is hand-rolled in extension/build.mjs,
+   the icons are drawn pixel by pixel in the same file, and the first reader of either was
+   going to be a reviewer.
+
+   Three of the four defects this block now catches were live on 2026-09-19 and all three
+   were invisible from the folder:
+
+   - the 128 px store icon carried 112x112 of artwork where Chrome's page asks for 96x96,
+     because `inset` is per side and 96/128 was written as 1/16 instead of 1/8;
+   - every entry in every zip was STORED — 64,973 bytes for a file the site hands to every
+     reader, against 8,846 deflated and minified;
+   - the package a store would have received carried a README.txt whose first instruction
+     was "turn on Developer mode, press Load unpacked", which is the sentence a Chrome Web
+     Store listing may not contain about itself.
+
+   A zip is parsed here rather than shelled out to `unzip`, for the reason build.mjs writes
+   one rather than shelling out to `zip`: the binary is not on this machine. The central
+   directory is the only part that has to be read, and reading it is also the assertion —
+   a zip whose central directory does not parse is a zip no store can open. */
+{
+	const zipPath = name => new URL(`../dist-ext/${name}`, import.meta.url)
+	/** Entries from the CENTRAL DIRECTORY, which is the index every unzipper actually reads. */
+	const entriesOf = file => {
+		const b = readFileSync(file)
+		/* The end-of-central-directory record, found from the back: it is the last 22 bytes
+		   when there is no archive comment, and these are written without one. */
+		let end = b.length - 22
+		while (end >= 0 && b.readUInt32LE(end) !== 0x06054b50) end--
+		if (end < 0) return null
+		const count = b.readUInt16LE(end + 10)
+		let at = b.readUInt32LE(end + 16)
+		const out = []
+		for (let i = 0; i < count; i++) {
+			if (b.readUInt32LE(at) !== 0x02014b50) return null
+			const method = b.readUInt16LE(at + 10)
+			const crc = b.readUInt32LE(at + 16)
+			const packed = b.readUInt32LE(at + 20)
+			const raw = b.readUInt32LE(at + 24)
+			const nameLen = b.readUInt16LE(at + 28)
+			const extraLen = b.readUInt16LE(at + 30)
+			const commentLen = b.readUInt16LE(at + 32)
+			const offset = b.readUInt32LE(at + 42)
+			const name = b.toString("utf8", at + 46, at + 46 + nameLen)
+			/* The local header at `offset`, so the bytes are read the way an unzipper reads
+			   them rather than from the index that describes them. */
+			const localNameLen = b.readUInt16LE(offset + 26)
+			const localExtraLen = b.readUInt16LE(offset + 28)
+			const from = offset + 30 + localNameLen + localExtraLen
+			const body = b.subarray(from, from + packed)
+			out.push({ name, method, packed, raw, crc, body })
+			at += 46 + nameLen + extraLen + commentLen
+		}
+		return { size: b.length, entries: out }
+	}
+
+	/** Inflate if it says it is deflated. The CRC is compared BETWEEN the two packages
+	    below rather than recomputed here; nothing in this block verifies it against the bytes. */
+	const contentOf = e => (e.method === 8 ? inflateRawSync(e.body) : e.body)
+
+	const PACKAGE = ["manifest.json", "background.js", "yahoo.js", "bridge.js",
+		"icon-16.png", "icon-48.png", "icon-128.png"]
+
+	for (const browser of ["chrome", "firefox"]) {
+		const download = entriesOf(zipPath(`beanemachine-${browser}.zip`))
+		const upload = entriesOf(zipPath(`beanemachine-${browser}-store.zip`))
+		t(`${browser}: both zips exist and their central directories parse`,
+			!!download && !!upload, `${!!download} ${!!upload}`)
+		if (!download || !upload) continue
+
+		/* NAMED, IN ORDER, AND NOTHING ELSE. The list is written out here rather than derived
+		   from build.mjs, because a test that imports the list it is checking asserts only
+		   that the build is self-consistent. A file that arrives in the package by having
+		   been left in the folder — a .map, a stray screenshot, a .DS_Store — is exactly what
+		   this is for. */
+		t(`${browser}: the store package is the seven files a browser needs and nothing else`,
+			JSON.stringify(upload.entries.map(e => e.name)) === JSON.stringify(PACKAGE),
+			JSON.stringify(upload.entries.map(e => e.name)))
+		t(`${browser}: the download is those seven plus the README that tells a reader to load it`,
+			JSON.stringify(download.entries.map(e => e.name)) ===
+				JSON.stringify([...PACKAGE, "README.txt"]),
+			JSON.stringify(download.entries.map(e => e.name)))
+
+		/*
+		   AND THIS IS THE ONE THAT BLOCKS A CHROME REVIEW.
+
+		   A Chrome Web Store listing may not tell a reader to install from outside the Web
+		   Store, and the package is part of what a reviewer reads. The download zip carries
+		   those instructions because for its reader they are the only ones that work; the
+		   upload zip must not carry them anywhere, in any file, so every entry is searched
+		   rather than just the one that used to hold them.
+		*/
+		const sideloadWords = /developer mode|load unpacked|load temporary add-on|about:debugging/i
+		const offenders = upload.entries
+			.filter(e => !e.name.endsWith(".png"))
+			.filter(e => sideloadWords.test(contentOf(e).toString("utf8")))
+			.map(e => e.name)
+		t(`${browser}: nothing in the store package tells a reader to sideload it`,
+			offenders.length === 0, offenders.join(", "))
+		t(`${browser}: and the download says how to load it, because that reader has no store`,
+			sideloadWords.test(
+				contentOf(download.entries.find(e => e.name === "README.txt")).toString("utf8")
+			))
+
+		/* THE TWO PACKAGES ARE ONE PACKAGE. If they ever stop being, two different add-ons
+		   are in circulation under one name and the one nobody tests is the one readers have. */
+		const byName = z => Object.fromEntries(z.entries.map(e => [e.name, e.crc]))
+		t(`${browser}: the two packages hold the same seven files, byte for byte`,
+			PACKAGE.every(n => byName(download)[n] === byName(upload)[n]),
+			PACKAGE.filter(n => byName(download)[n] !== byName(upload)[n]).join(", "))
+
+		/*
+		   DEFLATED, AND THE ARITHMETIC IS CHECKED RATHER THAN THE FLAG.
+
+		   Every entry was stored until 2026-09-19 and the comment beside the writer argued
+		   that DEFLATE "would save a few kilobytes". Measured on the Chrome package it saved
+		   56,127 of 64,973 bytes. What is asserted is not "method 8" — a PNG is already
+		   deflated and re-compressing icon-16 made it three bytes BIGGER, so the writer picks
+		   per entry — but the property that made the change worth making: no entry is larger
+		   than the file it came from, and the archive as a whole is far smaller than the sum
+		   of its contents.
+		*/
+		const grew = download.entries.filter(e => e.packed > e.raw).map(e => e.name)
+		t(`${browser}: no entry is packed larger than the file it came from`, grew.length === 0,
+			grew.join(", "))
+		const contents = download.entries.reduce((n, e) => n + e.raw, 0)
+		t(`${browser}: the zip is well under the bytes it contains, so it is really compressed`,
+			download.size < contents * 0.6, `${download.size} bytes holding ${contents}`)
+		/* A store's upload limit is far above this; the number is asserted so that a bundle
+		   that suddenly triples — a dependency pulled in, minification switched off — is
+		   caught here rather than by somebody noticing the download got slow. */
+		t(`${browser}: and the whole add-on is still one small file`, download.size < 20_000,
+			`${download.size} bytes`)
+
+		/* The zipped manifest is the manifest. A build that zips a stale folder ships a
+		   manifest nobody reviewed, and every assertion above this block reads the folder. */
+		const zipped = contentOf(upload.entries.find(e => e.name === "manifest.json")).toString("utf8")
+		t(`${browser}: the manifest inside the zip is the one this suite has been reading`,
+			zipped === readFileSync(new URL(`../dist-ext/${browser}/manifest.json`, import.meta.url), "utf8"))
+	}
+
+	/*
+	   THE ICONS, MEASURED AS A REVIEWER SEES THEM: a bounding box of what is not transparent.
+
+	   Chrome's Supplying Images page asks for 96x96 of artwork centred in a 128x128 canvas,
+	   which is 16 transparent pixels a side. The build drew 112x112 at (8, 8) for as long as
+	   the padding had existed, because the inset is a fraction PER SIDE and 96 inside 128 is
+	   1/8, not 1/16 — an error that looks right in a thumbnail and is wrong on the store
+	   page, where Chrome's own frame is drawn against the artwork's edge.
+
+	   The 16 and the 48 go in a toolbar and an extensions list, where padding makes a small
+	   icon smaller, so those are asserted full bleed — the opposite property, asserted
+	   explicitly, because "pad the icon" applied to all three is the obvious wrong fix.
+	*/
+	const decodePng = file => {
+		const b = readFileSync(file)
+		if (!b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+			return null
+		let at = 8, w = 0, h = 0, depth = 0, colour = 0
+		const idat = []
+		while (at + 8 <= b.length) {
+			const len = b.readUInt32BE(at)
+			const type = b.toString("ascii", at + 4, at + 8)
+			const data = b.subarray(at + 8, at + 8 + len)
+			if (type === "IHDR") {
+				w = data.readUInt32BE(0)
+				h = data.readUInt32BE(4)
+				depth = data[8]
+				colour = data[9]
+			}
+			if (type === "IDAT") idat.push(data)
+			at += 12 + len
+		}
+		if (colour !== 6 || depth !== 8) return { w, h, depth, colour }
+		const raw = inflateSync(Buffer.concat(idat))
+		const stride = w * 4 + 1
+		let minX = w, maxX = -1, minY = h, maxY = -1
+		for (let y = 0; y < h; y++)
+			for (let x = 0; x < w; x++)
+				if (raw[y * stride + 1 + x * 4 + 3] !== 0) {
+					if (x < minX) minX = x
+					if (x > maxX) maxX = x
+					if (y < minY) minY = y
+					if (y > maxY) maxY = y
+				}
+		return { w, h, depth, colour, ink: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 } }
+	}
+
+	const icon = s => decodePng(new URL(`../dist-ext/chrome/icon-${s}.png`, import.meta.url))
+	for (const size of [16, 48, 128]) {
+		const png = icon(size)
+		t(`the ${size} px icon is a ${size}x${size} PNG`,
+			png?.w === size && png?.h === size, JSON.stringify(png && { w: png.w, h: png.h }))
+	}
+	for (const size of [16, 48]) {
+		const { ink } = icon(size)
+		t(`the ${size} px icon is full bleed, because padding a toolbar icon just shrinks it`,
+			ink.x === 0 && ink.y === 0 && ink.w === size && ink.h === size, JSON.stringify(ink))
+	}
+	const big = icon(128).ink
+	t("the 128 px icon is 96x96 of artwork inside 16 px of transparency, which is what Chrome asks for",
+		big.w === 96 && big.h === 96 && big.x === 16 && big.y === 16, JSON.stringify(big))
+
+	/* Chrome's small promotional tile is 440x280 and must be FULL BLEED — its own page says
+	   so in the same breath it asks for padding on the icon, which is why both are asserted
+	   here and in opposite directions. */
+	const promo = decodePng(new URL("../dist-ext/promo-440x280.png", import.meta.url))
+	t("the promotional tile is 440x280", promo?.w === 440 && promo?.h === 280,
+		JSON.stringify(promo && { w: promo.w, h: promo.h }))
+	t("and it is full bleed, with no transparent border for the store to frame",
+		promo.ink.x === 0 && promo.ink.y === 0 && promo.ink.w === 440 && promo.ink.h === 280,
+		JSON.stringify(promo.ink))
+
+	/*
+	   THE VERSION, AND WHAT IT IS ALLOWED TO BE.
+
+	   `VERSION` in extension/build.mjs is bumped by hand and deliberately does NOT track
+	   package.json: the app's version and the add-on's are two things readers see in two
+	   places, and tying them would make every site deploy a store submission. What has to
+	   hold is that the two browsers ship the SAME version — one source, two manifests, and a
+	   build that let them drift would put two different add-ons in circulation under one
+	   number — and that the string is one Chrome will take at all.
+
+	   CHROME'S RULE, AND THE CLAUSE THIS ASSERTION GOT WRONG FIRST: one to four dot-separated
+	   integers, each 0..65535, and no integer written with a leading zero (`032` is invalid,
+	   `0` is not). The first version of this line also demanded the leading integer be
+	   non-zero, which failed on `0.2.0` — the version this add-on actually ships. That rule
+	   does not exist; what does is the leading-zero rule inside each integer, which is the
+	   one a hand-bumped `VERSION` can plausibly break by writing `0.02`.
+	*/
+	const chromeM = JSON.parse(readFileSync(new URL("../dist-ext/chrome/manifest.json", import.meta.url), "utf8"))
+	const firefoxM = JSON.parse(readFileSync(new URL("../dist-ext/firefox/manifest.json", import.meta.url), "utf8"))
+	t("both browsers ship the same version", chromeM.version === firefoxM.version,
+		`${chromeM.version} vs ${firefoxM.version}`)
+	/* Both listings show this as the developer's website and both reviewers follow it. An
+	   add-on that reads a signed-in site and hands the pages to beanemachine.com invites the
+	   question of whether the add-on and the site are the same people, and this is the only
+	   answer either store's furniture has room for. https, because a store listing linking
+	   out over plaintext is a finding of its own. */
+	t("both manifests point a reviewer at the site the add-on hands pages to",
+		chromeM.homepage_url === "https://beanemachine.com" &&
+			firefoxM.homepage_url === chromeM.homepage_url,
+		`${chromeM.homepage_url} / ${firefoxM.homepage_url}`)
+	const parts = String(chromeM.version).split(".")
+	t("and it is a version Chrome will accept: up to four integers under 65536, none zero-padded",
+		parts.length >= 1 && parts.length <= 4 &&
+			parts.every(p => /^(0|[1-9]\d*)$/.test(p) && Number(p) <= 65535) &&
+			parts.some(p => Number(p) > 0),
+		chromeM.version)
+
+	/*
+	   AND THE DOCUMENT SOMEBODY PASTES FROM.
+
+	   extension/SUBMITTING.md holds the exact text to paste into each store's form and names
+	   the exact files to upload. Both are copies of things the build produces, so both can go
+	   stale silently — and the failure lands at a submission, where the cost of finding out is
+	   an afternoon and a review queue. The description is quoted there as a blockquote; the
+	   files are named in a table. Asserted against the manifest and against the filesystem
+	   rather than against a second copy of the answer.
+	*/
+	const submitting = readFileSync(new URL("../extension/SUBMITTING.md", import.meta.url), "utf8")
+	t("SUBMITTING.md quotes the description the manifest actually carries",
+		submitting.includes(`> ${chromeM.description}`),
+		`manifest: ${chromeM.description}`)
+	const named = [...submitting.matchAll(/`dist-ext\/([A-Za-z0-9._-]+\.(?:zip|png))`/g)].map(m => m[1])
+	const missing = [...new Set(named)].filter(
+		n => !existsSync(new URL(`../dist-ext/${n}`, import.meta.url))
+	)
+	t("and every file it tells you to upload is a file the build wrote",
+		named.length >= 3 && missing.length === 0,
+		missing.length ? `missing: ${missing.join(", ")}` : `${named.length} named`)
+
+	/* THE ONLY THING A REVIEWER CAN READ IN A MINIFIED BUNDLE. The shipped scripts are
+	   minified — 61,833 bytes of source to 16,011, measured 2026-09-19 — so the four lines
+	   naming the repository, the build command and the privacy policy are the whole of what
+	   the file says about itself. A minifier that swallows them (the first two attempts here
+	   both did: `output.banner` was dropped as a plain comment and again as a `/*!` legal
+	   comment) leaves a store a package with no provenance in it at all. */
+	for (const f of ["yahoo.js", "background.js", "bridge.js"]) {
+		const js = readFileSync(new URL(`../dist-ext/chrome/${f}`, import.meta.url), "utf8")
+		t(`${f} names where it came from, which is all a reviewer can read in a minified file`,
+			js.startsWith("/*! beanemachine reader ") &&
+				js.includes("github.com/ssalbdivad/beanemachine") &&
+				js.includes(chromeM.version),
+			js.slice(0, 60))
+		t(`${f} is minified, not shipped as commented source`,
+			js.length < 12_000 && !js.includes("\n *"), `${js.length} bytes`)
+	}
+}
+
 /* THIS RUNS BEFORE THE ORPHAN BLOCK BELOW, and the order is load-bearing: that block calls
    `chrome.runtime.reload()`, and under `--load-extension` the extension does not come back —
    measured, 0 service workers afterwards. Anything that needs a working reader has to be
@@ -1737,16 +2184,30 @@ await walled.close()
 		if (offerLine) await offerLine.click()
 		await first.waitForSelector(".connect", { timeout: 20000 })
 		await first.click(".connect .primary")
-		await first.waitForFunction(
-			() => {
-				try {
-					return Object.keys(JSON.parse(localStorage.getItem("beanemachine:pool") ?? "{}")).length > 0
-				} catch {
-					return false
-				}
-			},
-			{ timeout: 90000 }
-		)
+		/* A PRESS THAT NEVER LANDS IS A FAILED ASSERTION, NOT A DEAD SUITE.
+		
+		   This was a bare `waitForFunction`, so a press that produced nothing threw out of the
+		   file and took every assertion below it with it — about two hundred of them, including
+		   every one about the store packages. The whole block is about what ONE PRESS produces,
+		   so the timeout is exactly the thing worth reporting: it is reported, with whatever the
+		   page threw, and the rest of the run still happens. */
+		const pressLanded = await first
+			.waitForFunction(
+				() => {
+					try {
+						return Object.keys(JSON.parse(localStorage.getItem("beanemachine:pool") ?? "{}")).length > 0
+					} catch {
+						return false
+					}
+				},
+				{ timeout: 90000 }
+			)
+			.then(() => true)
+			.catch(() => false)
+		t("one press on a first visit fills the free agents", pressLanded,
+			pressLanded ? "" : (
+				`${(await first.evaluate(() => document.querySelector(".connect")?.innerText ?? "")).replace(/\s+/g, " ").slice(0, 300)} :: ${firstErrs.slice(0, 2).join(" | ")}`
+			))
 		const made = await first.evaluate(() => {
 			const read = n => JSON.parse(localStorage.getItem(`beanemachine:${n}`) ?? "null")
 			const c = read("config")
@@ -1874,12 +2335,13 @@ await walled.close()
 	await app.waitForTimeout(1200)
 	const made = asked.length - before
 
-	/* One press is two pages. Twenty presses unguarded were forty. The bound asserted is
-	   generous on purpose — it is not trying to pin the exact number of requests a single
-	   press makes, which the descriptor decides, but to say that nineteen of the twenty
-	   never reached Yahoo at all. */
+	/* One press off a team page is three pages — the settings, the eligibility grid and the
+	   matchup — so twenty presses unguarded would be sixty. WAS `<= 6` when a press was two
+	   pages; the bound is generous on purpose, because it is not trying to pin what a single
+	   press costs (the descriptor decides that) but to say that a burst never becomes a burst
+	   of requests. Measured at 6 from twenty presses. */
 	t("twenty presses at once do not become twenty presses' worth of requests",
-		made <= 6, `${made} requests to Yahoo from 20 simultaneous presses`)
+		made <= 8, `${made} requests to Yahoo from 20 simultaneous presses`)
 	t("and every press that was refused came back with a sentence rather than a silence",
 		burst.every(b => (b.kind === "grabs" && (b.grabs?.length ?? 0) > 0) || (b.kind === "failed" && b.failure?.what)),
 		JSON.stringify(burst.map(b => b.kind)))
@@ -1893,8 +2355,14 @@ await walled.close()
 	   fetching; the answer still carries the page and the sentence together.
 	*/
 	const refused = burst.map(b => b.failure).filter(Boolean)
-	t("nineteen of the twenty are refused",
-		refused.length >= 19, `${refused.length} refused of 20`)
+	/* WAS "nineteen of the twenty", and the number was never the property. The gate is
+	   one-at-a-time, so how many get through depends on how long one press takes to release
+	   it: a press is three fetches now rather than two, and the first can finish before the
+	   twentieth message is dispatched, which measured as two through and eighteen refused.
+	   What is protected is that all but a couple are refused and that the requests never
+	   arrive — the bound above is the half of it that counts. */
+	t("all but at most two of the twenty are refused",
+		refused.length >= 18, `${refused.length} refused of 20`)
 	t("…and every one of them still hands back the page he is standing on",
 		burst.filter(b => b.failure).every(b => (b.grabs?.length ?? 0) > 0),
 		JSON.stringify(burst.filter(b => b.failure).map(b => b.grabs?.length)))
@@ -1921,15 +2389,20 @@ await walled.close()
 	/*
 	   AND THE SUSTAINED BOUND, which is the other half of the finding: the old flag stopped
 	   sweeps OVERLAPPING and nothing stopped them running back to back for ever — measured at
-	   27 requests in 6.9 seconds, refused by nothing. Five sweeps is the whole minute's
-	   allowance, so the sixth is the one that must be told to wait. It is asked for all nine
-	   up front, because a sweep that stops at position four is the partial list `poolIsPartial`
-	   exists to refuse, and refusing before it starts costs a sentence instead of a wrong wire.
+	   27 requests in 6.9 seconds, refused by nothing. It is asked for all nine up front,
+	   because a sweep that stops at position four is the partial list `poolIsPartial` exists
+	   to refuse, and refusing before it starts costs a sentence instead of a wrong wire.
+
+	   WAS "the sixth", when the minute's allowance was 45 and a sweep of nine went into it
+	   five times. The allowance is 60 — raised because one press became eleven requests and
+	   then thirteen, and a reader pressing three times in a minute was being told to wait; see
+	   `ALLOWANCE` in extension/src/yahoo.ts. Six sweeps of nine plus the burst above is the
+	   whole of it, so the seventh is the one that must be told to wait.
 	*/
-	for (let i = 0; i < 4; i++) await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
+	for (let i = 0; i < 5; i++) await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
 	const spentAll = asked.length
 	const denied = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
-	t("the sixth sweep inside a minute makes no requests at all",
+	t("the seventh sweep inside a minute makes no requests at all",
 		asked.length === spentAll, `${asked.length - spentAll} requests`)
 	t("and says the list is not coming yet rather than coming back empty",
 		denied.kind === "failed" && /rest|wait|again/i.test(`${denied.failure?.what} ${denied.failure?.fix}`),

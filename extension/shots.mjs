@@ -56,12 +56,35 @@ await page.click("nav button:nth-child(3)")
 await page.waitForTimeout(2000)
 await page.screenshot({ path: resolve(out, "3-my-league.png") })
 
-/* The walkthrough is the shot that tells a reviewer what this is FOR, so it is taken last and
-   its absence is loud rather than silent. */
+/**
+ * THE FOURTH SHOT IS THE WALKTHROUGH, AND IT IS ONLY UPLOADABLE HALF THE TIME.
+ *
+ * `IN_STORE` in src/client/Connect.tsx is `false` while no listing exists, and the sheet then
+ * renders the sideload route: "turn on Developer mode", "press Load unpacked", "choose the
+ * folder from step 1". That is the correct screen for the reader the site is serving today
+ * and it is a screenshot the Chrome Web Store will not accept on a listing — a listing may not
+ * instruct a reader to install from outside the Web Store, and this one would do it in four
+ * numbered steps with an arrow pointing at the button.
+ *
+ * So the shot is taken, read, and written only if it is the store walkthrough. It is not
+ * hardcoded off `IN_STORE`: that constant is compiled into the bundle this script is
+ * photographing, so reading the rendered WORDS is the only check that cannot go stale against
+ * a flag somebody flipped. When it is the sideload screen, nothing is written and the run says
+ * so — which is the loud absence, in the place where a silent one would put an unusable image
+ * in front of a reviewer.
+ */
 await page.click(".connect-offer button")
 await page.waitForSelector(".dock-sheet .connect", { timeout: 15000 })
 await page.waitForTimeout(800)
-await page.screenshot({ path: resolve(out, "4-walkthrough.png") })
+const walkthrough = (await page.textContent(".dock-sheet .connect")) ?? ""
+const sideload = /Developer mode|Load unpacked|Load Temporary Add-on/i.exec(walkthrough)
+if (sideload)
+	console.log(
+		`NOT written: 4-walkthrough.png. The sheet is showing the sideload route ` +
+			`("${sideload[0]}"), which a Chrome Web Store listing may not contain. Flip IN_STORE ` +
+			`in src/client/Connect.tsx once a listing exists and run this again for the fourth shot.`
+	)
+else await page.screenshot({ path: resolve(out, "4-walkthrough.png") })
 
 console.log(`${roster.length} men seeded; wrote ${readdirSync(out).join(", ")} to dist-ext/store`)
 await browser.close()

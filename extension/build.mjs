@@ -14,7 +14,12 @@
  * Output:
  *   dist-ext/chrome/    load this with "Load unpacked"
  *   dist-ext/firefox/   load this with "Load Temporary Add-on"
- *   dist-ext/beanemachine-chrome.zip / -firefox.zip   what a store takes
+ *   dist-ext/beanemachine-chrome.zip / -firefox.zip               what the SITE hands out
+ *   dist-ext/beanemachine-chrome-store.zip / -firefox-store.zip   what a STORE takes
+ *
+ * The last two differ from the first two by one file, README.txt, and the reason is written
+ * out at `zip` near the foot of this file. It is the difference between a package a reader
+ * can act on and a package that tells a Chrome reviewer his listing distributes around him.
  */
 import { build } from "vite"
 import { appMatches } from "../src/data/extension.ts"
@@ -28,7 +33,7 @@ import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { basename, dirname, resolve } from "node:path"
-import { deflateSync } from "node:zlib"
+import { deflateRawSync, deflateSync } from "node:zlib"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -124,6 +129,12 @@ const common = {
 		{ matches: appMatches(DEV), js: ["bridge.js"], run_at: "document_start", all_frames: false }
 	],
 	action: { default_title: "Open beanemachine" },
+	/* Both stores show this as the developer's website on the listing, and both reviewers
+	   follow it. Without it a listing that reads a signed-in site's pages and hands them to
+	   `beanemachine.com` offers no way to check that the add-on and the site are the same
+	   people — which is the first question this particular add-on invites. It is not a
+	   verified-publisher claim and does not pretend to be; see §8 of docs/EXTENSION.md. */
+	homepage_url: "https://beanemachine.com",
 	/* Both stores read this; it is also the honest floor. MV3 content scripts and
 	   `host_permissions` behave the way this code assumes from Chrome 120 on. */
 	minimum_chrome_version: "120",
@@ -151,11 +162,30 @@ const manifests = {
 				/* A stable id so an update replaces the install rather than sitting beside
 				   it, and so a temporary install keeps its place. */
 				id: "beanemachine@beanemachine.com",
-				/* MV3 has been generally available in Firefox since 109, but host permissions
-				   are only GRANTED at install from 127 — before that they sit ungranted and
-				   the reader has to find a checkbox nobody told him about. 128 is the ESR,
-				   which is what a cautious install actually runs. */
-				strict_min_version: "128.0",
+				/**
+				 * 140, AND THE KEY BELOW IS THE REASON — NOT HOST PERMISSIONS.
+				 *
+				 * This was 128, argued from host permissions: MV3 has been generally available
+				 * in Firefox since 109, but host permissions are only GRANTED at install from
+				 * 127, and 128 was the ESR. That argument is still true and is no longer the
+				 * binding one.
+				 *
+				 * Measured 2026-09-19 by running the tool AMO itself runs, against the built
+				 * package: `npx addons-linter dist-ext/beanemachine-firefox-store.zip` at 128.0
+				 * returned 0 errors and 2 warnings, both of them
+				 * KEY_FIREFOX_UNSUPPORTED_BY_MIN_VERSION — "strict_min_version requires Firefox
+				 * 128, which was released before version 140 introduced support for
+				 * browser_specific_settings.gecko.data_collection_permissions", and the same
+				 * sentence for Firefox for Android naming 142. So at 128 the key immediately
+				 * below is declared to a browser that does not read it: the consent screen
+				 * Mozilla now requires would not be shown to anyone on 128..139, which is the
+				 * one thing the key exists to guarantee. A floor that silently drops the
+				 * disclosure is worse than a floor that excludes an old browser.
+				 *
+				 * 140 costs nothing in practice: it is itself the current ESR, so "what a
+				 * cautious install actually runs" is still included.
+				 */
+				strict_min_version: "140.0",
 				/**
 				 * WITHOUT THIS, MOZILLA WILL NOT TAKE THE SUBMISSION AT ALL.
 				 *
@@ -186,10 +216,46 @@ const manifests = {
 				 * `optional`.
 				 */
 				data_collection_permissions: { required: ["none"] }
-			}
+			},
+			/**
+			 * ANDROID HAS ITS OWN FLOOR AND IT IS TWO RELEASES LATER.
+			 *
+			 * `gecko.strict_min_version` does not set the Android floor; without
+			 * `gecko_android`, AMO derives the Android floor from the desktop one. Measured
+			 * 2026-09-19 with addons-linter: at 128 the desktop and the Android warnings were
+			 * two separate findings, the Android one naming 142 as the release that introduced
+			 * `data_collection_permissions` on Android. Raising desktop to 140 alone left the
+			 * Android warning standing.
+			 *
+			 * Android is worth carrying rather than dropping: it is the only route this add-on
+			 * has to a phone. Chrome on Android takes no extensions at all and Safari needs a
+			 * native wrapper, so a reader with a phone either gets this or types his team in.
+			 */
+			gecko_android: { strict_min_version: "142.0" }
 		}
 	}
 }
+
+/**
+ * THE SOURCE OF THESE BYTES, STAMPED ON THE BYTES.
+ *
+ * The shipped bundles are minified, so the one question a reviewer or a curious reader has
+ * when he opens `yahoo.js` — where did this come from and can I check it — has to be
+ * answerable from inside the file. Four lines, 295 bytes on each of three files, against the
+ * 46,707 bytes minifying saves.
+ *
+ * PREPENDED AFTER THE BUILD RATHER THAN PASSED AS `output.banner`, because that does not
+ * survive. Measured 2026-09-19, twice: through `rollupOptions.output.banner` the built
+ * `yahoo.js` began `(function(){var e=[\`hello\`,` with no banner anywhere in it, as a plain
+ * block comment AND as a `/*!` legal comment. Rather than keep guessing at which marker this
+ * version of the minifier honours, the bytes are written on after it has finished, where
+ * nothing can drop them. It costs one read and one write per bundle.
+ */
+const BANNER =
+	`/*! beanemachine reader ${VERSION} — https://github.com/ssalbdivad/beanemachine\n` +
+	`   Source: extension/src/. Built by extension/build.mjs with Vite (Rolldown), minified.\n` +
+	`   The build is deterministic: the same commit produces these bytes again.\n` +
+	`   Privacy policy: https://beanemachine.com/privacy */\n`
 
 /**
  * THREE BUNDLES, ONE ENTRY EACH.
@@ -197,6 +263,32 @@ const manifests = {
  * Content scripts cannot be modules in either browser, so each is built on its own as a
  * self-contained IIFE. A shared chunk between them is not a saving — it is a file neither
  * can import.
+ *
+ * MINIFIED, AND THIS IS A REVERSAL.
+ *
+ * `minify: false` was deliberate and the argument for it is in docs/EXTENSION.md §2: the
+ * whole add-on is small enough that a store reviewer can read all of it. Measured
+ * 2026-09-19 on this build, that claim had stopped being about readable code and started
+ * being about shipping comments: of `dist-ext/chrome/*.js`, 22,564 of yahoo.js's 39,254
+ * bytes were comment (57.5%), 11,057 of background.js's 16,685 (66.3%) and 3,073 of
+ * bridge.js's 5,468 (56.2%) — a byte in three going to two stores was a sentence arguing
+ * with a decision, and a reviewer who wants the argument wants it beside the code in the
+ * repository, not re-downloaded on every update by every reader.
+ *
+ * Minified: 9,978 + 3,680 + 1,468 = 15,126 bytes against 61,833, a 75.5% cut; with the
+ * 295-byte banner on each it is 16,011, a 74.1% cut. Deflated into the package the three
+ * come to 6,339 bytes, and the whole Chrome download is 8,846 where it was 64,973 (see the
+ * zip writer below). What replaces the
+ * comments for a reviewer is three things, all of them stronger than a comment in a
+ * bundle: the banner above, naming the repository and the one command that rebuilds it;
+ * the AMO source submission, which is required of a bundled add-on whether or not it is
+ * minified (SUBMITTING.md, and it is TESTED there rather than asserted); and the fact that
+ * the build is deterministic, so anybody can check these bytes byte for byte.
+ *
+ * Chrome's policy allows minification explicitly and forbids obfuscation; this is the
+ * former. No mangling beyond what the minifier does by default, and no sourcemap in the
+ * package — a `.map` in the zip is dead weight for every reader to pay for so that one
+ * person need not run the build.
  */
 const bundle = async (name, entry) => {
 	await build({
@@ -210,11 +302,14 @@ const bundle = async (name, entry) => {
 			emptyOutDir: false,
 			outDir: resolve(out, "js"),
 			lib: { entry: resolve(here, entry), formats: ["iife"], name: `bm_${name}`, fileName: () => `${name}.js` },
-			minify: false,
+			minify: true,
+			sourcemap: false,
 			target: "chrome114",
 			rollupOptions: { output: { extend: true } }
 		}
 	})
+	const file = resolve(out, "js", `${name}.js`)
+	await writeFile(file, BANNER + (await readFile(file, "utf8")))
 }
 
 /**
@@ -256,11 +351,19 @@ const INK = [244, 241, 232]
  * @param inset  the fraction of that edge left transparent on every side
  *
  * CHROME WANTS THE 128 PADDED AND THE OTHERS NOT. Its store guidance asks for 96x96 of artwork
- * centred in a 128x128 canvas — a sixteenth of the edge, transparent, on each side — because
- * the store draws its own frame around it and a full-bleed icon collides with it. The 16 and
- * the 48 are used in the toolbar and the extensions list, where padding would just make a
- * small icon smaller. Measured on the previous build: alpha 255 at (0, 64), zero transparent
- * columns before ink on row 64, which is the full-bleed shape Chrome asks you not to send.
+ * centred in a 128x128 canvas, which is 16 transparent pixels on each side — an EIGHTH of the
+ * edge, not a sixteenth — because the store draws its own frame around it and a full-bleed
+ * icon collides with it. The 16 and the 48 are used in the toolbar and the extensions list,
+ * where padding would just make a small icon smaller.
+ *
+ * THE ARITHMETIC HERE WAS WRONG ONCE AND THE COMMENT SAID SO CONFIDENTLY. `inset` is the
+ * fraction of the edge left transparent PER SIDE, so 96 inside 128 is 16/128 = 1/8. It was
+ * 1/16, and the comment below it called that "a sixteenth of the edge on each side" as if
+ * that were the answer. Measured 2026-09-19 by decoding the built PNG and taking the
+ * bounding box of non-transparent pixels: 112x112 of ink at (8, 8), 8 px of padding on every
+ * side. At 1/8 the same measurement gives 96x96 at (16, 16), which is the number Chrome's
+ * page states. test/extension.mjs now asserts the bounding box at all three sizes, because
+ * this is exactly the kind of error that survives review by looking approximately right.
  */
 const iconPng = (size, inset = 0) => {
 	const px = (x, y) => {
@@ -318,15 +421,24 @@ for (const [browser, manifest] of Object.entries(manifests)) {
 	for (const f of ["background.js", "yahoo.js", "bridge.js"])
 		await cp(resolve(out, "js", f), resolve(dir, f))
 	await writeFile(resolve(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
-	/* 1/16th of the edge on the 128 alone — Chrome's store frames that one. See `iconPng`. */
+	/* 1/8th of the edge on the 128 alone — 16 px a side, so 96x96 of artwork, which is what
+	   Chrome's store frames. See `iconPng`, and the correction recorded there. */
 	for (const size of [16, 48, 128])
-		await writeFile(resolve(dir, `icon-${size}.png`), iconPng(size, size === 128 ? 1 / 16 : 0))
+		await writeFile(resolve(dir, `icon-${size}.png`), iconPng(size, size === 128 ? 1 / 8 : 0))
+	/**
+	 * THIS FILE IS TRUE OF THE DOWNLOAD AND FALSE OF THE STORE PACKAGE, so it goes in one zip
+	 * and not the other — see `zip` below. It tells a reader to turn on Developer mode and
+	 * load an unpacked folder, which is exactly what he must do with a zip he got from
+	 * beanemachine.com, and exactly what the Chrome Web Store refuses to let a listing say.
+	 */
 	await writeFile(
 		resolve(dir, "README.txt"),
 		`beanemachine ${VERSION} (${browser})\n\n` +
 			(browser === "chrome" ?
-				"Open chrome://extensions, turn on Developer mode, press Load unpacked, and choose this folder.\n"
-			:	"Open about:debugging#/runtime/this-firefox, press Load Temporary Add-on, and choose the manifest.json in this folder.\n")
+				"Open chrome://extensions — on Edge, edge://extensions.\n" +
+					"Turn on Developer mode, press Load unpacked, and choose this folder.\n"
+			:	"Open about:debugging#/runtime/this-firefox, press Load Temporary Add-on, and choose the manifest.json in this folder.\n" +
+					"Firefox forgets a temporary add-on when you quit it. Do this again next time, or use Chrome.\n")
 	)
 }
 
@@ -340,11 +452,27 @@ for (const [browser, manifest] of Object.entries(manifests)) {
  * the site started handing the file to readers: a download link whose file is built by a
  * binary that may not exist is a 404 waiting for the one machine that lacks it.
  *
- * The format is the small one: one local header per file, stored (no compression — these are
- * four small text files and a pair of icons, and DEFLATE would save a few kilobytes at the
- * cost of a second implementation to get wrong), a central directory, an end record. CRC-32
- * is the same table the PNG writer above already needs, which is the reason this is thirty
- * lines rather than a dependency.
+ * The format is the small one: one local header per file, a central directory, an end record.
+ * CRC-32 is the same table the PNG writer above already needs, which is the reason this is
+ * forty lines rather than a dependency.
+ *
+ * DEFLATED, AND THE COMMENT HERE USED TO ARGUE THE OPPOSITE. It read: "stored (no compression
+ * — these are four small text files and a pair of icons, and DEFLATE would save a few
+ * kilobytes at the cost of a second implementation to get wrong)". Both halves were wrong.
+ * Measured 2026-09-19 on the Chrome folder as it stood BEFORE the bundles were minified:
+ * 64,169 bytes of payload stored against 24,405 deflated — 62% of the file, not "a few
+ * kilobytes", on a file the SITE hands to every reader over a connection it does not choose.
+ * And the second implementation is `deflateRawSync`, which is in node:zlib and is the same
+ * library the PNG writer three hundred lines above already calls; method 8 is two header
+ * fields and a different byte count. On the minified folder the same measurement is 18,437
+ * stored against 8,042.
+ *
+ * PER ENTRY, NOT PER ARCHIVE, because deflate does not always win. The same measurement:
+ * icon-16.png went 139 -> 142 bytes and icon-48.png 305 -> 310 — a PNG's IDAT is already
+ * deflated and re-compressing it costs the block header. So each entry keeps whichever of the
+ * two is smaller and declares the method it actually used. A zip that stores an entry it
+ * called deflated is a corrupt zip in every reader on earth, so the method is derived from
+ * the bytes chosen rather than set alongside them.
  */
 const dosTime = () => {
 	/* A fixed timestamp rather than the clock: two builds of the same source should produce
@@ -360,36 +488,50 @@ const zipOf = async (dir, names) => {
 	for (const name of names) {
 		const body = await readFile(resolve(dir, name))
 		const crc = crc32(body)
+		/* Level 9 rather than the default 6, and it is very nearly a coin toss: measured
+		   2026-09-19 on the minified Chrome folder, 8,042 bytes at 9 against 8,044 at 6. Two
+		   bytes. It is 9 because the asymmetry is total — this build runs once on one machine
+		   and the file it writes is downloaded by everybody — and not because the number is
+		   interesting. Both levels are deterministic, which is the property the fixed
+		   timestamp above needs to mean anything. */
+		const packed = deflateRawSync(body, { level: 9 })
+		/* Strictly smaller, so a tie stores: stored is the form every reader implements
+		   without a code path. */
+		const deflated = packed.length < body.length
+		const payload = deflated ? packed : body
+		const method = deflated ? 8 : 0
 		const nameBuf = Buffer.from(name, "utf8")
 		const local = Buffer.alloc(30)
 		local.writeUInt32LE(0x04034b50, 0)
+		/* 20 is "2.0", which is the version that introduced DEFLATE — so it is the right
+		   floor for both branches and does not have to move with `method`. */
 		local.writeUInt16LE(20, 4) // version needed
 		local.writeUInt16LE(0, 6) // flags
-		local.writeUInt16LE(0, 8) // stored
+		local.writeUInt16LE(method, 8)
 		local.writeUInt16LE(time, 10)
 		local.writeUInt16LE(date, 12)
-		local.writeUInt32LE(crc, 14)
-		local.writeUInt32LE(body.length, 18)
+		local.writeUInt32LE(crc, 14) // of the UNCOMPRESSED bytes, in both branches
+		local.writeUInt32LE(payload.length, 18)
 		local.writeUInt32LE(body.length, 22)
 		local.writeUInt16LE(nameBuf.length, 26)
 		local.writeUInt16LE(0, 28)
-		locals.push(local, nameBuf, body)
+		locals.push(local, nameBuf, payload)
 
 		const dirent = Buffer.alloc(46)
 		dirent.writeUInt32LE(0x02014b50, 0)
 		dirent.writeUInt16LE(20, 4) // version made by
 		dirent.writeUInt16LE(20, 6) // version needed
 		dirent.writeUInt16LE(0, 8)
-		dirent.writeUInt16LE(0, 10) // stored
+		dirent.writeUInt16LE(method, 10)
 		dirent.writeUInt16LE(time, 12)
 		dirent.writeUInt16LE(date, 14)
 		dirent.writeUInt32LE(crc, 16)
-		dirent.writeUInt32LE(body.length, 20)
+		dirent.writeUInt32LE(payload.length, 20)
 		dirent.writeUInt32LE(body.length, 24)
 		dirent.writeUInt16LE(nameBuf.length, 28)
 		dirent.writeUInt32LE(at, 42)
 		central.push(dirent, nameBuf)
-		at += 30 + nameBuf.length + body.length
+		at += 30 + nameBuf.length + payload.length
 	}
 	const dirBytes = Buffer.concat(central)
 	const end = Buffer.alloc(22)
@@ -454,21 +596,54 @@ const promoPng = (w, h) => {
 	])
 }
 
-const zip = async browser => {
+/**
+ * TWO ZIPS PER BROWSER, AND THE DIFFERENCE IS ONE FILE.
+ *
+ * `beanemachine-<browser>.zip` is what the SITE hands over while no listing exists, and it
+ * carries README.txt: sideloading is the only thing that reader can do with it, and once the
+ * file is on his disk and the tab is closed, that README is the only instruction he has.
+ *
+ * `beanemachine-<browser>-store.zip` is what gets UPLOADED, and it must not carry it. A
+ * Chrome Web Store listing may not tell a reader to install from outside the Web Store, and a
+ * package whose README's first line is "turn on Developer mode, press Load unpacked" tells a
+ * reviewer, in writing, that this add-on is distributed around him. That is a rejection, and
+ * it is one nothing in this repository would have caught: the file is correct, the manifest
+ * is correct, and the zip they are in goes to two readers who need opposite instructions.
+ *
+ * Two zips rather than one README worded to serve both, because there is no such wording. A
+ * store reader has nothing to do after pressing Add; telling him how to load an unpacked
+ * folder is at best noise and at worst the sentence that gets the listing pulled.
+ *
+ * Both are otherwise byte-identical inputs — same manifest, same three bundles, same three
+ * icons — and test/extension.mjs asserts that the entry lists differ by README.txt alone, so
+ * this cannot quietly become two different add-ons.
+ */
+const PACKAGE = ["manifest.json", "background.js", "yahoo.js", "bridge.js",
+	"icon-16.png", "icon-48.png", "icon-128.png"]
+
+const zip = async (browser, { readme }) => {
 	const dir = resolve(out, browser)
-	const file = resolve(out, `beanemachine-${browser}.zip`)
+	const file = resolve(out, `beanemachine-${browser}${readme ? "" : "-store"}.zip`)
 	/* Named rather than walked, so a file nobody meant to ship cannot arrive in the download
 	   by having been left in the folder. Every one of these is written a few lines above. */
-	const names = ["manifest.json", "background.js", "yahoo.js", "bridge.js", "README.txt",
-		"icon-16.png", "icon-48.png", "icon-128.png"].filter(n => existsSync(resolve(dir, n)))
+	const names = [...PACKAGE, ...(readme ? ["README.txt"] : [])].filter(n =>
+		existsSync(resolve(dir, n))
+	)
 	await writeFile(file, await zipOf(dir, names))
 	return file
 }
 
+/** The ones the site hands out. Only these are copied into `public/`. */
 const zips = []
+/** The ones a store takes. Never copied anywhere; SUBMITTING.md names them. */
+const uploads = []
 for (const browser of Object.keys(manifests)) {
-	const made = await zip(browser)
-	if (made) zips.push(made)
+	zips.push(await zip(browser, { readme: true }))
+	/* NOT WRITTEN AT ALL BY A DEV BUILD. The dev build injects the bridge into every page
+	   served from the reader's own machine (see `DEV` at the top); an upload package built
+	   from it would be a store listing that hands a Yahoo league to anything on localhost.
+	   An artifact that must never be uploaded is safest as an artifact that does not exist. */
+	if (!DEV) uploads.push(await zip(browser, { readme: false }))
 }
 
 /*
@@ -508,5 +683,6 @@ console.log(
 			" — with the local addresses, which is a build for testing and NOT what goes to a store"
 		:	" — hosted site only, which is what goes to a store")
 )
-if (zips.length) console.log(`zipped: ${zips.map(z => z.replace(`${out}/`, "")).join(", ")}`)
-else console.log("no zip was written, which should not happen — the folders are loadable as they are")
+const named = list => list.map(z => z.replace(`${out}/`, "")).join(", ")
+console.log(`the site hands out: ${named(zips)}`)
+if (uploads.length) console.log(`a store takes: ${named(uploads)} (no README.txt — see \`zip\`)`)

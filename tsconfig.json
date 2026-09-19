@@ -27,5 +27,13 @@
   },
   // `api/` was outside this list, so `api/index.ts` — the serverless entry — was never
   // type-checked by `npm run check` at all.
-  "include": ["src", "api", "vite.config.ts"]
+  //
+  // Neither was `extension/src`, which is the code that runs inside somebody else's
+  // signed-in Yahoo tab and is the hardest thing in this repo to debug once it ships: it
+  // has no console a reader will read, no stack trace that reaches anybody, and a store
+  // review between a fix and its arrival. Three of its files were edited on 2026-09-19 and
+  // `npm run check` said nothing about any of them, because `--listFiles` counted zero
+  // files under that directory. `extension/*.mjs` stays out — those are build scripts, not
+  // TypeScript.
+  "include": ["src", "api", "extension/src", "vite.config.ts"]
 }

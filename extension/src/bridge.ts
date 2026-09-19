@@ -10,7 +10,6 @@
  * no opinion about any of it.
  */
 import {
-	FROM_APP,
 	FROM_EXTENSION,
 	PROTOCOL,
 	isFromApp,
@@ -82,7 +81,7 @@ window.addEventListener("message", event => {
 	   loop every postMessage bridge writes at least once. */
 	if (event.source !== window || event.origin !== location.origin) return
 	if (!isFromApp(event.data)) return
-	const { id, ask, leagueId, sport, positions, teamIds } = event.data
+	const { id, ask, leagueId, sport, positions, teamIds, teamId } = event.data
 	/* A hello never leaves this browser, so it is answered here rather than routed. See
 	   `Ask` in src/data/extension.ts for why a page has to be able to ask for one. */
 	if (ask === "hello") {
@@ -90,7 +89,11 @@ window.addEventListener("message", event => {
 		return
 	}
 	try {
-		chrome.runtime.sendMessage({ kind: "ask", id, ask, leagueId, sport, positions, teamIds }, answer => {
+		/* Named fields rather than a spread of whatever the page posted: this is the one hop
+		   where a message from a web page becomes a message inside the extension, and a
+		   spread would carry every field a page cared to invent across it. Anything added to
+		   `AppMessage` has to be added here too — `teamId` arrived that way. */
+		chrome.runtime.sendMessage({ kind: "ask", id, ask, leagueId, sport, positions, teamIds, teamId }, answer => {
 			/* An extension that has been updated or disabled between the send and the answer
 			   leaves this channel dead, and the callback then fires with `undefined` and an
 			   error on `chrome.runtime.lastError`. Reading it is what stops the browser
@@ -111,7 +114,17 @@ window.addEventListener("message", event => {
 				})
 				return
 			}
-			toPage({ from: FROM_EXTENSION, id, ...answer })
+			/*
+			   THE BACKGROUND'S ANSWER, FORWARDED — and `answer` is `unknown` at this seam,
+			   which typing `extension/src` made visible for the first time.
+			
+			   It is not validated here on purpose: the page's own listener runs every message
+			   through `isFromExtension` before it reads a field, so a malformed answer is
+			   refused where the refusal can be reported. Validating twice would put a second
+			   copy of the protocol in the half that has no way to say anything when it fails.
+			   The cast says that out loud instead of the spread quietly claiming a shape.
+			*/
+			toPage({ from: FROM_EXTENSION, id, ...(answer as object) } as ExtensionMessage)
 		})
 	} catch {
 		/* Thrown, not returned: `Extension context invalidated`. The page gets its answer
@@ -149,7 +162,11 @@ function hello(): void {
 				kind: "hello",
 				version,
 				protocol: PROTOCOL,
-				yahooOpen: !!answer?.yahooOpen
+				/* Same seam as the forward above: the background's reply is `unknown` and the
+				   one field read out of it is coerced rather than trusted, so a reply that is
+				   missing it reads as "no Yahoo tab" — the safe half, and what the page would
+				   conclude anyway. */
+				yahooOpen: !!(answer as { yahooOpen?: unknown } | undefined)?.yahooOpen
 			})
 		})
 	} catch {

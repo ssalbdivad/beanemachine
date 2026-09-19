@@ -27,8 +27,7 @@ import {
 	type Grab,
 	type GrabFailure
 } from "../../src/data/extension.ts"
-import { pageUrl } from "../../src/data/yahoo-pool.ts"
-import { YAHOO } from "../../src/data/platforms.ts"
+import { YAHOO, type Fetchable } from "../../src/data/platforms.ts"
 
 /** Yahoo throttles by serving a wall rather than an error status, so the words are the
  *  only signal — the same two tests `src/auto/roster.ts` uses against the same site, kept
@@ -439,13 +438,28 @@ const claim = (what: "league" | "pool" | "rosters"): void => {
 	readingSince = Date.now()
 }
 const WINDOW = 60_000
-/* Five full sweeps in a minute. A reader pressing every button on the screen as fast as he
-   can read them does not come near it — a sweep paces itself at a quarter-second a position
-   and takes about three seconds, and there is nothing to press while it runs. A loop reaches
-   it in well under a second and is told, in a sentence, when it may ask again. The number is
-   a bound on abuse rather than a ration: it is set where a reader cannot feel it and a script
-   cannot get past it. */
-const ALLOWANCE = 45
+/*
+   WAS 45, AND A READER STARTED FEELING IT — which the number is defined by not doing.
+
+   A "read my league" press is not one request: `readLeagueHere` reads the league and then
+   sweeps, so it is `onePress` plus nine positions. `onePress` went from two pages to four
+   (his own team, which it could not ask for at all from a URL that names no team, and the
+   eligibility page, which nothing had ever asked for), so a press went from 11 requests to
+   13, and a reader who also presses "read who is taken" spends 9 more.
+
+   Measured in test/extension.mjs against the published build: the journey block pressed the
+   button on a tab that had already been read from, and the sweep was refused with "this has
+   asked Yahoo a lot in the last minute… try again in about 30 seconds" — the free agents
+   came back empty and the board had no wire. At 45 the ceiling sat between three presses
+   (39) and three presses plus a rosters read (48); at 60 it sits past four full presses (52),
+   which is more than a reader can produce without waiting for each one to finish.
+
+   Still a bound on abuse rather than a ration. A sweep paces itself at a quarter-second a
+   position and there is nothing to press while it runs, so 60 in a rolling minute is a rate
+   no hand reaches; a loop on the app origin reaches it in under a second and is told, in a
+   sentence, when it may ask again.
+*/
+const ALLOWANCE = 60
 /** When each request this tab has made was made, oldest first, trimmed to the window. */
 const spent: number[] = []
 const trim = (): void => {
@@ -538,7 +552,18 @@ const answering = (
 
 chrome.runtime.onMessage.addListener(
 	(
-		msg: { ask: Ask; id: string; leagueId?: string; sport?: string; positions?: string[] },
+		msg: {
+			ask: Ask
+			id: string
+			leagueId?: string
+			sport?: string
+			positions?: string[]
+			teamIds?: string[]
+			/** For `league`: the team the APP knows is his. A Yahoo URL names a team on the
+			 *  team page and nowhere else, so without this a press from the players page
+			 *  could not ask for his roster — see `onePress` in src/data/platforms.ts. */
+			teamId?: string
+		},
 		_sender,
 		reply
 	) => answering(() => {
@@ -601,12 +626,19 @@ chrome.runtime.onMessage.addListener(
 			   manifest's match patterns are written from. This file's job is to fetch what it is
 			   handed, from the tab it is in, and to say what came back.
 			*/
-			const plan = YAHOO.onePress({
-				kind: here.kind,
-				leagueId,
-				teamId: teamIdFrom(location.href),
-				sport
-			})
+			const plan = YAHOO.onePress(
+				{
+					kind: here.kind,
+					leagueId,
+					teamId: teamIdFrom(location.href),
+					sport
+				},
+				/* What the app already knows, which is the half this tab cannot see. `asked`
+				   is the same digits-only filter every other id from the page goes through:
+				   this string arrives from a web page and is about to be interpolated into a
+				   URL fetched with the reader's own cookies. */
+				{ teamId: asked(msg.teamId) }
+			)
 			/*
 			   THIS PRESS FETCHES, SO IT QUEUES BEHIND THE ONE RULE EVERY FETCHING ASK OBEYS.
 			
@@ -635,14 +667,35 @@ chrome.runtime.onMessage.addListener(
 				return true
 			}
 			claim("league")
-			/** A page fetched from the reader's own signed-in tab, as the text a browser would
-			 *  have rendered — see `renderedText`. Empty string when Yahoo would not serve it,
-			 *  which the caller treats as "not read" rather than as "empty". */
-			const asText = async (url: string): Promise<string> => {
+			/**
+			 * A page fetched from the reader's own signed-in tab, IN THE FORM THE DESCRIPTOR
+			 * ASKED FOR.
+			 *
+			 * It used to be `asText` and nothing else, which made `Fetchable.as` a field that
+			 * was declared, set on every page and read by nobody: the first `as: "html"` page
+			 * anybody added to `onePress` would have been stripped to text on the way in,
+			 * parsed to nothing by a parser that reads attributes, and reported as a page that
+			 * came back empty. Markup goes through `rowsOnly` for the same reason a swept page
+			 * does — the last row of a players page is followed by roughly 90 KB of footer and
+			 * a whole page of it crosses `postMessage`.
+			 *
+			 * Empty text is how a page Yahoo would not serve comes back, and the caller treats
+			 * that as "not read" rather than as "empty".
+			 */
+			const fetchAs = async (want: Fetchable): Promise<Grab | null> => {
 				spend()
-				const res = await getPage(url)
-				if (!res.ok) return ""
-				return renderedText(await res.text())
+				const res = await getPage(want.url)
+				if (!res.ok) return null
+				const raw = await res.text()
+				const text = renderedText(raw)
+				if (!text.trim()) return null
+				return {
+					url: want.url,
+					kind: want.kind,
+					text,
+					html: want.as === "html" ? (rowsOnly(raw) ?? raw) : undefined,
+					at: now()
+				}
 			}
 			void (async () => {
 				try {
@@ -664,11 +717,11 @@ chrome.runtime.onMessage.addListener(
 					const extra: Grab[] = []
 					let wall: GrabFailure | null = null
 					for (const want of plan) {
-						const text = await asText(want.url)
-						if (!text.trim()) continue
-						wall = wallIn(text)
+						const got = await fetchAs(want)
+						if (!got) continue
+						wall = wallIn(got.text)
 						if (wall) break
-						extra.push({ url: want.url, kind: want.kind, text, at: now() })
+						extra.push(got)
 					}
 					reply({ kind: "grabs", grabs: [here, ...extra], failure: wall ?? undefined })
 				} catch {

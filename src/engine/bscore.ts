@@ -279,6 +279,32 @@ export interface Rated {
 	/** Yahoo "% Ros" — the share of leagues this player is rostered in. Null when
 	 *  the platform did not list him, which is not the same as nobody owning him. */
 	rosteredPct?: number | null
+	/**
+	 * BSCORE PER TEAM GAME — the same quantity, in a unit that does not change meaning
+	 * when the window does.
+	 *
+	 * bscore is an un-normalised point TOTAL over whatever horizon it was rated on, so
+	 * every constant built on it means something different per window. Measured on the
+	 * committed capture, same league, same pool, counting men who clear each bar:
+	 *
+	 *     horizon      rateable   bscore>0   bscore>=25   bscore>=5
+	 *     1 day          1082        108          2           19
+	 *     period 6d      1240        110          2           64
+	 *     14 days        1248        106         20           88
+	 *     rest 20d       1248        110         28           86
+	 *
+	 * `bscore > 0` is stable at 106-113 because it is a rank test — it asks whether a man
+	 * beats his bar, which is true or false whatever the window. The planner's two
+	 * constants are not rank tests: `keepFloor` 25 matches 2 men over six days and 28 over
+	 * twenty, a fourteen-fold swing driven by nothing but the length of the window, and
+	 * `minGain` 5 swings four-and-a-half-fold. Those constants decide which men the app
+	 * tells a reader to drop.
+	 *
+	 * Null where the horizon is zero games — a player whose club is not playing has no
+	 * per-game rate, and dividing by nothing to get a number is how an absence becomes a
+	 * default.
+	 */
+	bscorePerGame: number | null
 }
 
 export interface RateOptions {
@@ -701,6 +727,8 @@ export const rateAll = (o: RateOptions): Rated[] => {
 			season: scoreStats(player.stats, table, player.group),
 			points: 0,
 			bscore: 0,
+			/* Filled in with `bscore` below, once the bar is known. */
+			bscorePerGame: null,
 			addValue: 0,
 			slot: "",
 			replacement: 0,
@@ -944,6 +972,12 @@ export const rateAll = (o: RateOptions): Rated[] => {
 		r.slot = best.slot
 		r.replacement = Number(best.replacement.toFixed(2))
 		r.bscore = Number((best.value === -Infinity ? 0 : best.value).toFixed(2))
+		/* Derived from the ROUNDED bscore for the same reason `addValue` is: two numbers on
+		   one row that disagree in the last decimal place is a defect a reader can see. */
+		r.bscorePerGame =
+			r.projection.horizonGames > 0 ?
+				Number((r.bscore / r.projection.horizonGames).toFixed(3))
+			:	null
 		// the display floor, derived from the rounded bscore so the two can never
 		// disagree in the last decimal place
 		r.addValue = Math.max(r.bscore, 0)

@@ -18,17 +18,42 @@ const near2 = (a, b) => typeof a === "number" && Math.abs(a - b) < 0.005
 let nextId = 1
 /** Only the fields the planner reads — a Rated carries far more, and none of it
  *  changes a decision. */
-const rated = (name, { points = 0, bscore = 0, slots = ["Util"], injury, rateable = true, group = "hitting" } = {}) => ({
+/*
+   GAMES, because the planner's two bars are now per team game.
+ 
+   `minGain` and `keepFloor` used to be bscore TOTALS, which meant a different thing on
+   every horizon: 25 matched 2 men over a six-day period and 28 over twenty days, a
+   fourteen-fold swing caused by nothing but the length of the window. They are per-game
+   now, so every rated row carries `bscorePerGame` — and a fixture row that carries none
+   is a man the planner correctly refuses to price, which is how this suite first came
+   back with an empty move list.
+ 
+   Six is this league's own scoring period, so the totals below keep the sizes they were
+   written at and the bars they are measured against are the shipped ones.
+*/
+const FIXTURE_GAMES = 6
+const rated = (name, { points = 0, bscore = 0, slots = ["Util"], injury, rateable = true, group = "hitting", games = FIXTURE_GAMES } = {}) => ({
 	player: { id: nextId++, name, team: null, teamId: 1, position: slots[0], group, stats: {} },
 	injury,
 	slots,
 	slot: slots[0],
 	points,
 	bscore,
+	bscorePerGame: games > 0 ? Number((bscore / games).toFixed(3)) : null,
+	projection: { horizonGames: games },
 	rateable,
 	replacement: 0,
 	confidence: { value: 1, reasons: [] },
 	regressionGap: null
+})
+/** Re-score a rated row and keep its per-game twin in step. A spread that sets `bscore`
+ *  alone leaves `bscorePerGame` reporting the OLD score, and the planner decides on the
+ *  per-game one — which is a desync a fixture can produce and production cannot, because
+ *  `rateAll` writes both from the same number. */
+const rescore = (r, bscore) => ({
+	...r,
+	bscore,
+	bscorePerGame: r.projection.horizonGames > 0 ? Number((bscore / r.projection.horizonGames).toFixed(3)) : null
 })
 const spot = (slot, name, positions, status = "") => ({ slot, name, positions, team: null, status })
 
@@ -42,7 +67,26 @@ const SHAPE = {
 	}
 }
 const shape = (slots, accepts, order = null) => ({ slots, slot_order: order, slot_accepts: accepts })
-const opts = o => ({ ...DEFAULTS, ...o })
+/*
+   THE BARS THE FIXTURES NAME ARE STILL IN POINTS, and are converted here.
+
+   Every `opts({ minGain: 5, keepFloor: 25 })` in this file was written when those were
+   bscore TOTALS, and the fixtures' own numbers — a 36-point gain, an 8-point catcher —
+   were chosen to sit either side of them. The planner's bars are per team game now (see
+   `PlanOptions`), so converting at this one seam keeps every fixture below meaning what
+   its author meant, instead of thirty edited literals whose relationship to the numbers
+   around them would have to be re-derived one at a time.
+
+   Divided by the same six games the rated rows are built over — see FIXTURE_GAMES — so a
+   bar and the scores it is compared against come from one window.
+*/
+const perGameBars = o => {
+	const out = { ...o }
+	for (const k of ["minGain", "keepFloor"])
+		if (typeof out[k] === "number") out[k] = Number((out[k] / FIXTURE_GAMES).toFixed(4))
+	return out
+}
+const opts = o => ({ ...DEFAULTS, ...perGameBars(o) })
 
 /* ---------------- the roster shape itself ---------------- */
 
@@ -390,7 +434,7 @@ t("the best add takes the worst man's spot, never the keeper's",
 		...room,
 		// two seats, two men — and My Fielder at 30 has to be under the keep floor for
 		// anyone to be offered up at all, which is the OTHER rail and is asserted above
-		rated: room.rated.map(r => (r.player.name === "My Fielder" ? { ...r, bscore: 4 } : r)),
+		rated: room.rated.map(r => (r.player.name === "My Fielder" ? rescore(r, 4) : r)),
 		shape: shape({ C: 1, OF: 1 }, { C: ["C"], OF: ["OF"] }, ["C", "OF"])
 	}
 	const q = planMoves(full)
@@ -422,7 +466,7 @@ t("no player is added or dropped twice inside one run",
 
 const thin = {
 	...wire,
-	rated: wire.rated.map(r => r.player.name === "Free Agent" ? { ...r, bscore: 7 } : r),
+	rated: wire.rated.map(r => r.player.name === "Free Agent" ? rescore(r, 7) : r),
 	options: opts({ minGain: 5, keepFloor: 25, maxMoves: 1 })
 }
 t("a swap below the minimum gain is not proposed",
@@ -463,7 +507,11 @@ t("a real plan passes its own audit", railViolations(full, wire).length === 0,
 
 const forged = (move, lineup) => ({
 	lineup: { ...full.lineup, ...(lineup ?? {}) },
-	moves: [{ kind: "add-drop", add: "Free Agent", addScore: 70, drop: "Wes Weak", dropScore: 4, gain: 66, reason: "", ...(move ?? {}) }],
+	/* The per-game twins are part of a move now, because the audit re-checks a move in the
+	   unit the planner DECIDED it in — see `PlanOptions`. Derived from the totals over the
+	   same six games the rated rows use, so a forgery that overrides `gain` alone still
+	   gets a consistent pair and the rail fires on the thing it is aimed at. */
+	moves: [(m => ({ ...m, gainPerGame: Number((m.gain / FIXTURE_GAMES).toFixed(4)), dropPerGame: m.dropScore === null ? null : Number((m.dropScore / FIXTURE_GAMES).toFixed(4)) }))({ kind: "add-drop", add: "Free Agent", addScore: 70, drop: "Wes Weak", dropScore: 4, gain: 66, reason: "", ...(move ?? {}) })],
 	skipped: [], notes: []
 })
 const caught = (name, forgery, pattern, input = wire) =>
@@ -481,7 +529,7 @@ caught("a drop above the keep floor", forged({ drop: "Stu Stud", dropScore: 60, 
 caught("an add MLB says cannot play",
 	forged({ add: "Hurt Ace", addScore: 120, gain: 116 }), /cannot play \(Injured 60-Day\)/, ilWire)
 caught("an add nobody could actually claim", forged({ add: "Some Guy", addScore: 70 }), /free-agent pool/)
-caught("a swap below the bar", forged({ addScore: 5, gain: 1 }), /below the 5 bar/)
+caught("a swap below the bar", forged({ addScore: 5, gain: 1 }), /below the 0.8333 bar/)
 caught("a gain that is not the difference it claims", forged({ gain: 66.5 }), /is not/)
 caught("more moves than the cap",
 	{ ...full, moves: [...forged().moves, { ...forged().moves[0], add: "Other Guy", drop: "Andy Mask" }] },
@@ -663,14 +711,21 @@ t("and it names the upgrade the sparing cost, so the operator can make it by han
 	JSON.stringify(both.notes))
 t("a run that spares everyone below the floor does not then claim nobody was below it",
 	!both.notes.some(n => n.includes("nobody on the roster is below")) &&
-		both.notes.some(n => n.includes("everyone below the 25 keep floor is in this run's lineup")),
+				/* "25 keep floor" → "1.9-a-game keep floor". The bar is per team game now, because
+		   as a bscore TOTAL it meant a different thing on every horizon — 25 matched 2 men
+		   over a six-day period and 28 over twenty days. The sentence quotes the bar it
+		   actually applied, so it moved with it. */
+		both.notes.some(n => n.includes("everyone below the 1.9-a-game keep floor is in this run's lineup")),
 	JSON.stringify(both.notes))
 t("a plan that does contradict itself is caught by the audit", (() => {
 	const forged = {
 		...both,
 		moves: [{
+			/* The forged move carries the per-game figures too: the audit re-checks a move
+			   in the unit the planner DECIDED it in, and a move with none is a move it
+			   cannot price. Six games, this league's own period — see FIXTURE_GAMES. */
 			kind: "add-drop", add: "Better Catcher", addScore: 41, drop: "Solo Catcher",
-			dropScore: 8, gain: 33, reason: "forged"
+			dropScore: 8, gain: 33, gainPerGame: 5.5, dropPerGame: 1.333, reason: "forged"
 		}]
 	}
 	return railViolations(forged, contradiction)
@@ -689,7 +744,7 @@ t("protecting a starter does not block a move against anyone else", (() => {
 			slot_order: [...contradiction.shape.slot_order, "BN"]
 		},
 		rated: [
-			...contradiction.rated.map(r => (r.player.name === "Gil Ok" ? { ...r, bscore: 3 } : r)),
+			...contradiction.rated.map(r => (r.player.name === "Gil Ok" ? rescore(r, 3) : r)),
 			rated("Hot Bat", { points: 70, bscore: 50, slots: ["OF"] }),
 			rated("Free Bat", { points: 60, bscore: 44, slots: ["OF"] })
 		],

@@ -35,6 +35,21 @@ export interface Move {
 	drop: string | null
 	dropScore: number | null
 	gain: number
+	/**
+	 * THE SAME GAIN AND THE SAME DROP, PER TEAM GAME — the unit the decision was made in.
+	 *
+	 * `gain` and `dropScore` are point TOTALS over the window, which is what a reader
+	 * wants to see: "worth 14 more points this week" is a sentence he can act on, and
+	 * "worth 1.1 more points a game" is not. But the two bars the planner decides by are
+	 * per-game now — see `PlanOptions` — so the rails that re-check a move after the fact
+	 * have to re-check it in the unit it was decided in, or they are comparing a fortnight
+	 * against a bar set for a day.
+	 *
+	 * Null where a club has no games in the window: there is no per-game rate for a man
+	 * who is not playing, and inventing one is how an absence becomes a default.
+	 */
+	gainPerGame: number | null
+	dropPerGame: number | null
 	reason: string
 	/**
 	 * The startable seats the arriving man can fill, as the league's own eligibility
@@ -50,9 +65,23 @@ export interface Move {
 }
 
 export interface PlanOptions {
-	/** Minimum bscore improvement before a swap is worth making. */
+	/**
+	 * Minimum improvement before a swap is worth making, PER TEAM GAME.
+	 *
+	 * It was a bscore total and that made it mean a different thing on every screen.
+	 * bscore is an un-normalised point total over whatever window it was rated on, so a
+	 * 5-point bar matched 19 men over one day, 64 over this league's six-day period, 88
+	 * over a fortnight and 86 over the rest of the season — a four-and-a-half-fold swing
+	 * caused by nothing but the length of the window. See `bscorePerGame`.
+	 */
 	minGain: number
-	/** Never drop anyone at or above this bscore, whatever the alternative. */
+	/**
+	 * Never drop anyone at or above this, PER TEAM GAME, whatever the alternative.
+	 *
+	 * The worse of the two: as a total, 25 matched 2 men over six days and 28 over twenty.
+	 * A constant that decides which players the app tells a reader to DROP cannot swing
+	 * fourteen-fold on the horizon the reader happens to be looking at.
+	 */
 	keepFloor: number
 	/**
 	 * Hard cap on moves per run. See `DEFAULTS` below for why it is 2.
@@ -107,7 +136,31 @@ export interface PlanOptions {
  * spends waiver priority or FAAB on every claim, and this number does not know
  * that. If your league makes moves expensive, lower it.
  */
-export const DEFAULTS: PlanOptions = { minGain: 5, keepFloor: 25, maxMoves: 2, lineupMinGain: 0 }
+/*
+ * THE TWO BARS ARE NOW PER TEAM GAME, and the numbers are the old ones divided by the
+ * window they were chosen on.
+ *
+ * Both were picked while the board's default horizon was a fourteen-day fortnight, which
+ * is about 13 team games. 25 / 13 = 1.9 and 5 / 13 = 0.38 — so on the horizon they were
+ * tuned for they select exactly the men they always did, and on every OTHER horizon they
+ * now select the same KIND of man instead of a different number of them.
+ *
+ * Rounded to two figures rather than carried to four: the precision of the original 25
+ * was one significant figure and dividing it does not create more.
+ */
+/**
+ * A RATED MAN'S SCORE IN THE UNIT THE BARS ARE NOW IN.
+ *
+ * `bscorePerGame` is null where his club has no games in the window — he cannot clear a
+ * per-game bar and he cannot fall below one either, so the honest reading is that he is
+ * not a candidate and is not droppable, which is what `Infinity` and `-Infinity` do at
+ * the two call sites. Writing the fallback here rather than at each of them is what stops
+ * the two disagreeing about what "no games" means.
+ */
+const perGame = (r: { bscorePerGame?: number | null }): number | null =>
+	r.bscorePerGame ?? null
+
+export const DEFAULTS: PlanOptions = { minGain: 0.38, keepFloor: 1.9, maxMoves: 2, lineupMinGain: 0 }
 
 /** What a slot will accept, as the league's own settings page states it. */
 export type SlotAccepts = string[] | "any" | "injured_only"
@@ -667,7 +720,7 @@ export const planMoves = (
 
 	const belowFloor = rostered
 		.flatMap(r => (r.rated && r.rated.rateable ? [{ ...r, rated: r.rated }] : []))
-		.filter(r => r.rated.bscore < options.keepFloor)
+		.filter(r => (perGame(r.rated) ?? Infinity) < options.keepFloor)
 		.sort((a, b) => a.rated.bscore - b.rated.bscore)
 	const started = belowFloor.filter(r => protect.has(normalizeName(r.spot.name)))
 	const droppable = belowFloor.filter(r => !protect.has(normalizeName(r.spot.name)))
@@ -680,7 +733,7 @@ export const planMoves = (
 		for (const r of started) {
 			const up = upgrades.get(normalizeName(r.spot.name))
 			notes.push(
-				`${r.spot.name} is ${r.rated.bscore}, below the ${options.keepFloor} keep floor, but ` +
+				`${r.spot.name} is ${perGame(r.rated)} a game, below the ${options.keepFloor} keep floor, but ` +
 					`this run is starting him, and dropping a man the lineup needs would leave the ` +
 					`seat empty — so he is not offered up` +
 					(up ?
@@ -728,9 +781,9 @@ export const planMoves = (
 	if (!droppable.length)
 		notes.push(
 			started.length ?
-				`everyone below the ${options.keepFloor} keep floor is in this run's lineup, so ` +
+				`everyone below the ${options.keepFloor}-a-game keep floor is in this run's lineup, so ` +
 					`nothing was offered up`
-			:	`nobody on the roster is below the ${options.keepFloor} keep floor, so nothing was ` +
+			:	`nobody on the roster is below the ${options.keepFloor}-a-game keep floor, so nothing was ` +
 					`offered up`
 		)
 
@@ -757,7 +810,7 @@ export const planMoves = (
 	for (const a of addable) {
 		if (moves.length >= Math.min(room, cap)) break
 		if (usedAdds.has(a.player.id.toString())) continue
-		if (a.bscore < options.minGain) continue
+		if ((perGame(a) ?? -Infinity) < options.minGain) continue
 		usedAdds.add(a.player.id.toString())
 		moves.push({
 			kind: "add",
@@ -765,6 +818,10 @@ export const planMoves = (
 			addScore: a.bscore,
 			drop: null,
 			dropScore: null,
+			/* A pure add displaces nobody, so there is no drop rate and the gain IS his own
+			   per-game value. */
+			gainPerGame: perGame(a),
+			dropPerGame: null,
 			gain: a.bscore,
 			reason:
 				`${a.player.name} projects ${a.bscore} points above the man left at ${a.slot}, ` +
@@ -779,8 +836,8 @@ export const planMoves = (
 				`costs you nobody — ${
 					moves.length ?
 						`${moves.length} free agent${moves.length === 1 ? "" : "s"} clear the ` +
-						`${options.minGain}-point bar`
-					:	`no free agent clears the ${options.minGain}-point bar`
+						`${options.minGain}-a-game bar`
+					:	`no free agent clears the ${options.minGain}-a-game bar`
 				}`
 		)
 
@@ -799,9 +856,15 @@ export const planMoves = (
 		)
 		if (!best) continue
 		const gain = r2(best.bscore - drop.rated.bscore)
+		/* Each man against his OWN club's schedule. A gain between two players on clubs
+		   playing different numbers of games has no single denominator, and the difference
+		   of their per-game rates is the well-defined reading of it. */
+		const addPG = perGame(best)
+		const dropPG = perGame(drop.rated)
+		const gainPerGame = addPG === null ? null : r2(addPG - (dropPG ?? 0))
 		if (!bestSeen || gain > bestSeen.gain)
 			bestSeen = { gain, add: best.player.name, drop: drop.spot.name }
-		if (gain < options.minGain) continue
+		if ((gainPerGame ?? -Infinity) < options.minGain) continue
 		usedAdds.add(best.player.id.toString())
 		moves.push({
 			kind: "add-drop",
@@ -809,17 +872,19 @@ export const planMoves = (
 			addScore: best.bscore,
 			drop: drop.spot.name,
 			dropScore: drop.rated.bscore,
+			gainPerGame,
+			dropPerGame: dropPG,
 			gain,
 			reason:
 				`${best.player.name} projects ${gain} points higher over the horizon at ` +
 				`${best.slot}, and ${drop.spot.name} is ${drop.rated.bscore} — below the ` +
-				`${options.keepFloor} keep floor. Slots matched on ${source}.`
+				`${options.keepFloor}-a-game keep floor. Slots matched on ${source}.`
 		})
 	}
 	if (!moves.length && bestSeen)
 		notes.push(
 			`the best legal upgrade, ${bestSeen.add} for ${bestSeen.drop}, gains ${bestSeen.gain} — ` +
-				`below the ${options.minGain}-point bar`
+				`below the ${options.minGain}-a-game bar`
 		)
 	if (!moves.length && droppable.length && !bestSeen)
 		notes.push(
@@ -895,10 +960,12 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 		if (m.kind === "add-drop" && m.drop !== null && m.dropScore !== null) {
 			const drop = normalizeName(m.drop)
 			const rated = byName.get(drop)
-			if (rated && rated.bscore >= options.keepFloor)
-				out.push(`${m.drop} is at ${rated.bscore}, at or above the ${options.keepFloor} keep floor`)
-			if (m.dropScore >= options.keepFloor)
-				out.push(`${m.drop} is reported at ${m.dropScore}, at or above the keep floor`)
+			if (rated && (perGame(rated) ?? Infinity) >= options.keepFloor)
+				out.push(`${m.drop} is at ${perGame(rated)} a game, at or above the ${options.keepFloor} keep floor`)
+			if ((m.dropPerGame ?? -Infinity) >= options.keepFloor)
+				out.push(
+					`${m.drop} is reported at ${m.dropPerGame} a game, at or above the keep floor`
+				)
 			if (r2(m.addScore - m.dropScore) !== m.gain)
 				out.push(`${m.add} for ${m.drop} reports a gain of ${m.gain} that is not ${m.addScore} − ${m.dropScore}`)
 			if (reserved.has(drop)) out.push(`${m.drop} sits in a reserve slot and must not be dropped`)
@@ -911,8 +978,11 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 			if (m.drop !== null || m.dropScore !== null)
 				out.push(`${m.add} is an add with no drop but reports one (${m.drop})`)
 		}
-		if (m.gain < options.minGain)
-			out.push(`${m.add}${m.drop ? ` for ${m.drop}` : ""} gains ${m.gain}, below the ${options.minGain} bar`)
+		if ((m.gainPerGame ?? -Infinity) < options.minGain)
+			out.push(
+				`${m.add}${m.drop ? ` for ${m.drop}` : ""} gains ${m.gainPerGame} a game, below the ` +
+					`${options.minGain} bar`
+			)
 		if (!input.availableNames.has(add)) out.push(`${m.add} is not in the free-agent pool`)
 		if (onRoster.has(add)) out.push(`${m.add} is already on the roster`)
 		/* "is on the IL" was true of every value this field could hold until
@@ -1251,9 +1321,9 @@ export const planSwaps = (
 			notes.push(
 				best.drop ?
 					`the best remaining swap, ${best.add.rated.player.name} for ${best.drop.spot.name}, ` +
-						`is worth ${best.gain} points — below the ${options.minGain}-point bar`
+						`is worth ${best.gain} points — below the ${options.minGain}-a-game bar`
 				:	`the best remaining add, ${best.add.rated.player.name}, is worth ${best.gain} ` +
-					`points — below the ${options.minGain}-point bar, even into a free seat`
+					`points — below the ${options.minGain}-a-game bar, even into a free seat`
 			)
 			break
 		}
@@ -1266,6 +1336,15 @@ export const planSwaps = (
 			drop: best.drop ? best.drop.spot.name : null,
 			dropScore: best.drop ? best.drop.rated!.points : null,
 			gain: best.gain,
+			/* This branch prices a swap by what it does to the LINEUP TOTAL rather than by
+			   the difference of two bscores, so the per-game reading is that total spread
+			   over the window the lineup was projected across. Null where the window has no
+			   games, which is the same absence `bscorePerGame` reports. */
+			gainPerGame:
+				best.add.rated.projection.horizonGames > 0 ?
+					r2(best.gain / best.add.rated.projection.horizonGames)
+				:	null,
+			dropPerGame: best.drop?.rated ? perGame(best.drop.rated) : null,
 			seats: [...new Set(seats)],
 			// Written for the reader, not for the model. "bscore -22.62, below the 25
 			// keep floor" is two internal quantities and a threshold nobody outside

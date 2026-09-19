@@ -235,7 +235,21 @@ export type Strategy = {
 	/** A diagnostic, and never a claim about a model anybody could run. Printed with a
 	 *  banner and refused by the results writer unless the run asked for it. */
 	cheats?: boolean
-	rank: (ctx: Context, hindsight?: Hindsight) => { p: PlayerSeason; score: number }[]
+	rank: (
+		ctx: Context,
+		hindsight?: Hindsight,
+		/**
+		 * THE MEN THIS STRATEGY ALREADY HOLDS, for a ranking that is relative to a roster.
+		 *
+		 * Almost every strategy here is a pure function of the pool — that is what makes
+		 * them comparable. One is not: the app's headline recommendation is ranked by
+		 * `deltaMine`, which is a candidate's points less the WORST MAN THE READER OWNS who
+		 * could take that seat, so the same free agent is worth different amounts to two
+		 * managers. It cannot be asked of the pool alone, and it has never been asked of a
+		 * season at all.
+		 */
+		held?: PlayerSeason[]
+	) => { p: PlayerSeason; score: number }[]
 }
 
 const tableFor = (league: League, g: "hitting" | "pitching") =>
@@ -800,6 +814,65 @@ export const COMBO_SWEEP: Strategy[] = [
 	humanStrategy
 ]
 
+/**
+ * WHAT THE APP'S HEADLINE RECOMMENDATION IS ACTUALLY RANKED BY.
+ *
+ * The one pick the board leads with is chosen by `deltaMine` — a candidate's projected
+ * points less the raw projected points of the worst man the reader owns who could take
+ * that seat (src/client/useBoard.ts, src/client/Board.tsx's `best`). bscore is only the
+ * GATE: rows are filtered to `bscore > 0` and then re-sorted by something else.
+ *
+ * The difference is that the replacement subtraction is dropped, so slot scarcity plays
+ * no part in the final pick — and `grep -rn deltaMine src/backtest src/auto` returns
+ * nothing, which means the metric that decides the app's single most prominent
+ * recommendation has never appeared in a simulator arm or a stored result, while
+ * model.json calls value over replacement "the dominant component".
+ *
+ * So it is asked here, on the same 111 paired weeks as everything else. The arm ranks by
+ * points less the worst HELD man eligible at each slot, exactly as the board does, and
+ * falls back to raw points where the roster cannot price him — which is what the board
+ * does too.
+ */
+export const deltaMineStrategy: Strategy = {
+	name: "delta-mine",
+	rank: (ctx, _hindsight, held) => {
+		const points = new Map(makeBscoreStrategy("_").rank(ctx).map(r => [r.p.id, r.score]))
+		/* The worst man he owns at each slot, in raw projected points — the floor the board
+		   subtracts. Rebuilt every week because the roster changes every week. */
+		const floor = new Map<string, number>()
+		for (const p of held ?? []) {
+			const v = points.get(p.id)
+			if (v === undefined) continue
+			for (const sl of slotsFor(p)) {
+				const now = floor.get(sl)
+				if (now === undefined || v < now) floor.set(sl, v)
+			}
+		}
+		return ctx.prior
+			.map(p => {
+				const v = points.get(p.id) ?? -Infinity
+				if (!Number.isFinite(v)) return { p, score: -Infinity }
+				let best = -Infinity
+				for (const sl of slotsFor(p)) {
+					const f = floor.get(sl)
+					if (f === undefined) continue
+					best = Math.max(best, v - f)
+				}
+				/* No man of his own is eligible anywhere this candidate plays, so there is
+				   nothing to displace and the board falls back to the raw number. */
+				return { p, score: best === -Infinity ? v : best }
+			})
+			.sort((a, b) => b.score - a.score)
+	}
+}
+
+export const HEADLINE_SWEEP: Strategy[] = [
+	bscoreStrategy,
+	deltaMineStrategy,
+	humanStrategy,
+	seasonToDateStrategy
+]
+
 export const ORACLE_SWEEP: Strategy[] = [
 	bscoreStrategy,
 	volumeOracle,
@@ -1073,7 +1146,8 @@ export const playSeason = async (
 			   strategy is a one-parameter function and could not read it if it tried. */
 			const ranked = strategy.rank(
 				ctx,
-				strategy.cheats ? { played: [...hitActual, ...pitActual], points: actual } : undefined
+				strategy.cheats ? { played: [...hitActual, ...pitActual], points: actual } : undefined,
+				rosters.get(strategy.name)?.map(r => r.p)
 			)
 			const held = rosters.get(strategy.name)
 			if (!held) {

@@ -913,6 +913,33 @@ export const MATCHUP_RETUNE: Strategy[] = [
 	humanStrategy
 ]
 
+/**
+ * THE ONE BIG LEVER THAT HAS NEVER HAD AN HONEST MEASUREMENT.
+ *
+ * `statcast.weight` ships at 0, and it is 0 because every result that argued for a
+ * nonzero value was measured on polluted input: Savant's custom leaderboard silently
+ * ignores its own date parameters, so "the season so far" returned the whole season,
+ * future included. Those results are void rather than noisy, and the weight was zeroed
+ * rather than guessed at — which is the right call and leaves the question open.
+ *
+ * `--statcast-real` aggregates Savant day by day, which does respect the window, and the
+ * days are in the disk cache. So the question can finally be asked, on the model that now
+ * ships: every arm here carries the joint bars and the shrinkage, and varies only how
+ * much of a man's contact quality to believe.
+ *
+ * WITHOUT `--statcast-real` EVERY ARM HERE IS THE SAME STRATEGY, because `underlying`
+ * comes back empty and the multiplier is 1 whatever the weight. A run that forgets the
+ * flag compares seven identical models and reads as noise; the totals coming back equal
+ * is the symptom.
+ */
+export const QUALITY_RETUNE: Strategy[] = [
+	tuned("q0-shipped", { qualityWeight: 0 }),
+	tuned("q0.25", { qualityWeight: 0.25 }),
+	tuned("q0.5", { qualityWeight: 0.5 }),
+	tuned("q1", { qualityWeight: 1 }),
+	humanStrategy
+]
+
 export const ORACLE_SWEEP: Strategy[] = [
 	bscoreStrategy,
 	volumeOracle,

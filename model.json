@@ -62,7 +62,10 @@
 			"So Savant is used where it demonstrably pays — the rolling-window buy-low board, the contact ranking, the confidence penalty for a missing row — and not as a multiplier.",
 			"windowDays 21: the signal was measured on a rolling three-week window, not on season-to-date. Contact and results diverge far more inside three weeks (gap~wOBA -0.61) than across a season (-0.36), and that divergence is the whole signal. 0 means season-to-date.",
 			"lambda.mode 'rising' trusts xwOBA MORE as batted-ball sample grows; 'falling' trusts it more in SMALL samples, which is what the stabilisation literature actually argues; 'fixed' ignores sample.",
-			"scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality."
+			"scope 'wide' scales runs and RBI along with the batted-ball events; 'battedBall' leaves run production alone, on the grounds that a hitter's runs depend on the eight men around him, not on his contact quality.",
+			"MEASURED AT LAST, 2026-09-19, and the zero stands as a RESULT rather than as a placeholder. Every earlier argument for a nonzero weight was void input: Savant's custom leaderboard ignores its own date parameters, so 'the season so far' returned the whole season including the future. `--statcast-real` aggregates day by day, which respects the window, and those days are in the disk cache.",
+			"Asked on the model that now ships — joint replacement bars, league-rate shrinkage, corrected game counts, the league's own bench, two moves a week — over 2024-2025, 46 weeks: weight 0 scores 35,647, 0.25 scores 35,247 (−400), 1 scores 35,024 (−623) and 0.5 scores 35,006 (−642). Every nonzero arm is worse and the best of them is worse than the thoughtful human's distance from the control. Contact quality does not pay here.",
+			"A run without --statcast-real compares four IDENTICAL strategies, because `underlying` comes back empty and the multiplier is 1 at every weight. Equal totals across the arms is the symptom, and it is how a quality sweep can look like noise while measuring nothing."
 		]
 	},
 	"probables": {

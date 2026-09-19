@@ -225,5 +225,83 @@ const vsHold = mine.filter((v, i) => v > (holdWeeks[i] ?? Infinity)).length
 t("acting on the model beats drafting on it and walking away", vsHold / mine.length > 0.8, `${vsHold}/${mine.length}`)
 t("and that gap is large", bscore - hold > 10000, `${(bscore - hold).toFixed(0)} pts`)
 
+/*
+ * ═══ AND THE SAME SEASONS UNDER THE RULES THIS LEAGUE ACTUALLY PLAYS ═══════════════
+ *
+ * Everything above runs the LEGACY configuration — one waiver move a week and no bench —
+ * because every result stored in data/results was measured on it and a guard that moves
+ * the grid under those files changes what they mean. It is also not the game anybody
+ * plays: this league carries five bench spots, so a manager holds twenty-two men and
+ * chooses seventeen every week, and it allows six acquisitions a week rather than one.
+ *
+ * With no bench the roster IS the lineup and a strategy's only decision all season is its
+ * waiver swap. Two decisions a week is why every variant of this model landed within a
+ * thousand points of every other for as long as the simulator existed, and why the sweeps
+ * in docs/METHODOLOGY.md read as static. The lineup choice — who to START from the men
+ * you already hold — is the decision the app is actually FOR, and until 2026-09-19 the
+ * season competition could not see it at all.
+ *
+ * So the shipped claims are asserted HERE, on the configuration that matches the league,
+ * and the block above is kept as the continuity check against the stored corpus. This
+ * doubles the suite's runtime to about two minutes, offline, which is the price of the
+ * regression test measuring the product rather than its history.
+ */
+console.log(`\n  ── with the league's own five bench spots and two moves a week ──`)
+const benchTotals = new Map()
+const benchWeekly = new Map()
+for (const season of SEASONS) {
+	const { results } = await playSeason(season, league, STRATEGIES, {
+		movesPerWeek: 2,
+		warmupDays: 28,
+		bench: true
+	})
+	for (const r of results) {
+		benchTotals.set(r.strategy, (benchTotals.get(r.strategy) ?? 0) + r.total)
+		benchWeekly.set(r.strategy, [...(benchWeekly.get(r.strategy) ?? []), ...r.byWeek])
+	}
+}
+const bMine = benchWeekly.get("bscore") ?? []
+const paired = name => {
+	const them = benchWeekly.get(name) ?? []
+	const w = bMine.filter((v, i) => v > (them[i] ?? Infinity)).length
+	const l = bMine.filter((v, i) => v < (them[i] ?? -Infinity)).length
+	const margin = bMine.reduce((a, c, i) => a + (c - (them[i] ?? 0)), 0) / Math.max(bMine.length, 1)
+	return { w, l, margin, total: benchTotals.get(name) ?? 0 }
+}
+for (const name of ["thoughtful-human", "hot-hand+vorp", "season-to-date", "projected-points"]) {
+	const r = paired(name)
+	console.log(
+		`  vs ${name.padEnd(17)} ${String(r.w).padStart(3)}W-${String(r.l).padEnd(3)}L  ` +
+			`${r.margin >= 0 ? "+" : ""}${r.margin.toFixed(1)}/wk`
+	)
+}
+/*
+ * THE THREE CLAIMS THIS PROJECT IS ENTITLED TO MAKE, and no more.
+ *
+ * Against the naive managers the margins are 40 to 60 points a week at p < 0.001, and
+ * those are asserted strictly. Against a thoughtful human — half the season rate, half
+ * the last fortnight, then value over replacement — bscore leads on the total and on the
+ * margin and does NOT clear a sign test (62-49, p 0.25 on the run this was written
+ * against), so what is asserted is that it is ahead, not that it is significantly ahead.
+ * Asserting significance there would be asserting noise, and this suite has already had
+ * one threshold that was measuring a bug rather than a model.
+ */
+const vsHumanB = paired("thoughtful-human")
+t("with a bench, bscore beats a thoughtful human on the total",
+	benchTotals.get("bscore") > vsHumanB.total,
+	`${benchTotals.get("bscore")?.toFixed(0)} vs ${vsHumanB.total.toFixed(0)}`)
+t("…and on the weekly margin, which is the unit a head-to-head league pays in",
+	vsHumanB.margin > 5, `${vsHumanB.margin.toFixed(1)}/wk`)
+for (const [name, floor] of [["season-to-date", 30], ["hot-hand+vorp", 25], ["projected-points", 15]]) {
+	const r = paired(name)
+	t(`and beats ${name} decisively with the bench in`, r.margin > floor && r.w > r.l,
+		`${r.w}W-${r.l}L, ${r.margin.toFixed(1)}/wk`)
+}
+/* The lineup decision is worth something on its own: draft-and-hold makes no moves at
+   all, and with a bench it can still re-choose its seventeen every week. */
+t("and the bench raises every strategy, because choosing a lineup is a real decision",
+	(benchTotals.get("draft-and-hold") ?? 0) > (totals.get("draft-and-hold") ?? 0),
+	`${benchTotals.get("draft-and-hold")?.toFixed(0)} with a bench vs ${totals.get("draft-and-hold")?.toFixed(0)} without`)
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -127,10 +127,37 @@ const seated = (() => {
 */
 const FLAG_AT = 0
 const WIDE_AT = 1
-const teamPage = () =>
+
+/**
+ * EVERY TEAM IN THE LEAGUE HAS ITS OWN MEN, which this fixture used not to model.
+ *
+ * One page was served for every `/b1/<league>/<digits>`, so nine rival rosters came back
+ * identical — which is what the union's duplicate rule is written to REFUSE, and which
+ * would have made a suite over it either green on a bug or red on the fixture. Each team
+ * id now gets a disjoint slice of the capture: team 8 is the reader's own (the seats every
+ * other assertion in this file is written against, unchanged), and every other id deals
+ * from a pool of men nobody else has.
+ */
+const rivalsFor = (() => {
+	const mine = new Set(seated.map(s => s.p.id))
+	const spare = snap.players
+		.filter(p => !mine.has(p.id))
+		.filter(p => (p.stats?.plateAppearances ?? 0) > 200 || (p.stats?.outs ?? 0) > 200)
+	const SIZE = 9
+	return teamId => {
+		const n = Number(teamId)
+		if (!Number.isInteger(n) || n < 1) return []
+		const from = (n - 1) * SIZE
+		return spare
+			.slice(from, from + SIZE)
+			.map((p, i) => ({ slot: ["C", "1B", "2B", "3B", "SS", "OF", "SP", "RP", "BN"][i], p }))
+	}
+})()
+
+const teamPage = (teamId = "8") =>
 	`<!doctype html><meta charset="utf-8"><title>My Team</title><body><table>` +
 	`<tr><th>Pos</th><th>Player</th></tr>` +
-	seated
+	(teamId === "8" ? seated : rivalsFor(teamId))
 		.map(({ slot, p }, i) => {
 			const elig =
 				i === WIDE_AT ? `${p.position ?? "Util"},1B` : (p.position ?? "Util")
@@ -284,6 +311,10 @@ const WALLED_BEHIND_NAV = `<!doctype html><meta charset="utf-8"><body>${NAV}Requ
  * number for one block below and put back afterwards.
  */
 let serveUntil = Infinity
+/** Rival roster pages served this run, and the page after which the fixture walls —
+ *  `Infinity` for the ordinary case. Drives the partial-union assertion. */
+let teamsServed = 0
+let teamsUntil = Infinity
 let playersServed = 0
 
 /** After this many players pages, answer with a STATUS rather than with a page. Yahoo
@@ -342,7 +373,13 @@ const server = createServer((req, res) => {
 	   and the football pages are served by the same routes because Yahoo's fantasy URLs have
 	   the same shape for every sport — the sport is in the HOST, which is what
 	   `sportFrom` reads and what the router refuses on. */
-	if (/\/[bf]1\/\d+\/\d+$/.test(url.pathname)) return send(teamPage())
+	if (/\/[bf]1\/\d+\/\d+$/.test(url.pathname)) {
+		/* The team id off the URL, so nine rival rosters are nine different rosters — see
+		   `rivalsFor`. `teamsServed` counts them so a walled read can be driven. */
+		teamsServed++
+		if (teamsServed > teamsUntil) return send(WALL)
+		return send(teamPage(url.pathname.split("/").pop()))
+	}
 	if (/\/[bf]1\/\d+$/.test(url.pathname)) return send(`<!doctype html><body>League home</body>`)
 	send(`<!doctype html><body>Yahoo Fantasy</body>`)
 })
@@ -1322,6 +1359,105 @@ await walled.close()
 	t("and the status badge on the rows that had one, and nothing on the rows that did not",
 		got.flagged > 0 && got.flagged < got.pool, JSON.stringify(got))
 	t("with nothing thrown on the way", uiErrs.length === 0, uiErrs.join(" | "))
+
+	/*
+	   ── AND THEN THE ONE THAT STOPS THE APP ESTIMATING ──────────────────────────────
+	
+	   Every other answer this app has to "can I add him" approximates this one. The sweep
+	   above is Yahoo's top twenty-five a position, so the addable universe it produces is
+	   ~225 men chosen by Yahoo's own rank; without it the board falls back to a capture's
+	   rostered-share column, which calls 1,010 of 1,248 rateable men gettable where the
+	   derived wire calls 540. The union of the league's own rosters is the set.
+	*/
+	/* Out of the setup sheet and onto My league, which is where a press that costs one
+	   request per rival team lives — beside the league read rather than inside it. */
+	await ui.click(".connect-back button").catch(() => {})
+	await ui.waitForTimeout(500)
+	const dock = await ui.$('.dock-bar button[aria-expanded="true"], .dock-sheet button[aria-expanded="true"]')
+	if (dock) await dock.click()
+	await ui.waitForSelector("button.read-rosters", { timeout: 20000 })
+	await ui.click("button.read-rosters")
+	await ui.waitForFunction(
+		() => {
+			try {
+				return Object.keys(JSON.parse(localStorage.getItem("beanemachine:taken") ?? "{}")).length > 0
+			} catch {
+				return false
+			}
+		},
+		undefined,
+		{ timeout: 90000 }
+	)
+	const union = await ui.evaluate(k => {
+		const held = JSON.parse(localStorage.getItem("beanemachine:taken") ?? "null")?.[k]
+		const teams = Object.keys(held?.byTeam ?? {})
+		const all = Object.values(held?.byTeam ?? {}).flat()
+		return {
+			teams: teams.length,
+			read: held?.teamsRead?.length ?? 0,
+			asked: held?.teamsAsked?.length ?? 0,
+			men: all.length,
+			distinct: new Set(all).size,
+			mine: teams.includes("8"),
+			stamped: !!held?.at,
+			note: held?.note ?? ""
+		}
+	}, KEY)
+	/* Nine rivals in a ten-team league, and his own team is not one of them: he is not a
+	   counterparty and his own men are already in the roster store. */
+	t("one press reads every OTHER team in his league",
+		union.teams === 9 && union.asked === 9 && union.read === 9 && !union.mine,
+		JSON.stringify(union))
+	/* The fixture deals each team a disjoint slice of the capture, so a union that
+	   deduplicated to fewer men than it holds would mean two teams came back as one page —
+	   which is the redirect the duplicate rule exists to catch. */
+	t("…and the nine rosters are nine different rosters, not one page served nine times",
+		union.men > 0 && union.distinct === union.men, JSON.stringify(union))
+	t("…kept per team, so the app can name who owns a man rather than only that somebody does",
+		union.teams === 9 && union.men >= 9 * 5, JSON.stringify(union))
+	t("…and stamped and sourced, because a taken list is as perishable as a wire",
+		union.stamped && /read off your league.s own rosters/.test(union.note),
+		JSON.stringify(union))
+	t("with nothing thrown on the way either", uiErrs.length === 0, uiErrs.join(" | "))
+	await ui.close()
+}
+
+/* ── A UNION MISSING ONE ROSTER IS NOT A SMALLER ANSWER ──────────────────────────────
+   It is that team's twenty-seven men reported as FREE, and rostered men rank at the top,
+   so they would head the board — the failure `likelyAvailable` records on Blake Snell.
+   So the taken store is all-or-nothing, and this drives the partial: the fixture walls
+   after the fifth roster, and what must be in the browser afterwards is NOTHING. */
+{
+	const ui = await context.newPage()
+	const uiErrs = []
+	ui.on("pageerror", e => uiErrs.push(String(e)))
+	await ui.addInitScript(c => {
+		localStorage.clear()
+		localStorage.setItem("beanemachine:config", JSON.stringify(c))
+	}, { ...cfg, active_league: KEY, leagues: { [KEY]: cfg.leagues[KEY] } })
+	await ui.goto(`${APP}#my-league`, { waitUntil: "domcontentloaded" })
+	await ui.waitForSelector("nav button", { timeout: 30000 })
+	await ui.waitForTimeout(2500)
+	await ui.waitForSelector("button.read-rosters", { timeout: 30000 })
+	teamsServed = 0
+	teamsUntil = 5
+	await ui.click("button.read-rosters")
+	await ui.waitForFunction(
+		() => /rosters came back|could not be read/.test(document.querySelector(".read-yahoo")?.innerText ?? ""),
+		undefined,
+		{ timeout: 90000 }
+	)
+	teamsUntil = Infinity
+	const said = await ui.$eval(".read-yahoo", e => e.innerText.replace(/\s+/g, " "))
+	const after = await ui.evaluate(
+		k => JSON.parse(localStorage.getItem("beanemachine:taken") ?? "null")?.[k] ?? null,
+		KEY
+	)
+	t("a walled roster read stores nothing at all, rather than a union that is short",
+		after === null, JSON.stringify(after))
+	t("…and says how many came back, so it reads as a failure and not as a small league",
+		/\b\d+ of \d+ rosters came back\b/.test(said), said.slice(0, 400))
+	t("nothing thrown while being refused", uiErrs.length === 0, uiErrs.join(" | "))
 	await ui.close()
 }
 

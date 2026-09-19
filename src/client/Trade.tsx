@@ -7,6 +7,7 @@ import {
 import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
 import { pool as poolStore, since } from "./pool.ts"
+import { taken as takenStore } from "./taken.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { opponentStore } from "./opponent.ts"
 import { lineupStore } from "./lineup.ts"
@@ -16,7 +17,7 @@ import { localDate } from "../data/today.ts"
 import { shift } from "../engine/period.ts"
 import { deriveTradeReview, leagueTradeDeadline } from "../import.ts"
 import { extensionHere, useExtension } from "./extension.ts"
-import { readLeagueHere } from "./read-yahoo.ts"
+import { readLeagueHere, readRostersHere } from "./read-yahoo.ts"
 import { browserOf, takesExtension } from "./Connect.tsx"
 import { stored } from "./stores.ts"
 import "./trade.css"
@@ -152,6 +153,48 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 		setReadSaid(null)
 		const got = await readLeagueHere(ext, snapshot, leagueKey)
 		setReadSaid(got.said)
+		stored()
+	}
+	/** What this browser holds about who is taken, and how old it is. */
+	const takenHeld = useMemo(() => {
+		try {
+			return leagueKey ? takenStore.of(leagueKey) : null
+		} catch {
+			return null
+		}
+	}, [leagueKey, readSaid])
+	/**
+	 * THE PRESS THAT STOPS THE APP ESTIMATING WHO IS TAKEN.
+	 *
+	 * Its own button, beside the league read rather than inside it, because it is one
+	 * request per rival team — the same bargain the free-agent sweep struck. It reports
+	 * what came back either way: a partial read stores nothing and says so, because the
+	 * list it would replace is a true statement about the league and a union missing one
+	 * roster is not.
+	 */
+	const readRosters = async (): Promise<void> => {
+		if (!snapshot || !leagueKey) return
+		const id = leagueKey.startsWith("yahoo:") ? leagueKey.slice("yahoo:".length) : null
+		if (!id) return
+		setReadSaid(null)
+		/* The SPORT is deliberately not passed. `league.meta.sport` is MLB's own word for it
+		   ("mlb") and Yahoo's host wants the fantasy game's ("baseball"); handing the first to
+		   the second is a read of `mlb.fantasysports.yahoo.com`, which is nobody's league.
+		   Every other read on this screen leaves it to the content script, which takes it off
+		   the tab the reader is standing in. */
+		const got = await readRostersHere(ext, snapshot, leagueKey, id, league?.meta.max_teams ?? null)
+		setReadSaid(
+			[
+				got.taken !== null ?
+					`Read ${got.asked} rosters — ${got.taken} men are taken in your league.`
+				: got.failure ?
+					`${got.failure.what}${got.failure.fix ? ` — ${got.failure.fix}` : ""}`
+				:	null,
+				...got.notes
+			]
+				.filter(Boolean)
+				.join(" ")
+		)
 		stored()
 	}
 	// `availability` comes along for its `cut` — the percentage that separates
@@ -1038,8 +1081,36 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 								</button>
 							)}
 						</p>
+						{/*
+						  THE SECOND PRESS, AND IT IS WORTH A SECOND BUTTON.
+						
+						  Everything else in this app answers "can I add him" by approximation: the
+						  free-agent sweep reads Yahoo's table twenty-five rows deep per position, and
+						  with no sweep the board falls back to a capture's opinion of who is
+						  generally owned. This reads the league's own rosters, so the answer stops
+						  being an estimate. It costs one request per rival team, which is why it is a
+						  press and not a side effect of the one above.
+						*/}
+						{(league?.meta.max_teams ?? 0) > 1 && (
+							<p>
+								<button
+									type="button"
+									className="read-rosters"
+									disabled={ext.busy || !snapshot || !leagueKey}
+									onClick={() => void readRosters()}
+								>
+									Read the other {(league!.meta.max_teams ?? 1) - 1} rosters
+								</button>
+							</p>
+						)}
 						{ext.progress && <p className="sub connect-progress">{ext.progress}</p>}
 						{readSaid && <p className="sub">{readSaid}</p>}
+						{takenHeld && (
+							<p className="sub">
+								Holding who is taken off <b>{takenHeld.teamsRead.length}</b> rosters, read{" "}
+								{since(takenHeld.at, Date.now()).label}.
+							</p>
+						)}
 						{/*
 						  WHAT IS ACTUALLY IN THIS BROWSER, from the store rather than from the
 						  last press.

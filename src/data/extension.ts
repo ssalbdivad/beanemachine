@@ -75,12 +75,12 @@ export const FROM_EXTENSION = "beanemachine-extension" as const
  *      carries the list the sweep set out to get; and an ask the browser half does not know
  *      is refused by name instead of going quiet.
  */
-export const PROTOCOL = 2
+export const PROTOCOL = 3
 
 /** Every ask this protocol defines. The browser half checks an incoming ask against this
  *  rather than falling through, because falling through is what made an unknown ask look
  *  like a lost connection. */
-export const ASKS = ["hello", "page", "league", "pool"] as const
+export const ASKS = ["hello", "page", "league", "pool", "rosters"] as const
 
 export const isKnownAsk = (ask: unknown): ask is Ask =>
 	typeof ask === "string" && (ASKS as readonly string[]).includes(ask)
@@ -212,6 +212,17 @@ export interface Grab {
 	 * carry anything, and the list has to survive whichever pages are the ones that made it.
 	 */
 	asked?: string[]
+	/**
+	 * EVERY TEAM ID A `rosters` PRESS SET OUT TO READ.
+	 *
+	 * The same argument as `asked` one field up, and a stricter consequence. Who is taken
+	 * in a league is the union of its rosters, and a union missing one roster is not a
+	 * smaller answer — it is 27 taken men reported as free, and rostered men rank at the
+	 * top, so they would head the board. So the complement is written only when EVERY
+	 * asked-for roster came back, and the only way to know how many were asked for is to
+	 * carry the list on the pages that did arrive.
+	 */
+	askedTeams?: string[]
 }
 
 /** What the extension could not do, in the same shape `src/auto/session.ts` uses — one
@@ -234,10 +245,12 @@ export interface GrabFailure {
  * to ask for one. Found by the integration suite, which timed out waiting for a hello that
  * had already been said.
  *
- * `pool` is the only one that costs Yahoo more than the page the reader already has open,
- * and it is the only one behind a button of its own.
+ * `pool` and `rosters` are the two that cost Yahoo more than the page the reader already
+ * has open, and they are the two behind buttons of their own. `rosters` reads every OTHER
+ * team in the league, which is the only way to know who is taken rather than to estimate
+ * it — nine pages for a ten-team league, so it is a press and never a side effect.
  */
-export type Ask = "hello" | "page" | "league" | "pool"
+export type Ask = "hello" | "page" | "league" | "pool" | "rosters"
 
 export interface AppMessage {
 	from: typeof FROM_APP
@@ -249,6 +262,10 @@ export interface AppMessage {
 	leagueId?: string
 	sport?: string
 	positions?: string[]
+	/** For `rosters`: which teams in that league to read. The app derives them from the
+	 *  league's own stated size, so the extension is never asked to guess how many there
+	 *  are or to crawl for them. */
+	teamIds?: string[]
 }
 
 export type ExtensionMessage =

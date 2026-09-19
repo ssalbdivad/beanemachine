@@ -641,8 +641,25 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			.flatMap(x => x.split(",").map(y => y.trim()))
 			.filter(Boolean)
 	)
+	/* AND THE PLURAL FORM OF THE SAME SENTENCE, which has no <b> in it.
+	
+	   `.decide-locked b` finds the name only when ONE seat has started: with more than one
+	   the card writes "4 of your seats were due to start before now — A, B, C and D — so
+	   they are no longer yours to change", and `andList` returns a plain string. So this
+	   assertion passed all afternoon and failed in the evening, on the card's own words,
+	   about men it had named. Measured at HEAD as well as here, which is what says it is the
+	   clock and not a change: Cristopher Sánchez, Jesús Luzardo, Michael Wacha and Gavin
+	   Williams, every one of them inside that sentence.
+	
+	   Matched out of the prose against the seats that were read, which is weaker than a
+	   selector and is the honest reading of a sentence. */
+	const shut = (
+		await page
+			.$$eval(".decide-locked, .decide-stuck", n => n.map(e => e.innerText ?? "").join(" "))
+			.catch(() => "")
+	).replace(/\s+/g, " ")
 	const unaccounted = [...activeSeated].filter(
-		n => !inFold.has(n) && !benchNames.has(n) && !unpriced.has(n)
+		n => !inFold.has(n) && !benchNames.has(n) && !unpriced.has(n) && !shut.includes(n)
 	)
 	const twice = [...activeSeated].filter(n => inFold.has(n) && benchNames.has(n))
 	t("every man in an active seat is either benched, in tonight's lineup, or named as unpriceable",

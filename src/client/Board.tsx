@@ -14,6 +14,7 @@ import {
 	canReadPool, api, ApiError, getMode, poolIsPartial, type AvailablePool
 } from "./api.ts"
 import { since } from "./pool.ts"
+import { taken as takenStore, takenKeys as keysOf } from "./taken.ts"
 import { useEffect } from "react"
 import { datesBetween, leagueWeek, type ResolvedPeriod } from "../engine/period.ts"
 import { purpose, tab } from "./panels.tsx"
@@ -682,6 +683,25 @@ export const Board = ({
 		)
 	}, [leagueKey, snapshot, rev])
 	/**
+	 * WHO IS TAKEN IN THIS LEAGUE, where his own rosters have been read.
+	 *
+	 * The top rung of the availability ladder. Guarded the way the roster read above is:
+	 * a corrupt store must not blank the one screen that ranks anything, and `taken.ts`
+	 * already refuses to hand back anything that did not validate.
+	 */
+	const takenHere = useMemo(() => {
+		if (!leagueKey) return null
+		try {
+			return takenStore.of(leagueKey)
+		} catch {
+			return null
+		}
+	}, [leagueKey, rev])
+	const takenSet = useMemo(() => {
+		const keys = keysOf(takenHere)
+		return keys.size ? keys : null
+	}, [takenHere])
+	/**
 	 * Opens on the question this reader last asked, not on a guess about a stranger.
 	 * Only mode, window and moves are restored — see `view.ts` for why the filters
 	 * deliberately are not.
@@ -936,7 +956,11 @@ export const Board = ({
 		   the status badge — which used to die in the store. See the note above. */
 		poolOwnership,
 		poolStatus,
-		pool?.readAt ?? null
+		pool?.readAt ?? null,
+		/* The exact answer, where a complete roster read is stored. Everything else on the
+		   ladder approximates this. */
+		takenSet,
+		takenHere ? { teams: takenHere.teamsRead.length, at: takenHere.at } : null
 	)
 	/** How old the figures that came off his own league page are, in the words the pool
 	 *  chip already uses. Computed once for the whole list rather than per row: every row
@@ -971,7 +995,7 @@ export const Board = ({
 	 * was never asked.
 	 */
 	const availTitle =
-		availability.basis === "pool" || !poolError ?
+		availability.basis === "pool" || availability.basis === "taken" || !poolError ?
 			availability.basisText
 		:	`${availability.basisText}. Your league's own free-agent list could not be read.`
 	useEffect(() => {
@@ -1167,7 +1191,11 @@ export const Board = ({
 	const picked = tier.length ? best(tier) : undefined
 	const pick = picked ?? (addable.length ? best(addable) : null)
 	const basis: "pool" | "ownership" | "none" =
-		picked === undefined ? "none" : availability.basis === "pool" ? "pool" : "ownership"
+		picked === undefined ? "none"
+		: /* A roster read is exact, so it speaks in the same voice the wire does rather than
+		     in the estimate's. */
+			availability.basis === "pool" || availability.basis === "taken" ? "pool"
+		:	"ownership"
 
 	/**
 	 * What the reader has narrowed, in his own words.
@@ -1425,7 +1453,8 @@ export const Board = ({
 								Only players I can add
 								<em className="pool-count">
 									{" "}
-									{availability.basis === "pool" ? `${availability.size} free`
+									{availability.basis === "taken" ? "off your league's rosters"
+									: availability.basis === "pool" ? `${availability.size} free`
 									: availability.basis === "ownership" ? `est. over ${availability.cut!.cut}% is taken`
 									:	"can't tell"}
 								</em>
@@ -1526,7 +1555,8 @@ export const Board = ({
 							Only players I can add
 							<em className="pool-count">
 								{" "}
-								{availability.basis === "pool" ? `${availability.size} free`
+								{availability.basis === "taken" ? "exact"
+								: availability.basis === "pool" ? `${availability.size} free`
 								: availability.basis === "ownership" ? "estimated"
 								:	"can't tell"}
 							</em>

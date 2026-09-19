@@ -224,7 +224,17 @@ const pickTab = async (want: string | null): Promise<{ tab: YahooTab } | { failu
  * pressed something.
  */
 const askYahoo = async (
-	msg: { ask: Ask; id: string; leagueId?: string; sport?: string; positions?: string[] },
+	msg: {
+		ask: Ask
+		id: string
+		leagueId?: string
+		sport?: string
+		positions?: string[]
+		/* For `rosters`. Forwarded by the spread below with everything else — no new rule
+		   is needed, because a `rosters` ask names its league and the existing "only a tab
+		   on that league will do" therefore applies to it unchanged. */
+		teamIds?: string[]
+	},
 	reply: (answer: unknown) => void
 ): Promise<void> => {
 	/*

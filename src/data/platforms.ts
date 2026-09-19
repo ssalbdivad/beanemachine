@@ -106,6 +106,20 @@ export interface Platform {
 	sweep:
 		| ((at: PageAt, positions: string[]) => Fetchable[])
 		| null
+	/**
+	 * EVERY OTHER TEAM'S ROSTER, which is the only exact answer to "who is taken".
+	 *
+	 * The sweep reads Yahoo's free-agent table 25 rows deep per position, so the addable
+	 * universe it produces is ~225 men chosen by Yahoo's own rank; everything else is an
+	 * estimate off a capture's ownership column. The union of the league's own rosters is
+	 * not an estimate and is not capped: it is the set, exactly, for this league.
+	 *
+	 * One request per team, which is why it is its own function and its own button. Null
+	 * for a platform that answers who is rostered in a single request.
+	 */
+	rosters:
+		| ((at: PageAt, teamIds: string[]) => Fetchable[])
+		| null
 }
 
 /* ── Yahoo ──────────────────────────────────────────────────────────────────────────────
@@ -220,6 +234,19 @@ export const YAHOO: Platform = {
 			kind: "players" as PageKind,
 			as: "html" as const
 		}))
+	},
+	/* `as: "text"` and not "html". A roster page is ~4 KB of text against ~400 KB of
+	   markup, and `rosterFromPaste` reads text: nine pages as HTML would be 3.6 MB across
+	   postMessage to buy nothing the text does not already carry. The players table is the
+	   one page where the markup is worth it, because ids live in attributes. */
+	rosters: (at, teamIds) => {
+		if (!at.leagueId) return []
+		const sport = at.sport ?? "baseball"
+		return teamIds.map(id => ({
+			url: `https://${sport}.fantasysports.yahoo.com/b1/${at.leagueId}/${id}`,
+			kind: "team" as PageKind,
+			as: "text" as const
+		}))
 	}
 }
 
@@ -257,7 +284,8 @@ export const SLEEPER: Platform = {
 	},
 	at: () => ({ kind: "unknown", leagueId: null, teamId: null, sport: null }),
 	onePress: () => [],
-	sweep: null
+	sweep: null,
+	rosters: null
 }
 
 export const PLATFORMS: Platform[] = [YAHOO, SLEEPER]

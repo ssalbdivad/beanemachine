@@ -45,7 +45,7 @@ export interface ExtensionState {
 	progress: string | null
 	ask: (
 		ask: Ask,
-		opts?: { leagueId?: string; sport?: string; positions?: string[] }
+		opts?: { leagueId?: string; sport?: string; positions?: string[]; teamIds?: string[] }
 	) => Promise<{ grabs: Grab[]; failure?: GrabFailure } | { grabs?: undefined; failure: GrabFailure }>
 	/** Opens Yahoo in a tab of its own, on the reader's press — the extension never opens
 	 *  one by itself. */

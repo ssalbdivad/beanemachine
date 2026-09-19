@@ -82,7 +82,7 @@ window.addEventListener("message", event => {
 	   loop every postMessage bridge writes at least once. */
 	if (event.source !== window || event.origin !== location.origin) return
 	if (!isFromApp(event.data)) return
-	const { id, ask, leagueId, sport, positions } = event.data
+	const { id, ask, leagueId, sport, positions, teamIds } = event.data
 	/* A hello never leaves this browser, so it is answered here rather than routed. See
 	   `Ask` in src/data/extension.ts for why a page has to be able to ask for one. */
 	if (ask === "hello") {
@@ -90,7 +90,7 @@ window.addEventListener("message", event => {
 		return
 	}
 	try {
-		chrome.runtime.sendMessage({ kind: "ask", id, ask, leagueId, sport, positions }, answer => {
+		chrome.runtime.sendMessage({ kind: "ask", id, ask, leagueId, sport, positions, teamIds }, answer => {
 			/* An extension that has been updated or disabled between the send and the answer
 			   leaves this channel dead, and the callback then fires with `undefined` and an
 			   error on `chrome.runtime.lastError`. Reading it is what stops the browser

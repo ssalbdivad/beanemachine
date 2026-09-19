@@ -418,7 +418,7 @@ const slotsAsked = (want: string[] | undefined): string[] => {
  * background.ts), so driving three tabs at once means three real Yahoo pages the reader has
  * open on three different leagues.
  */
-let reading: null | "league" | "pool" = null
+let reading: null | "league" | "pool" | "rosters" = null
 /**
  * WHEN THE CURRENT READ CLAIMED THE GATE, so a read that cannot end cannot hold it.
  *
@@ -434,7 +434,7 @@ let reading: null | "league" | "pool" = null
 let readingSince = 0
 const STUCK_MS = 240_000
 const gateHeld = (): boolean => reading !== null && Date.now() - readingSince < STUCK_MS
-const claim = (what: "league" | "pool"): void => {
+const claim = (what: "league" | "pool" | "rosters"): void => {
 	reading = what
 	readingSince = Date.now()
 }
@@ -475,14 +475,14 @@ const spend = (): void => {
  * tell him what to do next. The `detail` field is where the machine's account goes; the app
  * prints it only where it prints everything.
  */
-const alreadyBusy = (step: "pool" | "league"): { kind: "failed"; failure: GrabFailure } => ({
+const alreadyBusy = (step: "pool" | "league" | "rosters"): { kind: "failed"; failure: GrabFailure } => ({
 	kind: "failed",
 	failure: {
 		step,
 		what:
-			reading === "pool" ?
-				"your free agents are being read right now"
-			:	"your league is being read right now",
+			reading === "pool" ? "your free agents are being read right now"
+			: reading === "rosters" ? "your league's rosters are being read right now"
+			: "your league is being read right now",
 		/* The second sentence is the one that matters when this is wrong. A read that is
 		   genuinely stuck says "a few seconds" for as long as it is stuck, and the reader has no
 		   way to know which of the two he is looking at — so he is given the action that fixes
@@ -493,7 +493,7 @@ const alreadyBusy = (step: "pool" | "league"): { kind: "failed"; failure: GrabFa
 	}
 })
 
-const askedTooHard = (step: "pool" | "league", ms: number): { kind: "failed"; failure: GrabFailure } => ({
+const askedTooHard = (step: "pool" | "league" | "rosters", ms: number): { kind: "failed"; failure: GrabFailure } => ({
 	kind: "failed",
 	failure: {
 		step,
@@ -677,6 +677,125 @@ chrome.runtime.onMessage.addListener(
 					/* Given back on every path, including the ones that threw: a gate that is not
 					   released is an extension that has quietly stopped working, which is worse
 					   than the burst it was put there to stop. */
+					reading = null
+				}
+			})()
+			return true
+		}
+		/*
+		   EVERY OTHER TEAM IN HIS LEAGUE, WHICH IS THE ONLY EXACT ANSWER TO "WHO IS TAKEN".
+		
+		   The sweep reads Yahoo's free-agent table twenty-five rows deep per position, so the
+		   list it produces is Yahoo's own top 225 and everything past that is an estimate off a
+		   capture's ownership column. The union of the league's rosters is neither capped nor
+		   estimated; it is the set.
+		
+		   Built from the `league` branch and not from the `pool` one, because these are ordinary
+		   page reads at `as: "text"` rather than a paginated table — but it takes the sweep's
+		   spacing and the sweep's progress messages, because nine sequential requests inside a
+		   one-at-a-time gate is a long time to say nothing.
+		
+		   THE TEAM IDS COME FROM THE APP, which derives them from the league's own stated size.
+		   This file never guesses how many teams there are and never crawls for them: an ask
+		   with no ids is refused, and the ids it is given are digits, deduped and capped. A
+		   league is teams, not a search.
+		*/
+		if (msg.ask === "rosters") {
+			const leagueId = asked(msg.leagueId) ?? leagueIdFrom(location.href)
+			const sport = sportAsked(msg.sport) ?? sportFrom(location.href) ?? SPORT
+			if (!leagueId) {
+				reply({
+					kind: "failed",
+					failure: {
+						step: "rosters",
+						what: "this page does not say which league it is",
+						fix: "Open your own team page on Yahoo and try again."
+					}
+				})
+				return true
+			}
+			const teamIds = [
+				...new Set((msg.teamIds ?? []).map(x => asked(x)).filter((x): x is string => !!x))
+			].slice(0, 32)
+			if (!teamIds.length) {
+				reply({
+					kind: "failed",
+					failure: {
+						step: "rosters",
+						what: "this page does not say which teams your league has",
+						fix: "Set the number of teams on My league, then press this again."
+					}
+				})
+				return true
+			}
+			const plan = YAHOO.rosters?.({ kind: "team", leagueId, teamId: null, sport }, teamIds) ?? []
+			if (gateHeld()) {
+				reply(alreadyBusy("rosters"))
+				return true
+			}
+			const hold = waitFor(plan.length)
+			if (hold > 0) {
+				reply(askedTooHard("rosters", hold))
+				return true
+			}
+			claim("rosters")
+			void (async () => {
+				try {
+					const grabs: Grab[] = []
+					let wall: GrabFailure | null = null
+					for (let i = 0; i < plan.length; i++) {
+						const want = plan[i]!
+						/* Said before the request, not after, so the line on screen names the page
+						   the reader is waiting on rather than the one that just landed. */
+						try {
+							chrome.runtime.sendMessage({
+								kind: "progress",
+								id: msg.id,
+								say: `reading roster ${i + 1} of ${plan.length}`,
+								done: i,
+								total: plan.length
+							})
+						} catch {
+							/* Orphaned — see the sweep's own note. The pages still go back. */
+						}
+						if (i > 0) await new Promise(r => setTimeout(r, 250))
+						spend()
+						const res = await getPage(want.url)
+						if (!res.ok) continue
+						const text = renderedText(await res.text())
+						if (!text.trim()) continue
+						/* A WALL STOPS THE PRESS. A throttle is a fact about the session, not about
+						   the page: the next request would be refused too, and a union missing one
+						   roster is not a smaller answer — it is 27 taken men reported as free. */
+						wall = wallIn(text)
+						if (wall) break
+						grabs.push({
+							url: want.url,
+							kind: want.kind,
+							text,
+							at: now(),
+							/* Carried on every grab for the reason `asked` is: a page that never
+							   arrived cannot carry anything, and the count of what was asked for is
+							   the only thing that can refuse a partial complement. */
+							askedTeams: teamIds
+						})
+					}
+					reply(
+						wall && !grabs.length ?
+							{ kind: "failed", failure: wall }
+						:	{ kind: "grabs", grabs, failure: wall ?? undefined }
+					)
+				} catch (e) {
+					reply({
+						kind: "failed",
+						failure: {
+							step: "rosters",
+							what: "your league's rosters could not be read",
+							fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+							detail: String(e)
+						}
+					})
+				} finally {
 					reading = null
 				}
 			})()

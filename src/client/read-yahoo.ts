@@ -6,6 +6,7 @@ import { pool as poolStore } from "./pool.ts"
 import { roster as rosterStore } from "./roster.ts"
 import { lineupStore } from "./lineup.ts"
 import { opponentStore } from "./opponent.ts"
+import { taken as takenStore } from "./taken.ts"
 
 /**
  * READING A LEAGUE, IN ONE PLACE, because two places would drift.
@@ -131,6 +132,123 @@ export const knownTeamId = (leagueKey: string | null): string | null => {
 		return lineupStore.of(leagueKey)?.teamId ?? null
 	} catch {
 		return null
+	}
+}
+
+export interface RostersRead {
+	/** How many men came back taken, when the read was complete. Null on every refusal,
+	 *  including a partial one — see `complete`. */
+	taken: number | null
+	/** How many teams answered, out of how many were asked for, so a screen can say what
+	 *  happened rather than only that nothing did. */
+	read: number
+	asked: number
+	failure: GrabFailure | null
+	notes: string[]
+}
+
+/**
+ * EVERY OTHER TEAM IN HIS LEAGUE, which is the only exact answer to "who can I add".
+ *
+ * `max_teams − 1` requests, one page at a time, paced and capped inside the extension the
+ * way the sweep is. It is its own press and is deliberately NOT folded into `readLeagueHere`:
+ * nine requests sit behind their own button, which is the bargain the sweep already struck
+ * with the reader.
+ *
+ * REFUSED BEFORE IT ASKS where the league has not said how many teams it has. Without that
+ * number there is no list of team ids to read and no denominator to check the answer
+ * against, and a union of "as many as answered" is exactly the partial set this whole store
+ * refuses to hold.
+ *
+ * HIS OWN TEAM IS LEFT OUT WHERE IT IS KNOWN. He is not a counterparty, and his own men
+ * are already in the roster store. Where the app does not know which team is his — a
+ * browser that has never read his team page, so `knownTeamId` is null — every team is read
+ * instead, which is the honest fallback: his own men are genuinely taken, so a union that
+ * includes them still answers "can I add him" correctly, and the alternative is refusing a
+ * read over a number nobody stated.
+ *
+ * WRITTEN ONLY WHEN COMPLETE. A partial read reports what came back and stores nothing,
+ * because the old list — however old — is a true statement about the league, and a union
+ * missing one roster is a false one.
+ */
+export const readRostersHere = async (
+	ext: ExtensionState,
+	snapshot: { players: PlayerSeason[]; eligibility?: Record<string, string[]> },
+	leagueKey: string,
+	leagueId: string,
+	teams: number | null,
+	sport = "baseball"
+): Promise<RostersRead> => {
+	if (!teams || teams < 2)
+		return {
+			taken: null,
+			read: 0,
+			asked: 0,
+			failure: {
+				step: "rosters",
+				what: "your league has not said how many teams it has",
+				fix: "Set the number of teams on My league, then press this again."
+			},
+			notes: []
+		}
+	const mine = knownTeamId(leagueKey)
+	const teamIds = Array.from({ length: teams }, (_, i) => String(i + 1)).filter(id => id !== mine)
+	const answer = await ext.ask("rosters", { leagueId, sport, teamIds })
+	if (!answer.grabs?.length)
+		return { taken: null, read: 0, asked: teamIds.length, failure: answer.failure ?? null, notes: [] }
+	const got = readGrabs(answer.grabs, snapshot)
+	const rosters = got.rosters
+	if (!rosters)
+		return {
+			taken: null,
+			read: 0,
+			asked: teamIds.length,
+			failure: answer.failure ?? {
+				step: "rosters",
+				what: "none of those pages could be read as a roster",
+				fix: "Open your league on Yahoo and press it again."
+			},
+			notes: got.notes
+		}
+	if (!rosters.complete)
+		return {
+			taken: null,
+			read: rosters.teamsRead.length,
+			asked: rosters.teamsAsked.length,
+			failure: answer.failure ?? null,
+			notes: got.notes
+		}
+	try {
+		takenStore.set(leagueKey, {
+			at: got.at ?? new Date().toISOString(),
+			leagueId,
+			byTeam: rosters.byTeam,
+			teamsRead: rosters.teamsRead,
+			teamsAsked: rosters.teamsAsked,
+			/* The reader's own account of where this came from, in the words a chip will
+			   print. A carried file and a read age differently and must say which they are. */
+			note: "read off your league's own rosters in this browser"
+		})
+	} catch (e) {
+		return {
+			taken: null,
+			read: rosters.teamsRead.length,
+			asked: rosters.teamsAsked.length,
+			failure: {
+				step: "store",
+				what: "this browser would not keep who is taken",
+				fix: "Check that this site is allowed to store data, then try again.",
+				detail: String(e)
+			},
+			notes: got.notes
+		}
+	}
+	return {
+		taken: new Set(Object.values(rosters.byTeam).flat()).size,
+		read: rosters.teamsRead.length,
+		asked: rosters.teamsAsked.length,
+		failure: answer.failure ?? null,
+		notes: got.notes
 	}
 }
 

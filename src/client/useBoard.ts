@@ -8,6 +8,7 @@ import {
 import type { League } from "../schema.ts"
 import { resolvePeriod, scoringEnd, windowFrom, withinDays } from "../engine/period.ts"
 import { localDate } from "../data/today.ts"
+import { since } from "./pool.ts"
 import { useInjuries } from "./useInjuries.ts"
 import { normalizeName } from "../data/names.ts"
 
@@ -481,7 +482,22 @@ export const useBoard = (
 	 */
 	poolStatus?: Map<string, string> | null,
 	/** When that wire was read, so a row can say how old its own figure is. */
-	poolReadAt?: string | null
+	poolReadAt?: string | null,
+	/**
+	 * WHO IS TAKEN IN THIS LEAGUE, as `id:group` keys off its own rosters.
+	 *
+	 * The top rung of the availability ladder and the only exact one. Every other rung
+	 * approximates it: the sweep is Yahoo's top 25 a position, the ownership cut is a
+	 * capture's opinion of who is generally owned. This is the league, read.
+	 *
+	 * Null unless a complete read is stored — `taken.ts` refuses to hold a partial union,
+	 * because one missing roster is that team's men reported as free, at the top of the
+	 * board.
+	 */
+	takenKeys?: Set<string> | null,
+	/** How many rosters that union was read from, and when, so the line naming it can say
+	 *  both rather than asserting an exact answer with no provenance. */
+	takenFrom?: { teams: number; at: string } | null
 ) => {
 	/**
 	 * The injured list, brought up to date from MLB rather than read off a capture.
@@ -676,6 +692,31 @@ export const useBoard = (
 	}, [using, period, longWindows])
 
 	const availability = useMemo(() => {
+		/*
+		   THE TOP RUNG, AND THE ONLY ONE THAT IS NOT AN APPROXIMATION.
+		
+		   Every rung below answers "can I add him" from something other than the league: the
+		   sweep from Yahoo's own top twenty-five a position, the cut from a capture's
+		   rostered-share column. This is the union of the league's own rosters, so the
+		   complement is every man in the snapshot nobody in his league owns — uncapped, and
+		   not an opinion.
+		
+		   It carries NO `missedPositions` clause and passes `availablePositions: undefined`
+		   downstream, which `slotsCoveredBy` already reads as "every slot covered". That is
+		   correct here and is the reason the truncation failure cannot recur on this rung: a
+		   roster read is not per-position, so there is no position it could have missed.
+		*/
+		if (takenKeys && takenKeys.size > 0)
+			return {
+				basis: "taken" as const,
+				exact: true,
+				cut: null as OwnershipCut | null,
+				size: null as number | null,
+				basisText:
+					`read off your league's own rosters: everyone not on one of the other ` +
+					`${takenFrom?.teams ?? 0} teams is free` +
+					(takenFrom?.at ? `, read ${since(takenFrom.at, Date.now()).label}` : "")
+			}
 		if (availableNames && availableNames.size > 0)
 			return {
 				basis: "pool" as const,
@@ -723,7 +764,7 @@ export const useBoard = (
 				cut?.basis ??
 				"nothing this page can read says who is on the wire in your league, so nobody is filtered out for it"
 		}
-	}, [availableNames, league, snapshot, missedPositions])
+	}, [availableNames, league, snapshot, missedPositions, takenKeys, takenFrom])
 
 	/**
 	 * Who the reader can actually get, as one test, drawn from whichever rung of the
@@ -739,6 +780,11 @@ export const useBoard = (
 	 * about the wire, the whole-pool simulation is still the best bar available.
 	 */
 	const gettable = useMemo(() => {
+		/* The key is `id:group`, the same one the roster store holds, so a two-way player is
+		   one man and cannot be free as a batter and owned as a pitcher. */
+		if (availability.basis === "taken" && takenKeys)
+			return (r: { player: { id: number; group?: string } }) =>
+				!takenKeys.has(`${r.player.id}:${r.player.group === "pitching" ? "pitching" : "hitting"}`)
 		if (availability.basis === "pool" && availableNames)
 			return (r: { player: { name: string } }) => availableNames.has(normalizeName(r.player.name))
 		const cut = availability.cut
@@ -752,7 +798,7 @@ export const useBoard = (
 			}
 		}
 		return undefined
-	}, [availability, availableNames, snapshot])
+	}, [availability, availableNames, snapshot, takenKeys])
 
 	const rated = useMemo(() => {
 		if (!snapshot || !league) return []
@@ -971,7 +1017,13 @@ export const useBoard = (
 							return Math.round((r.points - Math.min(...floors)) * 10) / 10
 						})(),
 				free:
-					availability.basis === "pool" ?
+					/* On the top rung the answer is not "probably": he is on a roster or he is
+					   not, and the whole league was read to find out. */
+					availability.basis === "taken" ?
+						!takenKeys!.has(
+							`${r.player.id}:${r.player.group === "pitching" ? "pitching" : "hitting"}`
+						)
+					: availability.basis === "pool" ?
 						availableNames!.has(normalizeName(r.player.name))
 					: availability.basis === "ownership" ?
 						likelyAvailable(r.rosteredPct, availability.cut!, {
@@ -980,7 +1032,7 @@ export const useBoard = (
 						})
 					:	null
 			})),
-		[rated, availability, availableNames, valueRank, worstMineBySlot, myNames]
+		[rated, availability, availableNames, valueRank, worstMineBySlot, myNames, takenKeys]
 	)
 
 	/** Which sides this league actually scores — an unconfigured template scores

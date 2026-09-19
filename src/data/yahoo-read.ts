@@ -60,6 +60,28 @@ export interface YahooReading {
 	 * page was among the grabs.
 	 */
 	teamId: string | null
+	/**
+	 * WHO IS TAKEN IN THIS LEAGUE, read rather than estimated.
+	 *
+	 * The union of every OTHER team's roster. The sweep answers "who is free" twenty-five
+	 * rows deep per position off Yahoo's own ranking, and past that the app falls back to
+	 * `ownershipCut` — an estimate off a capture that calls 1,010 of 1,248 rateable men
+	 * gettable where the derived wire calls 540. This is the set, for this league, on the
+	 * day it was read.
+	 *
+	 * `complete` is ALL-OR-NOTHING and that is the whole design. A union missing one roster
+	 * is not a smaller answer: it is 27 taken men reported as free, and rostered men rank
+	 * high, so they would head the board — the failure `likelyAvailable` already documents
+	 * on Blake Snell. Null when no rival roster was among the grabs.
+	 */
+	rosters: {
+		/** `id:group` keys per team id, so a consumer can say WHO owns a man and not only
+		 *  that somebody does. */
+		byTeam: Record<string, string[]>
+		teamsRead: string[]
+		teamsAsked: string[]
+		complete: boolean
+	} | null
 	/** The oldest read in the set, which is what any age the app prints must be measured
 	 *  from — a set of pages read over four minutes is as old as its oldest page. */
 	at: string | null
@@ -134,6 +156,7 @@ export const readGrabs = (
 		pool: null,
 		opponent: null,
 		teamId: null,
+		rosters: null,
 		at: null,
 		notes
 	}
@@ -228,7 +251,18 @@ export const readGrabs = (
 			)
 	}
 
-	const team = grabs.find(g => g.kind === "team")
+	/*
+	   TWO KINDS OF TEAM PAGE, TOLD APART BY THE PRESS THAT ASKED FOR THEM.
+
+	   A `rosters` press reads every OTHER team in the league, so its grabs are rival roster
+	   pages by construction — and the own-team path below refuses exactly those, loudly and
+	   correctly ("that is somebody else's team page"). Rather than teach that rule an
+	   exception, the press declares itself: only a `rosters` press sets `askedTeams`, so a
+	   grab carrying it is never a candidate for "his team" and a grab without it is never
+	   part of the union. Neither path can be reached by the other's pages.
+	*/
+	const unionGrabs = grabs.filter(g => g.kind === "team" && g.askedTeams?.length)
+	const team = grabs.find(g => g.kind === "team" && !g.askedTeams?.length)
 	if (team) out.teamId = teamIdFrom(team.url)
 	/*
 	   SOMEBODY ELSE'S TEAM.
@@ -299,7 +333,7 @@ export const readGrabs = (
 			notes.push(
 				"The seats on that page could not be read, so everyone it names is on your team until you say otherwise."
 			)
-	} else if (grabs.some(g => g.kind !== "players")) {
+	} else if (!unionGrabs.length && grabs.some(g => g.kind !== "players")) {
 		/*
 		   HE PRESSED IT FROM THE WRONG PAGE, and it used to say nothing at all.
 
@@ -315,6 +349,86 @@ export const readGrabs = (
 		notes.push(
 			"That page is not your team, so no players were read. Open your own team on Yahoo and press it again."
 		)
+	}
+
+	/*
+	   ═══ THE UNION OF THE LEAGUE'S OWN ROSTERS ═══════════════════════════════════════════
+	
+	   Every rule here is STRICTER than the own-team path above, and deliberately so. There,
+	   a page whose seats will not parse falls back to "everyone it names is yours", because
+	   the cost of refusing is an empty roster and the reader can see and fix it. Here the
+	   same mistake marks a FREE man taken, which hides him from every screen in the app
+	   without anything on any screen mentioning him. So a rival roster that cannot be read
+	   as a roster is simply not read.
+	*/
+	if (unionGrabs.length) {
+		const byTeam: Record<string, string[]> = {}
+		const teamsRead: string[] = []
+		/* Kept for the duplicate sweep below to add to; nothing is printed from it, because a
+		   reader cannot act on which team id came back short. */
+		const unreadable: string[] = []
+		for (const g of unionGrabs) {
+			const id = teamIdFrom(g.url)
+			if (!id || byTeam[id]) continue
+			const read = rosterFromPaste(g.text, snapshot)
+			const seatedNames = new Set(read.spots.map(sp => normalizeName(sp.name)))
+			const seated = read.players.filter(p => seatedNames.has(normalizeName(p.name)))
+			/* Two thirds AND at least five. The fraction is the same line the own-team path
+			   and the matchup gap both use; the floor is because two of three men seated is a
+			   ratio a three-name news module can pass. */
+			if (seated.length < 5 || seated.length < Math.ceil(read.players.length * (2 / 3))) {
+				unreadable.push(id)
+				continue
+			}
+			byTeam[id] = seated.map(p => `${p.id}:${p.group}`)
+			teamsRead.push(id)
+		}
+		/*
+		   TWO TEAMS WITH THE SAME MEN ON THEM IS A REDIRECT, NOT A COINCIDENCE.
+		
+		   The same shape as the players-page duplicate rule twenty lines up, and for the same
+		   reason: Yahoo answers a request it will not serve by serving something else, and a
+		   team id that quietly resolves to the reader's own team would put his own roster in
+		   the taken set twice and leave a rival's men free. A league cannot have two identical
+		   rosters. Both are dropped rather than one, because nothing here can tell which of
+		   the two was the redirect.
+		*/
+		const dupes = new Set<string>()
+		for (const a of teamsRead)
+			for (const b of teamsRead) {
+				if (a === b || dupes.has(a)) continue
+				const one = new Set(byTeam[a]!)
+				const two = byTeam[b]!
+				const shared = two.filter(k => one.has(k)).length
+				const smaller = Math.min(one.size, two.length)
+				if (smaller >= 20 && shared >= smaller * 0.9) {
+					dupes.add(a)
+					dupes.add(b)
+				}
+			}
+		for (const id of dupes) {
+			delete byTeam[id]
+			unreadable.push(id)
+		}
+		const kept = teamsRead.filter(id => !dupes.has(id))
+		const teamsAsked = unionGrabs[0]?.askedTeams ?? unionGrabs.map(g => teamIdFrom(g.url) ?? "")
+		out.rosters = {
+			byTeam,
+			teamsRead: kept,
+			teamsAsked,
+			/* ALL, never two thirds. See the note on the field: one missing roster is 27
+			   taken men reported as free, at the top of the board. */
+			complete: kept.length > 0 && kept.length === teamsAsked.length
+		}
+		/* One sentence, and only on the failure: `complete` is the whole contract, so a press
+		   that got every roster has nothing to say and says nothing. Counted rather than named
+		   — a reader cannot act on which team id came back short, and the action is the same
+		   either way. */
+		if (!out.rosters.complete)
+			notes.push(
+				`${kept.length} of ${teamsAsked.length} rosters came back, so who is taken was ` +
+					`left as it was. Open Yahoo and press it again.`
+			)
 	}
 
 	const matchup = grabs.find(g => g.kind === "matchup")

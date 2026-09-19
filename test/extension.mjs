@@ -1400,7 +1400,8 @@ await walled.close()
 			distinct: new Set(all).size,
 			mine: teams.includes("8"),
 			stamped: !!held?.at,
-			note: held?.note ?? ""
+			note: held?.note ?? "",
+			first: all[0] ?? ""
 		}
 	}, KEY)
 	/* Nine rivals in a ten-team league, and his own team is not one of them: he is not a
@@ -1418,6 +1419,25 @@ await walled.close()
 	t("…and stamped and sourced, because a taken list is as perishable as a wire",
 		union.stamped && /read off your league.s own rosters/.test(union.note),
 		JSON.stringify(union))
+	/* AND THE PAYOFF FOR KEEPING IT PER TEAM. This screen has always been a calculator
+	   for a deal somebody else proposed: it prices both sides and could not say who would
+	   have to agree to it. The search on the receiving side now names the holder. */
+	/* A man the FIXTURE put on team 1, so the search below is asking about a real holder
+	   rather than hoping one turns up. */
+	const held1 = rivalsFor("1")[0]?.p?.name ?? ""
+	/* The deal builder is a disclosure — a reader opens it when he has a deal to price —
+	   so it is opened here rather than assumed. */
+	/* Either wording: this league's trade deadline has passed on the committed config, so
+	   the press reads "Price one anyway" rather than "Price a trade". */
+	await ui.click('.trade-deal .chip-btn').catch(() => {})
+	await ui.waitForSelector('[data-ctl="get-search"]', { timeout: 20000 })
+	await ui.fill('[data-ctl="get-search"]', held1.split(" ").slice(-1)[0] || "zzz")
+	await ui.waitForTimeout(600)
+	const named = await ui
+		.$$eval(".trade-result .owner", n => n.map(e => e.textContent.trim()))
+		.catch(() => [])
+	t("and the man he would be receiving is labelled with the team that holds him",
+		named.some(x => /^team \d+$/.test(x)), JSON.stringify(named.slice(0, 5)))
 	t("with nothing thrown on the way either", uiErrs.length === 0, uiErrs.join(" | "))
 	await ui.close()
 }

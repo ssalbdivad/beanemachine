@@ -825,6 +825,10 @@ pre{
 .who .hurt{margin-left:6px}
 .who .code{font-size:var(--fs-1);padding:2px 6px;min-width:auto;margin-right:6px}
 .hurt{font-style:normal;color:var(--neg);font-size:var(--fs-2)}
+/* Who in his league holds this man. Neutral, not a warning: it is a fact about the
+   league and not a problem with the player — so it takes the muted colour rather than
+   `.hurt`'s. */
+.who .owner{margin-left:6px;font-style:normal;color:var(--muted);font-size:var(--fs-2)}
 /* every column of digits is tabular, because the column IS the comparison */
 .board-row .uscore,.board-row .bscore,.board-row .dim,.board-row .games,.board-row .gap{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .board-row .uscore{font-size:var(--fs-4);color:var(--muted)}

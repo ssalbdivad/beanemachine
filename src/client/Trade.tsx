@@ -7,7 +7,7 @@ import {
 import type { League } from "../schema.ts"
 import { canReadPool, api, ApiError } from "./api.ts"
 import { pool as poolStore, since } from "./pool.ts"
-import { taken as takenStore } from "./taken.ts"
+import { taken as takenStore, ownerOf } from "./taken.ts"
 import { roster as store, rosterKey } from "./roster.ts"
 import { opponentStore } from "./opponent.ts"
 import { lineupStore } from "./lineup.ts"
@@ -1589,6 +1589,9 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 										r={r}
 										className="trade-result"
 										action="Get"
+										/* Only on the side he would be RECEIVING from, and only where the
+										   rosters have been read: on the other side every man is his. */
+										owner={takenHeld ? ownerOf(takenHeld, rosterKey(r.player)) : undefined}
 										onAction={() => {
 											setTake(t => [...t, rosterKey(r.player)])
 											setTakeQuery("")
@@ -1669,12 +1672,21 @@ const Line = ({
 	r,
 	className,
 	action,
-	onAction
+	onAction,
+	owner
 }: {
 	r: Ranked
 	className: string
 	action: string
 	onAction: () => void
+	/** WHO IN HIS LEAGUE HOLDS THIS MAN, where the rosters have been read.
+	 *
+	 *  This screen has always been a calculator for a deal somebody else proposed: it
+	 *  prices both sides and cannot say who would have to agree. Naming the holder is the
+	 *  first half of that, and it is a fact off his own league's pages rather than an
+	 *  inference. Null is "not on anybody's roster we read", which on a complete read means
+	 *  he is free — and free men are an ADD, not a trade, which is what the word says. */
+	owner?: string | null
 }) => (
 	<div className={`trade-line ${className}`}>
 		<span className="who">
@@ -1682,6 +1694,9 @@ const Line = ({
 			<span className="meta">
 				<span className="code">{r.rateable ? r.slot : (r.slots[0] ?? "—")}</span>
 				{r.player.team ?? "—"}
+				{owner !== undefined && (
+					<em className="owner">{owner === null ? "free" : `team ${owner}`}</em>
+				)}
 				{r.injury && <em className="hurt">{r.injury}</em>}
 			</span>
 		</span>

@@ -1,5 +1,6 @@
 import type { League } from "./schema.ts"
 import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
+import { eligibilityFromText } from "./data/yahoo-read.ts"
 import { ESPN_MLB_SLOT } from "./data/rosters.ts"
 import {
 	espnInningsMinimum,
@@ -862,51 +863,23 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 		)
 	}
 
+	/* ONE READING OF THIS PAGE, SHARED WITH THE BROWSER. The four expressions this used to
+	   hold were written here, against the real page for league 228947, and they stayed here
+	   while the extension route never asked for the page at all — so every league a reader
+	   produced in his browser carried `eligibility: null` and the editor on My league had
+	   nothing to edit. `onePress` now fetches it, which made this a parse two routes need
+	   and therefore a parse that cannot live in only one of them; it is
+	   `eligibilityFromText` in src/data/yahoo-read.ts. */
 	let eligibility: League["eligibility"] = null
 	try {
-		const text = documentText(await fetchText(eligibilityUrl))
-		const batters = text.match(
-			/Batters need either (\d+) Games Started or (\d+) Games Played/
-		)
-		const pitchers = text.match(
-			/Pitchers need (\d+) Starts to gain SP eligibility,\s*(\d+) Relief Appearances/
-		)
-		const header = text.match(/No Appearances Yet\s+((?:[A-Za-z0-9+]+\s+){2,14}?)Player\b/)
-		if (batters || pitchers) {
-			if (!header)
-				needsReview.push(
-					"Couldn't parse the eligibility grid header; tracked_positions is null."
-				)
-			eligibility = {
-				source: eligibilityUrl,
-				tracked_positions: header ? header[1]!.trim().split(/\s+/) : null,
-				batters:
-					batters ?
-						{
-							rule: "or",
-							games_started_at_position: Number(batters[1]),
-							games_played_at_position: Number(batters[2])
-						}
-					:	null,
-				pitchers:
-					pitchers ?
-						{
-							SP: { starts: Number(pitchers[1]) },
-							RP: { relief_appearances: Number(pitchers[2]) }
-						}
-					:	null,
-				grid_legend: {
-					P: "games to play until eligible",
-					S: "games to start until eligible",
-					E: "currently eligible",
-					"-": "no appearances yet"
-				}
-			}
-		} else {
-			needsReview.push(
-				"Eligibility thresholds weren't found on the position-eligibility page."
-			)
-		}
+		const read = eligibilityFromText(documentText(await fetchText(eligibilityUrl)), eligibilityUrl)
+		eligibility = read.eligibility
+		/* WAS TWO SENTENCES OF ITS OWN — "Eligibility thresholds weren't found on the
+		   position-eligibility page" and "Couldn't parse the eligibility grid header;
+		   tracked_positions is null". `needs_review` is rendered to the reader on My league
+		   beside his own scoring, so naming a schema field in it was the one thing that list
+		   is not for; the shared sentences say the same two things in his words. */
+		if (read.note) needsReview.push(read.note)
 	} catch (e) {
 		needsReview.push(
 			`Position-eligibility page unreadable (${(e as Error).message}); eligibility is null.`

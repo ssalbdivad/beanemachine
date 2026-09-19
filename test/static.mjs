@@ -135,7 +135,14 @@ for (const which of ["chrome", "firefox"]) {
   t(`…and what comes back is an archive, not the app's own index page`,
     got.head[0] === 0x50 && got.head[1] === 0x4b && got.head[2] === 3 && got.head[3] === 4,
     JSON.stringify(got.head))
-  t(`…of a plausible size for a built add-on`, got.bytes > 10_000 && got.bytes < 2_000_000,
+  /* THE FLOOR CAME DOWN BECAUSE THE PACKAGE GOT SMALLER, not because the claim got
+     weaker. It read `> 10_000` when the zip was written STORED and unminified at 64,973
+     bytes; it is now deflated and minified at 8,846, so the old bound would fail on a
+     better build. What the bound is really for is the failure it names one line up — a
+     host that answers a missing file with index.html — and that fallback is a few
+     kilobytes of HTML, so the floor stays well above nothing and well below any real
+     archive. The upper bound is untouched. */
+  t(`…of a plausible size for a built add-on`, got.bytes > 4_000 && got.bytes < 2_000_000,
     String(got.bytes))
 }
 /*

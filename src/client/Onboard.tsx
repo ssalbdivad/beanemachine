@@ -10,7 +10,7 @@ import { typingStore, type Box } from "./typing.ts"
 import { Connect, browserOf, takesExtension } from "./Connect.tsx"
 import { extensionHere, useExtension } from "./extension.ts"
 import { readGrabs } from "../data/yahoo-read.ts"
-import { knownTeamId } from "./read-yahoo.ts"
+import { knownTeamId, refreshPool } from "./read-yahoo.ts"
 import { pool as poolStore } from "./pool.ts"
 import { opponentStore } from "./opponent.ts"
 import type { GrabFailure } from "../data/extension.ts"
@@ -55,6 +55,18 @@ import type { GrabFailure } from "../data/extension.ts"
  *  placeholder naming somebody who is not in the data would teach the wrong format on
  *  the one screen that has to get the format across. */
 const PLACEHOLDER = "C Cal Raleigh\n1B Ben Rice\nOF Aaron Judge\nSP Tarik Skubal"
+
+/** When the stored free-agent list says it was read, or null when there is no list.
+ *  Read back off the store rather than remembered from the sweep, so the receipt cannot
+ *  outlive the thing it describes; forgiving, because a damaged pool store is the
+ *  free-agent chip's to explain and the receipt still has a league to name. */
+const poolAt = (leagueKey: string): string | null => {
+	try {
+		return poolStore.of(leagueKey)?.at ?? null
+	} catch {
+		return null
+	}
+}
 
 type Where = "yahoo" | "espn" | "custom"
 
@@ -355,6 +367,16 @@ export const Onboard = ({
 	 * asking Yahoo nine times on behalf of a reader whose league we could not even read
 	 * would be asking for a throttle to punish a failure. Each half reports separately,
 	 * because "your league is in, the free agents are not" is a real state and a common one.
+	 *
+	 * THE SECOND HALF IS `refreshPool`; THE FIRST HALF CANNOT BE `readLeagueHere` YET, and the
+	 * two reasons are worth writing down because the duplication reads like laziness and is
+	 * not. `readLeagueHere` takes a `leagueKey: string` and passes it into `readGrabs` as what
+	 * the read is expected to be ABOUT, so a tab showing a different league is refused. That
+	 * is exactly right on My league, where the screen's league is the authority — and it is
+	 * exactly wrong here, where the tab IS what the reader is adopting and no key exists yet
+	 * on a first visit (the board behind this sheet is a preview). Sharing the first half
+	 * needs `readLeagueHere` to take something like `adopt: true`, which means editing
+	 * src/client/read-yahoo.ts.
 	 */
 	const readLeague = async () => {
 		if (!snapshot) return
@@ -436,48 +458,39 @@ export const Onboard = ({
 		})
 		if (reading.notes.length) setNote(reading.notes.join(" "))
 
-		/* THE FREE AGENTS, second and separately. */
+		/*
+		   THE FREE AGENTS, SECOND AND SEPARATELY — and by the SAME function the chip calls.
+
+		   This was forty-eight lines that re-implemented `refreshPool` from src/client/read-yahoo.ts:
+		   the same `ext.ask("pool")`, the same `readGrabs`, and a `poolStore.set` call copied
+		   field for field down to the `note` string the chip prints. The file it was copied
+		   from opens with "READING A LEAGUE, IN ONE PLACE, because two places would drift",
+		   and the two had already drifted in two measurable ways:
+
+		    · A sweep that came back with NOBODY in it set no failure here and returned. The
+		      reader pressed the button, the receipt kept saying whatever the league read had
+		      said, and nothing on the screen mentioned the nine requests that had just come
+		      back empty. `refreshPool` answers that case with "that came back with nobody in
+		      it" and "Open your league's players page on Yahoo and try again."
+		    · A refused `poolStore.set` — a private window, a full phone — reported `fix: null`
+		      here against `refreshPool`'s "A private window usually does this, and so does a
+		      full phone." `Connect` renders `failure.fix`, so the reader with the one cause he
+		      could actually act on was the one reader told nothing.
+
+		   Both are now whatever the shared function says, because there is one of them.
+
+		   NINE REQUESTS ONLY ON A READ THAT WORKED. Asking Yahoo nine times on behalf of a
+		   reader whose own league page we could not even parse is asking for a throttle to
+		   punish a failure, so the sweep is refused where there is no league id and no key to
+		   file it under.
+		*/
 		if (!reading.leagueId || !key) return
-		const swept = await ext.ask("pool", { leagueId: reading.leagueId, sport: reading.sport ?? "baseball" })
-		if (!swept.grabs?.length) {
-			setReadFailure(swept.failure ?? null)
-			return
-		}
-		const got = readGrabs(swept.grabs, snapshot)
-		/* WHAT THE SWEEP HAS TO SAY ABOUT ITSELF, which this route dropped exactly as the other
-		   one did: a position Yahoo served as another position's list is refused, and the reason
-		   was computed here and thrown away while the board downstream said only that the
-		   position never came back. */
-		if (got.notes.length) setNote(got.notes.join(" "))
-		if (got.pool?.players.length) {
-			try {
-				poolStore.set(key, {
-					at: got.at ?? new Date().toISOString(),
-					leagueId: reading.leagueId,
-					players: got.pool.players.map(p => ({
-						yahooId: p.yahooId,
-						name: p.name,
-						team: p.team,
-						positions: p.positions,
-						rosteredPct: p.rosteredPct,
-						status: p.status
-					})),
-					positionsRead: got.pool.positionsRead,
-					positionsRequested: got.pool.positionsRequested,
-					/* The reader's own account of where this came from, in the words the chip
-					   will print. "Carried in a file" and "read off your league in this browser"
-					   are different claims about the same list and age it differently. */
-					note: "read off your league in this browser"
-				})
-				setReceipt(r => ({ ...r, free: got.pool!.players.length, at: got.at ?? r.at }))
-			} catch (e) {
-				setReadFailure({
-					step: "store",
-					what: `the free agents could not be saved: ${(e as Error).message}`,
-					fix: null
-				})
-			}
-		}
+		const swept = await refreshPool(ext, snapshot, key, reading.leagueId, reading.sport ?? "baseball")
+		if (swept.notes.length) setNote(swept.notes.join(" "))
+		if (swept.added !== null)
+			/* The instant off the STORE rather than off the read, so the receipt cannot outlive
+			   the list it is about — the same rule the dock bar's summary follows. */
+			setReceipt(r => ({ ...r, free: swept.added, at: poolAt(key) ?? r.at }))
 		if (swept.failure) setReadFailure(swept.failure)
 	}
 
@@ -561,34 +574,6 @@ export const Onboard = ({
 					/>
 				:	<>
 				{/*
-				  THE OTHER DOOR, offered above the question rather than instead of it.
-				
-				  A reader in a browser that takes the reader can have his league read to him in
-				  one press; a reader on a phone cannot, and must not be shown a control he
-				  cannot use or a sentence about what his device lacks. So the offer line is
-				  shown where it is true, and where it is not, the sheet is exactly what it has
-				  always been — because typing a team in is not a consolation prize, it is the
-				  route that works on every device, in a private window, and on a private league.
-				*/}
-				{takesExtension(browserOf()) && (
-					<p className="onboard-offer">
-						{/*
-						  IT SAYS YAHOO BEFORE HE PRESSES IT, AND IT DID NOT.
-						
-						  This read "Let it read my league for me" until he had already installed the
-						  add-on, and the word Yahoo first appeared in step 3 of the walkthrough —
-						  272px below the line he pressed. An ESPN reader could therefore install an
-						  add-on called "beanemachine — read my Yahoo league" before anything on this
-						  screen told him it is Yahoo only, which costs him an install and this
-						  project a store review it can never make good on. The offer names what it
-						  reads, in both states.
-						*/}
-						<button type="button" className="as-link" onClick={() => setConnecting(true)}>
-							{ext.present ? "Let it read my Yahoo league" : "Let it read my Yahoo league for me"}
-						</button>
-					</p>
-				)}
-				{/*
 				  ONE question, and it is about baseball.
 				  
 				  This card used to open with "Where do you play?" — a question asked for the
@@ -604,6 +589,60 @@ export const Onboard = ({
 				  readers, and never the first thing anybody is asked.
 				*/}
 				<h2>Who&rsquo;s on your team?</h2>
+				{/*
+				  THE ONE PRESS, AS A BUTTON, UNDER THE QUESTION IT ANSWERS.
+
+				  This was the smallest type on the screen. It rendered as `.as-link` — `--fs-2`,
+				  `--muted`, underlined, no border — floating ABOVE the heading, which put the
+				  deepest thing this product does in the one style the page uses for footnotes,
+				  where a reader scanning for a control does not look. Measured at 390x844 with the
+				  sheet open: the link's top sat at y=216, the first bordered control under it was the
+				  textarea at y=360 and the `primary` was at y=539 — so the hierarchy read, in
+				  order, "footnote, box, do this", and the footnote was the route that needs no
+				  typing at all. Measured against the box it is an alternative to: 11px, no
+				  border, underlined, against the box's 13px.
+
+				  It is now a button, in the app's own button chrome, directly under the question —
+				  so the sheet reads question, one-press answer, typed answer, which is the order of
+				  effort. `primary` only where the reader's browser already HAS the reader: for him
+				  a press really is the whole league and typing is strictly worse. Without it there
+				  is an install in the way, so it is a plain button and the typing keeps the weight.
+				  It costs 26px more than the link did (46px against 20px) and the sheet still fits
+				  the phone — see the note on the deleted sentence in the fold below, which is where
+				  those pixels came from.
+
+				  IT SAYS YAHOO BEFORE HE PRESSES IT, AND IT DID NOT. This read "Let it read my
+				  league for me" until he had already installed the add-on, and the word Yahoo first
+				  appeared in step 3 of the walkthrough — 272px below the line he pressed. An ESPN
+				  reader could therefore install an add-on called "beanemachine — read my Yahoo
+				  league" before anything on this screen told him it is Yahoo only, which costs him
+				  an install and this project a store review it can never make good on.
+
+				  SHOWN ONLY WHERE IT IS TRUE. A reader on a phone cannot run it and must not be
+				  shown a control he cannot use or a sentence about what his device lacks, so
+				  `takesExtension` gates the whole thing and the sheet underneath is unchanged for
+				  him — typing a team in is not a consolation prize, it is the route that works on
+				  every device, in a private window, and on a private league.
+				*/}
+				{takesExtension(browserOf()) && (
+					/* NOT `.onboard-go`, which is the class on the button that submits the typed
+					   team eighty lines down. This is a different press to a different screen, and
+					   giving it that class made `.onboard-go button` match two buttons — so a
+					   suite that clicks it got the Yahoo walkthrough instead of the team it had
+					   just typed, and then waited twenty seconds for a receipt that was never
+					   coming. The same collision the roster paste box and the platform offer have
+					   already caused twice; the rule is that a class naming a control belongs to
+					   one control. */
+					<p className="onboard-offer onboard-read">
+						<button
+							type="button"
+							className={ext.present ? "primary" : ""}
+							onClick={() => setConnecting(true)}
+						>
+							{ext.present ? "Read my Yahoo league" : "Read my Yahoo league for me"}
+						</button>
+					</p>
+				)}
 				{/* THE PASTE WAS ALREADY THE FRONT DOOR AND THE SCREEN DID NOT SAY SO.
 				
 				    This read "First and last name, one to a line. Put the position first if you
@@ -905,10 +944,16 @@ export const Onboard = ({
 				  wrong first question for everybody.
 				*/}
 				<details className="onboard-alts">
+					{/* The summary is the claim and the chips under it are the instruction. What sat
+					    between them was "If your league pays differently, here is how to tell it." —
+					    the summary again in more words, with nothing in it to press.
+
+					    It was 38px tall plus its margin, and those were the pixels that decided
+					    whether this sheet fits a phone. Measured at 390x844 on a first visit with the
+					    sheet open: with the sentence in, the last control the sheet offers ("Load a
+					    file I saved") bottomed at y=876 — 32px under the fold, with no visible
+					    scrollbar to say anything followed. Without it, y=834. */}
 					<summary>My league scores differently</summary>
-					<p className="sub">
-						If your league pays differently, here is how to tell it.
-					</p>
 					<div className="chips onboard-where">
 						{WHERE.map(w => (
 							<button

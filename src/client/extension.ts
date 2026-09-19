@@ -45,7 +45,15 @@ export interface ExtensionState {
 	progress: string | null
 	ask: (
 		ask: Ask,
-		opts?: { leagueId?: string; sport?: string; positions?: string[]; teamIds?: string[] }
+		opts?: {
+			leagueId?: string
+			sport?: string
+			positions?: string[]
+			teamIds?: string[]
+			/** For `league`: which team in it is his, so one press can fetch his roster from
+			 *  a page whose URL does not name a team. See `AppMessage.teamId`. */
+			teamId?: string
+		}
 	) => Promise<{ grabs: Grab[]; failure?: GrabFailure } | { grabs?: undefined; failure: GrabFailure }>
 	/** Opens Yahoo in a tab of its own, on the reader's press — the extension never opens
 	 *  one by itself. */
@@ -218,14 +226,28 @@ export const useExtension = (): ExtensionState => {
 		[present]
 	)
 
+	/*
+	   A LINK, AND IT USED TO BE A LINK PLUS A READ OF SOMEBODY ELSE'S SITE.
+
+	   This posted `{ ask: "page", open: url }` before opening the tab. Three things were
+	   wrong with that and one of them left the browser. `open` is dropped by the bridge,
+	   which forwards the ask and the four named fields and nothing else, so the branch in
+	   extension/src/background.ts that would have opened a tab was never reached and the tab
+	   has always been opened by the `window.open` below — inside the click, which is what
+	   makes it survive a popup blocker. What DID arrive at the router was a bare `page` ask:
+	   the router picked one of the reader's Yahoo tabs and its content script read the page
+	   out of the DOM and sent it back, for a press that meant "take me to Yahoo". Not a
+	   request to Yahoo — `grabHere` reads the tab it is already in — but the contents of a
+	   league page crossing two message hops for nothing, and on the players page that is the
+	   markup: `rowsOnly` of a table Yahoo follows with about 90 KB of footer. Nothing was
+	   waiting on the id, because `waiting` is only written by `ask`, so the answer was
+	   dropped the moment it arrived.
+
+	   Counted on the press: one message to the extension, one tab query, one tab picked, one
+	   page read out of its DOM, one answer discarded. Now: none of them, and the same tab
+	   opens.
+	*/
 	const openYahoo = useCallback((url?: string) => {
-		window.postMessage(
-			{ from: FROM_APP, id: `bm-open-${++nextId}`, ask: "page" as Ask, open: url ?? true },
-			location.origin
-		)
-		/* The extension opens the tab, but a reader whose extension is missing or asleep
-		   must still get where he was going — so the page opens it too if nothing answers.
-		   Both landing on the same URL is harmless; neither is not. */
 		window.open(url ?? "https://baseball.fantasysports.yahoo.com/", "_blank", "noopener")
 	}, [])
 

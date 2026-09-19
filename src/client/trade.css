@@ -221,11 +221,15 @@
 }
 .paste-roster button{align-self:flex-start}
 .paste-note{color:var(--muted)}
-.paste-how{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px;font-size:var(--fs-2);max-width:70ch}
-.paste-how kbd{
-	font-family:var(--mono);font-size:0.9em;padding:1px 5px;border:1px solid var(--line);
-	border-bottom-width:2px;border-radius:4px;background:var(--sunken);
-}
+/* `.paste-how` and `.paste-how kbd` stood here and are gone with the four-step list
+   this screen used to put over its roster box — see the comment on that box in
+   Trade.tsx. Neither was scoped to this screen, so for as long as they existed they
+   also restyled the ONLY other `.paste-how` in the app, the settings-paste steps in
+   Onboard.tsx: font-size var(--fs-2) instead of app.css's var(--fs-3), padding-left
+   1.2em instead of 1.35em, gap 4px instead of 5px, and a `kbd` differing from the
+   global one (app.css) by 0.02em of font-size and by dropping its colour and
+   white-space. A second copy of a rule that nothing on this screen needed, deciding
+   how another screen looked. */
 
 /* ---------- where the rest of the screen is ----------
    MEASURED on the published build at 390x844, by the route a stranger takes: pressing
@@ -288,3 +292,8 @@
    own text to check that the exact free-agent list is got here and needs no terminal —
    went red against a screen that was correct apart from its capitals. */
 .paste-wire-fold>summary h3{text-transform:none;letter-spacing:normal;font-family:var(--sans)}
+
+/* The presses on the collapsed deal card. Two of them once the league's window has
+   shut — the evaluator anyway, and the screen that still takes adds and drops — so
+   they wrap rather than overflow a 390px phone, where the pair is 314px of chips. */
+.trade-deal-ways{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center}

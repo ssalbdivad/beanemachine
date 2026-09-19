@@ -2229,19 +2229,41 @@ export const Decide = ({
 							    unfilled and this fold would advise emptying the whole lineup — the
 							    same "could not answer" read as "answered no" that the section
 							    above now guards. Unknown is said as unknown. */}
+							{/*
+							  THE REASON IS SAID ONCE, UNDER THE LIST; THE ROW KEEPS THE INSTRUCTION.
+
+							  Every one of these rows carried the whole sentence — "leave empty — nobody
+							  you own is projected to play here today", eleven words, identical but for
+							  nothing at all. Measured in a browser at 390x844 against the roster
+							  test/decide.mjs constructs: nine empty seats on a five-game night, so that
+							  one sentence was 99 of the card's 766 words with the folds open — 13% of
+							  the card to say one thing nine times — and a 27-seat league whose slate is
+							  light runs to twenty-odd copies.
+
+							  One row per seat stays, because that is the invariant this fold exists for
+							  and the one test/decide.mjs asserts: every active seat accounted for,
+							  filled or explicitly left empty. What was never per-seat is the REASON. It
+							  is one fact about tonight's schedule, so it costs two words on the row and
+							  one sentence at the foot instead of eleven words twenty times.
+							*/}
 							{today.unfilled.map((slot, i) => (
 								<li key={`empty-${slot}-${i}`} className="decide-empty">
 									<span className="decide-slot">{slot}</span>
 									<span>
 										<em className="decide-why">
-											{today.lineup.starters.length ?
-												"leave empty — nobody you own is projected to play here today"
-											:	"not priced — no projection could be made for anyone you own today"}
+											{today.lineup.starters.length ? "leave empty" : "not priced"}
 										</em>
 									</span>
 								</li>
 							))}
 						</ul>
+						{today.unfilled.length > 0 && (
+							<p className="sub decide-empty-why">
+								{today.lineup.starters.length ?
+									"Nobody you own is projected to play in those seats today."
+								:	"No projection could be made for anyone you own today."}
+							</p>
+						)}
 					</details>
 					{/* Two different things to say, because two different things are true. With
 					    seats read off the platform there is a baseline and the list above is a
@@ -2286,6 +2308,22 @@ export const Decide = ({
 					  would mean a typed-in margin driving a re-sort by ceiling — a ranking change
 					  with no measurement behind it, dressed as a feature.
 					*/}
+					{/*
+					  AND THE PARAGRAPH IS GONE WHERE THERE IS NO GAP TO STATE.
+
+					  The other arm of this ternary read "How your week stands is on Last night,
+					  against an opponent you tell it about" — an errand, on the screen that is
+					  supposed to answer. Tonight is where a manager arrives at 6:40 to be told who
+					  to start; it is not where he is sent to another screen to go and paste a
+					  roster so that a different sentence can appear here later. Where the opponent
+					  is known the gap below is a fact he can act on and it stays; where it is not,
+					  the card says nothing rather than handing him homework, and the <p> is not
+					  rendered at all rather than rendered empty.
+					*/}
+					{matchup.gap !== null &&
+					matchup.rivals > 0 &&
+					matchup.mine !== null &&
+					matchup.rivals >= Math.ceil(ownedIds.length * (2 / 3)) && (
 					<p className="sub decide-read">
 						{/* "It does not know your matchup or the score" was true of the whole app
 						    when it was written and is now true of only half of it: the card above
@@ -2327,10 +2365,6 @@ export const Decide = ({
 						    same comparison; this card was printing it in bold. Two thirds, because a
 						    roster differs from a roster by an injured-list seat or two and not by a
 						    third. */}
-						{matchup.gap !== null &&
-						matchup.rivals > 0 &&
-						matchup.mine !== null &&
-						matchup.rivals >= Math.ceil(ownedIds.length * (2 / 3)) ?
 							<>
 								You are{" "}
 								{matchup.gap === 0 ?
@@ -2406,27 +2440,8 @@ export const Decide = ({
 										)
 									})()}
 							</>
-						:	<>
-								{/*
-								  IT ONLY POINTS AT LAST NIGHT WHEN THERE IS SOMETHING THERE.
-								
-								  The opponent control lives behind "Who are you playing?" on that card,
-								  which renders only once his own men have scored something over the
-								  league's period — `periodTotal !== null` in Recap.tsx. A reader on his
-								  first evening, who has entered a team and has no period behind him yet,
-								  was sent to a screen with no such control on it to do a thing it does not
-								  offer. Where it is not there, the sentence stops at what this card can
-								  say about itself.
-								*/}
-								{matchup.mine !== null ?
-									<>
-										How your week stands is on <b>Last night</b>, against an opponent you
-										tell it about.
-									</>
-								:	null}
-							</>
-						}
-					</p>
+						</p>
+					)}
 				</>
 			)}
 
@@ -2514,8 +2529,8 @@ export const Decide = ({
 						    five seasons.
 
 						    "is what measured best" was too strong even so, the comment above
-						    conceded exactly that, and then the string shipped it anyway. The fold
-						    below says why it is too strong: that sweep was run against the OLD
+						    conceded exactly that, and then the string shipped it anyway. Why it is
+						    too strong: that sweep was run against the OLD
 						    scoring, before swaps were priced on the lineup that follows them, and
 						    src/auto/plan.ts says in so many words that the cap is NOT YET
 						    RE-MEASURED. A summary must not outrun the drawer it summarises — the
@@ -2532,9 +2547,11 @@ export const Decide = ({
 						:	/* The tail "which is this app's own limit and not a measured best" came off
 						     this line: it is the page being unsure of itself in the middle of the
 						     advice, at the exact moment it is asking to be trusted, and a reader can
-						     do nothing with it. The retraction is not lost — it is the last item in
-						     the "How this was decided" fold, in full, where a reader who wants to
-						     know how the number was arrived at will find it. */
+						     do nothing with it. The retraction is not lost, and it is no longer on
+						     this card at all: it lives in src/auto/plan.ts beside the cap it
+						     governs, which is where the next person to change the number stands.
+						     It came off the "How this was decided" fold too — that fold holds the
+						     planner's notes about THIS roster, not this repository's history. */
 							`stopping at ${plan.swaps.moves.length}`}
 						{rules.cap !== null && ` · your league allows ${rules.cap}`}
 						{/* WHEN, not why. The gain above is accrued from today, and in a league
@@ -2555,11 +2572,16 @@ export const Decide = ({
 			    could be judged, and sent him to a command line — which is the difference
 			    between a website and a developer tool. It only says nothing where there
 			    is genuinely nothing: no wire AND no usable ownership in the capture. */}
+			{/* Two absences and no third sentence about them. The tail read "so there is no
+			    honest way to say who you could get", which restates "no add can be judged" in
+			    the app's own voice and adds nothing the reader can act on — 36 words down to
+			    22. Both absences stay, because they are different absences with different
+			    fixes: a free-agent list nobody has read, and a capture whose ownership
+			    figures cannot locate the boundary. */}
 			{!candidates.length ?
 				<p className="sub">
-					No add can be judged here yet: nothing has read your league&rsquo;s free-agent
-					list, and this capture&rsquo;s ownership figures cannot locate the boundary
-					either, so there is no honest way to say who you could get.
+					No add can be judged: nothing has read your league&rsquo;s free-agent list, and
+					who is free cannot be estimated from this capture either.
 				</p>
 			: !plan?.swaps.moves.length ?
 				/*
@@ -2710,8 +2732,8 @@ export const Decide = ({
 											.{" "}
 										</>
 									:	<>
-											Your pitchers project <b>{rules.projected} more</b> over what is left
-											of this period
+											Innings already thrown could not be read. Your pitchers project{" "}
+											<b>{rules.projected} more</b> over what is left of this period
 											{rules.after !== null && rules.after !== rules.projected && (
 												<>
 													{" "}
@@ -2721,19 +2743,26 @@ export const Decide = ({
 											.{" "}
 										</>
 									}
-									{/* One clause on the line, the rest a tap away. What a reader has
-									    to know before acting is that this counts only what is STILL TO
-									    COME; why it cannot count the rest is a fact about this page, not
-									    about his week. */}
-									{/* The clause is an <em> and the fold is its SIBLING, not its child:
-									    <details> is flow content and cannot live inside phrasing content,
-									    and a browser handed that quietly closes the <em> early — which
-									    puts the fold outside the element it is styled inside. */}
-									<em className="decide-why">
-										{banked !== null ?
-											"counted for every pitcher you hold now, whatever seat he was in at the time \u2014 which is the most this page can know"
-										:	"still to come only, from their scheduled turns"}
-									</em>
+									{/*
+									  THE CAVEAT CLAUSE IS GONE FROM THE LINE, and the absence it sometimes carried
+									  moved into the sentence that owns it.
+									
+									  An <em class="decide-why"> sat here in both shapes. With the read landed it said
+									  "counted for every pitcher you hold now, whatever seat he was in at the time —
+									  which is the most this page can know": 21 words at rest on the answer screen,
+									  provenance for a number the reader can do nothing differently about, ending in
+									  this page talking about its own limits. Measured at 390x844 against the roster
+									  test/decide.mjs builds, it was one of three such clauses standing between the
+									  top of the card and the last instruction on it. The same sentence is still in
+									  the fold below, in full, for a reader who goes looking for where the numbers
+									  came from.
+									
+									  With the read NOT landed it said "still to come only, from their scheduled
+									  turns", and THAT clause was doing real work: it is the only thing stopping a
+									  reader weighing 4 against a floor of 20 and claiming a panic streamer. It is an
+									  absence, so it is stated as one — first, in the sentence itself — instead of
+									  trailing the number in italics.
+									*/}
 									<details className="decide-fine">
 										<summary>{banked !== null ? "what these two numbers are" : "why not the whole week"}</summary>
 										{/* The old version of this said "Innings already thrown this period are
@@ -2824,21 +2853,29 @@ export const Decide = ({
 						{plan.swaps.notes.map(n => (
 							<li key={n}>{n}</li>
 						))}
-						{/* "bscores" was shipped to the reader in this sentence: a word this app
-						    coined, inside an explanation of how a limit was measured, on the one
-						    surface where a reader goes looking for reassurance. The retraction it
-						    carries is the valuable part and survives without the word — what the
-						    older sweep did was compare the two players' own ratings, where these
-						    are priced on what the whole lineup projects afterwards, and neither
-						    clause needs naming anything in this repository. */}
-						<li>
-							Stopping at {DEFAULTS.maxMoves} a week is inherited rather than
-							established: {DEFAULTS.maxMoves} beat one and beat three across 111 weeks
-							and five seasons, but that sweep priced a swap by comparing the two
-							players&rsquo; own ratings, where these are priced on what your whole
-							lineup projects afterwards. No season has been played against the newer
-							way of pricing them.
-						</li>
+						{/*
+						  THE HARDCODED RETRACTION CAME OFF THIS LIST, and nothing it protected is
+						  lost with it.
+
+						  It read: "Stopping at 2 a week is inherited rather than established: 2 beat
+						  one and beat three across 111 weeks and five seasons, but that sweep priced a
+						  swap by comparing the two players’ own ratings, where these are priced on what
+						  your whole lineup projects afterwards. No season has been played against the
+						  newer way of pricing them." Forty-nine words, and every one of them is this
+						  repository describing its own measurement history to a man deciding who to
+						  start. It existed to retract an overclaim on the heading above — that line
+						  once said the cap "is what measured best" — and that overclaim was itself
+						  removed: the heading now says "stopping at 2", which claims nothing and so
+						  needs no retracting. The evidence is not deleted, it is in src/auto/plan.ts
+						  at the cap it governs (`treat the cap as inherited rather than established`)
+						  and in the comment on that heading, which is where the next person to change
+						  the number will be standing.
+
+						  What is left in this fold is the planner’s own notes, which name men and
+						  bars for THIS roster on THIS night. Those are an audit trail for advice the
+						  reader is being asked to act on. A paragraph about which sweep priced which
+						  way is not.
+						*/}
 					</ul>
 				</details>
 			)}

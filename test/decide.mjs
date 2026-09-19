@@ -490,6 +490,36 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("an empty seat says to leave it empty rather than going unmentioned",
 		rows.every(r => r.empty === (r.who === null)),
 		JSON.stringify(rows.filter(r => r.empty !== (r.who === null))))
+	/*
+	 * AND THE REASON IS SAID ONCE, WHICH IS NEW AND IS THE POINT OF THIS PAIR.
+	 *
+	 * Every empty row used to carry the whole sentence — "leave empty — nobody you own
+	 * is projected to play here today" — eleven words, identical but for nothing at
+	 * all. Measured in this browser at 390x844 against the roster above: nine empty
+	 * seats, so that one sentence was 99 of the card's 766 words with the folds open,
+	 * 13% of the card to say one thing nine times, and a 27-seat league on a five-game
+	 * night runs to twenty-odd copies of it. The card is 605 words with the folds open
+	 * now.
+	 *
+	 * The seat count is NOT what moved and the two assertions above still hold it: one
+	 * row per active seat, every one named, an empty one visibly empty. What moved is
+	 * the reason, which was never per-seat — it is one fact about tonight's schedule —
+	 * so it is one sentence under the list and the row keeps only the instruction.
+	 */
+	const emptyRows = rows.filter(r => r.empty)
+	if (emptyRows.length > 1) {
+		const reasons = await page.$$eval(".decide-today .decide-empty em.decide-why", ns =>
+			ns.map(e => e.textContent.trim().split(/\s+/).length))
+		t("an empty row is an instruction, not a sentence repeated once per seat",
+			reasons.every(n => n <= 2),
+			JSON.stringify(await page.$$eval(".decide-today .decide-empty em", ns =>
+				ns.map(e => e.textContent.trim()))))
+		t("…and the reason those seats are empty is stated once, under the list",
+			(await page.$$(".decide-empty-why")).length === 1 &&
+				/projected to play/.test(await page.$eval(".decide-empty-why", e => e.textContent)),
+			await page.$$eval(".decide-empty-why", ns => ns.map(e => e.textContent).join(" | ")) ||
+				"(nothing said)")
+	}
 
 	/*
 	 * The card leads with the DIFFERENCE, not the lineup.
@@ -749,15 +779,66 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 */
 	if (/innings a week/.test(text)) {
 		const banked = /have thrown [\d.]+ in it so far and project [\d.]+ more/.test(text)
+		/* THE MISSING HALF MOVED FROM AN ITALIC TAIL INTO THE SENTENCE. This matched
+		   "still to come only", which was an <em class="decide-why"> hanging off the end
+		   of the line — the same clause that, when the read HAD landed, read "counted for
+		   every pitcher you hold now, whatever seat he was in at the time — which is the
+		   most this page can know", 21 words of provenance at rest on the answer screen.
+		   The em is gone in both shapes. What it was carrying in the failed shape is an
+		   ABSENCE, and it now leads the sentence instead of trailing the number, so the
+		   claim being protected is unchanged and only the string it is matched by moved. */
 		t("the innings line states what was thrown as well as what is coming, or says it could not",
-			banked || /still to come only/.test(text), text.slice(-700))
+			banked || /Innings already thrown could not be read/.test(text), text.slice(-700))
 		t("and a floor is only compared against a total the page could source",
 			banked ? /against \d/.test(text) : !/against \d/.test(text), text.slice(-400))
 		t("the fold explains whichever of the two it printed, and never the retracted claim",
 			/what these two numbers are|why not the whole week/i.test(text) &&
 				!/are on your team page, which\s+nothing here reads/.test(deep),
 			deep.slice(-900))
+		/* And the provenance is only in the fold. A reader who does not open it must not
+		   be reading where a number came from: the sentence he is shown is two facts and
+		   a total, and "counted for every pitcher you hold now" is one tap away in full. */
+		t("and the provenance for those numbers is behind the fold, not beside them",
+			!/counted for every pitcher you hold now/.test(text) &&
+				(!banked || /counted for every pitcher you hold now/.test(deep)),
+			text.slice(-400))
 	}
+
+	/*
+	 * TONIGHT IS THE ANSWER SCREEN, SO IT SENDS NOBODY OFF TO DO SETUP.
+	 *
+	 * Two sentences on this card asked the reader to go and prepare something before it
+	 * could tell him more. "How your week stands is on Last night, against an opponent
+	 * you tell it about" rendered wherever the opponent was unknown — which is every
+	 * first evening — and the whole <p> is now simply not rendered there; the gap
+	 * sentence below it, which is a fact he can act on, is untouched and asserted
+	 * further down this file.
+	 *
+	 * This is not the same claim as "the card never names another screen". It still
+	 * names My league where an ABSENCE has a fix — the partial-roster line, asserted at
+	 * the foot of this file, and the assumed-daily chip, asserted in test/static.mjs.
+	 * The difference is that those state something the card does not know and say where
+	 * it is answered, where this one stated nothing at all and handed out homework.
+	 */
+	t("nothing on the answer screen sends the reader away to set something up first",
+		!/How your week stands is on/.test(deep), text.slice(-500))
+
+	/*
+	 * AND THE FOLD THAT EXPLAINS THE DECISION HOLDS NO CHANGELOG.
+	 *
+	 * "How this was decided" ended with a hardcoded 49-word paragraph: "Stopping at 2 a
+	 * week is inherited rather than established: 2 beat one and beat three across 111
+	 * weeks and five seasons, but that sweep priced a swap by comparing the two players'
+	 * own ratings…". It was there to retract an overclaim the heading no longer makes —
+	 * that line once read "2 is what measured best" and now reads "stopping at 2", which
+	 * claims nothing. The measurement itself is not lost: src/auto/plan.ts carries it at
+	 * the cap it governs. What is asserted here is that the fold holds the planner's own
+	 * notes about THIS roster on THIS night and not a paragraph about which sweep priced
+	 * which way.
+	 */
+	t("the decision fold explains tonight's answer, not this repository's history",
+		!/inherited rather than established|No season has been played/.test(deep),
+		deep.slice(-600))
 
 	/*
 	 * A stale WIRE is worse than a stale lineup, and silently so: it goes on offering
@@ -1467,22 +1548,37 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		await page.$$eval(".decide p details, .decide em details", ns =>
 			ns.map(e => e.parentElement?.outerHTML.slice(0, 140)).join(" | ")))
 	/*
-	 * The innings fold is a SIBLING of its clause, not a child, and the two are
-	 * distinguishable only here: reparented or not, `.decide-watch`'s textContent
-	 * reads the same, and the assertion above would pass either way because the
-	 * reparent is what REMOVES it from the <em>. So this is the one that catches the
-	 * markup being written back the nested way: the clause and the fold share a
-	 * parent, and the clause contains nothing.
+	 * THE INNINGS FOLD HAS NO CLAUSE LEFT TO SIT INSIDE, which is why this assertion
+	 * changed shape rather than being deleted.
+	 *
+	 * It read: "the innings clause keeps its fold beside it rather than inside it",
+	 * over `.decide-watch em.decide-why` — the <em> that carried "counted for every
+	 * pitcher you hold now, whatever seat he was in at the time — which is the most
+	 * this page can know". That em is gone: 21 words of provenance at rest on the
+	 * answer screen, all of it still in the fold below. With it gone the old selector
+	 * matches only the skipped-player reasons, which have no fold near them, so
+	 * `innings.some(i => i.sibling)` is false and the assertion fails for a reason
+	 * that has nothing to do with markup nesting.
+	 *
+	 * What it was really protecting is that the fold is not inside phrasing content,
+	 * where a browser silently reparents it and both `text` and `deep` still find the
+	 * words. So it is asserted directly: the innings fold's parent is the block the
+	 * sentence is in, and no <em> anywhere under `.decide-watch` contains a fold.
 	 */
-	const innings = await page.$$eval(".decide-watch em.decide-why", ns =>
-		ns.map(e => ({
-			nested: !!e.querySelector("details"),
-			sibling: e.nextElementSibling?.tagName === "DETAILS"
+	const inningsFold = await page.$$eval(".decide-watch details", ns =>
+		ns.map(d => ({
+			parent: d.parentElement?.tagName ?? null,
+			insideClause: !!d.closest("em, p, span")
 		})))
-	if (innings.length)
-		t("the innings clause keeps its fold beside it rather than inside it",
-			innings.every(i => !i.nested) && innings.some(i => i.sibling),
-			JSON.stringify(innings))
+	if (inningsFold.length)
+		t("the innings fold hangs off the block, not off a clause a browser would move it out of",
+			inningsFold.every(f => f.parent === "DIV" && !f.insideClause),
+			JSON.stringify(inningsFold))
+	t("and no caveat clause is left standing beside those numbers on the card",
+		(await page.$$eval(".decide-watch em.decide-why", ns =>
+			ns.filter(e => /most this page can know|still to come only/.test(e.textContent)).length
+		)) === 0,
+		await page.$$eval(".decide-watch em.decide-why", ns => ns.map(e => e.textContent).join(" | ")))
 	/*
 	 * React's own complaint, filtered rather than "no console errors at all": this page
 	 * reads MLB live and a blocked or slow feed logs a 502 of its own, so a bare

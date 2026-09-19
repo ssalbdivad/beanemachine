@@ -138,7 +138,7 @@ const openTrade = async () => {
  */
 const openDeal = async () => {
 	const button = page.locator(
-		".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')"
+		".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Pick who leaves and who arrives')"
 	)
 	if (await button.count()) {
 		await button.first().click()
@@ -196,10 +196,47 @@ const openDeal = async () => {
 		const closed = await page.$(".trade-closed")
 		t("a league past its own trade deadline is not shown a deal form",
 			!!closed, closed ? "" : "the deal form rendered for a league that closed 2026-08-06")
-		if (closed)
+		if (closed) {
 			t("and it says when trades closed, so the reader is told rather than left to wonder",
 				/stopped taking trades on/.test(await closed.innerText()),
 				await closed.innerText())
+			/*
+			 * AND IT OFFERS THE THING HE CAN STILL DO.
+			 *
+			 * Until 2026-09-19 this card was 155px and eighteen words on the shipped
+			 * league, ending in the name of a tab — "Adds and drops are on Tonight" — and
+			 * its only press opened the evaluator for a league that will not accept the
+			 * deal. Two defects in one sentence: a signpost a reader has to go and find,
+			 * pointing at Tonight (who to start) rather than at Pickups (everyone you can
+			 * actually get). It is a chip now, and the chip is named off VIEWS so it
+			 * cannot drift from the tab bar the way the sentence did.
+			 */
+			const wire = page.locator("[data-ctl=deal-to-wire]")
+			const label = (await wire.count()) ? await wire.innerText() : ""
+			t("and a league that cannot trade is offered the screen that still takes adds",
+				(await wire.count()) === 1 && /pickups/i.test(label), label || "no chip at all")
+			/* The route really lands. It goes through the hash rather than a prop — `App`
+			   listens for `hashchange` — which is exactly the kind of wiring that stops
+			   working silently, so it is pressed rather than assumed. */
+			await wire.click()
+			/* Waited FOR THE LABEL, not for the element: `.views button[aria-current=page]`
+			   exists the instant the page loads and still reads "My league" for the tick
+			   `hashchange` takes to reach React. The first run of this assertion measured
+			   exactly that — "landed on My league, hash #pickups" — which is the route
+			   working and the wait being wrong. */
+			const landed = await page
+				.waitForFunction(
+					want =>
+						document.querySelector(".views button[aria-current=page]")?.textContent.trim() === want,
+					SCREEN.wire,
+					{ timeout: 15000 }
+				)
+				.then(() => SCREEN.wire, () => null)
+			t("and pressing it really changes screens", landed === SCREEN.wire,
+				`still on ${await page.$eval(".views button[aria-current=page]", e => e.textContent.trim())}, hash ${await page.evaluate(() => location.hash)}`)
+			await toScreen(page, SCREEN.setup)
+			await page.waitForSelector(".trade-team", { timeout: 30000 })
+		}
 	}
 }
 
@@ -293,8 +330,10 @@ const at = re => cardOrder.findIndex(h => re.test(h))
  */
 t("My league no longer answers the add/drop question at all",
   at(/add and drop/i) === -1, cardOrder.join(" | "))
+/* The card is headed "Price a trade" since 2026-09-19 — see the chip assertion below
+   for why "The deal" went. The ordering claim is untouched. */
 t("and the lineup still comes before the deal — you price a trade against a lineup",
-  at(/starting lineup/i) > -1 && at(/starting lineup/i) < at(/the deal/i),
+  at(/starting lineup/i) > -1 && at(/starting lineup/i) < at(/price a trade/i),
   cardOrder.join(" | "))
 /* `SCREEN.today` rather than the literal it used to hold: this assertion was written
  * with "Today" typed into it, and the tab is called **Tonight** now, so the one
@@ -324,7 +363,9 @@ t("the screen that does answer it is the first tab, so nothing has to point at i
  */
 const editorStarts = at(/^this league$/i)
 t("the league editor is on this screen too, under the team rather than beside it",
-  editorStarts > -1 && at(/the deal/i) < editorStarts, cardOrder.join(" | "))
+  /* /price a trade/i, not /the deal/i: that card was renamed on 2026-09-19 so the
+     evaluator is named for what it does. The boundary this asserts is unchanged. */
+  editorStarts > -1 && at(/price a trade/i) < editorStarts, cardOrder.join(" | "))
 t("and the scoring tables are below the team, not above it",
   at(/^batting$/i) > editorStarts && at(/^roster slots$/i) > editorStarts,
   cardOrder.join(" | "))
@@ -388,14 +429,18 @@ t("no card on My league sends the reader to a screen by a dead name written in p
  */
 const jumps = await page.$$eval(".trade-jump button", n => n.map(e => e.textContent.trim()))
 t("the screen opens by saying where its own parts are",
-  jumps.length === 3 && jumps[0] === "Your starting lineup" && jumps[1] === "The deal" &&
+  /* "The deal" was the middle chip until 2026-09-19 and it named nothing: the app
+     carries a 3,013-line trade evaluator and that noun was the only word for it on any
+     screen. Chip and heading both say "Price a trade" now, and the rule the next
+     assertion enforces — the label IS the heading — still holds. */
+  jumps.length === 3 && jumps[0] === "Your starting lineup" && jumps[1] === "Price a trade" &&
     jumps[2] === "Scoring and slots", jumps.join(" | "))
 /* Every label has to be a heading that exists on the screen, or the row is a set of
  * promises the page cannot keep — the same failure as a card naming a tab that was
  * renamed. "Scoring and slots" is the one that names a group of cards rather than one
  * card, so it is checked against the group's own first heading instead. */
 t("and every destination it names is really on the screen",
-  cardOrder.includes("Your starting lineup") && cardOrder.includes("The deal") &&
+  cardOrder.includes("Your starting lineup") && cardOrder.includes("Price a trade") &&
     editorStarts > -1, cardOrder.join(" | "))
 {
 	await page.evaluate(() => window.scrollTo(0, 0))
@@ -741,15 +786,26 @@ t("and clearing it really is the way out",
 		await toScreen(page, SCREEN.setup)
 		await page.waitForSelector(".trade-deal", { timeout: 30000 })
 		const card = await page.$eval(".trade-deal", e => e.innerText)
+		/* The label moved on 2026-09-19 from "Price a trade" to the instruction the
+		   paragraph above it used to carry, because the heading became "Price a trade" —
+		   the card had said its own name twice and instructed nowhere. The claim this
+		   assertion protects is unchanged: exactly one press, no builder laid out, no
+		   deadline sentence. */
 		t("a league that still takes trades is offered the builder as a press, not a wall",
 			(await page.$$(".trade-closed")).length === 0 && (await page.$$(".deal")).length === 0 &&
 				!/stopped taking trades/.test(card) &&
-				(await page.$$(".trade-deal button:text-is('Price a trade')")).length === 1,
+				(await page.$$(".trade-deal button:text-is('Pick who leaves and who arrives')")).length === 1,
 			card.replace(/\s+/g, " ").slice(0, 200))
-		await page.click(".trade-deal button:text-is('Price a trade')")
+		/* And the card names the evaluator. "The deal" was the heading and the only word
+		   for a 3,013-line engine anywhere in the product; a reader scanning this screen
+		   had nothing on it that said the app prices trades. */
+		t("and the card it sits on is named for what the evaluator does",
+			/^price a trade$/im.test(card) && !/^the deal$/im.test(card),
+			card.replace(/\s+/g, " ").slice(0, 200))
+		await page.click(".trade-deal button:text-is('Pick who leaves and who arrives')")
 		const opened = await page.waitForSelector(".deal", { timeout: 15000 }).then(() => true, () => false)
 		t("and pressing it really opens the same evaluator", opened,
-			"pressing Price a trade produced no deal form")
+			"pressing the open-window chip produced no deal form")
 		// put the league back the way it was found, so nothing below inherits an open
 		// window from this block
 		await page.evaluate(text => localStorage.setItem("beanemachine:config", text), raw)
@@ -815,58 +871,51 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 	if (await toScreen(page, SCREEN.setup)) {
 		await page.waitForSelector(".paste-roster", { timeout: 30000 })
 		/*
-		 * The steps, and the ORDER of them, because the order is the fix.
+		 * ONE SENTENCE OVER THE BOX, AND IT STILL OFFERS TYPING.
 		 *
-		 * This asserted only that the words "My Team", "Ctrl", "A" and "Read that" were all
-		 * somewhere in the list, in any arrangement — so it passed on the broken version
-		 * and passes on the fixed one, which makes it no protection at all for the thing
-		 * that actually changed. The broken version gave Ctrl+A as THE way to get a roster
-		 * in, and no phone has a Ctrl key: on the device this app is mostly opened on, the
-		 * instruction could not be carried out, and nothing told the reader that typing four
-		 * names works exactly as well (`playersInText` matches known players in arbitrary
-		 * text and has never cared whether a clipboard was involved).
+		 * This block used to read `.paste-how li` and pin three things about a numbered
+		 * list: that it named the page to open and the button at the end, that typing was
+		 * offered before any keystroke was named, and that every mention of Ctrl sat inside
+		 * an "on a computer" clause. The list is gone as of 2026-09-19 — 57 words over
+		 * this box against 11 over the onboarding box that feeds the same
+		 * `rosterFromPaste`, and it was behind a `<details>` nobody opens. Measured at
+		 * 390x844: the open fold was 451px and 69 words, and is 311px and 24.
 		 *
-		 * The new truth is positional: the gesture that works on every device leads, and the
-		 * keyboard shortcut survives scoped to the device that has the keys. Both halves are
-		 * pinned separately — that typing is offered before any keystroke is named, and that
-		 * every mention of Ctrl sits inside a clause saying "on a computer" — because either
-		 * one alone still passes on the version this replaced.
+		 * What those three assertions were REALLY protecting is the one that survives: a
+		 * reader on a phone, which is the device this app is mostly opened on, must be told
+		 * he can type the names, because `playersInText` matches known players in arbitrary
+		 * text and no phone has a Ctrl key. That claim is now carried by the sentence
+		 * Onboard.tsx has always used. The Ctrl+A scoping assertion is not rewritten as a
+		 * weaker version of itself: there is no keystroke named over this box any more, so
+		 * the assertion is that there is none — which is strictly stronger than "every one
+		 * of them is qualified".
 		 */
 		await openPasteFold(page)
-		const steps = await page.$$eval(".paste-how li", n =>
-			n.map(e => e.innerText.replace(/\s+/g, " ").trim())
+		const how = await page.$eval(".paste-team-fold p.sub", e =>
+			e.innerText.replace(/\s+/g, " ").trim()
 		)
-		const how = steps.join(" ")
-		const stepWith = re => steps.findIndex(l => re.test(l))
-		t("the paste route says which page to open and what to press at the end",
-			/My Team/.test(how) && /Read that/.test(how), how.slice(0, 160))
-		t("typing the names is offered before any keystroke is named",
-			stepWith(/type the names/i) > -1 && stepWith(/type the names/i) < stepWith(/Ctrl/),
-			steps.join(" / ").slice(0, 200))
-		/*
-		 * ...and offered ONCE.
-		 *
-		 * Step 2 said "Copy it, or just type the names" and step 3 said "Paste or type them
-		 * below", so a three-step list spent a third of itself repeating the alternative it
-		 * had already given, and a reader who types was told twice in consecutive lines.
-		 * Step 3 exists for the box and the button; it says "put that in" now, which covers
-		 * a paste and a typed line without naming either a second time.
-		 */
-		t("and offered once rather than repeated in the next step",
-			steps.filter(l => /\btype\b/i.test(l)).length === 1,
-			steps.join(" / ").slice(0, 240))
-		t("and Ctrl+A is scoped to a computer rather than given as the way in",
-			/Ctrl/.test(how) &&
-				(await page.$$eval(".paste-how li", n =>
-					n.every(
-						li =>
-							!/Ctrl/.test(li.innerText) ||
-							[...li.querySelectorAll(".sub")].some(
-								sub => /on a computer/i.test(sub.innerText) && /Ctrl/.test(sub.innerText)
-							)
-					)
-				)),
-			how.slice(0, 200))
+		t("the box over the roster paste offers typing, not just pasting",
+			/paste/i.test(how) && /type the names/i.test(how), how)
+		t("and says it once, in one sentence rather than four steps",
+			how.split(/[.!?]/).filter(x => x.trim()).length === 1 &&
+				how.split(/\s+/).length <= 15,
+			`${how.split(/\s+/).length} words: ${how}`)
+		t("and names no keystroke a phone cannot press",
+			!/ctrl/i.test(await page.$eval(".paste-team-fold", e => e.innerText)) &&
+				(await page.$$(".paste-team-fold .paste-how")).length === 0,
+			await page.$eval(".paste-team-fold", e => e.innerText.replace(/\s+/g, " ").slice(0, 200)))
+		/* THE HALF OF THE DELETED ASSERTION THAT SURVIVES THE CUT.
+		   It read "the paste route says which page to open and what to press at the end"
+		   and was checking a three-step <ol> that named Yahoo's page, Ctrl+A and Ctrl+C —
+		   57 words replaced by an 11-word sentence, and the two assertions above now pin
+		   that sentence. What it was ALSO protecting is still true and still worth pinning:
+		   a reader who types his team in can see the button he has to press. Without this
+		   the fold could lose its own control and three assertions about a sentence would
+		   still pass. */
+		t("and the press that reads what he typed is on the same fold, named",
+			(await page.$$eval(".paste-team-fold button", n => n.map(e => e.textContent.trim())))
+				.some(x => /^read that$/i.test(x)),
+			JSON.stringify(await page.$$eval(".paste-team-fold button", n => n.map(e => e.textContent.trim()))))
 		t("the paste route is offered above the platform read, not below it",
 			await page.evaluate(() => {
 				const paste = document.querySelector(".paste-roster")
@@ -1237,7 +1286,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		await page.waitForSelector(".paste-note", { timeout: 15000 })
 
 		const open = page.locator(
-			".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')"
+			".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Pick who leaves and who arrives')"
 		)
 		t("the builder is asked for rather than shown, on a league of any kind",
 			(await open.count()) === 1 && (await page.$$(".deal")).length === 0,
@@ -1259,7 +1308,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		const back = {
 			collapsed: (await page.$$(".deal")).length === 0,
 			asks: await page
-				.locator(".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')")
+				.locator(".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Pick who leaves and who arrives')")
 				.count(),
 			kept: await page.$$eval(".deal-side .chip-btn[aria-pressed=true]", n => n.length)
 		}
@@ -1335,7 +1384,7 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			await toScreen(page, SCREEN.setup)
 			await page.waitForSelector(".trade-team", { timeout: 30000 })
 			const open = page.locator(
-				".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Price a trade')"
+				".trade-deal button:text-is('Price one anyway'), .trade-deal button:text-is('Pick who leaves and who arrives')"
 			)
 			if (await open.count()) {
 				await open.first().click()

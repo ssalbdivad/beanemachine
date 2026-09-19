@@ -874,7 +874,27 @@ t("stash mode re-ranks against the rest of the season",
   stashTop.length > 0 && stashTop.join() !== streamTop.join(),
   `${stashTop.slice(0, 3)} vs ${streamTop.slice(0, 3)}`)
 t("every horizon still produces a full board", stashTop.length >= 5, String(stashTop.length))
-await page.click(".modes .mode:has-text('This fortnight')")
+/*
+ * `#horizon-board`, not `.modes .mode:has-text('This fortnight')` — and it is the LABEL
+ * that moved, not this file's principle about labels.
+ *
+ * This suite reaches every other control by the words a reader sees, on the argument
+ * written at the top of it: an index finds A tab whatever the labels say, so it survives a
+ * rename by silently testing the wrong screen. The standing board's label is no longer a
+ * label. It is data: `standingBoard` in Board.tsx names the tab after the window the board
+ * is ranking, which is the league's own scoring period wherever the league stated one — so
+ * on this fixture (league 228947, a seven-day period starting Monday) it reads "This week",
+ * on a league that stated nothing it still reads "This fortnight", and on a ten-day period
+ * it would read "These 10 days". Pinning any one of those here would pin the fixture's
+ * settings rather than the tab.
+ *
+ * The id is the tab's identity and has never moved (`tabId` in Board.tsx, `horizon-${mode}`),
+ * it is the same string `aria-controls` and `aria-labelledby` already join the panel to, and
+ * it cannot silently select a DIFFERENT tab the way `nth-child` can. What the tab SAYS is
+ * asserted on its own, where it belongs: see "the standing board is named after the window
+ * it ranks" below.
+ */
+await page.click("#horizon-board")
 await page.waitForTimeout(250)
 
 /**
@@ -929,25 +949,49 @@ t("and a streaming list holds no hitters, because a hitter cannot be streamed fo
 const availTier = () => page.$eval(".stream-strip .toggle[data-avail]", e => e.dataset.avail)
 const availNote = () =>
   page.$eval("#horizon-panel .avail-note", e => e.textContent.replace(/\s+/g, " ").trim())
-/** The DERIVATION, which Board.tsx deliberately keeps in the tooltip rather than in
- *  the line — 109px of audit trail on a 390px screen, in front of the answer, was
- *  the reason it moved. It is still asserted, because a number the reader is asked
- *  to trust has to be traceable; it is just asserted where it actually lives. This
- *  read `textContent` and so could never match it once it moved. */
+/*
+ * WHERE THE THREE ANSWERS ARE NOW SAID, and the claim under test has not moved an inch.
+ *
+ * The paragraph under the header used to carry all of it: a bold headline naming the tier,
+ * the cut, the derivation in a `title`, and an instruction to untick a checkbox that is on
+ * the same screen. Measured at 390x844 on the dev server, 75px and 23 words of it, directly
+ * in front of the ranking — and every word of the first two sentences is on the CONTROL
+ * that makes the claim, two hundred pixels up: `data-avail` for the tier, the `pool-count`
+ * for the answer in the tier's own words ("off your league's rosters" / "213 free" /
+ * "est. over 35% is taken" / "can't tell"), and the full derivation as the toggle's title.
+ *
+ * So the reads move onto the toggle. What the paragraph still prints — and what these
+ * assertions would still catch it dropping — is the two states where that one line is
+ * short of the truth: `none` (the filter is ticked and NOTHING was filtered out) and a
+ * read that missed positions ("C could not be read this time"). Both are absences, which
+ * is why they are the two that survived.
+ */
+const availSays = () =>
+  page.$eval(".stream-strip .toggle[data-avail] .pool-count", e => e.textContent.replace(/\s+/g, " ").trim())
+/** The DERIVATION — "a 10-team league with 27 seats holds 270 players, and the 270th most
+ *  widely rostered player in this capture is rostered in 35% of leagues" — which was 109px
+ *  of audit trail on a 390px screen when it was a sentence. It is the title of the control
+ *  it derives, so it is read from there; a number the reader is asked to trust still has to
+ *  be traceable, and this is where it is traceable from. */
 const availDerivation = () =>
-  page.$eval("#horizon-panel .avail-note span[title]", e => e.getAttribute("title"))
+  page.$eval(".stream-strip .toggle[data-avail]", e => e.getAttribute("title"))
 t("Streaming opens filtered to players the reader can add, with no click at all",
   await page.$eval(".stream-strip .toggle[data-avail] input", e => e.checked))
 const tierOnOpen = await availTier()
 t("and it says which of the three answers it is giving rather than implying one",
   ["pool", "ownership", "none"].includes(tierOnOpen) &&
     new RegExp(
-      tierOnOpen === "pool" ? "free-agent list"
-      : tierOnOpen === "ownership" ? "estimated"
-      : "not read|no point in the list",
+      tierOnOpen === "pool" ? "free$"
+      : tierOnOpen === "ownership" ? "est\\."
+      : "can.t tell",
       "i"
-    ).test(await availNote()),
-  `${tierOnOpen}: ${await availNote()}`)
+    ).test(await availSays()),
+  `${tierOnOpen}: ${await availSays()}`)
+/* ...and where it cannot tell, it says so in the paragraph as well as on the control,
+   because "nobody was filtered out" is not something a reader can see in a list. */
+if (tierOnOpen === "none")
+  t("and where nothing says who is free, the board says that rather than implying a list",
+    /nobody is filtered out/i.test(await availNote()), await availNote())
 /**
  * The estimate has to be CALIBRATED to the league rather than to a constant. The
  * bar it replaced was `WIDELY_ROSTERED = 70` in Board.tsx — one number standing in
@@ -956,17 +1000,19 @@ t("and it says which of the three answers it is giving rather than implying one"
  * the league's own shape and every surviving row must sit at or under the cut.
  */
 if (tierOnOpen === "ownership") {
-  const note = await availNote()
-  // the line reads "above 35% rostered is treated as taken"; this pattern omitted
-  // "rostered", so `cut` was NaN and every assertion resting on it failed silently
-  // in the one way a number-check can: by comparing against NaN
-  const cut = Number((note.match(/above (\d+)% rostered is treated as taken/) ?? [])[1])
+  /* The number the reader sees, read off the control rather than the deleted paragraph.
+     It said "above 35% rostered is treated as taken" and now says "est. over 35% is taken"
+     — same cut, same screen, one line instead of four. The pattern that matched the old
+     wording once omitted the word "rostered" and made `cut` NaN, which every assertion
+     resting on it then compared against silently; this one is anchored on the digits. */
+  const line = await availSays()
+  const cut = Number((line.match(/over (\d+)% is taken/) ?? [])[1])
   const derivation = await availDerivation()
   t("the estimated bar is derived from the league's own size, not a constant",
     /\d+-team league with \d+ seats holds \d+ players/.test(derivation) && Number.isFinite(cut),
     derivation)
   t("and the line the reader actually sees states the cut it derived",
-    new RegExp(`above ${cut}% rostered is treated as taken`).test(note), note)
+    new RegExp(`over ${cut}% is taken`).test(line), line)
   const owned = await page.$$eval(".board-row .who .own", n => n.map(e => e.textContent.trim()))
   t("and nobody above that bar is on the list",
     owned.length > 0 &&
@@ -1151,7 +1197,15 @@ t("a window running past the reset says the extra games score for the next match
  * is thin is worse. Read off the counts the page itself prints, so it holds on any
  * capture of any age.
  */
-const clubsNamed = note => (note.match(/(\d+) of (\d+) clubs completely/) ?? []).slice(1).map(Number)
+/* READ OFF THE FRACTION THE NOTE STILL PRINTS, because the one it used to read is gone.
+   The note carried "N of M clubs completely" beside "named the starter in P of G", and the
+   pair was deleted as one fact said twice — a club is fully named exactly when none of its
+   games is unnamed, so `done < all` and `published < games` cross together. The deletion left
+   this matcher returning [], which made the loop below `continue` past both windows and made
+   the assertion under it compare 0 <= 0: two assertions that went on printing nothing and
+   passing whatever the page did. Same property, read from the numbers that are on screen. */
+const clubsNamed = note =>
+  (note.match(/named the starter in (\d+) of (\d+)/) ?? []).slice(1).map(Number)
 /* THE SIGNAL MOVED. It used to be "a shorter window is where this data is strongest: MLB names
    starters about three days ahead and then stops" — an explanation of the FEED, which is
    exactly the kind of sentence no screen carries any more. The hedge that survives is the one
@@ -1162,7 +1216,7 @@ for (const [label, note] of [["the period", periodNote], ["seven days", sevenNot
   const [done, all] = clubsNamed(note)
   if (!Number.isFinite(done) || !Number.isFinite(all)) continue
   t(`${label}: the thin-data warning is on exactly when the window is not fully named`,
-    warns(note) === done < all, `${done}/${all} clubs named, warning ${warns(note)}`)
+    warns(note) === done < all, `${done}/${all} starts named, warning ${warns(note)}`)
 }
 t("and the longer window is never better covered than the shorter one",
   (clubsNamed(sevenNote)[0] ?? 0) <= (clubsNamed(periodNote)[0] ?? 0) ||
@@ -1390,7 +1444,7 @@ await page.waitForTimeout(500)
  * and the board emptied with nothing on screen to undo — so leaving the tab has to
  * restore the full ranking, and the controls have to leave with it.
  */
-await page.click(".modes .mode:has-text('This fortnight')")
+await page.click("#horizon-board")
 await page.waitForTimeout(500)
 t("the streaming controls leave with the streaming tab",
   (await page.$(".stream-strip")) === null && (await page.$("#horizon-panel .stream-note")) === null)
@@ -1806,8 +1860,8 @@ t("and it comes back unchanged when the board is flipped again",
 
 // Every horizon, both directions. The pick is re-derived per horizon (journey.mjs
 // pins that it changes), so the bar has to hold on each of the three.
-for (const mode of ["Streaming", "This fortnight", "Stash"]) {
-  await page.click(`.modes .mode:has-text('${mode}')`)
+for (const mode of ["#horizon-stream", "#horizon-board", "#horizon-stash"]) {
+  await page.click(mode)
   await page.waitForTimeout(350)
   const a = { name: await pickOf(page), score: await pickBscore() }
   await flipValue(page)
@@ -1818,7 +1872,7 @@ for (const mode of ["Streaming", "This fortnight", "Stash"]) {
   t(`${mode}: the pick clears replacement in both sort directions`,
     a.score > 0 && b.score > 0, `${a.score} / ${b.score}`)
 }
-await page.click(".modes .mode:has-text('This fortnight')")
+await page.click("#horizon-board")
 await page.waitForTimeout(350)
 /*
  * ...and the ordering is PUT BACK by name, not left to the arithmetic of the clicks
@@ -2045,7 +2099,7 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
   // against Stash's 1,446 to 1,245.
   const injuredToggle = '.board-controls .toggle:has-text("Hide injured")'
   const count = () => page.$eval(".card-head-count .count", e => Number(e.textContent))
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(700)
   // The block above leaves the C chip pressed, and every count here is about the whole
   // board. A leftover filter is how a row-count assertion ends up measuring the wrong thing.
@@ -2069,7 +2123,7 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
    * stopped being drawn, and the board emptied with nothing on screen to undo it. With the
    * box still ticked, the fortnight must show every row it showed before.
    */
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(900)
   const fortnightTicked = await count()
   t("a filter that is not on screen is not filtering either",
@@ -2089,14 +2143,14 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
    * emptied it completely under the note "No players match the C position. Clear one of
    * those to widen it" — an instruction to clear a chip that is not on that screen.
    */
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(700)
   await page.click('.chips[aria-label="Position"] .chip-btn:text-is("All")')
   await page.waitForTimeout(400)
   await page.click(".modes .mode:has-text('Streaming')")
   await page.waitForTimeout(900)
   const streamOpen = await count()
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(700)
   await page.fill(".ctl-search input", "Grant")
   await page.waitForTimeout(600)
@@ -2106,7 +2160,7 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
   t("a name typed on the fortnight does not silently empty the Streaming tab",
     (await count()) === streamOpen && (await page.$(".ctl-search input")) === null,
     `Streaming shows ${await count()} with "Grant" still in the box (fortnight: ${searched})`)
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(700)
   t("and it is still applied on the horizon that does draw the box",
     (await count()) === searched, `${await count()} vs ${searched}`)
@@ -2121,7 +2175,7 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
     (await count()) === streamOpen &&
       (await page.$('.chips[aria-label="Position"]')) === null,
     `Streaming shows ${await count()} with the C chip still set (fortnight: ${cCount})`)
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(700)
   await page.click('.chips[aria-label="Position"] .chip-btn:text-is("All")')
   await page.waitForTimeout(500)
@@ -2138,7 +2192,7 @@ t("slot filter restricts to that slot", slots.length > 0 && slots.every(s => s =
   await page.waitForTimeout(900)
   await page.click(".board-head .sort-head[data-col=pts]")
   await page.waitForTimeout(500)
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(900)
   const carried = await page.$$eval(".board-head .sort-head", n =>
     n.filter(e => /[▾▴]/.test(e.textContent)).map(e => e.dataset.col + (/▾/.test(e.textContent) ? " desc" : " asc")))
@@ -2488,8 +2542,58 @@ await phone.close()
     (await back.$eval(".board-controls input[type=text]", e => e.value).catch(() => "")) === "",
     "search box should open empty")
   // leave the tab where the rest of this suite expects it
-  await page.click(".modes .mode:has-text('This fortnight')")
+  await page.click("#horizon-board")
   await page.waitForTimeout(600)
+}
+
+/**
+ * WHICH LEAGUES GET THEIR OWN SCORING PERIOD AS THE STANDING BOARD'S HORIZON.
+ *
+ * The board above is one league, so the browser can only ever show one answer to this. The
+ * gate has four interesting inputs and three of them are leagues this fixture is not:
+ * `periodScoped` is exported and pure, so each is asked directly, through `resolvePeriod`
+ * rather than through a hand-built period object — what has to hold is the pair working
+ * together, and a literal would let the resolver's own flags drift away from the gate that
+ * reads them.
+ *
+ * The fortnight is not a fallback anybody should reach by accident: it is what a league
+ * that STATED NOTHING gets, and the assertions below are as much about that as about the
+ * leagues that get their own window.
+ */
+{
+  const { periodScoped } = await import("../src/client/useBoard.ts")
+  const { resolvePeriod } = await import("../src/engine/period.ts")
+  const TODAY = "2026-09-19"
+  const END = "2027-12-31"
+  const at = sp => resolvePeriod({ scoring_period: sp }, TODAY, END)
+
+  const stated = at({ kind: "matchup", days: 7, starts_on: "mon", anchor: null, lineup_lock: "daily" })
+  t("a league that states its scoring period ranks the standing board over it",
+    periodScoped("board", stated) === true, JSON.stringify(stated.basis))
+  /* `days: null` — the league named a start day and no length, so `resolvePeriod` assumes
+     seven and says so. A window this app assumed is exactly what the fortnight already was,
+     so there is nothing to be gained by swapping one assumption for a shorter one. */
+  const guessed = at({ kind: "matchup", days: null, starts_on: "mon", anchor: null, lineup_lock: "daily" })
+  t("a league that left the length to us keeps the fourteen days, and the flag says why",
+    guessed.assumed === true && periodScoped("board", guessed) === false, guessed.basis)
+  /* Season-long scoring resolves to a rolling seven days with `assumed: false` — false
+     because the league DID say how it scores, not because seven days is its window. It has
+     no period at all, so the standing board keeps the fortnight. */
+  const seasonLong = at({ kind: "none", days: null, starts_on: null, anchor: null, lineup_lock: null })
+  t("a league that scores the whole season has no period to scope to, flag or no flag",
+    seasonLong.assumed === false && periodScoped("board", seasonLong) === false, seasonLong.basis)
+  /* A daily league's stated period is one day. That is the right horizon for tonight's
+     lineup and the wrong one for a board of everyone in baseball you could add. */
+  const daily = at({ kind: "daily", days: null, starts_on: null, anchor: null, lineup_lock: null })
+  t("a daily league is not ranked over one day on the standing board",
+    periodScoped("board", daily) === false, daily.basis)
+  t("Streaming asks the period question whatever the league said",
+    periodScoped("stream", seasonLong) && periodScoped("stream", daily) && periodScoped("stream", null),
+    "streaming is unconditional")
+  t("and Stash never is, because its question is the rest of the season",
+    periodScoped("stash", stated) === false && periodScoped("stash", daily) === false)
+  t("and a league with no period resolved at all keeps the fortnight",
+    periodScoped("board", null) === false)
 }
 
 /**
@@ -2643,8 +2747,13 @@ await phone.close()
   await page.click(".modes .mode:has-text('Streaming')")
   await page.waitForTimeout(900)
   const deskTop = await top(page, ".board-row")
-  t("and the board starts within one and a half screens of its own",
-    deskTop < 1300, `first ranked row at y=${deskTop}`)
+  /* 1,300 was the bar when the board's own introduction to itself, a card heading and the
+     column legend all stood above the ranking. They are gone (see the notes in Board.tsx),
+     and the streaming board's first row measured y738 on this viewport and y632 on the
+     fortnight. A bar left at 1,300 would pass a page that put every one of them back and
+     then some, so it comes down to 900 — above where it sits, not at it. */
+  t("and the board starts within one screen on a desktop",
+    deskTop < 900, `first ranked row at y=${deskTop}`)
 
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await phone.goto(BASE, { waitUntil: "domcontentloaded" })
@@ -2667,7 +2776,16 @@ await phone.close()
   await phone.click(".modes .mode:has-text('Streaming')")
   await phone.waitForTimeout(1200)
   const phoneBoard = await top(phone, ".board-row")
-  t("and the board within two screens on a phone", phoneBoard < 1900,
+  /*
+   * 1,900 was two phone screens and it was set when the climb to a ranked row on Streaming
+   * was 1,506. Measured on the dev server at 390x844 after this pass: 934 on Streaming and
+   * 787 on the standing board, where the first row's top is 57px above the fold. This bar is
+   * the streaming one — the deepest of the three horizons, since it adds the window chips,
+   * the second toggle and the coverage note — and 1,200 leaves a paragraph of room while
+   * failing anything like the old shape. The standing board has a bar of its own, at the
+   * viewport itself, where the claim is that something ranked is on the first screen.
+   */
+  t("and the board within one and a half screens on a phone", phoneBoard < 1200,
     `first ranked row at y=${phoneBoard}`)
   t("with nothing spilling sideways on a phone",
     (await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0)
@@ -3013,8 +3131,38 @@ await phone.close()
   const fortnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 14)
   t("the board's window opens today, not on the day the player data was captured",
     !!range && range[1] === label(now), `${head} — today is ${label(now)}`)
-  t("and it runs the fortnight the rows are actually rated over",
-    !!range && range[2] === label(fortnight), `${head} — fourteen days on is ${label(fortnight)}`)
+  /*
+   * ...AND IT ENDS WHEN HIS LEAGUE'S MATCHUP DOES, WHICH IS THE CHANGE.
+   *
+   * This asserted the far edge was today+14 — the fortnight, a window this app chose. The
+   * standing board is now rated over the LEAGUE's own scoring period wherever the league
+   * stated one (`periodScoped` in useBoard.ts), because points scored after the reset belong
+   * to the next matchup and a man who is worth fourteen days is not the man who is worth the
+   * two that are left of this one. On this fixture, read on 2026-09-19, that moved the header
+   * from "Sep 19 → Oct 3" to "Sep 19 → Sep 20" and the board's own top row from Grant Taylor
+   * (8.34 ahead by) to Tyler Stephenson (2.25) — 912 rows rather than 932.
+   *
+   * The expected edge is computed by `resolvePeriod` from the league's own settings rather
+   * than written down here: the fixture states `days: 7, starts_on: "mon"`, and a date typed
+   * into this file would be right for one week of one season. The fortnight is still asserted
+   * — as what the header must NOT be saying — so a silent revert fails here rather than
+   * passing with a different number.
+   */
+  const { resolvePeriod } = await import("../src/engine/period.ts")
+  const { readFileSync: readScoring } = await import("node:fs")
+  const store = JSON.parse(readScoring("scoring.json", "utf8"))
+  const activeLeague = store.leagues[store.active_league]
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  const fromIso = d => { const [y, m, dd] = d.split("-").map(Number); return new Date(y, m - 1, dd) }
+  // a slate end far past any period, so the clip below is the LEAGUE's edge and not the capture's
+  const stated = resolvePeriod(activeLeague, iso(now), "2027-12-31")
+  t("and it ends the day his league's own scoring period does, not a fortnight out",
+    !!range && range[2] === label(fromIso(stated.end)) && range[2] !== label(fortnight),
+    `${head} — this league's period ends ${stated.end}, fourteen days on is ${label(fortnight)}`)
+  t("and the tab that switches to it is named after the window it ranks",
+    /week|days|fortnight/i.test(await first.$eval("#horizon-board", e => e.textContent.trim())) &&
+      (stated.assumed || !/fortnight/i.test(await first.$eval("#horizon-board", e => e.textContent.trim()))),
+    await first.$eval("#horizon-board", e => e.textContent.trim()))
 
   const entries = () => first.evaluate(() => history.length)
   const opened = () => first.$$eval(".board-row.open", r => r.length)
@@ -3037,43 +3185,87 @@ await phone.close()
     (await opened()) === 0 && (await onTab()) === "Pickups",
     `${await opened()} rows open, on ${await onTab()}`)
 
-  const intro = await first.$eval(".board-intro", e => e.textContent.replace(/\s+/g, " ").trim())
   /*
-   * THE SOURCE OF TRUTH IS panels.tsx, not the nav button, and this assertion has now been
-   * written both ways round.
+   * WHAT THIS SCREEN IS SHOWING, AS TEXT ON IT — the claim these three assertions were
+   * really protecting, now made about the line that survived rather than the one that did
+   * not.
    *
-   * It first compared the rendered paragraph against the nav button's `title` — correct while
-   * both existed, and the point of the change was that the hover was the ONLY copy of the
-   * sentence. Once all three screens said their own, the three `title` attributes were
-   * duplicates and went, and this assertion went red on its own mechanism rather than on its
-   * claim. What survives of the hover is only the disabled variant, which a screen cannot carry.
+   * They pinned `.board-intro`: `purpose("wire")` printed as a paragraph at the top of the
+   * board, read out of panels.tsx so there was one copy of the sentence, and checked for not
+   * arguing the ranking's case. The paragraph is deleted. It described the PAGE — "Everyone
+   * you can actually get, ranked in this league's scoring, over the window you pick" — which
+   * is a sentence about the app rather than an instruction to the reader, and it cost 61px
+   * of an 844px phone at the very top of the one screen whose job is ranked rows. Measured
+   * at 390x844 on the dev server, the first ranked row sat at y937 with it and y787 without
+   * it, against the y895 this repo's own note records as the bug it had already fixed once.
    *
-   * So the sentence is read out of `VIEWS` as TEXT. panels.tsx cannot be imported here — it
-   * holds JSX, which `--experimental-strip-types` does not transform — and hardcoding the
-   * sentence in this file would put a second copy of it exactly where the defect was. A regex
-   * over the source keeps one copy and still fails if the screen stops printing it.
+   * The sentence is not lost and is still written in exactly one place: `VIEWS[].purpose` in
+   * panels.tsx, printed on My league under "What each tab does", which is where a reader
+   * asking what a tab is for actually is. The nav-button hover is still asserted below to be
+   * gone, because the original complaint — that this sentence existed only as a hover on an
+   * app opened on a phone — must not come back.
+   *
+   * What the screen owes a reader instead is what THIS BOARD is: how many men are on it and
+   * what window they were ranked over, in his league's own words. That is the header, and it
+   * is asserted here in the same three shapes: it is text on the screen, it is not a hover,
+   * and it states the window without arguing for the ranking.
    */
-  const { readFileSync } = await import("node:fs")
-  const panels = readFileSync("src/client/panels.tsx", "utf8")
-  const wireBlock = panels.slice(panels.indexOf('id: "wire"'))
-  const want = /purpose:\s*\n?\s*"([^"]+)"/.exec(wireBlock)?.[1]
-  t("the tab's own sentence is on the screen as text, read from the one place it is written",
-    !!want && intro.startsWith(want.trim()), `${intro.slice(0, 80)}… / wanted: ${want}`)
-  t("and the nav no longer carries it as a hover, because the screen says it",
+  const headLine = await first.$eval(".card-head-count", e => e.textContent.replace(/\s+/g, " ").trim())
+  t("the screen says what it is showing, as text: how many men, over what window",
+    /\d+ players/.test(headLine) &&
+      /(week \d+ of \d+|scoring period|these \d+ days|today|fortnight|rest of)/i.test(headLine),
+    headLine)
+  t("and the board's own introduction to itself is not back above the ranking",
+    (await first.$(".board-intro")) === null,
+    await first.$eval(".board-intro", e => e.textContent).catch(() => ""))
+  t("and the nav no longer carries the tab's sentence as a hover either",
     (await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))) === null,
     String(await first.$eval('.views button:has-text("Pickups")', e => e.getAttribute("title"))))
   /*
      THIS ASSERTED AN EXPLANATION, AND THE EXPLANATION WAS REMOVED ON PURPOSE.
-     
+
      It required the intro to say "the top names are unfamiliar because hardly anybody has
      taken them" with the first ten's rostered range. That is the board arguing its own case,
-     and no screen does that any more. It is not lost evidence — what the board owes a reader
-     is what the list IS, which the tab's own sentence says and which the assertion two lines
-     above already pins. Recorded rather than deleted so that nobody reads its absence as a
-     regression and puts the paragraph back.
+     and no screen does that any more. Recorded rather than deleted so that nobody reads its
+     absence as a regression and puts the paragraph back — and now pinned on the header, which
+     is the line that could grow one.
   */
-  t("and the intro says what the list is without arguing for it",
-    /Everyone you can actually get/.test(intro) && !/because hardly anybody/.test(intro), intro)
+  t("and the header states the window without arguing for the ranking",
+    !/because/i.test(headLine), headLine)
+  /*
+   * THE DEFINITION OF THE NUMBER IS BELOW THE ROWS, NOT ABOVE THEM.
+   *
+   * `.board-legend` — the generated sentence naming whose bar the ordering column subtracts —
+   * sat between the column heads and the first row and was 72px shut at 390x844: the last 72
+   * of a 937px climb on a screen 844px tall, so a reader who came for a ranked row scrolled
+   * past a definition to reach one. It is the same `<details>` with the same generated
+   * sentence at the foot of the list, and `COLUMN_HELP` still carries it on the heading
+   * itself, so nothing about the number is unsaid. Pinned by POSITION rather than by
+   * existence, because the regression to guard against is it climbing back over the answer.
+   */
+  const legendAbove = await first.evaluate(() => {
+    const legend = document.querySelector(".board-legend")
+    const row = document.querySelector(".board-row")
+    if (!legend || !row) return null
+    return legend.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING ? true : false
+  })
+  t("the column definition is under the ranking rather than in front of it",
+    legendAbove === false, `legend ${legendAbove === null ? "missing" : legendAbove ? "above" : "below"} the first row`)
+  /*
+   * AND A RANKED ROW IS ON THE FIRST PHONE SCREEN, which is the whole point of the pass
+   * above and has now regressed three times.
+   *
+   * The record: 1,187px, fixed to 895, back to 1,506 on the streaming tab, and 937 when this
+   * bar was written — every paragraph defensible on its own, which is exactly why a number is
+   * needed rather than judgement. Measured at 390x844 on the dev server with the fixture
+   * league: 787, so the first row's top sits 57px above the fold. The bar is set at 844 —
+   * the viewport itself — because that is the claim in words: SOMETHING RANKED IS ON THE
+   * FIRST SCREEN. Anything tighter would fail on a phone with a taller masthead rather than
+   * on a page that grew.
+   */
+  const firstRowTop = await first.$eval(".board-row", e => Math.round(e.getBoundingClientRect().top + scrollY))
+  t("a ranked row is on the first screen of a 390x844 phone",
+    firstRowTop < 844, `first ranked row at y=${firstRowTop}`)
   await first.close()
 }
 

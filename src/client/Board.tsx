@@ -7,7 +7,7 @@ import { roster } from "./roster.ts"
 import { useStored } from "./stores.ts"
 import { deriveMoveLimit, deriveInningsMinimum } from "../import.ts"
 import {
-	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, useBoard,
+	AVAILABLE_ONLY_DEFAULT, DEFAULT_FILTERS, normalizeName, periodScoped, useBoard,
 	type BoardRow, type ContactStatus, type Filters, type Ranked
 } from "./useBoard.ts"
 import {
@@ -17,7 +17,7 @@ import { since } from "./pool.ts"
 import { taken as takenStore, takenKeys as keysOf } from "./taken.ts"
 import { useEffect } from "react"
 import { datesBetween, leagueWeek, type ResolvedPeriod } from "../engine/period.ts"
-import { purpose, tab } from "./panels.tsx"
+import { tab } from "./panels.tsx"
 import { andList, statLabel } from "../data/names.ts"
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -118,9 +118,56 @@ const MODES = [
 	// which pitchers actually take the ball before the reset, what they get, and
 	// against whom.
 	["stream", "Streaming", "who's pitching before the reset — starts, matchups, and what they're worth"],
-	["board", "This fortnight", "the standing board, 14 days out"],
+	/* The standing board's label is not written here and the two empty strings are never
+	   read — the branch that renders this entry calls `standingBoard` instead, because the
+	   name of this tab is the window it is ranking and that is the league's, not ours. */
+	["board", "", ""],
 	["stash", "Stash", "rest of season — who to hold, not who to start"]
 ] as const
+
+/**
+ * WHAT THE STANDING BOARD IS CALLED, which is whatever it is ranking over.
+ *
+ * "This fortnight" was a constant over a window that is no longer constant:
+ * `periodScoped` in useBoard.ts now rates this horizon over the league's own scoring
+ * period wherever the league stated one, and a tab reading "This fortnight" above a
+ * header reading "the rest of this scoring period · Sep 19 → Sep 20" is two sentences on
+ * one screen disagreeing about what the reader is looking at — the exact failure this
+ * file has had to delete four times.
+ *
+ * The fallback keeps the old word for the league that stated nothing, because for that
+ * league nothing has changed: it is still fourteen days this app picked, and the tab
+ * still says so.
+ */
+const standingBoard = (
+	period: ResolvedPeriod | null,
+	/**
+	 * What the rows on screen were ACTUALLY rated over, where this tab is the one on
+	 * screen, and null where it is not.
+	 *
+	 * `periodScoped` says what the league stated; it does not say whether that window has
+	 * any baseball in it. A capture older than the period it is asked about resolves to a
+	 * window with no games, and `using` in useBoard.ts falls back to the fortnight rather
+	 * than rank everyone at zero — at which point a tab reading "This week" would sit over
+	 * a header reading "the fortnight ahead", which is the disagreement this function
+	 * exists to prevent rather than a new one to introduce. So where the answer is known it
+	 * wins, and where the reader is standing on another tab the league's own statement is
+	 * the best available guess at what this one will show.
+	 */
+	over: "period" | "rest" | "fortnight" | null
+): { label: string; why: string } => {
+	if (over !== null && over !== "period")
+		return { label: "This fortnight", why: "the standing board, 14 days out" }
+	if (!periodScoped("board", period) || !period?.periodStart || !period.periodEnd)
+		return { label: "This fortnight", why: "the standing board, 14 days out" }
+	const days = datesBetween(period.periodStart, period.periodEnd)
+	return {
+		// Seven is what a manager calls a week; anything else is named by its length
+		// rather than by a word that would be wrong about it.
+		label: days === 7 ? "This week" : `These ${days} days`,
+		why: `everyone you can add, ranked over the ${days} days your league settles this matchup on`
+	}
+}
 
 /**
  * The streaming horizons, as one control.
@@ -538,6 +585,12 @@ const horizonSpan = (
 	if (over.kind === "period" && period) {
 		const days = datesBetween(over.start, over.end)
 		return {
+			/* WHICH OF HIS LEAGUE'S OWN WEEKS, where the league numbers them and the number is
+			   checkable — `leagueWeek` walks back in sevens from the last day Yahoo prints and
+			   returns null unless the walk lands exactly on the period this app resolved. "Week
+			   25 of 26" is what a manager calls this window; a pair of dates is what a database
+			   calls it. The rest-of-season branch below has printed it since the day the league's
+			   own end date arrived, and the period — the window the number is ABOUT — did not. */
 			range: `${day(over.start)} → ${day(over.end)}`,
 			phrase:
 				// A window the reader chose by length is named by that length, not by the
@@ -547,6 +600,13 @@ const horizonSpan = (
 				period.kind === "days" ? `these ${days} days`
 				: period.kind === "daily" ? "today"
 				: period.kind === "rolling" ? "a rolling 7 days"
+				/* HIS LEAGUE'S OWN NUMBER FOR THIS WINDOW, where it numbers them and the
+				   number is checkable — `leagueWeek` walks back in sevens from the last day
+				   Yahoo prints and returns null unless the walk lands exactly on the period
+				   this app resolved. "The rest of week 25 of 26" is what a manager calls this
+				   window; "the rest of this scoring period" is what a schema calls it, and it
+				   is four words longer on a line that is read on every visit. */
+				: league?.week ? `the rest of week ${league.week.number} of ${league.week.of}`
 				: "the rest of this scoring period"
 		}
 	}
@@ -1041,17 +1101,22 @@ export const Board = ({
 		return (
 			<section className="card full">
 				<h2>The wire</h2>
-				<p className="empty">Import or configure a league first — the board ranks players in your league's scoring.</p>
+				{/* "— the board ranks players in your league's scoring" stood after the dash: the
+				    page telling a reader why it cannot do the thing, in front of the one gesture
+				    that makes it able to. What he needs is the gesture. */}
+				<p className="empty">Import or configure a league first.</p>
 			</section>
 		)
 	if (league.meta.max_teams == null)
 		return (
 			<section className="card full">
 				<h2>The wire</h2>
+				{/* The first sentence — "a player is worth what he beats the next man up by, and
+				    how deep the waiver wire runs decides who that is" — is the model explaining
+				    itself to a reader who is looking at an empty board, and panels.tsx already
+				    says it beside the field he has to fill in. What belongs here is where to go. */}
 				<p className="empty">
-					A player is worth what he beats the next man up by, and how deep the waiver
-					wire runs decides who that is. Set the team count on <b>My league</b> and
-					the board fills in.
+					Set the team count on <b>My league</b> and the board fills in.
 				</p>
 			</section>
 		)
@@ -1092,6 +1157,13 @@ export const Board = ({
 			}
 		:	null
 	)
+
+	/** Whether the window on screen runs past the day the league resets — the one thing
+	 *  `period.basis` says that the header above the board cannot, because it is about the
+	 *  points a reader would be counting for the wrong matchup. Only a window the reader
+	 *  chose by length can do it; the period's own end is the period's own end. */
+	const pastReset =
+		ratedOver.kind === "period" && period?.periodEnd != null && ratedOver.end > period.periodEnd
 
 	/**
 	 * A row's start schedule, or null where there is nothing honest to say: off the
@@ -1308,48 +1380,21 @@ export const Board = ({
 	return (
 		<>
 			{/*
-			  WHAT THIS SCREEN IS, AND WHY ITS TOP FIVE ARE MEN NOBODY HAS HEARD OF.
+			  THE SCREEN'S DESCRIPTION OF ITSELF STOOD HERE — `purpose("wire")`, "Everyone you
+			  can actually get, ranked in this league's scoring, over the window you pick."
 
-			  A bscore legend stood here and was deleted for pointing at the wrong column on
-			  the streaming tab, leaving an empty `.full` div at the top of the board. Two
-			  separate sentences now have to be said on this screen and they belong in one
-			  place, because they are one thought.
+			  It is a sentence about the page rather than an instruction to the reader, and it
+			  was charging 61px of a 844px phone for it at the very top of the one screen whose
+			  job is ranked rows: measured at 390x844 on the dev server, the first ranked row
+			  sat at y937, which is not merely off the first screen but 42px past the y895 this
+			  file's own "more filters" note records as the bug it had already fixed once.
+			  Deleting it is 61 of the 163px that pass bought back.
 
-			  THE FIRST is the tab's own sentence, which until now existed only as the `title`
-			  attribute on the nav button — a hover, on an app that is opened on a phone. 70
-			  `title` attributes are live on this screen at 390x844 and 68 of them run longer
-			  than six words; the three tab sentences are the best orientation copy in the app
-			  and a thumb cannot reach one of them. It is read from `VIEWS` through `purpose`
-			  rather than typed out, for the same reason `tab()` is: the tabs have been renamed
-			  three times and every rename left a sentence describing a screen that no longer
-			  had that name.
-
-			  THE SECOND is the one two separate walkers read as a broken app. With no team
-			  entered this board opens on Grant Taylor, Sam Antonacci and Tristan Peters — three
-			  White Sox — then two men from Miami and Cincinnati, and Billy picks the White Sox
-			  reliever. That is CORRECT: a board of men you can actually add, ranked by what
-			  they beat the man left at their slot by, is a board of men almost nobody has
-			  taken, and being untaken is the same fact as being available. Measured 2026-09-12
-			  on the dev server with an empty profile: every one of the top ten carries a
-			  rostered share and they run from 14% (Cole Carrigg) to 35% (Grant Taylor), mean
-			  25%, against a cut of 35% — the 270th most widely rostered man in this capture,
-			  which is what a 10-team league with 27 seats holds. So two leagues in three have
-			  the best name on this board sitting free.
-
-			  The range is COMPUTED from the rows on screen rather than written down, because
-			  the reader can widen the board: unticking "Only players I can add" fills it with
-			  men rostered everywhere, at which point a sentence about unfamiliar names would
-			  be false. So the explanation is scoped to the filter that makes it true, and the
-			  numbers move with the board. Where fewer than ten rows are ranked, or any of the
-			  ten has no published rostered share, the clause is left off entirely rather than
-			  quoting a range over a subset — an absence is stated as an absence, and here the
-			  honest absence is silence.
+			  The sentence is not lost: `VIEWS` still carries it and My league still prints it
+			  under "What each tab does", which is where a reader asking what a tab is for
+			  actually is. What tells him what THIS board is showing is now the header under it,
+			  which names the window in his league's own words rather than in the app's.
 			*/}
-			<div className="full">
-				<p className="sub board-intro">
-					{purpose("wire")}
-				</p>
-			</div>
 			{/*
 			  A toolbar, not a card.
 
@@ -1367,7 +1412,14 @@ export const Board = ({
 				{/* The tabs are the tablist's only children, because a tablist that
 				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
-					{MODES.map(([id, label, why]) => (
+					{MODES.map(([id, fixedLabel, fixedWhy]) => {
+					// The standing board is named by the window it ranks; the other two name
+					// their own question and never move. See `standingBoard`.
+					const { label, why } =
+						id === "board" ?
+							standingBoard(period, filters.mode === "board" ? ratedOver.kind : null)
+						:	{ label: fixedLabel, why: fixedWhy }
+					return (
 						<button
 							key={id}
 							id={tabId(id)}
@@ -1390,7 +1442,7 @@ export const Board = ({
 						>
 							<b>{label}</b>
 						</button>
-					))}
+					)})}
 				</div>
 				{/*
 				  The streaming controls, and only on the streaming tab.
@@ -1644,14 +1696,27 @@ export const Board = ({
 			    cards below re-rank with it too, but this is the ranking itself, and
 			    the sibling cards can't be wrapped without breaking the page grid. */}
 			<section className="card full" id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(filters.mode)}>
-				{/* The heading and the count share a line. Separately they were two rows and
-				    a margin above a table on the one screen whose job is showing ranked
-				    rows — and the count is a caption for the heading, not a second subject.
-				    `.card-head` is the flex row; the heading keeps its own marker. */}
+				{/*
+				  ONE LINE, AND IT NAMES THE WINDOW IN THE LEAGUE'S OWN WORDS.
+
+				  `<h2>The wire</h2>` stood in front of it. The screen is called Pickups, the tab
+				  is drawn selected above, this is the only card on it, and the panel takes its
+				  accessible name from that tab (`aria-labelledby`), so the heading named the
+				  screen to a reader already standing on it. At 390x844 the pair measured 63px
+				  against the 40px the line costs by itself, and it was the last block of
+				  furniture between the controls and the column heads.
+
+				  What replaces it is the sentence this board could not previously say: WHICH
+				  window these rows were ranked over. The dates were already here and a pair of
+				  dates does not tell a reader it is his matchup — `period.basis` has always
+				  known ("the rest of this scoring period"), and printed it on the streaming tab
+				  only, where it was the fourth line of a note nobody reads. It is the heading
+				  now, on every horizon, because the horizon is the one thing the three tabs
+				  differ by.
+				*/}
 				<div className="card-head">
-					<h2>The wire</h2>
 					<p className="sub card-head-count">
-						<b className="count">{rows.length}</b> players · {span.range}
+						<b className="count">{rows.length}</b> players · {span.phrase} · {span.range}
 						{budget.moves !== null && (
 							<>
 								{" · "}
@@ -1764,41 +1829,38 @@ export const Board = ({
 				  three-day one": it is, and the extra four days are estimated.
 				*/}
 				{/*
-				  Which of the three availability answers this page is giving, said once
-				  where the reader can see it rather than implied by a list. The whole
-				  complaint was a streaming list headed by four men who were already
-				  rostered; the fix is only trustworthy if the page is explicit about
-				  whether "he is free" was READ or ESTIMATED.
+				  WHICH OF THE THREE AVAILABILITY ANSWERS THIS PAGE IS GIVING — said on the
+				  control that makes the claim, and printed here only where that one line
+				  cannot hold it.
+
+				  The whole complaint this note was written for was a streaming list headed by
+				  four men who were already rostered, and the fix is only trustworthy if the
+				  page is explicit about whether "he is free" was READ or ESTIMATED. It still
+				  is: the toggle two hundred pixels above says which, in the same three
+				  vocabularies — "off your league's rosters", "213 free", "est. over 35% is
+				  taken", "can't tell" — and carries the full derivation as its title.
+
+				  So on the ordinary estimate this paragraph was the same fact a second time,
+				  plus an instruction to untick a checkbox that is on screen. Measured at
+				  390x844 on the dev server: 75px and 23 words, immediately under the header,
+				  in front of the ranking.
+
+				  TWO STATES SURVIVE, because in both of them the line above is short of the
+				  truth and the difference is an absence:
+				    - `none`: the filter is ticked and NOTHING was filtered out, which the
+				      reader cannot see from a list, plus the one instruction that fixes it.
+				    - a read that missed positions: "C could not be read this time, so what is
+				      listed at that position is short of what your league has" — a gap in the
+				      read rather than an empty wire, and the one sentence in this app that
+				      keeps an absence of evidence from being rendered as evidence of absence.
 				*/}
-				{filters.mode === "stream" && availableOnly && (
+				{filters.mode === "stream" && availableOnly &&
+					(availability.basis === "none" || missedPositions.length > 0) && (
 					<p className="sub avail-note">
-						<b>
-							{availability.basis === "pool" ? "Free agents in your league."
-							: availability.basis === "ownership" ? "Probably-free players."
-							:	"Every starter in the window."}
-						</b>{" "}
-						{/*
-						  The OPERATIVE fact, with the derivation behind it rather than in front.
-						  The full sentence — "a 10-team league with 27 seats holds 270 players,
-						  and the 270th most widely rostered player in this capture is rostered
-						  in 35% of leagues, so above 35% is treated as taken" — is how the
-						  number was arrived at, and it measured 109px on a 390px screen sitting
-						  directly under a card that had already said "probably free, rostered in
-						  13% of leagues". The same estimate, twice, in front of the answer.
-						  It is the audit trail for a number the reader is asked to trust, so it
-						  is not deleted: it is the title of the line that summarises it.
-						*/}
 						<span title={availability.basisText}>
-							{availability.basis === "ownership" && availability.cut ?
-								<>Estimated: above {availability.cut.cut}% rostered is treated as taken.</>
-							:	<>
-									{availability.basisText.charAt(0).toUpperCase()}
-									{availability.basisText.slice(1)}.
-								</>
-							}
+							{availability.basisText.charAt(0).toUpperCase()}
+							{availability.basisText.slice(1)}.
 						</span>
-						{availability.basis !== "pool" &&
-							" Untick “Only players I can add” to see the whole field."}
 						{/*
 						  The remedy, and it is here because the only one on offer was the
 						  wrong one.
@@ -1831,7 +1893,26 @@ export const Board = ({
 				)}
 				{streaming && (
 					<p className="sub stream-note">
-						{period && `${period.basis.charAt(0).toUpperCase()}${period.basis.slice(1)}. `}
+						{/*
+						  THE WINDOW'S CAVEATS, AND ONLY WHERE IT HAS ANY.
+
+						  This printed `period.basis` unconditionally and led with it: "The rest of
+						  this scoring period, through 2026-09-20." The header above now names the
+						  window on every horizon, in the league's own words and in a reader's date
+						  format rather than in ISO, so on the ordinary window that sentence was the
+						  same fact twice — 24 words and a whole line of a 390px screen, above a
+						  board, saying what the line above it had just said.
+
+						  What `basis` carries that the header cannot is the three things that are
+						  WRONG with a window, and each of them is an absence stated as an absence:
+						  the edges this app had to assume because the league never said, a window
+						  running past the reset (whose extra games score for the NEXT matchup, not
+						  this one), and a window clipped because the capture holds no games that
+						  far out. Where any of those is true the whole sentence prints; where none
+						  is, the header has already said everything there was to say.
+						*/}
+						{period && (period.assumed || period.clipped || pastReset) &&
+							`${period.basis.charAt(0).toUpperCase()}${period.basis.slice(1)}. `}
 						{/*
 						  "starting assignments", not "games". `streaming.games` sums `coverage.games`
 						  over CLUBS, and every game has two of them — so on the rest-of-period
@@ -1845,14 +1926,22 @@ export const Board = ({
 						<b>
 							{streaming.published} of {streaming.games}
 						</b>{" "}
-						starting assignments, {streaming.fullyNamed} of {streaming.clubs} clubs
-						completely.
-						{streaming.fullyNamed < streaming.clubs &&
-							" The rest are estimated from each pitcher's own rate of starting."}
-						{/* Only when NOT ONE club is fully named — the point at which a longer
-						    window has stopped buying certainty and is only buying games. Said
-						    here rather than as a permanent caption, because on a three-day
-						    window it is not true and a warning that is always on is furniture. */}
+						starting assignments
+						{/*
+						  "N of M clubs completely" stood here and was a second way of saying the
+						  first fraction: a club is fully named exactly when none of its games is
+						  unnamed, so `fullyNamed < clubs` and `published < games` are the same
+						  condition — they were never once observed to disagree because they cannot.
+						  Measured on the dev server at 390x844, the pair cost a line of the note
+						  (94px to 75px) to restate a ratio printed four words earlier.
+
+						  The warning it gated is unchanged and now hangs off the fraction the
+						  reader can see, which is the one a test can check against the sentence
+						  rather than against a second count that is not on screen any more.
+						*/}
+						{streaming.published < streaming.games ?
+							"; the rest are estimated from each pitcher's own rate of starting."
+						:	"."}
 					</p>
 				)}
 				{/* A "Moves left" box, a line of the league's per-period rules, and a "Your
@@ -1943,17 +2032,105 @@ export const Board = ({
 							{filters.mode === "stream" ? "starts" : "games"}
 						</span>
 					</div>
+					{/* `Math.min(limit, CAP)`: the observer below still pages the list in so the
+					    first paint stays cheap, and CAP is where the paging stops. */}
+					{rows.slice(0, Math.min(limit, CAP)).map((r, i) => (
+						<Row
+							key={r.player.id}
+							rank={i + 1}
+							r={r}
+							stream={filters.mode === "stream"}
+							wireAge={wireAge}
+							starts={startsFor(r)}
+							mine={mine}
+							/* the reader's budget, counted down the ranking he is actually
+							   looking at — his filters have already decided who is on it */
+							open={open === r.player.id}
+							onToggle={() => toggleRow(r.player.id)}
+							contactStatus={contactStatus}
+							askForContact={askForContact}
+						/>
+					))}
+					{/* Named the confidence floor, which no longer exists — a dead end offered to
+					    a reader who has just emptied his own board. It now names the filters that
+					    are actually on, read off the same `narrowed` list the fold's summary uses,
+					    so it cannot drift from the controls again. */}
+					{!rows.length && (
+						<p className="empty">
+							{/*
+							  Where the league scores one side and the reader has narrowed
+							  nothing, the cause is not in the controls and neither remedy below
+							  is one: no position and no window brings back a player the scoring
+							  cannot price. That is not a corner — the Streaming tab in a league
+							  with no pitching scoring is every row a pitcher, so it is empty on
+							  every visit, and "try a wider window" sends the reader round the
+							  horizon chips after something that was never there.
+
+							  His OWN narrowing still wins the sentence when he has any, because
+							  then it really might be the thing to undo, and the note at the top
+							  of the card has said the rest either way.
+							*/}
+							{/*
+							  THREE CASES, and the middle one was wrong in both directions.
+							  
+							  `narrowing` counts a position chip and a search string as well as the
+							  two in `narrowed`, so a reader in a one-sided league who had a
+							  pitching chip picked before the league changed fell past the first
+							  branch and got "try a different position or a wider window" — the dead
+							  end this block exists to remove, in the one state where the scoring
+							  really is the cause.
+							  
+							  And the second branch named `narrowed` alone, so a board emptied by the
+							  SEARCH BOX with Side=batters set read "No players match batters only",
+							  which is a confident wrong attribution where the old vague sentence was
+							  at least honest. It names everything that is narrowing now, and the
+							  position chip and the search are in that list.
+							*/}
+							{unscored && !narrowed.length ?
+								<>
+									Nothing left to rank. This league scores nothing for{" "}
+									{unscored === "pitching" ? "pitchers" : "batters"}
+									{/* `filters.mode !== "stream"` as well, for the same reason
+									    `narrowingNames` carries it: the chip is not drawn on Streaming,
+									    and on the horizon that does not draw it the chip is also no
+									    longer read, so naming it here would be wrong twice over. */}
+									{filters.mode !== "stream" && filters.slot ?
+										<>
+											, and the <b>{filters.slot}</b> chip can never match one
+										</>
+									:	", and no position and no window brings one back"}{" "}
+									&mdash; the note at the top of this card says where to fill them in.
+								</>
+							: narrowingNames.length ?
+								<>
+									No players match <b>{andList(narrowingNames)}</b>. Clear one of those to
+									widen it.
+								</>
+							:	<>No players match these filters. Try a wider window.</>
+							}
+						</p>
+					)}
 					{/*
-					  One sentence under the heads, and it is generated from the ordering that
-					  is actually in force rather than asserted.
-					  
+					  ONE SENTENCE ABOUT THE NUMBER THE ROWS ARE IN, generated from the ordering
+					  actually in force rather than asserted — and now BELOW the rows rather than
+					  above them.
+
 					  The app's one explanation of its own number lived in the colophon, on
 					  every screen, and said "a bscore is a ranking, not a forecast". True on
 					  two of the three horizons: Streaming ranks on raw projected points by
-					  documented decision (SORT_DEFAULT in useBoard.ts), so the only sentence
+					  documented decision (`defaultSort` in useBoard.ts), so the only sentence
 					  explaining the table was describing a different column from the one the
 					  table was sorted by. Reading it out of `sort` is what makes that
 					  impossible rather than merely unlikely.
+
+					  WHY IT MOVED. Shut, it is still 72px at 390x844, and it was spending them
+					  between the column heads and the first ranked row — the last 72px of a
+					  937px climb on a screen 844px tall, so the reader who wanted a ranked row
+					  scrolled past a definition to reach one. The definition is not deleted and
+					  not weakened: it is the same `<details>`, the same generated sentence, and
+					  `COLUMN_HELP` still carries it on the heading itself. It is at the foot of
+					  the list, which is where a reader who has read the rows and wants to know
+					  what the number means already is.
 					*/}
 					<details className="board-legend">
 						<summary>
@@ -2060,84 +2237,6 @@ export const Board = ({
 							</>
 						}
 					</details>
-					{/* `Math.min(limit, CAP)`: the observer below still pages the list in so the
-					    first paint stays cheap, and CAP is where the paging stops. */}
-					{rows.slice(0, Math.min(limit, CAP)).map((r, i) => (
-						<Row
-							key={r.player.id}
-							rank={i + 1}
-							r={r}
-							stream={filters.mode === "stream"}
-							wireAge={wireAge}
-							starts={startsFor(r)}
-							mine={mine}
-							/* the reader's budget, counted down the ranking he is actually
-							   looking at — his filters have already decided who is on it */
-							open={open === r.player.id}
-							onToggle={() => toggleRow(r.player.id)}
-							contactStatus={contactStatus}
-							askForContact={askForContact}
-						/>
-					))}
-					{/* Named the confidence floor, which no longer exists — a dead end offered to
-					    a reader who has just emptied his own board. It now names the filters that
-					    are actually on, read off the same `narrowed` list the fold's summary uses,
-					    so it cannot drift from the controls again. */}
-					{!rows.length && (
-						<p className="empty">
-							{/*
-							  Where the league scores one side and the reader has narrowed
-							  nothing, the cause is not in the controls and neither remedy below
-							  is one: no position and no window brings back a player the scoring
-							  cannot price. That is not a corner — the Streaming tab in a league
-							  with no pitching scoring is every row a pitcher, so it is empty on
-							  every visit, and "try a wider window" sends the reader round the
-							  horizon chips after something that was never there.
-
-							  His OWN narrowing still wins the sentence when he has any, because
-							  then it really might be the thing to undo, and the note at the top
-							  of the card has said the rest either way.
-							*/}
-							{/*
-							  THREE CASES, and the middle one was wrong in both directions.
-							  
-							  `narrowing` counts a position chip and a search string as well as the
-							  two in `narrowed`, so a reader in a one-sided league who had a
-							  pitching chip picked before the league changed fell past the first
-							  branch and got "try a different position or a wider window" — the dead
-							  end this block exists to remove, in the one state where the scoring
-							  really is the cause.
-							  
-							  And the second branch named `narrowed` alone, so a board emptied by the
-							  SEARCH BOX with Side=batters set read "No players match batters only",
-							  which is a confident wrong attribution where the old vague sentence was
-							  at least honest. It names everything that is narrowing now, and the
-							  position chip and the search are in that list.
-							*/}
-							{unscored && !narrowed.length ?
-								<>
-									Nothing left to rank. This league scores nothing for{" "}
-									{unscored === "pitching" ? "pitchers" : "batters"}
-									{/* `filters.mode !== "stream"` as well, for the same reason
-									    `narrowingNames` carries it: the chip is not drawn on Streaming,
-									    and on the horizon that does not draw it the chip is also no
-									    longer read, so naming it here would be wrong twice over. */}
-									{filters.mode !== "stream" && filters.slot ?
-										<>
-											, and the <b>{filters.slot}</b> chip can never match one
-										</>
-									:	", and no position and no window brings one back"}{" "}
-									&mdash; the note at the top of this card says where to fill them in.
-								</>
-							: narrowingNames.length ?
-								<>
-									No players match <b>{andList(narrowingNames)}</b>. Clear one of those to
-									widen it.
-								</>
-							:	<>No players match these filters. Try a wider window.</>
-							}
-						</p>
-					)}
 				</div>
 				{/* The end of the rendered window. Scrolling to it grows the list; when
 				    everything is on screen it is an empty div and says nothing. */}
@@ -3068,11 +3167,16 @@ const Detail = ({
 					Expected stats are MLB&rsquo;s model of what this contact usually produces —
 					not something that happened.
 				</p>
+				{/* Two clauses went from the sentence below: "they steer no ranking" and "the
+				    ordering you are looking at is the same either way" — the app reassuring a
+				    reader about its own internals. What survives is the absence and the way out
+				    of it, which is what he can act on. The claim behind the deleted clauses is
+				    true and is made where it is checkable: `statcast.weight` is 0 in model.json,
+				    and the note on `useContact` in useBoard.ts carries the proof. */}
 				{contactStatus === "failed" && (
 					<p className="empty warn">
-						Couldn&rsquo;t load the contact numbers. Everything else on this row is
-						unaffected &mdash; they steer no ranking &mdash; so the ordering you are
-						looking at is the same either way. Reloading the page tries again.
+						Couldn&rsquo;t load the contact numbers &mdash; nothing else on this row
+						waits on them. Reloading the page tries again.
 					</p>
 				)}
 				{(contactStatus === "loading" || contactStatus === "unasked") && (

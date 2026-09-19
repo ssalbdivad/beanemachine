@@ -55,6 +55,15 @@ export interface Fetchable {
 	 * carry the meaning — Yahoo's player rows hold the player id in `data-ys-playerid`, and
 	 * an id is what makes a free agent the same man as a player in the capture rather than a
 	 * name that might be two people. `json` is for a platform that answers with data.
+	 *
+	 * READ BY THE FETCHER, which it was not. It was declared here, set on all four page
+	 * shapes, and nothing anywhere branched on it: the `league` loop in extension/src/yahoo.ts
+	 * ran every page through `renderedText`, and the sweep hard-coded markup in the other
+	 * direction. So the field described an intention the code did not have, and the first
+	 * `as: "html"` page added to `onePress` would have arrived stripped to text, parsed to
+	 * nothing, and been reported as a page that came back empty. The loop now branches on it —
+	 * see `fetchAs` in extension/src/yahoo.ts — and test/platforms.mjs asserts every page
+	 * `onePress` asks for declares one.
 	 */
 	as: "text" | "html" | "json"
 }
@@ -67,6 +76,24 @@ export interface PageAt {
 	/** Yahoo puts the sport in the hostname; ESPN puts it in the path; Sleeper says it in the
 	 *  league JSON. Null where the URL does not carry it. */
 	sport: string | null
+}
+
+/**
+ * WHAT THE APP ALREADY KNOWS ABOUT THIS LEAGUE, handed to the descriptor because the URL
+ * cannot say it.
+ *
+ * Only `teamId` so far, and it is the whole reason this exists: `/b1/228947/players` and
+ * `/b1/228947` name a league and no team, so a press from either could not ask for the
+ * reader's own roster however the descriptor was written. The app has held his team id on
+ * the lineup store since the first read that stored seats (`knownTeamId` in
+ * src/client/read-yahoo.ts), and it was never sent.
+ *
+ * Absent means absent: a browser that has never read his team page has nothing to offer
+ * here, and the press asks for what it can and says the roster was not among it, rather
+ * than guessing at a team number.
+ */
+export interface KnownLeague {
+	teamId?: string | null
 }
 
 export interface Platform {
@@ -93,8 +120,13 @@ export interface Platform {
 	 * page is never in here — the content script always has that one already — and the list
 	 * is deliberately short: this is the press that makes the board his, and it competes with
 	 * a reader's patience rather than with a crawler's budget.
+	 *
+	 * `known` is what the APP already holds about this league, which is the half a URL cannot
+	 * supply. A players page and a league home carry no team id at all, so without it the one
+	 * page that makes the board his is the one page a press from those two could never ask
+	 * for — see the note on Yahoo's `onePress` below for the measurement.
 	 */
-	onePress: (at: PageAt) => Fetchable[]
+	onePress: (at: PageAt, known?: KnownLeague) => Fetchable[]
 	/**
 	 * The free-agent sweep, which is the expensive one and sits behind its own button.
 	 *
@@ -202,29 +234,65 @@ export const YAHOO: Platform = {
 		   other segment in that position is a word: matching `/b1/<league>/<anything>` as a
 		   team is how a settings page ends up parsed as a roster of nobody. */
 		if (/\/settings\b/i.test(path)) out.kind = "settings"
+		else if (/\/positioneligibility\b/i.test(path)) out.kind = "eligibility"
 		else if (/\/players\b/i.test(path)) out.kind = "players"
 		else if (/\/matchup\b/i.test(path)) out.kind = "matchup"
 		else if (out.teamId) out.kind = "team"
 		else if (out.leagueId) out.kind = "league"
 		return out
 	},
-	onePress: at => {
+	/*
+	   ONE PRESS BRINGS BACK HIS TEAM FROM ANYWHERE IN HIS LEAGUE, AND IT USED TO BRING IT
+	   BACK FROM NOWHERE AT ALL.
+
+	   Measured against this descriptor on the four URL shapes Yahoo serves, before the change:
+
+	     /b1/228947/8                     → settings, matchup
+	     /b1/228947                       → settings, matchup
+	     /b1/228947/players?pos=SP        → settings, matchup
+	     /b1/228947/settings              → matchup
+
+	   Not one of them asks for a roster. The old rule was `at.teamId && at.kind !== "team"`,
+	   and `at.teamId` is non-null on exactly one URL shape — `/b1/<league>/<team>`, the team
+	   page — which the second half of the same condition then excludes. The two halves cancel:
+	   the team page was fetched when and only when the reader was already standing on it, in
+	   which case the content script had it in hand and nothing was fetched at all.
+
+	   What that cost a reader: he presses "read my league" from the players page, where every
+	   manager spends his week, and the app writes his scoring and his matchup and no team. The
+	   receipt says what it got, the board prices nine seats it has never seen filled, and
+	   nothing on any screen says the roster was the thing that did not arrive.
+
+	   So the team to read is the one the APP knows is his (`known.teamId`, off the lineup
+	   store) and failing that the one the URL names, and the only page skipped is the exact
+	   page in hand. A reader standing on a RIVAL's roster is the case that makes the order
+	   matter: `known.teamId` is his, `at.teamId` is the rival's, and the press must fetch his.
+
+	   The settings page carries the scoring table and no roster; the eligibility page carries
+	   the thresholds and neither; the matchup page carries "am I winning", which is the
+	   question a head-to-head manager asks most. Four pages, one press, all inside his own
+	   league and all from his own signed-in tab.
+	*/
+	onePress: (at, known = {}) => {
 		if (!at.leagueId) return []
 		const sport = at.sport ?? "baseball"
 		const base = `https://${sport}.fantasysports.yahoo.com/b1/${at.leagueId}`
-		/* A team page carries the roster and no scoring table; the settings page carries the
-		   scoring table and no roster. Asking a reader to press one button and then telling him
-		   the app still does not know how his league scores is asking him to press it twice.
-		   The matchup page is the third because "am I winning" is the question a head-to-head
-		   manager asks most, and the page he is already signed into shows him both rosters. */
-		const want: Fetchable[] = [
-			{ url: `${base}/settings`, kind: "settings", as: "text" },
-			{ url: `${base}/matchup`, kind: "matchup", as: "text" }
-		]
-		/* His own team, where the URL says which one it is and he is not already on it. */
-		if (at.teamId && at.kind !== "team")
-			want.unshift({ url: `${base}/${at.teamId}`, kind: "team", as: "text" })
-		return want.filter(f => !(at.kind === f.kind))
+		const mine = known.teamId ?? at.teamId
+		const want: Fetchable[] = []
+		/* His own team first: it is the page the board is built out of, and a press that is
+		   refused partway through — a throttle, a wall — should have got it before the two
+		   that only price it. */
+		if (mine && !(at.kind === "team" && at.teamId === mine))
+			want.push({ url: `${base}/${mine}`, kind: "team", as: "text" })
+		if (at.kind !== "settings") want.push({ url: `${base}/settings`, kind: "settings", as: "text" })
+		/* The page `League.eligibility` comes from, and the reason every league this browser
+		   has ever read carries `eligibility: null` — see `eligibilityFromText` in
+		   src/data/yahoo-read.ts, which reads it with the same expressions the server importer
+		   has read it with since before any of this existed. */
+		if (at.kind !== "eligibility")
+			want.push({ url: `${base}/positioneligibility`, kind: "eligibility", as: "text" })
+		if (at.kind !== "matchup") want.push({ url: `${base}/matchup`, kind: "matchup", as: "text" })
+		return want
 	},
 	sweep: (at, positions) => {
 		if (!at.leagueId) return []

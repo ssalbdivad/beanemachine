@@ -466,8 +466,30 @@ t("and the league-management chrome stayed behind on My league",
 	await manageChrome() === 0, String(await manageChrome()))
 
 t("the ranking Pickups opens on is a real one", (await rows()).length > 50)
-const fortnight = (await rows()).slice(0, 10)
-const fortnightCount = await ranked()
+const mid = (await rows()).slice(0, 10)
+const midCount = await ranked()
+
+/*
+ * THE MIDDLE HORIZON IS FOUND, NOT NAMED, and that is what this block is protecting.
+ *
+ * Every `horizon()` call below read `This fortnight`. The strip is `Streaming | This week |
+ * Stash` on the dev server as of 2026-09-19, so all three clicks timed out at 30s and the
+ * journey stopped in section 3 with 28 of its 104 assertions run — a rename of a label
+ * taking out the last three quarters of a suite that has nothing to say about labels.
+ *
+ * What these assertions are actually about is the horizon BETWEEN tonight and the rest of
+ * the season: that switching to it re-ranks, that coming back to it gives the same ranking,
+ * and that it reads a starter's own published turns where the rest of the season cannot. The
+ * board's own strip is the authority on what it is called, so the label is read off it —
+ * whatever is neither Streaming nor Stash — and the claims are stated in terms of the
+ * horizon rather than of its current name.
+ */
+const MID = await page.$$eval(".modes .mode", n => {
+	const labels = n.map(e => e.innerText.trim())
+	return labels.find(l => !/^stream/i.test(l) && !/^stash/i.test(l)) ?? labels[1]
+})
+t("the ranking offers a horizon between tonight and the rest of the season",
+	!!MID && MID !== "Streaming" && MID !== "Stash", `modes: ${MID}`)
 
 const horizon = async label => {
 	await page.click(`.modes .mode:has-text('${label}')`)
@@ -505,8 +527,8 @@ const legend = async () => ({
 	all: (await page.textContent(".board-legend")).replace(/\s+/g, " ").trim(),
 	open: await page.$eval(".board-legend", d => d.open)
 })
-const fortnightPick = await pickName()
-const fortnightLegend = await legend()
+const midPick = await pickName()
+const midLegend = await legend()
 const stream = await horizon("Streaming")
 /**
  * Rewritten, not weakened: `stream.length === 10` was a claim about the RENDER
@@ -519,7 +541,7 @@ const stream = await horizon("Streaming")
  * a different question gives a different answer.
  */
 t("switching to Streaming re-ranks against the league's own scoring period",
-	stream.length > 0 && stream.join() !== fortnight.join(), `${stream.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
+	stream.length > 0 && stream.join() !== mid.join(), `${stream.slice(0, 3)} vs ${mid.slice(0, 3)}`)
 const streamPick = await pickName()
 const streamLegend = await legend()
 const stash = await horizon("Stash")
@@ -549,19 +571,19 @@ const stashPick = await pickName()
  * make the claim.
  */
 t("the table explains its own ordering rather than a fixed sentence about one column",
-	fortnightLegend.summary !== streamLegend.summary &&
-		/ahead by/i.test(fortnightLegend.summary) && /points/i.test(streamLegend.summary),
-	`fortnight: ${fortnightLegend.summary}\n  streaming: ${streamLegend.summary}`)
+	midLegend.summary !== streamLegend.summary &&
+		/ahead by/i.test(midLegend.summary) && /points/i.test(streamLegend.summary),
+	`mid: ${midLegend.summary}\n  streaming: ${streamLegend.summary}`)
 /** The caveat the footer used to carry, now beside the number it is about. It is the
  *  one sentence a decision depends on — a bscore of 35 is "further ahead than 20 is",
  *  not 35 points in the bank — and the footer no longer says it anywhere. */
 t("and the caveat the footer used to carry is on the ranking now, not lost",
-	/does not promise points/i.test(fortnightLegend.all), fortnightLegend.all.slice(0, 200))
+	/does not promise points/i.test(midLegend.all), midLegend.all.slice(0, 200))
 /** A disclosure that ships open is the paragraph again with a triangle on it — the
  *  same claim this suite makes about the Decide card's fine print in section 6. */
 t("and it is a tap rather than three lines standing over the table",
-	fortnightLegend.open === false && streamLegend.open === false,
-	`fortnight ${fortnightLegend.open ? "OPEN" : "shut"}, streaming ${streamLegend.open ? "OPEN" : "shut"}`)
+	midLegend.open === false && streamLegend.open === false,
+	`mid ${midLegend.open ? "OPEN" : "shut"}, streaming ${streamLegend.open ? "OPEN" : "shut"}`)
 
 /**
  * Billy's pick has to follow the horizon. A stale pick above a re-ranked board is
@@ -585,13 +607,13 @@ t("Billy's pick comes off the ranking currently on screen",
 await box.fill("")
 await page.waitForTimeout(400)
 t("Billy's pick is re-derived per horizon rather than frozen",
-	new Set([fortnightPick, streamPick, stashPick]).size > 1,
-	`${fortnightPick} / ${streamPick} / ${stashPick}`)
-const back = await horizon("This fortnight")
+	new Set([midPick, streamPick, stashPick]).size > 1,
+	`${midPick} / ${streamPick} / ${stashPick}`)
+const back = await horizon(MID)
 t("coming back to a horizon gives the same ranking it gave before",
-	back.join() === fortnight.join(), `${back.slice(0, 3)} vs ${fortnight.slice(0, 3)}`)
-t("every horizon left the ranking count intact", (await ranked()) === fortnightCount,
-	`${await ranked()} vs ${fortnightCount}`)
+	back.join() === mid.join(), `${back.slice(0, 3)} vs ${mid.slice(0, 3)}`)
+t("every horizon left the ranking count intact", (await ranked()) === midCount,
+	`${await ranked()} vs ${midCount}`)
 
 /**
  * The window column reads in two units, and which one is available is a property
@@ -601,22 +623,27 @@ t("every horizon left the ranking count intact", (await ranked()) === fortnightC
  * It used to be "GP" for everybody: the games a player's TEAM plays, which for a
  * starting pitcher is the wrong quantity by roughly a factor of six. It now shows
  * his own scheduled starts where MLB has published his turns. MLB publishes those
- * about a week out, so on the committed fixture the fortnight has a count for 154
- * pitchers and the rest of the season has one for none of its 361 — a GS still
- * showing on Stash would be a fortnight number sitting under a season heading.
+ * about a week out, so on the committed fixture the middle horizon — a fortnight when this
+ * was measured — has a count for 154 pitchers and the rest of the season has one for none of
+ * its 361 — a GS still showing on Stash would be a short-horizon number sitting under a
+ * season heading.
  */
 const units = () =>
 	page.$$eval(".board-row [data-col=games] .g-unit", n => n.map(e => e.textContent.trim()))
-await horizon("This fortnight")
-const fortnightUnits = await units()
-t("the fortnight board reads a starter's own turns rather than his club's games",
-	fortnightUnits.includes("GS"), `${fortnightUnits.slice(0, 8).join(",")}`)
+await horizon(MID)
+const midUnits = await units()
+/* "the fortnight board reads a starter's own turns…" until the strip was renamed from
+   `This fortnight` to `This week`. The claim was never about a fortnight: it is that a
+   horizon short enough for MLB to have published turns reads them, and the counts in the
+   note above (154 of 361 pitchers on the committed fixture) were taken on the fortnight. */
+t("the middle horizon reads a starter's own turns rather than his club's games",
+	midUnits.includes("GS"), `${MID}: ${midUnits.slice(0, 8).join(",")}`)
 await horizon("Stash")
 const stashUnits = await units()
 t("the rest of a season has no published turns, so every row falls back to team games",
 	stashUnits.length > 0 && stashUnits.every(u => u === "GP"),
 	`${stashUnits.filter(u => u === "GS").length} rows still claiming starts`)
-await horizon("This fortnight")
+await horizon(MID)
 t("and switching back brings the start counts back rather than leaving the fallback",
 	(await units()).includes("GS"))
 clean("across the three horizons")
@@ -632,7 +659,7 @@ clean("across the three horizons")
  * list whose top is unreachable is a ranking, not a recommendation.
  *
  * It is asserted as a journey claim rather than left to test/board.mjs because
- * `fortnight` and `fortnightCount` above were captured THROUGH this filter, and
+ * `mid` and `midCount` above were captured THROUGH this filter, and
  * every "the board came back unmoved" comparison below is against them. If the
  * default silently reverted, those comparisons would go on passing against a
  * different board; this is the one assertion that pins which board they mean.
@@ -644,14 +671,14 @@ await availToggle.uncheck()
 await page.waitForTimeout(400)
 const everyone = await ranked()
 t("and the restriction is really a restriction — unticking it widens the ranking",
-	everyone > fortnightCount, `${fortnightCount} available vs ${everyone} in all`)
+	everyone > midCount, `${midCount} available vs ${everyone} in all`)
 t("the wider board names men the opening board did not",
-	(await rows()).some(n => !fortnight.includes(n)), (await rows()).slice(0, 5).join(", "))
+	(await rows()).some(n => !mid.includes(n)), (await rows()).slice(0, 5).join(", "))
 await availToggle.check()
 await page.waitForTimeout(400)
 t("and reticking it gives back exactly the board the journey opened on",
-	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
-	`${await ranked()} vs ${fortnightCount}`)
+	(await ranked()) === midCount && (await rows()).slice(0, 10).join() === mid.join(),
+	`${await ranked()} vs ${midCount}`)
 
 // Each control is applied on top of the last rather than in isolation: a filter
 // that silently drops out when the ranking changes only shows up in combination.
@@ -695,7 +722,7 @@ t("a position chip restricts the board to that position",
 	catchers.length > 0 && (await codes()).every(c => c === "C"), (await codes()).slice(0, 5).join(","))
 const catcherCount = await ranked()
 t("filtering to one slot really is fewer players, not the same board",
-	catcherCount > 0 && catcherCount < fortnightCount, `${fortnightCount} → ${catcherCount}`)
+	catcherCount > 0 && catcherCount < midCount, `${midCount} → ${catcherCount}`)
 
 // a surname that is definitely on this board, so the search cannot be vacuously true
 const needle = catchers[0].split(" ").pop().toLowerCase()
@@ -791,8 +818,8 @@ await rankBy("bscore")
 await page.click('.board-controls .chip-btn:text-is("All")')
 await settle()
 t("clearing every filter returns the board it opened on",
-	(await ranked()) === fortnightCount && (await rows()).slice(0, 10).join() === fortnight.join(),
-	`${await ranked()} vs ${fortnightCount}`)
+	(await ranked()) === midCount && (await rows()).slice(0, 10).join() === mid.join(),
+	`${await ranked()} vs ${midCount}`)
 clean("after filtering, searching and re-ranking")
 
 // --- 5. the team, entered on Setup and read back on Today ---------------------
@@ -1227,10 +1254,21 @@ t("the footer is three links and one sentence, not a statistics essay",
  * to carry is asserted where it actually renders, on the ranking, per ordering. See
  * "the table explains its own ordering" in section 3. Dropping this line without
  * putting that one in would have lost the only protection the phrase had.
+ *
+ * AND THE SECOND HALF MOVED OFF THE SENTENCE ONTO THE LINK, which is why this now checks
+ * one thing where it checked two. The note read "Every number is in your league's own
+ * points. How the projections were built and measured, and the parts that could not be, are
+ * in Methodology." — and the second sentence, 17 words and 34px on a 390x844 Tonight, was a
+ * description of a link six pixels above it whose own text reads "Methodology & measured
+ * results". It was deleted in src/client/App.tsx. `/Methodology/` was asserted here against
+ * the NOTE, so it failed on that deletion while the thing it was really protecting — that
+ * the measurements are reachable from every screen — was never in danger: the very next
+ * assertion checks `onTodayFooter.methodology`, which is the link itself. Nothing is
+ * unprotected; one claim is simply no longer being made twice against two different
+ * elements, one of which no longer says it.
  */
-t("the one sentence says what the numbers are in, and points at the measurements",
-	/your league.s own points/i.test(onTodayFooter.note) && /Methodology/.test(onTodayFooter.note),
-	onTodayFooter.note)
+t("the one sentence says what the numbers are in",
+	/your league.s own points/i.test(onTodayFooter.note), onTodayFooter.note)
 t("and the results it no longer prints are linked rather than dropped",
 	onTodayFooter.methodology, onTodayFooter.links.join(" | "))
 
@@ -1247,7 +1285,7 @@ const onWireFooter = await colophon()
  * up right here.
  *
  * THE FIRST TEN ROWS ARE NOT THE SAME ANY MORE, and that is the point of the detour rather
- * than a regression. This used to assert `rows().slice(0, 10).join() === fortnight.join()` —
+ * than a regression. This used to assert `rows().slice(0, 10).join() === mid.join()` —
  * the same players in the same order — and the order legitimately changed on the day the board
  * started defaulting to the reader's OWN number once his roster can price a row. Before the
  * paste nothing could; after it everything can. Asserting the old order would be asserting that
@@ -1261,12 +1299,12 @@ const onWireFooter = await colophon()
  * a reader uses to know what he is looking at.
  */
 t("the same pool is ranked after the detour, so nothing leaked into who is gettable",
-	(await ranked()) === fortnightCount, `${await ranked()} vs ${fortnightCount}`)
+	(await ranked()) === midCount, `${await ranked()} vs ${midCount}`)
 const sortedHead = await page.$$eval(".board-head .sort-head", hs =>
 	hs.filter(h => h.classList.contains("active")).map(h => h.getAttribute("data-col")))
 t("and it is ordered by the reader's own number, which is what entering a team buys",
 	sortedHead.join() === "mine",
-	`${sortedHead.join() || "nothing active"} — first ten were ${fortnight.slice(0, 3).join(", ")}…`)
+	`${sortedHead.join() || "nothing active"} — first ten were ${mid.slice(0, 3).join(", ")}…`)
 t("and the same footer is under Pickups, rather than a second wording of it",
 	onWireFooter.note === onTodayFooter.note, `${onWireFooter.note}\n  vs\n  ${onTodayFooter.note}`)
 
@@ -1431,7 +1469,7 @@ await onWire()
  *  which is why the last mode this journey selected, back in section 4, had to be the
  *  one it captured its baseline on. A ranking that came back on Streaming here would
  *  be this suite's own leftover, not a defect. */
-t("and on the ranking it opened on", (await ranked()) === fortnightCount, `${await ranked()} vs ${fortnightCount}`)
+t("and on the ranking it opened on", (await ranked()) === midCount, `${await ranked()} vs ${midCount}`)
 t("with a working board under it", (await rows()).length > 50)
 
 at("My league still opens after the reload")
@@ -1567,6 +1605,128 @@ clean("over the whole journey")
 			!/setItem|Storage|beanemachine:/i.test(sheet),
 		sheet.replace(/\n+/g, " | ").slice(0, 300))
 	await sp.close()
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * THE ONE PRESS IS A CONTROL, AND IT WAS A FOOTNOTE.
+ *
+ * The browser reader is the deepest thing this product does — one press turns a signed-in
+ * Yahoo tab into a league, a roster, the seats, the opponent and nine pages of free agents,
+ * and it is the only route that reaches a PRIVATE league without typing. It rendered as
+ * `.as-link`: `--fs-2`, `--muted`, underlined, no border, floating ABOVE the heading, which
+ * is the style this app uses for footnotes. Measured at 390x844 on a first visit with the
+ * sheet open: the link's top was y=216, the first bordered control under it was the textarea
+ * at y=360 and the `primary` was at y=539 — so a reader scanning for something to press met
+ * the box first and the best route in the product read as small print over the question. The
+ * A/B below, run by putting `.as-link` back, reported `{"border":0,"underlined":true,
+ * "size":11,"boxSize":13}`: the deepest control in the app was two points SMALLER than the
+ * box it is an alternative to.
+ *
+ * It is a button in the app's own chrome now (1px border, no underline, at least the box's
+ * own size) and it sits UNDER the question it answers, so the sheet reads question, one-press answer,
+ * typed answer — the order of effort. The assertions below are about that ordering and
+ * that chrome rather than about the label, because the label has already changed twice and
+ * the defect was never the words.
+ *
+ * AND EVERY OFFER IN IT IS ON SCREEN. The button costs 26px more than the link did, and the
+ * pixels came from deleting "If your league pays differently, here is how to tell it." — a
+ * 38px sentence sitting directly under the summary "My league scores differently" that said
+ * the summary again in more words and left nothing to press. Measured at 390x844 with that
+ * sentence in and the button already promoted: the last control the sheet offers ("Load a
+ * file I saved") bottomed at y=876, 32px under an 844px fold, with no visible scrollbar (a
+ * phone's is invisible) to say anything followed. Without it: y=834.
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+{
+	const op = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	/* A stranger's first visit: the dev server seeds a real league and the dock — the only
+	   way into the sheet — exists exactly when there is none. */
+	await op.route("**/scoring.json", async route => {
+		const j = await (await route.fetch()).json()
+		j.leagues = {}
+		j.active_league = null
+		await route.fulfill({ json: j })
+	})
+	await op.goto(BASE, { waitUntil: "domcontentloaded" })
+	await op.waitForSelector("nav button", { timeout: 30000 })
+	await op.waitForSelector(".dock-bar button", { timeout: 30000 })
+	await op.waitForTimeout(1200)
+	/* ONE gesture from landing to the whole sheet. Counted rather than assumed, because the
+	   number of gestures to a usable recommendation is the thing this block is really about. */
+	if ((await op.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
+		await op.click(".dock-bar button")
+	await op.waitForSelector(".dock-sheet .onboard textarea", { timeout: 20000 })
+
+	const offer = op.locator(".onboard-offer button").first()
+	t("the one press into a Yahoo league is offered on the first screen a stranger reaches",
+		(await offer.count()) === 1)
+
+	const chrome = await offer.evaluate(b => {
+		const cs = getComputedStyle(b)
+		return {
+			border: parseFloat(cs.borderTopWidth),
+			underlined: cs.textDecorationLine.includes("underline"),
+			size: parseFloat(cs.fontSize)
+		}
+	})
+	const boxSize = await op.$eval(".onboard textarea", e => parseFloat(getComputedStyle(e).fontSize))
+	/* Not "is it styled nicely" — the claim is that it is not quieter than the thing it is an
+	   alternative to. `.as-link` measured 11px underlined with no border against a 13px box;
+	   anything that reads as a footnote again fails this. The sizes are compared rather than
+	   pinned because the root size settles as the webfont lands and an absolute px here would
+	   be a flake. */
+	t("…as a control rather than as a footnote beside the box it replaces",
+		chrome.border > 0 && !chrome.underlined && chrome.size >= boxSize,
+		JSON.stringify({ ...chrome, boxSize }))
+
+	t("…under the question it answers, and above the box that is the slower answer",
+		await op.evaluate(() => {
+			const h2 = document.querySelector(".dock-sheet .onboard h2")
+			const b = document.querySelector(".onboard-offer button")
+			const box = document.querySelector('textarea[data-ctl="onboard-team"]')
+			const after = (a, z) => !!(a.compareDocumentPosition(z) & Node.DOCUMENT_POSITION_FOLLOWING)
+			return !!h2 && !!b && !!box && after(h2, b) && after(b, box)
+		}))
+
+	/*
+	 * EVERY WAY FORWARD ON SCREEN, WITHOUT A GESTURE.
+	 *
+	 * The sheet is capped at min(70vh,620px) and has overflowed it twice before — 998px of
+	 * content in a 590px box with the third question 101px under, and a finish button 646px
+	 * down a 590px box. Both are recorded in src/client/Onboard.tsx. A phone's scrollbar is
+	 * invisible, so an overflowing sheet does not look like one: it looks like a sheet whose
+	 * last offer is the last offer there is.
+	 */
+	const clipped = await op.evaluate(() => {
+		const sheet = document.querySelector(".dock-sheet")
+		const out = []
+		for (const el of sheet.querySelectorAll("button, a[href], input, textarea, summary")) {
+			const r = el.getBoundingClientRect()
+			if (!r.width || !r.height) continue
+			if (r.bottom > innerHeight) out.push(`${el.tagName}.${el.className} bottom=${Math.round(r.bottom)}`)
+		}
+		return out
+	})
+	/* THE FOLD, NOT THE SCROLL BOX. A second assertion sat here comparing `.dock-sheet`'s
+	   scrollHeight against its own height, on the reasoning that a sheet which fits cannot
+	   clip. It was measured against the defect by putting the deleted paragraph back, and it
+	   PASSED while this one failed with `BUTTON bottom=876` — the sheet's box is capped at
+	   min(70vh,620px) and simply grew with its content, so "fits its box" was true of a sheet
+	   whose last control was 32px off the bottom of the phone. It is gone rather than kept as
+	   a second opinion: an assertion that passes on the bug is a claim nobody is making. */
+	t("and nothing the sheet offers is under the fold on a 390x844 phone",
+		clipped.length === 0, clipped.join(" | "))
+
+	/* And the route the button names really is the walkthrough, one press in — not a
+	   navigation to a different screen, which is what every other "add your players" offer in
+	   this app used to be. */
+	await offer.click()
+	await op.waitForSelector(".connect", { timeout: 15000 })
+	t("pressing it opens the reader on the same sheet, with the way back on it",
+		(await op.locator(".connect").count()) === 1 &&
+			(await op.locator(".connect-back button").count()) === 1)
+	await op.close()
 }
 
 await browser.close()

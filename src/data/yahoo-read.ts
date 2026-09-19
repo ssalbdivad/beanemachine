@@ -33,6 +33,19 @@ export interface YahooReading {
 	sport: string | null
 	/** The scoring table, slots and team count, when a settings page was among the grabs. */
 	league: League | null
+	/**
+	 * THE LEAGUE'S OWN ELIGIBILITY THRESHOLDS, when the eligibility page was among the grabs.
+	 *
+	 * Also written onto `league` above where a settings page came back in the same press, so
+	 * a caller that adopts the league gets it without doing anything. Carried separately as
+	 * well because the two pages are two fetches and either can fail on its own: a press that
+	 * got the thresholds and not the scoring table has something true to hand a league that
+	 * already exists.
+	 *
+	 * Null means the page was not read or said nothing this could parse — never "the league
+	 * has no thresholds", which is not a thing a Yahoo league can be.
+	 */
+	eligibility: League["eligibility"]
 	/** The team, with seats, when a roster page was. */
 	roster: PastedRoster | null
 	/** Free agents, when a sweep was. */
@@ -128,6 +141,87 @@ export interface ExpectedOf {
 	teamId?: string
 }
 
+/**
+ * THE LEAGUE'S OWN ELIGIBILITY THRESHOLDS, off `/positioneligibility`.
+ *
+ * ── WHY THIS IS HERE AND NOT ONLY IN THE IMPORTER ─────────────────────────────────────
+ *
+ * `src/import.ts` has read this page since long before any of this, with the four
+ * expressions below, against the real Yahoo page for league 228947 — that is where they
+ * were measured and it is the only measurement of this page anybody has. The browser route
+ * never asked for the page, so every league read through the extension, and every league
+ * pasted, carried `eligibility: null`: the app has an editor for these thresholds
+ * (src/client/panels.tsx) and a line on My league naming where they came from, and for a
+ * reader who never ran the Node importer there was nothing in either.
+ *
+ * Copying the expressions into the browser route would have been two places to get Yahoo's
+ * sentence wrong and only one of them tested, so the importer now calls this.
+ *
+ * ── WHAT IT DOES NOT READ ─────────────────────────────────────────────────────────────
+ *
+ * The per-player grid — the E / P / S / - marks under each tracked position, which state
+ * which men are eligible where TODAY. Reading it would be worth more than the thresholds
+ * are: the app's per-player eligibility comes from `snapshot.eligibility`, a capture that
+ * covers 328 of 1,446 players, and everyone else gets StatsAPI's single primary position.
+ * But nothing in this repository has ever measured a row of that grid, and a regular
+ * expression written against a page nobody has seen is a seat the board would open or
+ * close with total confidence and no evidence. The header IS measured, because the
+ * importer reads it, and that is exactly how far this goes.
+ *
+ * Whitespace is squished first so the two callers hand this the same shape: the importer
+ * arrives through `documentText`, which squishes, and the extension arrives as the text a
+ * browser rendered, which keeps its newlines.
+ */
+export const eligibilityFromText = (
+	text: string,
+	source: string
+): { eligibility: League["eligibility"]; note: string | null } => {
+	const flat = text.replace(/\s+/g, " ")
+	const batters = flat.match(/Batters need either (\d+) Games Started or (\d+) Games Played/)
+	const pitchers = flat.match(
+		/Pitchers need (\d+) Starts to gain SP eligibility,\s*(\d+) Relief Appearances/
+	)
+	const header = flat.match(/No Appearances Yet\s+((?:[A-Za-z0-9+]+\s+){2,14}?)Player\b/)
+	if (!batters && !pitchers)
+		return {
+			eligibility: null,
+			/* An absence said as an absence. The page was fetched and read; what is missing is
+			   Yahoo's own sentence about it, which is the only evidence there is. */
+			note: "That page did not state your league's eligibility thresholds, so they are left unset."
+		}
+	return {
+		eligibility: {
+			source,
+			tracked_positions: header ? header[1]!.trim().split(/\s+/) : null,
+			batters:
+				batters ?
+					{
+						rule: "or",
+						games_started_at_position: Number(batters[1]),
+						games_played_at_position: Number(batters[2])
+					}
+				:	null,
+			pitchers:
+				pitchers ?
+					{
+						SP: { starts: Number(pitchers[1]) },
+						RP: { relief_appearances: Number(pitchers[2]) }
+					}
+				:	null,
+			grid_legend: {
+				P: "games to play until eligible",
+				S: "games to start until eligible",
+				E: "currently eligible",
+				"-": "no appearances yet"
+			}
+		},
+		note:
+			header ? null : (
+				"The positions your league tracks could not be read off that page, so only the thresholds were kept."
+			)
+	}
+}
+
 const POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "Util", "SP", "RP"]
 
 /** The position a players-page URL was asking for, so a sweep can say which positions it
@@ -152,6 +246,7 @@ export const readGrabs = (
 		leagueId: null,
 		sport: null,
 		league: null,
+		eligibility: null,
 		roster: null,
 		pool: null,
 		opponent: null,
@@ -252,6 +347,28 @@ export const readGrabs = (
 	}
 
 	/*
+	   THE THRESHOLDS, WHICH ONE PRESS NOW ASKS FOR AND NEVER USED TO.
+
+	   `League.eligibility` was null for every league this browser has ever produced — the
+	   paste route says so in src/data/paste-settings.ts ("the eligibility thresholds live on
+	   a different Yahoo page"), and the extension route never asked for that page. So the
+	   editor on My league had nothing to edit and the line naming where the thresholds came
+	   from never appeared, for every reader who had not run the Node importer over his
+	   league from a terminal.
+
+	   Written onto the league where one came back in the same press, so adopting the league
+	   adopts these too, and carried on its own besides — the two are separate fetches and
+	   either can fail while the other lands.
+	*/
+	const elig = grabs.find(g => g.kind === "eligibility")
+	if (elig) {
+		const read = eligibilityFromText(elig.text, elig.url)
+		out.eligibility = read.eligibility
+		if (out.league && read.eligibility) out.league = { ...out.league, eligibility: read.eligibility }
+		if (read.note) notes.push(read.note)
+	}
+
+	/*
 	   TWO KINDS OF TEAM PAGE, TOLD APART BY THE PRESS THAT ASKED FOR THEM.
 
 	   A `rosters` press reads every OTHER team in the league, so its grabs are rival roster
@@ -262,7 +379,22 @@ export const readGrabs = (
 	   part of the union. Neither path can be reached by the other's pages.
 	*/
 	const unionGrabs = grabs.filter(g => g.kind === "team" && g.askedTeams?.length)
-	const team = grabs.find(g => g.kind === "team" && !g.askedTeams?.length)
+	/*
+	   TWO TEAM PAGES IN ONE PRESS, WHICH IS NEW AND IS THE POINT.
+
+	   A press from a rival's roster hands over the page in hand — the rival's — AND fetches
+	   the team the app says is his, because `onePress` now asks for it wherever he is
+	   standing. `find` took the first, which is always the page in hand, so the read that
+	   succeeded would have been thrown away and the refusal below would have fired on a
+	   press that had his own roster sitting in the same array.
+
+	   So where the app has said which team is his, that is the page; where it has not, the
+	   first is the only candidate there is, which is exactly the old behaviour.
+	*/
+	const ownGrabs = grabs.filter(g => g.kind === "team" && !g.askedTeams?.length)
+	const team =
+		(expect.teamId ? ownGrabs.find(g => teamIdFrom(g.url) === expect.teamId) : undefined) ??
+		ownGrabs[0]
 	if (team) out.teamId = teamIdFrom(team.url)
 	/*
 	   SOMEBODY ELSE'S TEAM.

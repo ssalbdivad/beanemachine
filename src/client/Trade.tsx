@@ -21,7 +21,7 @@ import { readLeagueHere, readRostersHere } from "./read-yahoo.ts"
 import { browserOf, takesExtension } from "./Connect.tsx"
 import { stored } from "./stores.ts"
 import "./trade.css"
-import { tab, tradesClosed } from "./panels.tsx"
+import { tab, tradesClosed, VIEW_HASH } from "./panels.tsx"
 import { DEFAULT_FILTERS, normalizeName, useBoard, type Filters, type Ranked } from "./useBoard.ts"
 
 /**
@@ -936,6 +936,13 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			  * naming a tab. "Scoring and slots" is the exception and is named for what
 			  * the editor holds rather than for its first card, because it is six cards
 			  * and "This league" names only the first of them.
+			  *
+			  * This chip read "The deal", and so did the heading it lands on. The app
+			  * carries a 3,013-line trade evaluator with a 2,151-line suite, and "The
+			  * deal" was the only word for it anywhere in the product — a noun that
+			  * names neither trading nor pricing, on the one screen a reader reaches by
+			  * pressing a tab called My league. The heading and this chip both say what
+			  * it does now, and they still match each other.
 			  */}
 			<nav className="trade-jump" ref={jumpRef} aria-label="Straight to part of this screen">
 				<span className="trade-jump-label">Straight to</span>
@@ -953,7 +960,7 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 					data-ctl="jump-deal"
 					onClick={() => jumpTo(document.querySelector(".trade-deal"))}
 				>
-					The deal
+					Price a trade
 				</button>
 				{valuesBelow && (
 					<button
@@ -1150,58 +1157,38 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 				
 				  It is the route that works on a phone, in a private window, on a league nobody
 				  can read, and on every platform this app does not read itself — so it does not
-				  go away. What it stops doing is competing: three steps, a four-row box and a
-				  button stood between the reader and everything below, on a screen whose first
-				  offer is one press.
+				  go away. What it stops doing is competing: a four-row box and a button stood
+				  between the reader and everything below, on a screen whose first offer is one
+				  press. (It was three numbered steps and a box until the steps went; the fold
+				  is still worth it, because what is left of it is 311px at 390 wide.)
 				*/}
 				<details className="paste-roster paste-team-fold">
 					<summary>
 						<h3>Or type your team in</h3>
 					</summary>
-					{/* Named steps, and the actual keystrokes. "Select the page" assumes the
-					    reader knows to select-all, which is the step people miss — and the page
-					    to open has a different name on every platform, so all four are said. */}
-					<ol className="paste-how">
-						{/* Sleeper is not named here any more, and it is not a shortening: this
-						    repo establishes at length that Sleeper does not run fantasy baseball —
-						    `SLEEPER_REFUSAL` in src/import.ts refuses every Sleeper URL because
-						    `/v1/state/mlb` names no season, src/data/rosters.ts deleted the Sleeper
-						    reader, and App.tsx's own comment records that offering it at all was the
-						    bug. Sending a reader to open his baseball roster there is sending him
-						    somewhere that does not exist. */}
-						<li>
-							Open your team on your fantasy site — <b>My Team</b> on Yahoo and ESPN,{" "}
-							<b>Roster</b> on CBS and Fantrax.
-						</li>
-						{/* On a phone there is no Ctrl+A, and this was the only instruction the
-						    box carried. Typing names works exactly as well — `playersInText`
-						    matches known players in arbitrary text and does not care whether it
-						    came from a clipboard — so the gesture that works everywhere leads and
-						    the keyboard shortcut is named for the device it belongs to. */}
-						<li>
-							Copy it, or just type the names — one to a line, first and last.
-						</li>
-						{/* "Paste or type them below" was what this said, and step 2 above has
-						    already offered typing — so a reader who types was told twice and a
-						    three-step list spent a third of itself saying the same thing. What
-						    this step is actually for is the box and the button, and "put that in"
-						    covers a paste and a typed line without naming either again. */}
-						<li>
-							Put that in the box below, then press <b>Read that</b>.{" "}
-							<span className="sub">
-								On a computer, <kbd>Ctrl</kbd>+<kbd>A</kbd> then <kbd>Ctrl</kbd>+
-								<kbd>C</kbd> copies the whole page in one go.
-							</span>
-						</li>
-					</ol>
-					{/* "it brings the seat each man is in with it" was unconditional, and the
-					    step above this one invites typing the names by hand — which carries no
-					    seats at all. `rosterFromPaste` takes a seat only off a line that has a
-					    slot on it (src/data/paste.ts, `spots`), and where there are none it
-					    CLEARS the stored seats rather than keeping the previous team's. Its own
-					    note already says which of the two happened; this sentence was promising
-					    the good case before the reader had pasted anything. */}
-
+					{/*
+					  ONE INSTRUCTION FOR ONE BOX, and this box had four.
+					
+					  The app takes a roster paste in two places and gave it two different
+					  instruction sets. The onboarding sheet's box (`data-ctl="onboard-team"` in
+					  src/client/Onboard.tsx) says the whole of it in eleven words — the sentence
+					  below, copied exactly — and feeds the SAME `rosterFromPaste`. This one
+					  carried a three-step ordered list naming four platforms, plus a Ctrl+A/Ctrl+C
+					  aside: 57 words against 11, for a parser that cannot tell the two apart.
+					
+					  MEASURED 2026-09-19 at 390x844 against the dev server, with this fold open and
+					  the removed list (and the two `.paste-how` rules trade.css carried for it)
+					  re-inserted into the live page to price them: the fold was 451px and 69 words,
+					  and is 311px and 24 words now — 140px and 45 words, 31% and 65% of it, for an
+					  instruction the other box has never needed.
+					
+					  The shorter one wins because it is the one that has been proven on a stranger:
+					  it is what a first visit reads, and `playersInText` matches known players in
+					  arbitrary text, so naming the page to open on each platform was never the thing
+					  that made a paste work. The placeholder below shows the shape a real Yahoo copy
+					  has, which is the only part of the four steps that was load-bearing.
+					*/}
+					<p className="sub">Paste your roster page, or type the names one to a line.</p>
 					<textarea
 						data-ctl="paste-roster"
 						value={pasted}
@@ -1476,30 +1463,66 @@ export const Trade = ({ snapshot, league, leagueKey, error, say, onConnect }: Tr
 			  */}
 			{!dealOpen ?
 				<section className={`card full trade-deal${tradeWindow.closed ? " trade-closed" : ""}`}>
-					<h2>The deal</h2>
-					{tradeWindow.closed ?
+					<h2>Price a trade</h2>
+					{/* The deadline, and NOTHING about where else to go — the sentence used to
+					    end "Adds and drops are on Tonight", which is a signpost written as prose
+					    and pointing at the wrong screen: `tab("board")` is Tonight, whose job is
+					    who to start tonight, while the screen that lists everyone you can
+					    actually get is Pickups. A tab named in a sentence is also a tab the
+					    reader has to go and find; the chip below goes there. */}
+					{tradeWindow.closed && (
 						<p className="sub">
-							Your league stopped taking trades on <b>{tradeWindow.on}</b>. Adds and drops are
-							on <b>{tab("board")}</b>.
+							Your league stopped taking trades on <b>{tradeWindow.on}</b>.
 						</p>
-					:	<p className="sub">
-							Pick who leaves and who arrives and this prices the offer.
-						</p>
-					}
+					)}
 					{/* A disclosure, not a wall. The evaluator still works, and a reader with a
 					    reason to run it — a deal on the table, a keeper league, a what-if — is
 					    one press from it. The wording splits because the two presses mean
 					    different things: one is an ordinary trade, the other is knowingly
-					    pricing a deal this league will not accept. */}
-					<button type="button" className="chip-btn" onClick={() => setDealOpen(true)}>
-						{tradeWindow.closed ? "Price one anyway" : "Price a trade"}
-					</button>
+					    pricing a deal this league will not accept.
+					
+					    The open-window press carries the instruction the paragraph above it used
+					    to carry ("Pick who leaves and who arrives and this prices the offer"),
+					    which is one sentence and one control saying the same thing. The heading
+					    is now the evaluator's own name, so the press says what to do next. */}
+					<div className="trade-deal-ways">
+						<button type="button" className="chip-btn" onClick={() => setDealOpen(true)}>
+							{tradeWindow.closed ? "Price one anyway" : "Pick who leaves and who arrives"}
+						</button>
+						{/*
+						  * WHAT HE CAN STILL DO, as a control rather than as a sentence.
+						  *
+						  * This screen's answer to a shut trade window was 155px and eighteen words
+						  * that ended in the name of a tab (measured 390x844 on the dev server,
+						  * 2026-09-19, on the committed league whose window closed 2026-08-06). The
+						  * only press on it opened the one thing the league will not accept. It is
+						  * 207px now and the same eighteen words — the tab's name moved out of the
+						  * sentence and onto a second chip, so the card grew 52px and gained the
+						  * only control on it a reader can act on.
+						  *
+						  * Routed through the hash rather than through a new prop: `App` already
+						  * owns `VIEW_HASH` and already listens for `hashchange` (see `onHash`
+						  * there), so this is the app's own public route between screens and needs
+						  * nothing threaded through <Trade/>. Back still works — assigning the hash
+						  * pushes an entry, and the pop fires `hashchange` with `#my-league`.
+						  */}
+						{tradeWindow.closed && (
+							<button
+								type="button"
+								className="chip-btn"
+								data-ctl="deal-to-wire"
+								onClick={() => {
+									window.location.hash = `#${VIEW_HASH.wire}`
+									window.scrollTo(0, 0)
+								}}
+							>
+								{`Add and drop on ${tab("wire")}`}
+							</button>
+						)}
+					</div>
 				</section>
 			:	<section className="card full trade-deal">
-				<h2>The deal</h2>
-				<p className="sub">
-					Pick who leaves and who arrives.
-				</p>
+				<h2>Price a trade</h2>
 				<div className="deal">
 					<div className="deal-side">
 						<h3>You give up</h3>

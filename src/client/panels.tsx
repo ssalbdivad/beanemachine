@@ -189,14 +189,34 @@ export const TeamCountInput = ({
 	)
 }
 
+/**
+ * A league's point values, and — only when asked for — the controls that change
+ * WHICH stats are in the table.
+ *
+ * `editing` is the whole of the difference, and it is where most of My league's
+ * control count used to go. Measured at 390x844 against yahoo:228947 on the dev
+ * server: the screen carried 102 visible controls, of which 17 were the per-row "×"
+ * on these two tables and 6 more were their two add-a-stat forms. A reader whose
+ * league was READ off Yahoo has 17 stats he did not choose and cannot usefully add a
+ * category to — Yahoo decides that, on the page this app parsed — so 23 of his
+ * controls were a form for restating an import.
+ *
+ * The point VALUES stay live either way. They are the one thing on this screen a
+ * reader does correct by hand (a preset borrowed from another league, a paste that
+ * missed a row), they are what the board is denominated in, and test/board.mjs and
+ * test/static.mjs both type into them straight after landing on the screen.
+ */
 export const StatTable = ({
 	table,
 	side,
+	editing,
 	onChange,
 	onReject
 }: {
 	table: Record<string, number>
 	side: string
+	/** Whether the add-a-stat form and the per-row remove buttons are on the screen. */
+	editing: boolean
 	onChange: (next: Record<string, number>) => void
 	onReject: (message: string) => void
 }) => {
@@ -220,20 +240,22 @@ export const StatTable = ({
 					    league, seventeen buttons on one screen all announcing "×, button",
 					    while the number field one element to its left gets it right because it
 					    uses `aria-label`. The title stays: it is the hover tooltip. */}
-					<button
-						className="ghost"
-						aria-label={`Remove ${code}`}
-						title={`Remove ${code}`}
-						onClick={() => {
-							const { [code]: _, ...rest } = table
-							onChange(rest)
-						}}
-					>
-						×
-					</button>
+					{editing && (
+						<button
+							className="ghost"
+							aria-label={`Remove ${code}`}
+							title={`Remove ${code}`}
+							onClick={() => {
+								const { [code]: _, ...rest } = table
+								onChange(rest)
+							}}
+						>
+							×
+						</button>
+					)}
 				</div>
 			))}
-			<AddStat table={table} onChange={onChange} onReject={onReject} />
+			{editing && <AddStat table={table} onChange={onChange} onReject={onReject} />}
 		</div>
 	)
 }
@@ -280,10 +302,14 @@ export const recount = rosterCounts
 
 export const RosterPanel = ({
 	roster,
+	editing,
 	onChange,
 	onReject
 }: {
 	roster: League["roster"]
+	/** Whether the add-a-slot form and the slot-to-position table are on the screen.
+	 *  See the note on `StatTable` — same split, same reason. */
+	editing: boolean
 	onChange: (next: League["roster"]) => void
 	onReject: (message: string) => void
 }) => {
@@ -328,17 +354,19 @@ export const RosterPanel = ({
 						</div>
 					)
 				})}
-				<form
-					className="add slotadd"
-					onSubmit={e => {
-						e.preventDefault()
-						addSlot(e.currentTarget)
-					}}
-				>
-					<input className="k" name="slot" placeholder="SLOT" aria-label="New roster slot" />
-					<input name="count" type="number" inputMode="numeric" min="1" step="1" placeholder="#" aria-label="Slot count" />
-					<button type="submit">Add slot</button>
-				</form>
+				{editing && (
+					<form
+						className="add slotadd"
+						onSubmit={e => {
+							e.preventDefault()
+							addSlot(e.currentTarget)
+						}}
+					>
+						<input className="k" name="slot" placeholder="SLOT" aria-label="New roster slot" />
+						<input name="count" type="number" inputMode="numeric" min="1" step="1" placeholder="#" aria-label="Slot count" />
+						<button type="submit">Add slot</button>
+					</form>
+				)}
 			</div>
 			{roster.counts && (
 				<div className="totals">
@@ -357,7 +385,7 @@ export const RosterPanel = ({
 					))}
 				</div>
 			)}
-			{roster.slot_accepts && (
+			{editing && roster.slot_accepts && (
 				<details>
 					<summary>Which positions fill each slot</summary>
 					<dl>
@@ -385,10 +413,16 @@ export const Fragment2 = ({ term, children }: { term: string; children: React.Re
 
 export const EligibilityPanel = ({
 	eligibility,
+	editing,
 	onChange,
 	onReject
 }: {
 	eligibility: League["eligibility"]
+	/** Whether the thresholds are number fields or the numbers themselves. Yahoo
+	 *  publishes these on a page of its own and this app parses them; a reader whose
+	 *  league was read has six inputs here for six values he has never chosen. See
+	 *  the note on `StatTable`. */
+	editing: boolean
 	onChange: (next: League["eligibility"]) => void
 	onReject: (message: string) => void
 }) => {
@@ -417,28 +451,32 @@ export const EligibilityPanel = ({
 			{batters && (
 				<Fragment2 term="Batters">
 					<span className="field">
-						<ValueInput
-							integer
-							value={batters.games_started_at_position}
-							label="games started"
-							onReject={onReject}
-							onCommit={n =>
-								onChange({ ...eligibility, batters: { ...batters, games_started_at_position: n } })
-							}
-						/>
+						{editing ?
+							<ValueInput
+								integer
+								value={batters.games_started_at_position}
+								label="games started"
+								onReject={onReject}
+								onCommit={n =>
+									onChange({ ...eligibility, batters: { ...batters, games_started_at_position: n } })
+								}
+							/>
+						:	<b>{batters.games_started_at_position}</b>}
 						<span className="unit">games started</span>
 					</span>
 					<span className="unit"> {batters.rule} </span>
 					<span className="field">
-						<ValueInput
-							integer
-							value={batters.games_played_at_position}
-							label="games played"
-							onReject={onReject}
-							onCommit={n =>
-								onChange({ ...eligibility, batters: { ...batters, games_played_at_position: n } })
-							}
-						/>
+						{editing ?
+							<ValueInput
+								integer
+								value={batters.games_played_at_position}
+								label="games played"
+								onReject={onReject}
+								onCommit={n =>
+									onChange({ ...eligibility, batters: { ...batters, games_played_at_position: n } })
+								}
+							/>
+						:	<b>{batters.games_played_at_position}</b>}
 						<span className="unit">games played</span>
 					</span>
 				</Fragment2>
@@ -447,18 +485,20 @@ export const EligibilityPanel = ({
 				<Fragment2 key={pos} term={pos}>
 					{Object.entries(rules).map(([rule, n]) => (
 						<span className="field" key={rule}>
-							<ValueInput
-								integer
-								value={n}
-								label={rule.replace(/_/g, " ")}
-								onReject={onReject}
-								onCommit={v =>
-									onChange({
-										...eligibility,
-										pitchers: { ...pitchers, [pos]: { ...rules, [rule]: v } }
-									})
-								}
-							/>
+							{editing ?
+								<ValueInput
+									integer
+									value={n}
+									label={rule.replace(/_/g, " ")}
+									onReject={onReject}
+									onCommit={v =>
+										onChange({
+											...eligibility,
+											pitchers: { ...pitchers, [pos]: { ...rules, [rule]: v } }
+										})
+									}
+								/>
+							:	<b>{n}</b>}
 							<span className="unit">{rule.replace(/_/g, " ")}</span>
 						</span>
 					))}

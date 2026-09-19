@@ -6,7 +6,7 @@ import {
 	type OwnershipCut, type Ranked
 } from "../engine/bscore.ts"
 import type { League } from "../schema.ts"
-import { resolvePeriod, scoringEnd, windowFrom, withinDays } from "../engine/period.ts"
+import { resolvePeriod, scoringEnd, windowFrom, withinDays, type ResolvedPeriod } from "../engine/period.ts"
 import { localDate } from "../data/today.ts"
 import { since } from "./pool.ts"
 import { useInjuries } from "./useInjuries.ts"
@@ -433,6 +433,59 @@ export const overlayEligibility = (
 	return out
 }
 
+/**
+ * WHOSE WINDOW THE STANDING BOARD RANKS OVER — the league's, where it stated one.
+ *
+ * The fortnight was a window this app chose. Every number on the board is a projection
+ * summed over it, so in a head-to-head league the board was denominated in a horizon the
+ * league does not settle anything on: points scored after the reset belong to the NEXT
+ * matchup, and the second week of that fortnight is somebody else's game.
+ *
+ * WHAT IT MOVES, measured on data/snapshot.json against league 228947 (period Mon Sep 14
+ * → Sun Sep 20) read on 2026-09-19, so two days of it left. Ranked by bscore, the men the
+ * ownership estimate says are gettable — which is what the default board actually shows:
+ *
+ *   fortnight  Grant Taylor 8.34 · Tyler Stephenson 7.69 · Sam Antonacci 7.57 · Jake
+ *              Burger 5.47 · Heriberto Hernández 5.08 …          1,012 rows
+ *   period     Tyler Stephenson 2.25 · Grant Taylor 2.04 · Sam Antonacci 1.50 ·
+ *              Heriberto Hernández 1.34 · Jake Burger 1.28 …       990 rows
+ *
+ * BE HONEST ABOUT THE SIZE OF IT: 8 of the visible top 10 are the same men (7 of 10 and
+ * 22 of 25 over the whole rateable pool, which is 1,226 against 1,248). This is not a
+ * different board. What changes is the top of it — the first two swap, two of the ten are
+ * replaced, and Billy's pick with them, driven on the dev server at 390x844 from Grant
+ * Taylor to Tyler Stephenson — and, more than that, WHAT THE NUMBER MEANS: 8.34 was
+ * fourteen days of surplus quoted to a man deciding a matchup that ends in two, and 2.25
+ * is what the move is worth to the matchup he is deciding. A reader planning against the
+ * first figure is planning against games his opponent this week will never see.
+ *
+ * THE GATE IS `kind === "matchup" && !assumed`, which is narrower than "the league said
+ * something" on purpose, and each half is doing work:
+ *
+ *   - `assumed` covers the league that stated no start day or no length; `resolvePeriod`
+ *     falls back to a Monday and seven days and flags it, and ranking a man against a
+ *     window this app invented is the thing the fortnight was already doing.
+ *   - `kind` excludes the two non-periods that carry `assumed: false`. A league scoring
+ *     the whole season ("none") resolves to a rolling seven days, which is no more the
+ *     league's own window than the fortnight is and is half as long; and a daily league's
+ *     stated period is ONE DAY, which is the right horizon for tonight's lineup and the
+ *     wrong one for a standing board of everyone you could add.
+ *
+ * Streaming is unconditional, as it has been since the rolling window was measured
+ * overstating a Wednesday by 59%: that tab's question is explicitly "before the reset",
+ * and the reader can move its far edge himself with the Window chips.
+ *
+ * Stash is deliberately absent. Its question is the rest of the season and is answered by
+ * `longWindows.rest`, which `scoringEnd` already clips to the last day the league scores.
+ *
+ * Board.tsx reads this twice and must: the tab that switches to this horizon is NAMED
+ * after the window it ranks (`standingBoard`), so the strip cannot say "This fortnight"
+ * over a board rated across two days.
+ */
+export const periodScoped = (mode: Filters["mode"], period: ResolvedPeriod | null): boolean =>
+	mode === "stream" ||
+	(mode === "board" && period !== null && period.kind === "matchup" && !period.assumed)
+
 export const useBoard = (
 	snapshot: Snapshot | null,
 	league: League | null,
@@ -658,17 +711,24 @@ export const useBoard = (
 	 * beside the header would be the same defect waiting to happen again, so the choice is
 	 * made here and both the rating and the sentence read the answer.
 	 *
-	 * "period" is the streaming window, which falls back to the fortnight when the league's
-	 * own period resolves to no games at all — a capture asked about a week that starts
-	 * after its last captured game. That fallback was already in the rating and was NOT in
-	 * the header, so a streaming board rated over the fortnight could print the period's
-	 * dates. Naming the fallback fixes that too.
+	 * "period" is the LEAGUE's own window and is no longer the streaming tab's alone — see
+	 * `periodScoped`, which is asked here rather than testing the mode inline, because
+	 * Board.tsx has to ask the same question to name the tab.
+	 *
+	 * It falls back to the fortnight when that window resolves to no games at all — a
+	 * capture asked about a week that starts after its last captured game. That fallback was
+	 * already in the rating and was NOT in the header, so a board rated over the fortnight
+	 * could print the period's dates. Naming the fallback fixes that too, and the tab's own
+	 * label reads this answer for the same reason.
+	 *
+	 * Stash is tested first only because it reads that way; the two branches cannot both be
+	 * true, since `periodScoped` answers false for stash by construction.
 	 */
 	const using = useMemo((): "period" | "rest" | "fortnight" => {
-		if (filters.mode === "stream" && week && week.games.size > 0) return "period"
 		if (filters.mode === "stash" && longWindows && longWindows.rest.games.size > 0) return "rest"
+		if (periodScoped(filters.mode, period) && week && week.games.size > 0) return "period"
 		return "fortnight"
-	}, [filters.mode, week, longWindows])
+	}, [filters.mode, period, week, longWindows])
 
 	/**
 	 * The window the rows are rated over, in dates, for the line that names it.
@@ -1191,11 +1251,15 @@ export const useBoard = (
 		if (filters.mode !== "stream" || !week || week.games.size === 0) return null
 		let published = 0
 		let games = 0
-		let fullyNamed = 0
+		/* `fullyNamed` — the count of clubs whose every game in the window has a named
+		   starter — and `clubs` were summed here for a clause in the note that read
+		   "0 of 30 clubs completely". A club is fully named exactly when none of its games
+		   is unnamed, so that count crossed its total at precisely the moment `published`
+		   crossed `games`: two numbers, one fact, and the sentence printed both. The note
+		   prints the fraction only now, and the estimate warning hangs off it. */
 		for (const c of week.coverage.values()) {
 			published += c.published
 			games += c.games
-			if (c.published === c.games) fullyNamed++
 		}
 		return {
 			/** Opponent club ids per announced start, in schedule order. */
@@ -1204,8 +1268,6 @@ export const useBoard = (
 			 *  of his opponent list. Distinct from `Rated.scheduledStarts`, which adds
 			 *  an estimate for his club's not-yet-named games. */
 			publishedStarts: week.probableStarts,
-			clubs: week.coverage.size,
-			fullyNamed,
 			published,
 			games
 		}

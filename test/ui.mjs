@@ -402,6 +402,38 @@ await slot.fill(""); await slot.blur(); await page.waitForTimeout(150)
 t("blank slot count restores, doesn't delete the slot",
   (await slot.inputValue()) === slotBefore && (await page.$$eval(".slot", n => n.length)) >= 12)
 
+/**
+ * ── The eligibility thresholds are BEHIND the one disclosure now ────────────────
+ *
+ * This read `.field input.val` straight off the loaded screen, and there is no such
+ * field there any more. My league opens with what the league SAYS and holds the
+ * controls that change WHICH stats, slots and rules it has behind one button —
+ * `data-ctl="by-hand"` in src/client/App.tsx, closed for a league whose values were
+ * read off its own pages (`provenance.verified`), open for one that was typed or
+ * borrowed, because then building the table by hand is the whole job of the screen.
+ * Measured at 390x844 against yahoo:228947: 102 visible controls became 72, and the
+ * 30 that went were 17 remove buttons, three add-forms and six threshold fields for
+ * values Yahoo publishes on a page this app already parsed.
+ *
+ * The assertion is unchanged in what it protects — a cleared integer threshold must
+ * restore the stored number rather than commit 0, which is `ValueInput`'s oldest
+ * trap — so it opens the disclosure and then makes exactly the same check. Pressing
+ * the button first is also the only proof in this suite that the fold gives the
+ * fields back.
+ */
+const byHand = page.locator('button[data-ctl="by-hand"]')
+t("the by-hand controls start folded away for a league that was read",
+  (await byHand.getAttribute("aria-expanded")) === "false",
+  await byHand.getAttribute("aria-expanded"))
+t("…so the remove buttons are not on the screen either",
+  (await page.locator(BATTING + ' button[aria-label^="Remove "]').count()) === 0,
+  `${await page.locator(BATTING + ' button[aria-label^="Remove "]').count()} remove buttons`)
+await byHand.click()
+await page.waitForSelector(".field input.val")
+t("pressing it gives back the form", (await byHand.getAttribute("aria-expanded")) === "true")
+t("…including a remove button per scored stat",
+  (await page.locator(BATTING + ' button[aria-label^="Remove "]').count()) === 9,
+  `${await page.locator(BATTING + ' button[aria-label^="Remove "]').count()} remove buttons`)
 // and on eligibility thresholds
 const elig = page.locator(".field input.val").first()
 const eligBefore = await elig.inputValue()
@@ -413,8 +445,29 @@ t("nothing dirty after all rejections",
 
 // needs-review surfaced
 t("needs review listed", (await page.$$eval(".flags li", n => n.length)) >= 1)
-// raw settings present
-t("raw league rules shown", (await page.$$eval("dl dt", n => n.length)) > 20)
+/**
+ * ── The raw settings are KEPT, not printed ──────────────────────────────────────
+ *
+ * This asserted `dl dt` > 20 against a card headed "League rules", which printed
+ * `league_rules.raw_settings` verbatim: 36 dt/dd pairs of Yahoo's own settings page,
+ * re-typed by the parser, on a screen the reader reached from that page. It is
+ * deleted — see the note in src/client/App.tsx — along with "Unmapped scoring",
+ * which put `JSON.stringify(scoring.unmapped, null, 2)` in a <pre>. Together they
+ * were 214px at 390x844 and a reader could act on neither.
+ *
+ * What that assertion was really protecting is that the import is not thrown away,
+ * and that is now checked where it is true: in the store, which is what Download
+ * writes out and what a reload reads back. The old number, 36 pairs on this league,
+ * is the number checked here.
+ */
+const rawKept = await page.evaluate(k => {
+  const l = JSON.parse(localStorage.getItem(k))?.leagues?.["yahoo:228947"]
+  return Object.keys(l?.league_rules?.raw_settings ?? {}).length
+}, STORE)
+t("the league's own settings are still stored, all 36 of them", rawKept === 36, String(rawKept))
+t("…and no longer re-printed on the screen",
+  (await page.$$eval("dl dt", n => n.length)) < 20,
+  `${await page.$$eval("dl dt", n => n.length)} terms still drawn`)
 
 // Firefox paints persistent number-input spinners that eat the field and read as
 // a stray scrollbar; they must be suppressed in every engine.
@@ -993,6 +1046,85 @@ const wide = await mp.evaluate(() => [...document.querySelectorAll(".grid > sect
   .filter(c => c.scrollWidth > c.clientWidth + 1)
   .map(c => `${c.querySelector("h2")?.textContent}:${c.scrollWidth}>${c.clientWidth}`))
 t("no card overflows its own width at 390px", wide.length === 0, wide.join(" "))
+
+/**
+ * ── MY LEAGUE IS A SCREEN, NOT A SETTINGS PANEL ─────────────────────────────────
+ *
+ * The worst bloat in the app, measured on this server at 390x844 with yahoo:228947
+ * — a league read off Yahoo's own settings pages — before the pass that cut it:
+ * 5,443px tall, 102 visible controls, 52 of them form fields, 516 words. 72 of the
+ * controls were a league editor for values Yahoo had already supplied, and two whole
+ * cards ("League rules", "Unmapped scoring") existed only to show the reader the raw
+ * import back.
+ *
+ * After: 4,523px, 72 controls, 42 fields, 421 words. The ceilings below are set a
+ * little above the measurement so that ordinary drift does not fail the suite, and
+ * far enough below the old numbers that putting any of it back does. A control count
+ * is the right unit here rather than a pixel height: the cards that remain are the
+ * league's own values, and the complaint was never that they are long.
+ *
+ * `controls` counts what `checkVisibility` reports, so the eight fields inside the
+ * closed scoring-period fold do not count — `getClientRects` still returns boxes for
+ * them, which is how an earlier run of this measurement over-counted by eight on
+ * both sides.
+ */
+const leagueScreen = await mp.evaluate(() => {
+  const sel = "input, select, textarea, button, a[href], details>summary"
+  const vis = [...document.querySelectorAll(sel)].filter(e => e.checkVisibility())
+  return {
+    height: document.documentElement.scrollHeight,
+    controls: vis.length,
+    fields: vis.filter(e => /INPUT|SELECT|TEXTAREA/.test(e.tagName)).length,
+    words: document.body.innerText.trim().split(/\s+/).length
+  }
+})
+t("My league opens with fewer than 75 controls, where it had 102",
+  leagueScreen.controls < 75, JSON.stringify(leagueScreen))
+t("…fewer than 45 of them fields, where it had 52",
+  leagueScreen.fields < 45, JSON.stringify(leagueScreen))
+t("…and under 5,000px, where it was 5,443",
+  leagueScreen.height < 5000, JSON.stringify(leagueScreen))
+t("the raw import is not printed back at the reader",
+  (await mp.locator('section.card:has(h2:text-is("League rules"))').count()) === 0 &&
+    (await mp.locator('section.card:has(h2:text-is("Unmapped scoring"))').count()) === 0)
+
+/**
+ * ── THE MASTHEAD CHIPS ON A PHONE ───────────────────────────────────────────────
+ *
+ * The row scrolls sideways at phone width by design (app.css orders the one BUTTON
+ * first so the only control in it is never the thing that scrolls off). What it did
+ * not do was keep the number of chips down to what fits. Measured here before this:
+ * on Tonight the row was 756px of chips in a 346px window — 410px off the right edge
+ * — because the team name and the roster count rode along on every screen, and the
+ * chip they pushed past the edge was "player data 11d ago", the only chip in the row
+ * that is ever a warning. Both are setup facts with a home on My league, so they are
+ * behind `detail` with the platform, the scoring type and the read date.
+ *
+ * 756px became 498px, and what is now cut is the tail of the age chip rather than
+ * the whole of it. The assertion is on the CONTENT — no setup fact in the row on the
+ * screens that are not about setup — because the exact overflow is app.css's
+ * business and 498 in 346 is still a scroller.
+ */
+await screen(mp, TONIGHT)
+await mp.waitForTimeout(600)
+const tonightChips = await mp.$$eval(".wrap>.chips>*", els =>
+  els.map(e => (e.innerText || "").replace(/\s+/g, " ").trim()))
+t("the phone masthead carries no setup facts on Tonight",
+  !tonightChips.some(c => /Harem|teams|Head-to-Head|yahoo|read 20/.test(c)),
+  tonightChips.join(" / "))
+t("…and the capture's age is one of the two chips left",
+  tonightChips.some(c => /player data/.test(c)) && tonightChips.length <= 3,
+  tonightChips.join(" / "))
+const tonightRow = await mp.$eval(".wrap>.chips", e => e.scrollWidth)
+t("…so the row is under 550px where it was 756", tonightRow < 550, `${tonightRow}px`)
+
+/* The colophon's second sentence — "How the projections were built and measured, and
+   the parts that could not be, are in Methodology." — was an advertisement for the
+   link six pixels above it, on all three screens. One sentence is left, and it is the
+   one that changes how a number is read. */
+const note = await mp.$eval(".colophon .tiny-note", e => e.innerText.trim())
+t("the colophon is one sentence about the unit the numbers are in",
+  note.split(".").filter(x => x.trim()).length === 1 && /league/.test(note), note)
 
 await dp.screenshot({ path: "/tmp/bc-dark.png", fullPage: true })
 await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })

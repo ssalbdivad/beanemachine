@@ -258,7 +258,21 @@ export const readLeagueHere = async (
 	leagueKey: string,
 	onLeague?: (league: import("../schema.ts").League) => void
 ): Promise<{ said: string; read: boolean }> => {
-	const answer = await ext.ask("league")
+	/*
+	   THE TEAM THIS BROWSER ALREADY KNOWS IS HIS, SENT SO THE PRESS CAN ASK FOR IT.
+
+	   A Yahoo URL names a team on exactly one page shape, and it is the team page itself. So
+	   a press from the players page — where a manager spends his week — or from the league
+	   home named no team, and the descriptor could not put his roster in the plan: measured
+	   on all four shapes, `onePress` returned settings and matchup and never a team. The
+	   board was then priced against seats nothing had ever read.
+
+	   This id has been on the lineup store since the first read that stored seats and was
+	   never sent. Undefined on a browser that has read nothing yet, which is the honest
+	   absence: the press falls back to the URL, exactly as it always has.
+	*/
+	const mine = knownTeamId(leagueKey)
+	const answer = await ext.ask("league", { teamId: mine ?? undefined })
 	if (!answer.grabs?.length) {
 		const f = answer.failure
 		return { said: `${f?.what ?? "That could not be read"}${f?.fix ? ` — ${f.fix}` : ""}`, read: false }
@@ -280,12 +294,19 @@ export const readLeagueHere = async (
 	*/
 	const reading = readGrabs(answer.grabs, snapshot, undefined, {
 		leagueKey,
-		teamId: knownTeamId(leagueKey) ?? undefined
+		teamId: mine ?? undefined
 	})
 	const said: string[] = []
 	if (reading.league && onLeague) {
 		onLeague(reading.league)
-		said.push("Read your league's own scoring")
+		/* Named separately because they are two pages and two fetches: a reader whose
+		   settings page landed and whose eligibility page did not has a league that scores
+		   correctly and states no thresholds, and the receipt has to be able to say which. */
+		said.push(
+			reading.eligibility ?
+				"Read your league's own scoring and eligibility"
+			:	"Read your league's own scoring"
+		)
 	}
 	if (reading.roster?.players.length) {
 		try {

@@ -24,7 +24,6 @@ import { useMatchup } from "./useMatchup.ts"
 import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
 	EligibilityPanel,
-	Fragment2,
 	freshness,
 	purpose,
 	VIEW_HASH,
@@ -1690,12 +1689,16 @@ const Colophon = ({ own }: { own: boolean }) => (
 		    scoring, not yours. Every number below is real and none of it is about your
 		    league yet" — the app contradicting itself on one screen, about the one fact
 		    that decides whether any of the numbers apply to the reader. */}
+		{/* ONE SENTENCE, because the second one was an advertisement for the link above it.
+		    It read "How the projections were built and measured, and the parts that could not
+		    be, are in Methodology." — 17 words describing a link whose own text already says
+		    "Methodology & measured results", six pixels higher, on all three screens.
+		    Measured at 390x844: 34px on Tonight, where the whole page is 1007px. What is left
+		    is the only clause in the footer that changes how a number should be read. */}
 		<p className="tiny-note">
 			{own ?
-				"Every number is in your league's own points. "
-			:	"Every number is in the scoring this board borrowed from one real league, not yours yet. "}
-			How the projections were built and measured, and the parts that could not be,
-			are in Methodology.
+				"Every number is in your league's own points."
+			:	"Every number is in the scoring this board borrowed from one real league, not yours yet."}
 		</p>
 	</footer>
 )
@@ -2204,12 +2207,32 @@ const Chips = ({ league, detail }: { league: League; detail: boolean }) => {
 	const { meta, provenance } = league
 	return (
 		<>
-			{[detail ? meta.platform : null, meta.team_name].filter(Boolean).map(v => (
+			{/*
+			  THE TEAM NAME AND THE TEAM COUNT RIDE WITH THE DETAIL NOW, and the reason is
+			  that on a phone they were not on the screen at all.
+
+			  Measured on the dev server at 390x844 with yahoo:228947 in place: the row is
+			  346px wide and held 756px of chips on Tonight, so 410px of it — every chip
+			  after the first — was off the right edge of a scroller most readers never
+			  swipe. The order is set in app.css so the one BUTTON leads, which took 309px
+			  of the 346, and what fell off the end was "10 teams", and then "player data
+			  11d ago", which is the only chip in the row that is ever a warning. A stale
+			  capture was invisible on a phone because a team name and a roster count were
+			  standing in front of it.
+
+			  Neither of the two is a decision input. The count has its own field one screen
+			  away, under "This league", and the name is in the league selector wherever
+			  there is more than one league to pick between and on My league either way.
+			  `detail` is the flag this component already uses for exactly that split — the
+			  platform, the scoring type and the read date were behind it before this — so
+			  they join them, and Tonight carries 491px in a 346px row instead of 756.
+			*/}
+			{[meta.platform, meta.team_name].filter(v => detail && v).map(v => (
 				<span className="chip" key={String(v)}>
 					<b>{String(v)}</b>
 				</span>
 			))}
-			{meta.max_teams != null && (
+			{detail && meta.max_teams != null && (
 				<span className="chip">
 					<b>{meta.max_teams}</b> teams
 				</span>
@@ -2411,18 +2434,6 @@ const ScoringPeriodPanel = ({
 		onChange(says ? next : null)
 	}
 
-	/** Which of these fields the board actually reads, given the period chosen. It is
-	 *  stated rather than shown by disabling anything, because a fact the league does
-	 *  hold is worth recording whether or not today's window is ranked on it. */
-	const reads =
-		stated?.kind === "matchup" ?
-			"The length, the start day, the lock and the anchor are all read — the anchor in place of the start day, wherever one is set."
-		: stated?.kind === "daily" ?
-			"A daily league's window is today, so nothing else here is read."
-		: stated?.kind === "none" ?
-			"A league with no periods is ranked over a rolling week, so nothing else here is read."
-		:	"Until the period is stated the board takes a rolling week and reads nothing else here."
-
 	/** What the board fills each null in with. Every line names a fallback that is in
 	 *  period.ts and would otherwise move a ranking without saying so. `basis` names
 	 *  the Monday and seven-day fallbacks itself; the unstated lineup lock leaves no
@@ -2445,21 +2456,22 @@ const ScoringPeriodPanel = ({
 
 	return (
 		<>
-			<p className="sub">
-				{/* The second sentence quoted "7.4 games a club when 4.7 remained", measured on
-				    "the shipped league" — and the published build ships no league at all
-				    (public/scoring.json carries `leagues: {}`), so the figure is not
-				    reproducible from anything a reader has. What it was there to convey is why
-				    these two fields are worth filling in, which is sayable without a number
-				    nobody can check: a window that runs past the reset counts games that score
-				    for somebody else's matchup. */}
-				Which days a matchup is scored over, and whether the lineup can still be changed
-				inside it — two facts that do not follow from each other. The period decides
-				where the streaming window ends; the lock decides which period you can still act
-				on. Get the period wrong and the board counts games played after your matchup has
-				already been settled.
-			</p>
+			{/*
+			  FOUR PARAGRAPHS OF ARGUMENT WENT, AND SIX LABELLED CONTROLS STAYED.
 
+			  This card opened with 62 words on why a period and a lock are different facts,
+			  carried a second paragraph (`reads`) naming which of its own fields the board
+			  consults for each choice of period, and closed the anchor fold with 56 more on
+			  how stepping from a date works. Three of the four were the app explaining
+			  itself: "the length, the start day, the lock and the anchor are all read" is a
+			  sentence about this software, addressed to somebody who is looking straight at
+			  the controls it names. Measured at 390x844 on the dev server with the fold
+			  open: 384px of the card's 914, for a value one person corrects once a season.
+
+			  What is left is what the league SAYS and what the board does when it says
+			  nothing: the resolved window, and the `assumptions` list, which is the one
+			  place a null is reported as a null rather than as a default.
+			*/}
 			<div className="period">
 				<label className="ctl">
 					<span>Period</span>
@@ -2539,8 +2551,6 @@ const ScoringPeriodPanel = ({
 				)}
 			</div>
 
-			<p className="sub period-reads">{reads}</p>
-
 			<p className="sub">
 				The board ranks the streaming week over {resolved.basis}.
 				{slateEnd !== null &&
@@ -2559,13 +2569,10 @@ const ScoringPeriodPanel = ({
 
 			<details>
 				<summary>Anchor the period to a date</summary>
-				<p className="sub">
-					For a league whose grid does not fall on a fixed weekday. Any date known to be
-					the first day of some period: the board steps forward from it in strides of the
-					length above, so an anchor without a length is stepped in sevens. It replaces
-					the start day rather than adjusting it — with an anchor set, the weekday above
-					is not read at all.
-				</p>
+				{/* The 56-word version of this named the stride arithmetic and the fixed-weekday
+				    case it is for. One clause survives, and it is the only one a reader cannot
+				    work out from the boxes: setting this stops the weekday above being read. */}
+				<p className="sub">Set this and the start day above is not read.</p>
 				<div className="period">
 					<label className="ctl">
 						<span>First day of a period</span>
@@ -2645,6 +2652,33 @@ const LeagueEditor = ({
 	const set = <K extends keyof League>(field: K, value: League[K]): void =>
 		setDraft(d => ({ ...d, [field]: value }))
 
+	/**
+	 * ONE DISCLOSURE FOR THE WHOLE FORM, AND IT STARTS CLOSED FOR A LEAGUE THAT WAS READ.
+	 *
+	 * Measured at 390x844 on the dev server against yahoo:228947 — a league imported off
+	 * Yahoo's own settings pages — My league drew 5,443px and 102 visible controls, 52 of
+	 * them form fields. The four cards below accounted for 60 of the 102, and of those, 31
+	 * existed only to change which stats, slots and eligibility rules the league HAS: 17
+	 * per-row remove buttons, two add-a-stat forms, an add-a-slot form, a slot-to-position
+	 * fold, and six number fields for thresholds Yahoo publishes on a page of its own.
+	 * Yahoo decides every one of them. A reader who imported his league was handed a form
+	 * to retype an import.
+	 *
+	 * So they are behind this, and it is ONE control rather than four folds — a fold per
+	 * card would put the values themselves behind a tap, and the values are the reason the
+	 * screen exists. What stays visible on every league is what the league SAYS: the codes,
+	 * the point values (still live, because correcting a borrowed or mis-pasted number is
+	 * the one edit people actually make here), the slot counts and totals, the eligibility
+	 * thresholds as numbers.
+	 *
+	 * OPEN by default where nothing was read. `provenance.verified` is the schema's own
+	 * flag for "every stored value came off this league's own pages"; without it the
+	 * league was typed, pasted or borrowed from a preset, and building the table by hand
+	 * IS the job of the screen. Closing the form on that reader would hide the only thing
+	 * he came to do.
+	 */
+	const [byHand, setByHand] = useState(() => !league.provenance.verified)
+
 	/** The SAME schema that guards what reaches storage, so the Save button cannot be
 	 *  enabled on a league the store would refuse. */
 	const invalid = useMemo(() => {
@@ -2657,8 +2691,6 @@ const LeagueEditor = ({
 			if (invalid) return
 			onSaved(leagues.save(leagueKey, draft))
 		})
-
-	const raw = (draft.league_rules as { raw_settings?: Record<string, unknown> } | undefined)?.raw_settings
 
 	return (
 		<>
@@ -2678,10 +2710,13 @@ const LeagueEditor = ({
 					{/* Said in baseball. The old version named the arithmetic ("replacement
 					    level is teams × slots") and a screen that no longer exists, to somebody
 					    filling in a number. What he needs is why the number matters. */}
+					{/* Two sentences where there were three. The cut one ("The more teams, the
+					    thinner the free-agent pool") restated the second in the abstract — it
+					    is the same fact about replacement level, told twice, above a field with
+					    one number in it. 31 words became 20, and the card 200px became 178. */}
 					<p className="sub">
-						The more teams, the thinner the free-agent pool &mdash; and every player here
-						is measured against whoever is left at his position once every team has
-						filled it. Nothing is ranked until this is set.
+						Every player here is measured against whoever is left at his position once
+						every team has filled it. Nothing is ranked until this is set.
 					</p>
 					<TeamCountInput
 						value={draft.meta.max_teams}
@@ -2722,6 +2757,22 @@ const LeagueEditor = ({
 				</section>
 			</div>
 
+			{/* The one control the note on `byHand` describes. It is a button rather than a
+			    `<details>` because what it discloses is scattered through four cards below —
+			    a native fold would have to be four folds, and each one would put a league's
+			    point values behind a tap to reveal the buttons that delete them. */}
+			<p className="bar-admin" style={{ margin: "var(--sp-5) 0 0" }}>
+				<button
+					type="button"
+					className="chip-btn"
+					data-ctl="by-hand"
+					aria-expanded={byHand}
+					onClick={() => setByHand(v => !v)}
+				>
+					{byHand ? "Hide the stats, slots and rules" : "Change the stats, slots and rules"}
+				</button>
+			</p>
+
 			<div className="grid">
 				<section className="card">
 					<h2>Batting</h2>
@@ -2729,6 +2780,7 @@ const LeagueEditor = ({
 					<StatTable
 						table={draft.scoring.batting}
 						side="batting"
+						editing={byHand}
 						onReject={onError}
 						onChange={batting => set("scoring", { ...draft.scoring, batting })}
 					/>
@@ -2740,6 +2792,7 @@ const LeagueEditor = ({
 					<StatTable
 						table={draft.scoring.pitching}
 						side="pitching"
+						editing={byHand}
 						onReject={onError}
 						onChange={pitching => set("scoring", { ...draft.scoring, pitching })}
 					/>
@@ -2748,63 +2801,85 @@ const LeagueEditor = ({
 				<section className="card full">
 					<h2>Roster slots</h2>
 					<p className="sub">{draft.roster.raw ?? "Slot counts for this league."}</p>
-					<RosterPanel roster={draft.roster} onReject={onError} onChange={r => set("roster", r)} />
-				</section>
-
-				<section className="card">
-					<h2>Position eligibility</h2>
-					{draft.eligibility?.source && <p className="sub">{draft.eligibility.source}</p>}
-					<EligibilityPanel
-						eligibility={draft.eligibility}
+					<RosterPanel
+						roster={draft.roster}
+						editing={byHand}
 						onReject={onError}
-						onChange={e => set("eligibility", e)}
+						onChange={r => set("roster", r)}
 					/>
 				</section>
 
-				<section className="card">
-					<h2>Needs review</h2>
-					{/* "null" is not a word about baseball, and "the source" is a word about where a
-					    program got something. The five `needs_review` strings that named field paths
-					    were fixed earlier; this intro line was left behind and says both in one
-					    sentence. */}
-					<p className="sub">
-						Anything your league&rsquo;s own pages did not state is left blank and listed
-						here.
-					</p>
-					{draft.needs_review.length ?
+				{/*
+				  THE WHOLE CARD RIDES WITH THE DISCLOSURE, not just its fields.
+				  
+				  With the thresholds rendered as numbers rather than as inputs, this card was
+				  362px at 390x844 and carried NO control at all: a games-started and a
+				  games-played count for batters, two rules a pitcher qualifies under, and a
+				  list of tracked positions — every one of them read off Yahoo's own
+				  position-eligibility page, which is one of the three URLs in this league's
+				  provenance. Nothing on it is a decision; the board applies these rules
+				  whether or not they are on the screen. That is the same card "League rules"
+				  was, and it goes the same way — behind the one control that says it holds the
+				  rules.
+				*/}
+				{byHand && (
+					<section className="card">
+						<h2>Position eligibility</h2>
+						{draft.eligibility?.source && <p className="sub">{draft.eligibility.source}</p>}
+						<EligibilityPanel
+							eligibility={draft.eligibility}
+							editing={byHand}
+							onReject={onError}
+							onChange={e => set("eligibility", e)}
+						/>
+					</section>
+				)}
+
+				{/*
+				  ONLY WHEN THERE IS SOMETHING OUTSTANDING.
+
+				  The card rendered on every league, and on a league that was read cleanly the
+				  whole of it was a heading, a sentence of preamble and "Nothing outstanding".
+				  Measured at 390x844 on the dev server: 148px and 24 words to report that
+				  there is nothing to report. The list is the point of the card — it is where
+				  an absence is stated as an absence — so the list is the card, and the
+				  preamble goes with it: the entries say what was not stated, in their own
+				  words, and a sentence above them saying that they do is a third statement of
+				  the same fact after the heading.
+				*/}
+				{draft.needs_review.length > 0 && (
+					<section className="card">
+						<h2>Needs review</h2>
 						<ul className="flags">
 							{draft.needs_review.map(f => (
 								<li key={f}>{f}</li>
 							))}
 						</ul>
-					:	<p className="empty">Nothing outstanding — every value came from the league.</p>}
-				</section>
-
-				{raw && Object.keys(raw).length > 0 && (
-					<section className="card full">
-						<h2>League rules</h2>
-						<p className="sub">Verbatim from the league's settings page.</p>
-						<details>
-							<summary>{Object.keys(raw).length} settings</summary>
-							<dl>
-								{Object.entries(raw).map(([k, v]) => (
-									<Fragment2 key={k} term={k}>
-										{String(v)}
-									</Fragment2>
-								))}
-							</dl>
-						</details>
-					</section>
-				)}
-
-				{draft.scoring.unmapped != null && (
-					<section className="card full">
-						<h2>Unmapped scoring</h2>
-						<p className="sub">Kept raw rather than guessed at.</p>
-						<pre>{JSON.stringify(draft.scoring.unmapped, null, 2)}</pre>
 					</section>
 				)}
 			</div>
+
+			{/*
+			  "LEAGUE RULES" AND "UNMAPPED SCORING" ARE GONE, and they were the two cards on
+			  this screen that existed only to show a reader the raw import back to himself.
+
+			  League rules printed `league_rules.raw_settings` verbatim — 36 dt/dd pairs on
+			  yahoo:228947, behind a summary reading "36 settings" — which is Yahoo's own
+			  settings page, re-typed by a parser, on a screen the reader reached FROM that
+			  page. Every value in it that this app acts on is already a labelled control
+			  above: the scoring tables, the slots, the team count, the period. The rest is
+			  the parser's leftovers.
+
+			  Unmapped scoring printed `JSON.stringify(scoring.unmapped, null, 2)` into a
+			  <pre>. A reader cannot act on a JSON object, and this is the one surface in the
+			  app that showed him one. Nothing is lost by dropping the DISPLAY: `unmapped` is
+			  still parsed, still stored, still written out by Download, and a stat the app
+			  cannot price is already named where it matters — in Needs review and in
+			  `unscoreable` on the board.
+
+			  Measured at 390x844 on the dev server, with 36 raw settings and no unmapped
+			  block: 214px and one more control.
+			*/}
 
 			<div className={dirty ? "savebar on" : "savebar"}>
 				<div className="inner">

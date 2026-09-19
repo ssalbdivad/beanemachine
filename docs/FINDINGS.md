@@ -286,9 +286,10 @@ Named because acquiring them is not a code change:
 - `extension/src/*.ts` has never been type-checked: `tsconfig.json` covers `src`, `api` and
   `vite.config.ts`, and `@types/chrome` is not installed. `npm run check` has never looked at
   the three files that actually run in a browser.
-- The background's `open-yahoo` branch is unreachable — the bridge drops the field that would
-  reach it. Left with a comment saying so, and warning that wiring it up without removing the
-  page's own `window.open` gives the reader two tabs.
+- ~~The background's `open-yahoo` branch is unreachable — the bridge drops the field that
+  would reach it.~~ FIXED: the branch and the `{ ask: "page", open: url }` the page posted
+  beside it are both deleted; `openYahoo` is now a `window.open` inside the click and
+  nothing else.
 - The Decide card's team-count refusal still explains itself in terms of a wire depth that no
   longer applies to a reader who has read his league's own list.
 - `chrome.runtime.reload()` under `--load-extension` does not bring the extension back, so the

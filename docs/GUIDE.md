@@ -449,9 +449,9 @@ it is the one that stays comparable with both sides on the list.
 
 ### A trade or a swap
 
-On **My league**, under *The deal*, press **Price a trade** — it is folded away until you
-do, because most visits have no deal on the table. Then pick who leaves and who arrives,
-and the verdict is **what your starting lineup projects afterwards, minus what it
+On **My league**, under *Price a trade*, press **Pick who leaves and who arrives** — it is
+folded away until you do, because most visits have no deal on the table. Once it is open,
+the verdict is **what your starting lineup projects afterwards, minus what it
 projects now**. (If your league's trade deadline has passed the card says so and the
 button reads **Price one anyway**.) That is deliberately not "who has the higher
 bscore": bench depth is worth nothing until it starts, so a

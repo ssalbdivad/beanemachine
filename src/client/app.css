@@ -1311,8 +1311,12 @@ kbd{
    privacy line where the typing happens, and the read named back player by player.
    ------------------------------------------------------------------------- */
 .onboard-privacy{margin:var(--sp-2) 0 0;font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
-.onboard-go{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
-.onboard-go .sub{margin:0;flex:1 1 220px;min-width:0}
+/* `.onboard-read` shares the row layout and nothing else: it is the Yahoo offer, and it
+   was briefly given `.onboard-go` itself — which is the class on the button that submits
+   a typed team, so the two became one selector and a suite clicked the wrong one. The
+   layout is shared here rather than by sharing a name that means something else. */
+.onboard-go,.onboard-read{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
+.onboard-go .sub,.onboard-read .sub{margin:0;flex:1 1 220px;min-width:0}
 .onboard-answer{
   margin:var(--sp-3) 0 0;padding:var(--sp-3);border-radius:var(--r-md);
   background:var(--well);border-left:2.5px solid var(--accent);

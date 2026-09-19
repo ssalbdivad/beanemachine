@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react"
 import type { GrabFailure } from "../data/extension.ts"
 import type { ExtensionState } from "./extension.ts"
 
@@ -202,13 +201,12 @@ export const Connect = ({
 		firefoxish ? "about:debugging#/runtime/this-firefox"
 		: browser === "edge" ? "edge://extensions"
 		: "chrome://extensions"
-	/* Once it is there, the steps are history: a reader who has installed it does not need
-	   to be told how, and a screen that keeps showing him is a screen that has not noticed
-	   he did the thing it asked. */
-	const [showSteps, setShowSteps] = useState(!ext.present)
-	useEffect(() => {
-		if (ext.present) setShowSteps(false)
-	}, [ext.present])
+	/* A `showSteps` state and the effect that cleared it used to sit here, feeding one
+	   expression at the foot of the walkthrough: `{showSteps ? null : null}`. It rendered
+	   nothing in either branch, so a `useState`, a `useEffect` and a re-render on every
+	   change of `ext.present` existed to choose between null and null. The claim it was for
+	   — a reader who has it installed is not shown how to install it — is made by the
+	   `if (ext.present) return` above, which returns before any step is drawn. */
 
 	if (ext.present)
 		return (
@@ -497,7 +495,6 @@ export const Connect = ({
 					Type my team in instead
 				</button>
 			</p>
-			{showSteps ? null : null}
 		</div>
 	)
 }

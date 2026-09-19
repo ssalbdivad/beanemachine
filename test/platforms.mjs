@@ -37,6 +37,7 @@ const URLS = [
 	"https://baseball.fantasysports.yahoo.com/b1/228947/settings",
 	"https://baseball.fantasysports.yahoo.com/b1/228947/players?status=A&pos=SP&count=0",
 	"https://baseball.fantasysports.yahoo.com/b1/228947/matchup?week=24",
+	"https://baseball.fantasysports.yahoo.com/b1/228947/positioneligibility",
 	"https://baseball.fantasysports.yahoo.com/b1/228947/draftresults",
 	"https://football.fantasysports.yahoo.com/f1/112233/4",
 	"https://baseball.fantasysports.yahoo.com/2024/b1/228947",
@@ -74,8 +75,12 @@ t("and a football league is still a football league",
 {
 	const onTeam = YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947/8")
 	const want = YAHOO.onePress(onTeam)
-	t("standing on his team, one press asks for the settings and the matchup",
-		want.map(f => f.kind).sort().join(",") === "matchup,settings",
+	/* WAS "the settings and the matchup". The eligibility page is the third, and it moved
+	   because `League.eligibility` was null for every league any browser has ever read: the
+	   thresholds live on `/positioneligibility` alone, the Node importer has read them off it
+	   for as long as it has existed, and no press ever asked for it. */
+	t("standing on his team, one press asks for the settings, the eligibility and the matchup",
+		want.map(f => f.kind).sort().join(",") === "eligibility,matchup,settings",
 		JSON.stringify(want.map(f => f.kind)))
 	t("and never for the page he is already standing on",
 		!want.some(f => f.kind === onTeam.kind), JSON.stringify(want.map(f => f.url)))
@@ -84,16 +89,62 @@ t("and a football league is still a football league",
 	t("and every URL is his own league's",
 		want.every(f => f.url.includes("/b1/228947/")), JSON.stringify(want.map(f => f.url)))
 
-	/* Standing on the SETTINGS page, the team page is what is missing — and the reader cannot
-	   get it unless the URL says which team is his, which a settings URL does not. */
 	const onSettings = YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947/settings")
 	const fromSettings = YAHOO.onePress(onSettings)
-	t("standing on the settings page, it asks for the matchup and not for settings again",
-		fromSettings.map(f => f.kind).join(",") === "matchup", JSON.stringify(fromSettings.map(f => f.kind)))
+	t("standing on the settings page, it asks for the rest and not for settings again",
+		fromSettings.map(f => f.kind).join(",") === "eligibility,matchup",
+		JSON.stringify(fromSettings.map(f => f.kind)))
 
 	t("a page with no league in it asks for nothing at all",
 		YAHOO.onePress(YAHOO.at("https://beanemachine.com/")).length === 0)
+
+	/*
+	   ONE PRESS BRINGS BACK HIS TEAM FROM ANYWHERE IN HIS LEAGUE.
+
+	   Measured on this descriptor before the change, on every URL shape Yahoo serves: not one
+	   of them asked for a team page. `at.teamId` is non-null only on `/b1/<league>/<team>`,
+	   and the same condition then excluded that page for being the one he was standing on, so
+	   the two halves cancelled and the roster — the page the whole board is built out of —
+	   was never among the pages one press fetched. A reader pressing from the players page,
+	   which is where a manager spends his week, got his scoring and his matchup and no team.
+	*/
+	for (const [where, url] of [
+		["the players page", "https://baseball.fantasysports.yahoo.com/b1/228947/players?status=A&pos=SP&count=0"],
+		["the league home", "https://baseball.fantasysports.yahoo.com/b1/228947"],
+		["the settings page", "https://baseball.fantasysports.yahoo.com/b1/228947/settings"],
+		["a rival's roster", "https://baseball.fantasysports.yahoo.com/b1/228947/9"]
+	]) {
+		const plan = YAHOO.onePress(YAHOO.at(url), { teamId: "8" })
+		t(`standing on ${where}, one press fetches his own team`,
+			plan[0]?.kind === "team" && plan[0]?.url.endsWith("/b1/228947/8"),
+			JSON.stringify(plan.map(f => f.url)))
+	}
+	/* And on his OWN team page it is still not fetched, because the content script is
+	   standing on it and hands it over without costing Yahoo a request. */
+	t("standing on his own team, it is the one page not fetched",
+		!YAHOO.onePress(YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947/8"), { teamId: "8" })
+			.some(f => f.kind === "team"))
+	/* Nothing invented where nothing is known: a browser that has never read his team page
+	   has no id to send, and a press from a page whose URL names no team asks for what it
+	   can rather than guessing at a team number. */
+	t("and with no team known anywhere, no team page is asked for",
+		!YAHOO.onePress(YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947/players?pos=C"))
+			.some(f => f.kind === "team"))
+
+	/* `as` was declared, set on every page here and read by nothing — see the note on
+	   `Fetchable`. The fetcher branches on it now, so every page one press asks for has to
+	   say which form it wants. */
+	t("every page one press asks for says how it should cross the wire",
+		YAHOO.onePress(YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947"), { teamId: "8" })
+			.every(f => f.as === "text" || f.as === "html" || f.as === "json"))
 }
+
+/* ── the page the thresholds live on ───────────────────────────────────────────────────── */
+t("the eligibility page is a page of its own and not a players page",
+	YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947/positioneligibility").kind === "eligibility",
+	YAHOO.at("https://baseball.fantasysports.yahoo.com/b1/228947/positioneligibility").kind)
+t("and it is not read as a team page either",
+	pageKind("https://baseball.fantasysports.yahoo.com/b1/228947/positioneligibility") === "eligibility")
 
 /* ── the sweep ─────────────────────────────────────────────────────────────────────────── */
 {

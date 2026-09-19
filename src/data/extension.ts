@@ -74,6 +74,10 @@ export const FROM_EXTENSION = "beanemachine-extension" as const
  *      always on the wire and never in this file; a swept page is marked as swept and
  *      carries the list the sweep set out to get; and an ask the browser half does not know
  *      is refused by name instead of going quiet.
+ *   3  `rosters`: the ask that reads every other team in the league. A page asking an older
+ *      half for it would be refused by name, which is why the number moved — the list of
+ *      asks is the one thing a page can need and an older half cannot fake. Bumped in
+ *      commit 7296c31 and left undocumented here until now.
  */
 export const PROTOCOL = 3
 
@@ -146,7 +150,17 @@ export const SPORT = "baseball"
  * class names, the column order, the words in the header — has changed at least once in
  * this project's lifetime.
  */
-export type PageKind = "team" | "settings" | "players" | "matchup" | "league" | "unknown"
+export type PageKind =
+	| "team"
+	| "settings"
+	/** `/positioneligibility` — the grid Yahoo states its own eligibility thresholds on, and
+	 *  the only page any of them are readable from. `League.eligibility` was null for every
+	 *  league this browser has ever read because no press ever asked for it. */
+	| "eligibility"
+	| "players"
+	| "matchup"
+	| "league"
+	| "unknown"
 
 /** One page, as the extension found it. */
 export interface Grab {
@@ -266,6 +280,22 @@ export interface AppMessage {
 	 *  league's own stated size, so the extension is never asked to guess how many there
 	 *  are or to crawl for them. */
 	teamIds?: string[]
+	/**
+	 * For `league`: WHICH TEAM IN IT IS HIS, when this browser already knows.
+	 *
+	 * A Yahoo URL says which team it is only on a team page, so a press from the players
+	 * page — where a manager spends his week — named no team and the one press that makes
+	 * the board his could not ask for his roster. The app has held the id on the lineup
+	 * store since the first read that stored seats (`knownTeamId` in
+	 * src/client/read-yahoo.ts) and never sent it. See `onePress` in src/data/platforms.ts
+	 * for the four URL shapes and what each used to bring back.
+	 *
+	 * Optional because a browser that has never read his team page genuinely does not know:
+	 * absent means the press falls back to the URL, which is the answer it has always given.
+	 * A half in the browser that predates this field ignores it and behaves exactly as it
+	 * does today, which is why this is not a protocol number.
+	 */
+	teamId?: string
 }
 
 export type ExtensionMessage =
@@ -344,6 +374,7 @@ export const pageKind = (url: string): PageKind => {
 		return "unknown"
 	}
 	if (/\/settings\b/i.test(path)) return "settings"
+	if (/\/positioneligibility\b/i.test(path)) return "eligibility"
 	if (/\/players\b/i.test(path)) return "players"
 	if (/\/matchup\b/i.test(path)) return "matchup"
 	/*

@@ -1006,10 +1006,17 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * the reason it was wrong is that none of it helps before the first tap, not that
 	 * it took up room.
 	 */
-	const ps = await page.$$(".decide-blocked p")
+	/* The button sits in its own <p> now rather than inside the sentence, so the paragraph
+	   count is two and only one of them is prose — see the note in Decide.tsx. The claim is
+	   unchanged and is counted the same way: one sentence, one press, no lecture, and a
+	   word bound that has come DOWN (45 → 40) because the sentence no longer has to read
+	   around a button. */
+	const ps = await page.$$(".decide-blocked p:not(.decide-cta-row)")
 	t("the blocked state is one sentence and a button, not an essay about CORS",
-		ps.length === 1 && !/CORS/.test(deep) &&
-			text.trim().split(/\s+/).length <= 45,
+		ps.length === 1 &&
+			(await page.$$(".decide-blocked button")).length === 1 &&
+			!/CORS/.test(deep) &&
+			text.trim().split(/\s+/).length <= 40,
 		`${ps.length} paragraphs, ${text.trim().split(/\s+/).length} words: ${text.slice(0, 300)}`)
 	/*
 	 * The estimate claim is not missing, it MOVED.
@@ -1389,9 +1396,17 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * card is still the same one sentence plus that clause rather than growing a
 	 * second route back.
 	 */
-	const ps = await page.$$(".decide-blocked p")
+	/* TWO paragraphs now, not one, and the second holds only the button. It used to be the
+	   first token of the first — "[Add your players] and this becomes tonight's lineup" —
+	   which wrapped the sentence around a 44px control at phone width. The claim this was
+	   protecting is that the card says ONE thing and offers ONE press, so that is what is
+	   counted: one sentence of prose, one button, and still no command line. */
+	const ps = await page.$$(".decide-blocked p:not(.decide-cta-row)")
 	t("and the ESPN card is the same one sentence, plus that clause",
-		ps.length === 1 && !!(await page.$(".decide-cta")) && !(await page.$(".decide-cmd")),
+		ps.length === 1 &&
+			(await page.$$(".decide-blocked button")).length === 1 &&
+			!!(await page.$(".decide-cta")) &&
+			!(await page.$(".decide-cmd")),
 		`${ps.length} paragraphs: ${text.slice(0, 260)}`)
 	await page.close()
 }

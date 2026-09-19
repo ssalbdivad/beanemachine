@@ -38,6 +38,9 @@
 .decide-scratch{margin:var(--sp-3) 0 0;color:var(--ink);max-width:62ch}
 .decide-scratch b{color:var(--neg)}
 .decide-cta{font-size:var(--fs-1);padding:6px 14px}
+/* Its own row. The button used to be the first token of the paragraph beside it, which
+   at 390px wrapped the sentence around a 44px box — see the note in Decide.tsx. */
+.decide-cta-row{margin:var(--sp-3) 0 0}
 .decide-blocked .decide-notes{margin-top:var(--sp-3)}
 
 /* A bench group is one fact about the schedule and the list of men it applies to,

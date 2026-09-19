@@ -1705,13 +1705,28 @@ export const Decide = ({
 				  where a reader who wants the exact list is standing.
 				*/}
 				<h2>What should I do?</h2>
+				{/*
+				  A PRESS IS A PRESS, NOT A WORD IN A SENTENCE.
+
+				  The button was the first token of the paragraph — "[Add your players] and
+				  this becomes tonight's lineup…" — so at 390px the sentence started to the
+				  RIGHT of a 44px-tall control and then wrapped underneath it, around a box
+				  that is not a word. Screenshotted on the shipped build, it reads as broken
+				  layout rather than as an invitation, and it is the first thing a stranger
+				  with no team sees.
+
+				  The sentence says what pressing it buys; the button says what it does. Same
+				  two facts, in the two shapes a reader already knows how to use.
+				*/}
 				<p>
+					Tonight&rsquo;s lineup and the moves to make, from the players you own. About
+					a minute, and it stays in this browser.
+					{espn && " Your platform can read the whole roster in one click."}
+				</p>
+				<p className="decide-cta-row">
 					<button type="button" className="primary decide-cta" onClick={onOpenTeam}>
 						Add your players
-					</button>{" "}
-					and this becomes tonight&rsquo;s lineup and the moves to make. About a
-					minute, and it stays in this browser.
-					{espn && " Your platform can read the whole roster in one click."}
+					</button>
 				</p>
 			</section>
 		)

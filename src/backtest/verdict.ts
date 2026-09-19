@@ -42,7 +42,12 @@ if (!kept.length) {
  * season, which made every baseline look twice as good as it is. Totals are only
  * additive across DISJOINT seasons within a single sweep.
  */
-const signature = (r: Result) => Object.keys(r.totals).sort().join("|")
+/* The strategy set AND the rules they played under. A bench run and a benchless one
+   name the same strategies and are not the same experiment: with a bench a team holds
+   twenty-two men and chooses seventeen every week, without one the roster is the lineup
+   and the only decision is the waiver swap. Pooling them averages two different games. */
+const signature = (r: Result) =>
+	`${(r as { bench?: boolean }).bench ? "bench" : "nobench"}|${Object.keys(r.totals).sort().join("|")}`
 const groups = new Map<string, Result[]>()
 for (const r of [...kept].sort((a, b) => a.ranAt.localeCompare(b.ranAt)))
 	groups.set(signature(r), [...(groups.get(signature(r)) ?? []), r])

@@ -138,6 +138,29 @@ const slotsFor = (p: PlayerSeason): string[] => {
 	return ["Util"]
 }
 
+/**
+ * HOW MANY MEN A TEAM CARRIES THAT IT IS NOT STARTING.
+ *
+ * The shipped league has five. The simulator had none: `fillRoster` filled the
+ * seventeen ACTIVE slots and the resulting roster WAS the lineup, so the only decision
+ * a strategy ever made was the two waiver swaps it was allowed — two decisions a week
+ * against a hundred and eleven weeks, which is why every variant of this model lands
+ * within a thousand points of every other and the sweeps read as noise.
+ *
+ * With a bench, the strategy holds twenty-two men and has to choose seventeen every
+ * week. That is the decision the app is actually FOR — the daily card exists to answer
+ * "who do I start tonight" — and it was the one thing the season competition could not
+ * see. It also multiplies the decision surface by about a hundred, which is what gives
+ * a real effect a chance of clearing the noise.
+ *
+ * Default 0, so every result already stored in data/results still means exactly what it
+ * meant when it was written. `--bench` asks the other question.
+ */
+const benchSize = (league: League): number =>
+	Object.entries(league.roster.slots)
+		.filter(([slot]) => /^BN$/i.test(slot.trim()))
+		.reduce((n, [, count]) => n + count, 0)
+
 /** Fills the league's real slots greedily from a ranked list. */
 const fillRoster = (ranked: { p: PlayerSeason; score: number }[], slots: string[]) => {
 	const taken = new Set<number>()
@@ -181,9 +204,38 @@ export interface Context {
 	strength: TeamStrength
 }
 
+/**
+ * WHAT ACTUALLY HAPPENED IN THE WEEK BEING DECIDED, handed ONLY to a diagnostic.
+ *
+ * This is future data. Nothing that ships may ever see it, and the one previous time
+ * future data reached a strategy in this repo it silently invalidated an entire result
+ * set — see the note on `underlyingWindow` above, which is the same lesson written from
+ * the other end.
+ *
+ * So it is not on `Context`. A strategy that wants it has to declare `cheats: true`, it
+ * is passed as a SECOND argument that honest strategies do not even have a parameter
+ * for, and `compete.ts` refuses to write a results file containing one unless the run
+ * was explicitly asked for as a diagnostic. Three locks on one door, because the cost of
+ * it coming open is every number this project has ever published.
+ *
+ * What it is FOR: the oracle ceiling says half the available points are unreachable and
+ * says nothing about which half. A strategy that knows the week's real playing time but
+ * not the real rates, against one that knows the real rates but not the playing time,
+ * splits that gap in two and says which half is worth modelling.
+ */
+export interface Hindsight {
+	/** Every man who played in the week being decided, with what he actually did. */
+	played: PlayerSeason[]
+	/** His actual fantasy points that week, keyed `id:group`. */
+	points: Map<string, number>
+}
+
 export type Strategy = {
 	name: string
-	rank: (ctx: Context) => { p: PlayerSeason; score: number }[]
+	/** A diagnostic, and never a claim about a model anybody could run. Printed with a
+	 *  banner and refused by the results writer unless the run asked for it. */
+	cheats?: boolean
+	rank: (ctx: Context, hindsight?: Hindsight) => { p: PlayerSeason; score: number }[]
 }
 
 const tableFor = (league: League, g: "hitting" | "pitching") =>
@@ -200,6 +252,9 @@ export const makeBscoreStrategy = (
 		qualityLambda?: { mode: "rising" | "falling" | "fixed"; prior: number; cap: number }
 		qualityScope?: "wide" | "battedBall"
 		reliefRateWeight?: number | null
+		/** See `recentRateK` in src/engine/project.ts: how much recent volume it takes
+		 *  before a man's recent rate is believed in full. 0 is the shipped behaviour. */
+		rateK?: number
 		/**
 		 * Demote anyone whose results have outrun his contact by more than this much
 		 * wOBA over the window.
@@ -247,6 +302,7 @@ export const makeBscoreStrategy = (
 					recentWeight: opts.recentWeight ?? RECENT_BLEND_WEIGHT[p.group],
 					recentStats: ctx.recent[21]?.find(r => r.id === p.id)?.stats ?? null,
 					recentRateWeight: opts.rateWeight ?? RECENT_RATE_WEIGHT[p.group],
+					recentRateK: opts.rateK ?? 0,
 					reliefRateWeight: opts.reliefRateWeight ?? null
 				})
 				const points = scoreStats(proj.stats, tableFor(ctx.league, p.group), p.group).points
@@ -274,14 +330,34 @@ export const makeBscoreStrategy = (
  */
 const applyVorp = (
 	ranked: { p: PlayerSeason; score: number }[],
-	league: League
+	league: League,
+	/**
+	 * WHERE THE REPLACEMENT LINE IS DRAWN, as a multiple of the starting depth.
+	 *
+	 * 1 is the textbook definition and is what has always shipped: the bar at a slot
+	 * is the (teams x starters)-th best man eligible for it, i.e. the first man left
+	 * once every team has filled that slot once.
+	 *
+	 * It is a definition, not a measurement, and it decides every add this model ever
+	 * recommends — the bar is what a candidate is priced against, so moving it moves
+	 * which position's men look like bargains. A real league does not stop at the
+	 * starters: every team carries a bench, so the man actually available on the wire
+	 * sits deeper than teams x starters, and pricing against a bar that is too shallow
+	 * systematically overvalues whichever position is thinnest.
+	 *
+	 * Swept here rather than argued about. 1 is the control.
+	 */
+	depthScale = 1
 ): { p: PlayerSeason; score: number }[] => {
 	const teams = league.meta.max_teams ?? 10
 	const replacement = new Map<string, number>()
 	for (const [slot, count] of Object.entries(league.roster.slots)) {
 		if (isReserveSlot(slot)) continue
 		const eligible = ranked.filter(r => slotsFor(r.p).includes(slot))
-		const depth = Math.min(teams * count, Math.max(eligible.length - 1, 0))
+		const depth = Math.min(
+			Math.round(teams * count * depthScale),
+			Math.max(eligible.length - 1, 0)
+		)
 		replacement.set(slot, eligible[depth]?.score ?? 0)
 	}
 	return ranked
@@ -402,10 +478,174 @@ export const STRATEGIES = [
 
 type VariantOpts = Parameters<typeof makeBscoreStrategy>[1]
 
-const vorpVariant = (name: string, opts: VariantOpts): Strategy => ({
+const vorpVariant = (name: string, opts: VariantOpts, depthScale = 1): Strategy => ({
 	name,
-	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league)
+	rank: ctx => applyVorp(makeBscoreStrategy("_", opts).rank(ctx), ctx.league, depthScale)
 })
+
+/**
+ * ═══ THE DECOMPOSITION ═══════════════════════════════════════════════════════════
+ *
+ * Every strategy in this file lands between 48% and 53% of perfect hindsight, and the
+ * ceiling says nothing about WHICH of the missing points were ever gettable. A week's
+ * production is volume times rate — how many times he came to the plate, and what he
+ * did when he got there — and a model can be wrong about either. Knowing which one
+ * costs more is the difference between a year of knob-turning and one right change.
+ *
+ * So: two cheats, each given exactly half of hindsight.
+ *
+ *   volume-oracle  knows how many plate appearances or outs each man REALLY got this
+ *                  week, and prices them at his own season-to-date rate.
+ *   rate-oracle    knows what each man REALLY did per plate appearance or per out,
+ *                  and multiplies it by the volume the shipped model projected.
+ *
+ * Whichever scores higher is the half that is currently costing more. And the gap
+ * between each and `bscore` is an upper bound on what perfect modelling of that half
+ * would be worth — a number to compare any proposed change against before building it.
+ *
+ * NEITHER MAY EVER SHIP and neither may ever be pooled with an honest run. They are
+ * marked `cheats`, the writer refuses them without `--diagnostic`, and the banner says
+ * so on every line of output.
+ */
+const rateOf = (p: PlayerSeason, league: League): { points: number; volume: number } => {
+	const points = scoreStats(p.stats, tableFor(league, p.group), p.group).points
+	const volume =
+		p.group === "hitting" ? (p.stats.plateAppearances ?? 0) : (p.stats.outs ?? 0)
+	return { points, volume }
+}
+
+export const volumeOracle: Strategy = {
+	name: "volume-oracle",
+	cheats: true,
+	rank: (ctx, hindsight) => {
+		const realVolume = new Map<number, number>()
+		for (const p of hindsight?.played ?? [])
+			realVolume.set(p.id, rateOf(p, ctx.league).volume)
+		return applyVorp(
+			ctx.prior
+				.map(p => {
+					const season = rateOf(p, ctx.league)
+					/* His own season rate, applied to the volume he really got. A man with no
+					   prior volume has no rate to apply and scores nothing — the same refusal
+					   every honest strategy makes on him. */
+					if (!season.volume) return { p, score: -Infinity }
+					const got = realVolume.get(p.id) ?? 0
+					return { p, score: (season.points / season.volume) * got }
+				})
+				.sort((a, b) => b.score - a.score),
+			ctx.league
+		)
+	}
+}
+
+export const rateOracle: Strategy = {
+	name: "rate-oracle",
+	cheats: true,
+	rank: (ctx, hindsight) => {
+		const realRate = new Map<number, number>()
+		for (const p of hindsight?.played ?? []) {
+			const r = rateOf(p, ctx.league)
+			if (r.volume) realRate.set(p.id, r.points / r.volume)
+		}
+		/* The shipped model's own volume projection, so the only thing swapped out is the
+		   rate. `project` returns a stat line; the volume in it is what is wanted. */
+		const projected = makeBscoreStrategy("_").rank(ctx)
+		const volumeOf = new Map<number, number>()
+		for (const p of ctx.prior) {
+			const season = rateOf(p, ctx.league)
+			if (!season.volume) continue
+			const gAhead = p.teamId ? (ctx.gamesAhead.get(p.teamId) ?? 0) : 0
+			const gBehind = p.teamId ? (ctx.priorGames.get(p.teamId) ?? 0) : 0
+			if (!gAhead || !gBehind) continue
+			volumeOf.set(p.id, (season.volume / gBehind) * gAhead)
+		}
+		void projected
+		return applyVorp(
+			ctx.prior
+				.map(p => {
+					const rate = realRate.get(p.id)
+					const vol = volumeOf.get(p.id)
+					if (rate === undefined || vol === undefined) return { p, score: -Infinity }
+					return { p, score: rate * vol }
+				})
+				.sort((a, b) => b.score - a.score),
+			ctx.league
+		)
+	}
+}
+
+/** Both halves at once — should land on the ceiling, and is here as the check that the
+ *  decomposition is measuring what it claims to. */
+export const bothOracle: Strategy = {
+	name: "both-oracle",
+	cheats: true,
+	rank: (ctx, hindsight) =>
+		applyVorp(
+			ctx.prior
+				.map(p => ({ p, score: hindsight?.points.get(`${p.id}:${p.group}`) ?? -Infinity }))
+				.sort((a, b) => b.score - a.score),
+			ctx.league
+		)
+}
+
+/**
+ * WHAT A HOT FORTNIGHT IS WORTH, asked with the sample size in the question.
+ *
+ * `recentForm.rate` ships at 0 for hitters and 0.15 for pitchers, and 0 won because a
+ * raw 21-day rate is mostly noise — which is true of a RAW one. It has never been asked
+ * of a rate that is trusted in proportion to the volume behind it, and those are
+ * different questions: the reason a hot fortnight misleads is precisely that the men it
+ * is loudest about are the ones with the fewest plate appearances behind it.
+ *
+ * The oracle decomposition says this is the half worth attacking. Perfect knowledge of
+ * the week's real RATES is worth about +59 points a week over the shipped model, against
+ * about +26 for perfect knowledge of its real playing time.
+ *
+ * rate0 is the control and is the shipped model.
+ */
+export const RATE_SWEEP: Strategy[] = [
+	vorpVariant("rate0", {}),
+	vorpVariant("rate.3k0", { rateWeight: 0.3 }),
+	vorpVariant("rate.3k60", { rateWeight: 0.3, rateK: 60 }),
+	vorpVariant("rate.6k60", { rateWeight: 0.6, rateK: 60 }),
+	vorpVariant("rate.6k150", { rateWeight: 0.6, rateK: 150 }),
+	vorpVariant("rate1k150", { rateWeight: 1, rateK: 150 }),
+	vorpVariant("rate1k300", { rateWeight: 1, rateK: 300 }),
+	humanStrategy
+]
+
+export const ORACLE_SWEEP: Strategy[] = [
+	bscoreStrategy,
+	volumeOracle,
+	rateOracle,
+	bothOracle,
+	humanStrategy
+]
+
+/**
+ * WHERE THE BAR SITS, swept as a season rather than asserted as a definition.
+ *
+ * `applyVorp`'s depth has been `teams x starters` since the metric existed, and that
+ * number has never been measured against anything — it is the textbook VORP line,
+ * borrowed. It is also the single most load-bearing constant in the model: bscore IS
+ * points minus the bar, so the bar decides which position's men look like bargains
+ * and therefore every add the app has ever recommended.
+ *
+ * The control is 1.0 and is the shipped model. The others ask whether the real wire
+ * sits shallower or deeper than the starters-only line, with the thoughtful human as
+ * the opponent that matters.
+ */
+export const DEPTH_SWEEP: Strategy[] = [
+	vorpVariant("depth0.50", {}, 0.5),
+	vorpVariant("depth0.75", {}, 0.75),
+	vorpVariant("depth1.00", {}, 1),
+	vorpVariant("depth1.25", {}, 1.25),
+	vorpVariant("depth1.50", {}, 1.5),
+	vorpVariant("depth2.00", {}, 2),
+	vorpVariant("depth3.00", {}, 3),
+	humanStrategy,
+	seasonToDateStrategy
+]
 
 /**
  * The playing-time question, asked as a season rather than as a correlation.
@@ -543,6 +783,9 @@ export const playSeason = async (
 		warmupDays: number
 		swapMargin?: number
 		anchorMonday?: boolean
+		/** Carry the league's own bench and choose a lineup from it every week — see
+		 *  `benchSize`. Off by default so stored results keep their meaning. */
+		bench?: boolean
 	} = {
 		movesPerWeek: 2,
 		warmupDays: 28
@@ -571,6 +814,9 @@ export const playSeason = async (
 	}
 
 	const slots = ACTIVE_SLOTS(league)
+	const bench = options.bench ? benchSize(league) : 0
+	/** Everyone the strategy HOLDS. Without a bench this is the lineup, exactly as it
+	 *  always was; with one it is the lineup plus the men waiting on it. */
 	const rosters = new Map<string, { slot: string; p: PlayerSeason }[]>()
 	const totals = new Map<string, number>()
 	const byWeek = new Map<string, number[]>()
@@ -633,10 +879,25 @@ export const playSeason = async (
 		}
 
 		for (const strategy of strategies) {
-			const ranked = strategy.rank(ctx)
+			/* The second argument exists only for a declared diagnostic. An honest
+			   strategy is a one-parameter function and could not read it if it tried. */
+			const ranked = strategy.rank(
+				ctx,
+				strategy.cheats ? { played: [...hitActual, ...pitActual], points: actual } : undefined
+			)
 			const held = rosters.get(strategy.name)
 			if (!held) {
-				rosters.set(strategy.name, fillRoster(ranked, slots))
+				const starters = fillRoster(ranked, slots)
+				/* The bench is drafted the way a real one is: the best men left, regardless
+				   of seat. They are held under the slot name "BN" and are eligible to start
+				   any week the ranking says they should — which is the decision this exists
+				   to create. */
+				const taken = new Set(starters.map(r => r.p.id))
+				const reserves = ranked
+					.filter(r => !taken.has(r.p.id))
+					.slice(0, bench)
+					.map(r => ({ slot: "BN", p: r.p }))
+				rosters.set(strategy.name, [...starters, ...reserves])
 			} else if (strategy.name === "draft-and-hold") {
 				// deliberately makes no moves — that is the whole point of the control
 			} else {
@@ -649,9 +910,43 @@ export const playSeason = async (
 				let made = 0
 				for (const out of worst) {
 					if (made >= options.movesPerWeek) break
-					const replacement = ranked.find(
-						r => !heldIds.has(r.p.id) && slotsFor(r.p).includes(out.slot)
-					)
+					/* WITHOUT a bench, the man's seat IS his roster spot and the incomer has to
+					   be able to fill it or the lineup loses a slot. WITH one, the seat is
+					   re-chosen every week from everyone held, so the constraint that matters
+					   is that the incomer covers something the outgoing man covered — which is
+					   what a manager actually checks before dropping him. */
+					const wanted = bench ? slotsFor(out.p) : [out.slot]
+					/*
+					   AND THE MOVE HAS TO LEAVE A LEGAL TEAM.
+					
+					   Measured the first time this ran with a bench: every strategy LOST points
+					   against its own benchless self — bscore 81586 to 79778 — because the swap
+					   only checked that the incoming man shared a slot with the outgoing one.
+					   With a bench almost everybody shares Util, so a strategy would drop its
+					   only catcher for a third outfielder, and `fillRoster` then left the C seat
+					   empty for the rest of the season. That is not a worse decision, it is an
+					   illegal one: Yahoo will not let a manager start nobody at catcher, and a
+					   simulation that lets him is measuring a game nobody is playing.
+					
+					   So the candidate is accepted only if the team it leaves behind can still
+					   fill every active seat. Checked against the ranking in hand, which is the
+					   same list the lineup will actually be chosen from.
+					*/
+					const replacement = ranked.find(r => {
+						if (heldIds.has(r.p.id)) return false
+						if (!slotsFor(r.p).some(sl => wanted.includes(sl))) return false
+						if (!bench) return true
+						const after = held
+							.filter(h => h.p.id !== out.p.id)
+							.map(h => h.p)
+							.concat(r.p)
+						return (
+							fillRoster(
+								after.map(p => ({ p, score: -(rank.get(p.id) ?? 1e9) })).sort((a, b) => b.score - a.score),
+								slots
+							).length === slots.length
+						)
+					})
 					if (!replacement) continue
 					const outRank = rank.get(out.p.id) ?? 1e9
 					const inRank = rank.get(replacement.p.id) ?? 1e9
@@ -667,7 +962,26 @@ export const playSeason = async (
 			}
 
 			const roster = rosters.get(strategy.name)!
-			const scored = roster.reduce(
+			/*
+			   WHAT SCORES IS THE LINEUP, and with a bench that is a choice.
+			
+			   The ranking is re-run every week, so a man held on the bench in April can
+			   start in June and a slumping regular can sit — which is the decision the app's
+			   daily card exists to make and the one this simulation could not previously
+			   see. Without a bench `lineup` is the whole roster and the arithmetic is
+			   byte-identical to what it always was.
+			*/
+			const order = new Map(ranked.map((r, i) => [r.p.id, i]))
+			const lineup =
+				bench ?
+					fillRoster(
+						[...roster]
+							.map(r => ({ p: r.p, score: -(order.get(r.p.id) ?? 1e9) }))
+							.sort((a, b) => b.score - a.score),
+						slots
+					)
+				:	roster
+			const scored = lineup.reduce(
 				(sum, r) => sum + (actual.get(`${r.p.id}:${r.p.group}`) ?? 0),
 				0
 			)

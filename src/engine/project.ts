@@ -221,6 +221,27 @@ export interface ProjectOptions {
 	 */
 	recentRateWeight?: number
 	/**
+	 * HOW MUCH RECENT VOLUME IT TAKES BEFORE THE RECENT RATE IS BELIEVED IN FULL.
+	 *
+	 * The season rate two lines below is shrunk toward the league by its own sample —
+	 * `(value + k*leagueRate) / (volume + k)` — which is the whole reason a 90-plate-
+	 * appearance hot streak does not project forward at face value. The RECENT rate was
+	 * then blended into that shrunk number RAW, at a fixed weight, with no such
+	 * protection: a hitter with 18 plate appearances in three weeks and one with 90 were
+	 * trusted identically.
+	 *
+	 * So the weight is scaled by `rv / (rv + k)`: a man with the volume to back his
+	 * fortnight gets the full blend, a man with a handful of games gets almost none of
+	 * it, and nobody gets a rate the sample cannot support.
+	 *
+	 * 0 is the old behaviour — full weight at any volume — and is the control every sweep
+	 * is measured against. It is NOT the same question as `recentRateWeight`: that one
+	 * asks how much recent form is worth, this one asks how much evidence it takes to
+	 * believe a given man's, and the first has only ever been measured with the second
+	 * switched off.
+	 */
+	recentRateK?: number
+	/**
 	 * Recent-rate weight for a pitcher who mostly relieves.
 	 *
 	 * A reliever's fantasy value is almost entirely a ROLE — whether he is getting
@@ -356,6 +377,7 @@ export const project = (
 		recentWeight = MODEL.recentForm.blend[player.group],
 		recentStats = null,
 		recentRateWeight = 0,
+		recentRateK = 0,
 		qualityLambda = MODEL.statcast.lambda,
 		qualityScope = MODEL.statcast.scope,
 		matchupIndex = null,
@@ -596,7 +618,13 @@ export const project = (
 				const rv = isHitter ? recentStats.plateAppearances : recentStats.outs
 				if (rv && rv > 0) {
 					const recentRate = (recentStats[key] ?? 0) / rv
-					perUnit = (1 - rateWeight) * perUnit + rateWeight * recentRate
+					/* Trust scaled by the recent sample. Shrinking the recent RATE toward the
+					   season rate and then blending at a fixed weight is algebraically the
+					   same as scaling the weight, so it is done once, here, where it is
+					   visible — see `recentRateK`. */
+					const trust = recentRateK > 0 ? rv / (rv + recentRateK) : 1
+					const w = rateWeight * trust
+					perUnit = (1 - w) * perUnit + w * recentRate
 				}
 			}
 			const scaled =

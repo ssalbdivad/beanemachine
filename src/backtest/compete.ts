@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import type { League } from "../schema.ts"
-import { MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
+import { DEPTH_SWEEP, ORACLE_SWEEP, RATE_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
  * Season-long head-to-head: `nub run compete`
@@ -29,7 +29,10 @@ let grandWeeks = 0
 
 for (const season of seasons) {
 	const strategies =
-		process.argv.includes("--volume") ? VOLUME_SWEEP
+		process.argv.includes("--rate") ? RATE_SWEEP
+		: process.argv.includes("--oracle-split") ? ORACLE_SWEEP
+		: process.argv.includes("--depth") ? DEPTH_SWEEP
+		: process.argv.includes("--volume") ? VOLUME_SWEEP
 		: process.argv.includes("--quality") ? QUALITY_SWEEP
 		: process.argv.includes("--matchup") ? MATCHUP_SWEEP
 		: process.argv.includes("--relief") ? RELIEF_SWEEP
@@ -40,6 +43,9 @@ for (const season of seasons) {
 	const { results, oracle, weeks } = await playSeason(season, league, strategies, {
 		movesPerWeek,
 		warmupDays: 28,
+		/* Carry the league's own bench and choose a lineup from it every week. Off by
+		   default: every stored run was measured without one. */
+		bench: process.argv.includes("--bench"),
 		swapMargin: Number(process.argv.find(a => a.startsWith("--margin="))?.slice(9) ?? 0)
 	})
 	const best = Math.max(...results.map(r => r.total))
@@ -128,10 +134,42 @@ for (const name of contenders) {
  * for a shipped weight lives in a terminal scrollback that no longer exists. These
  * files are the audit trail: `nub run verdict` pools them.
  */
+/*
+   A RUN THAT SAW THE FUTURE IS NOT A RESULT, AND MUST NOT BE FILED AS ONE.
+
+   The diagnostics in `ORACLE_SWEEP` are handed the week they are deciding. That is the
+   whole point of them — they exist to split the gap to the ceiling into the half that is
+   volume and the half that is rate — and it also makes their numbers meaningless as a
+   claim about any model a person could run.
+
+   `verdict.ts` pools everything in data/results by configuration, so one such file
+   sitting in that directory would eventually be averaged into a live measurement, which
+   is exactly how this project lost a whole Statcast result set once already. So the
+   writer refuses them, by name, unless the run says out loud that it is a diagnostic —
+   and even then it writes with a `diagnostic-` prefix and stamps the field, so nothing
+   pools it by accident.
+*/
+const cheated = [...grand.keys()].filter(n =>
+	["volume-oracle", "rate-oracle", "both-oracle"].includes(n)
+)
+if (cheated.length) {
+	console.log(
+		`\n  ⚠ ${cheated.join(", ")} ${cheated.length === 1 ? "was" : "were"} handed the week ` +
+			`${cheated.length === 1 ? "it" : "they"} decided. These are DIAGNOSTICS, not results:\n` +
+			`    they bound what perfect knowledge of one half is worth, and nothing else.`
+	)
+	if (!process.argv.includes("--diagnostic")) {
+		console.log(
+			`  Nothing was written. Re-run with --diagnostic to file it as one.\n`
+		)
+		process.exit(0)
+	}
+}
+
 const stamp = process.env.RESULT_STAMP ?? new Date().toISOString().replace(/[:.]/g, "-")
-const label = seasons.join("-")
+const label = seasons.join("-") + (process.argv.includes("--bench") ? "-bench" : "")
 mkdirSync("data/results", { recursive: true })
-const path = `data/results/${stamp}_${label}_moves${movesPerWeek}.json`
+const path = `data/results/${cheated.length ? "diagnostic-" : ""}${stamp}_${label}_moves${movesPerWeek}.json`
 writeFileSync(
 	path,
 	JSON.stringify(
@@ -142,6 +180,14 @@ writeFileSync(
 			weeks: grandWeeks,
 			// exactly what produced these numbers, so a stale result is identifiable
 			statcast: process.argv.includes("--statcast-real") ? "point-in-time" : "none",
+			/* Present and true only on a run that saw the future. `verdict.ts` and
+			   `paired.ts` both key on configuration, and this is part of it. */
+			...(cheated.length ? { diagnostic: cheated } : {}),
+			/* PART OF THE CONFIGURATION, not a detail. A run with the league's bench is
+			   playing a different game from one without — seventeen lineup decisions a week
+			   against two waiver swaps — so the two must never be pooled, and `verdict.ts`
+			   keys its grouping on this. */
+			bench: process.argv.includes("--bench"),
 			argv: process.argv.slice(2),
 			oracle: Number(grandOracle.toFixed(1)),
 			totals: Object.fromEntries([...grand].map(([k, v]) => [k, Number(v.toFixed(1))])),

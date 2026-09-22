@@ -34,7 +34,7 @@ import { createHash } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { basename, dirname, resolve } from "node:path"
-import { deflateRawSync, deflateSync } from "node:zlib"
+import { deflateRawSync } from "node:zlib"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -314,15 +314,21 @@ const bundle = async (name, entry) => {
 }
 
 /**
- * THE ICON, DRAWN HERE, BECAUSE BOTH STORES TAKE PNG AND NOTHING ELSE.
+ * THE ICONS ARE FILES NOW, NOT CODE. `extension/icons/` holds them and this copies them.
  *
- * Three binaries in the repository would be three files that can silently stop matching
- * the wordmark they came from. A PNG is a signature, one IHDR chunk, one deflated block of
- * scanlines and one CRC — so it is written from the same two colours the app uses, at the
- * three sizes the browsers ask for, by the build that ships it.
+ * They used to be drawn here — a rounded square with two dots and an arc, on the stated theory
+ * that 16 px cannot hold a real drawing. It can: `extension/icons.mjs` renders the actual
+ * mascot from `public/beanbot.svg`, and at 16 px it still resolves into a navy cap over a pale
+ * face. The approximation resolved into a smudge, and the first person to see it in a toolbar
+ * said so.
  *
- * Deliberately a flat mark rather than a scaled-down drawing: at 16px, which is the size
- * that actually appears in a toolbar, anything with a line thinner than two pixels is mud.
+ * The other half of the reason is reproducibility, which is now load-bearing: those PNGs were
+ * encoded with `zlib.deflateSync`, whose output depends on the Node version, so the same commit
+ * built on two machines produced different zips — and `npm run publish:ext` proves the source
+ * archive AMO holds rebuilds the package byte for byte. It cannot prove that about a file whose
+ * bytes depend on the builder. Committed artwork is the same everywhere.
+ *
+ * `crc32` stays because the zip writer below needs it; the PNG encoder that used it is gone.
  */
 const crcTable = Array.from({ length: 256 }, (_, n) => {
 	let c = n
@@ -334,80 +340,7 @@ const crc32 = buf => {
 	for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8)
 	return (c ^ 0xffffffff) >>> 0
 }
-const chunk = (type, data) => {
-	const len = Buffer.alloc(4)
-	len.writeUInt32BE(data.length)
-	const body = Buffer.concat([Buffer.from(type, "ascii"), data])
-	const crc = Buffer.alloc(4)
-	crc.writeUInt32BE(crc32(body))
-	return Buffer.concat([len, body, crc])
-}
-
-/** The app's own ground and ink, the two colours on every screen of it. */
-const GROUND = [27, 58, 43]
-const INK = [244, 241, 232]
-
-/**
- * @param size   the PNG's own edge, in pixels
- * @param inset  the fraction of that edge left transparent on every side
- *
- * CHROME WANTS THE 128 PADDED AND THE OTHERS NOT. Its store guidance asks for 96x96 of artwork
- * centred in a 128x128 canvas, which is 16 transparent pixels on each side — an EIGHTH of the
- * edge, not a sixteenth — because the store draws its own frame around it and a full-bleed
- * icon collides with it. The 16 and the 48 are used in the toolbar and the extensions list,
- * where padding would just make a small icon smaller.
- *
- * THE ARITHMETIC HERE WAS WRONG ONCE AND THE COMMENT SAID SO CONFIDENTLY. `inset` is the
- * fraction of the edge left transparent PER SIDE, so 96 inside 128 is 16/128 = 1/8. It was
- * 1/16, and the comment below it called that "a sixteenth of the edge on each side" as if
- * that were the answer. Measured 2026-09-19 by decoding the built PNG and taking the
- * bounding box of non-transparent pixels: 112x112 of ink at (8, 8), 8 px of padding on every
- * side. At 1/8 the same measurement gives 96x96 at (16, 16), which is the number Chrome's
- * page states. test/extension.mjs now asserts the bounding box at all three sizes, because
- * this is exactly the kind of error that survives review by looking approximately right.
- */
-const iconPng = (size, inset = 0) => {
-	const px = (x, y) => {
-		const span = 1 - inset * 2
-		const u = ((x + 0.5) / size - inset) / span
-		const v = ((y + 0.5) / size - inset) / span
-		if (u < 0 || u > 1 || v < 0 || v > 1) return [0, 0, 0, 0]
-		// a rounded square, so it does not read as a screenshot of a page
-		const r = 0.18
-		const dx = Math.max(r - u, 0, u - (1 - r))
-		const dy = Math.max(r - v, 0, v - (1 - r))
-		if (Math.hypot(dx, dy) > r) return [0, 0, 0, 0]
-		// two eyes and a smile: the mascot at the only fidelity 16px can hold
-		const eye = (cx, cy) => Math.hypot(u - cx, v - cy) < 0.115
-		if (eye(0.36, 0.40) || eye(0.64, 0.40)) return [...INK, 255]
-		const smile = Math.hypot(u - 0.5, (v - 0.52) * 0.85) 
-		if (smile > 0.26 && smile < 0.35 && v > 0.58) return [...INK, 255]
-		return [...GROUND, 255]
-	}
-	const raw = Buffer.alloc(size * (size * 4 + 1))
-	let at = 0
-	for (let y = 0; y < size; y++) {
-		raw[at++] = 0
-		for (let x = 0; x < size; x++) {
-			const [r, g, b, a] = px(x, y)
-			raw[at++] = r
-			raw[at++] = g
-			raw[at++] = b
-			raw[at++] = a
-		}
-	}
-	const ihdr = Buffer.alloc(13)
-	ihdr.writeUInt32BE(size, 0)
-	ihdr.writeUInt32BE(size, 4)
-	ihdr[8] = 8 // bit depth
-	ihdr[9] = 6 // truecolour with alpha
-	return Buffer.concat([
-		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-		chunk("IHDR", ihdr),
-		chunk("IDAT", deflateSync(raw)),
-		chunk("IEND", Buffer.alloc(0))
-	])
-}
+const ICONS = resolve(here, "icons")
 
 await rm(out, { recursive: true, force: true })
 await mkdir(resolve(out, "js"), { recursive: true })
@@ -422,10 +355,10 @@ for (const [browser, manifest] of Object.entries(manifests)) {
 	for (const f of ["background.js", "yahoo.js", "bridge.js"])
 		await cp(resolve(out, "js", f), resolve(dir, f))
 	await writeFile(resolve(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
-	/* 1/8th of the edge on the 128 alone — 16 px a side, so 96x96 of artwork, which is what
-	   Chrome's store frames. See `iconPng`, and the correction recorded there. */
+	/* The 128 carries 16 transparent px a side — 96x96 of artwork, which is what Chrome's store
+	   frames. That inset lives in extension/icons.mjs; test/extension.mjs measures it here. */
 	for (const size of [16, 48, 128])
-		await writeFile(resolve(dir, `icon-${size}.png`), iconPng(size, size === 128 ? 1 / 8 : 0))
+		await copyFile(resolve(ICONS, `icon-${size}.png`), resolve(dir, `icon-${size}.png`))
 	/**
 	 * THIS FILE IS TRUE OF THE DOWNLOAD AND FALSE OF THE STORE PACKAGE, so it goes in one zip
 	 * and not the other — see `zip` below. It tells a reader to turn on Developer mode and
@@ -545,59 +478,6 @@ const zipOf = async (dir, names) => {
 }
 
 /**
- * THE 440x280 PROMOTIONAL TILE CHROME ASKS FOR, drawn rather than acquired.
- *
- * It is required for a listing and there was none in this repository. Drawn from the same two
- * colours and the same mascot the icons use, because a tile that does not look like the icon
- * beside it reads as somebody else's add-on — and drawn procedurally for the reason the icons
- * are: an image nobody can regenerate is an image that goes stale the first time the mark
- * changes.
- *
- * No text on it. Chrome overlays the add-on's name and summary on its own store furniture, and
- * a tile carrying a second copy of the name is the commonest reason one is rejected for being
- * cluttered.
- */
-const promoPng = (w, h) => {
-	const px = (x, y) => {
-		const u = (x + 0.5) / h
-		const v = (y + 0.5) / h
-		/* The mascot, left of centre, at the size the tile can hold. */
-		const cx = (w / h) * 0.34
-		const eye = (ex, ey) => Math.hypot(u - ex, v - ey) < 0.075
-		if (eye(cx - 0.09, 0.42) || eye(cx + 0.09, 0.42)) return [...INK, 255]
-		const smile = Math.hypot(u - cx, (v - 0.54) * 0.85)
-		if (smile > 0.17 && smile < 0.23 && v > 0.58) return [...INK, 255]
-		/* A seam of ink down the right third, so the tile has a shape at thumbnail size. */
-		const seam = (w / h) * 0.62
-		if (Math.abs(u - seam) < 0.006) return [...INK, 255]
-		return [...GROUND, 255]
-	}
-	const raw = Buffer.alloc(h * (w * 4 + 1))
-	let at = 0
-	for (let y = 0; y < h; y++) {
-		raw[at++] = 0
-		for (let x = 0; x < w; x++) {
-			const [r, g, b, a] = px(x, y)
-			raw[at++] = r
-			raw[at++] = g
-			raw[at++] = b
-			raw[at++] = a
-		}
-	}
-	const ihdr = Buffer.alloc(13)
-	ihdr.writeUInt32BE(w, 0)
-	ihdr.writeUInt32BE(h, 4)
-	ihdr[8] = 8
-	ihdr[9] = 6
-	return Buffer.concat([
-		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-		chunk("IHDR", ihdr),
-		chunk("IDAT", deflateSync(raw)),
-		chunk("IEND", Buffer.alloc(0))
-	])
-}
-
-/**
  * TWO ZIPS PER BROWSER, AND THE DIFFERENCE IS ONE FILE.
  *
  * `beanemachine-<browser>.zip` is what the SITE hands over while no listing exists, and it
@@ -710,7 +590,7 @@ for (const browser of Object.keys(manifests)) {
 /* The listing's own artwork, beside the zips a store takes. Not in `public/`: it belongs to a
    submission, not to the site. */
 if (!DEV) {
-	await writeFile(resolve(out, "promo-440x280.png"), promoPng(440, 280))
+	await copyFile(resolve(ICONS, "promo-440x280.png"), resolve(out, "promo-440x280.png"))
 	console.log("promo tile: dist-ext/promo-440x280.png")
 }
 if (!DEV && zips.length) {

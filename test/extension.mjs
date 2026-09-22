@@ -2018,15 +2018,23 @@ await walled.close()
 		   56,127 of 64,973 bytes. What is asserted is not "method 8" — a PNG is already
 		   deflated and re-compressing icon-16 made it three bytes BIGGER, so the writer picks
 		   per entry — but the property that made the change worth making: no entry is larger
-		   than the file it came from, and the archive as a whole is far smaller than the sum
-		   of its contents.
+		   than the file it came from, and what CAN compress does.
+
+		   That last clause used to read "the archive as a whole is far smaller than the sum of
+		   its contents", against 0.6 of the total. It stopped being a measurement of the zip
+		   writer on 2026-09-22, when the icons became rendered artwork: three real PNGs are
+		   9,837 of the package's 27,798 bytes and deflate cannot touch them, so the whole-
+		   archive ratio now mostly reports how big the pictures are. The bundles are what a
+		   broken writer would stop compressing, so the bundles are what is measured.
 		*/
 		const grew = download.entries.filter(e => e.packed > e.raw).map(e => e.name)
 		t(`${browser}: no entry is packed larger than the file it came from`, grew.length === 0,
 			grew.join(", "))
-		const contents = download.entries.reduce((n, e) => n + e.raw, 0)
-		t(`${browser}: the zip is well under the bytes it contains, so it is really compressed`,
-			download.size < contents * 0.6, `${download.size} bytes holding ${contents}`)
+		const text = download.entries.filter(e => !e.name.endsWith(".png"))
+		const raw = text.reduce((n, e) => n + e.raw, 0)
+		const packed = text.reduce((n, e) => n + e.packed, 0)
+		t(`${browser}: the code in the zip is really deflated, not stored`, packed < raw * 0.6,
+			`${packed} packed from ${raw}`)
 		/* A store's upload limit is far above this; the number is asserted so that a bundle
 		   that suddenly triples — a dependency pulled in, minification switched off — is
 		   caught here rather than by somebody noticing the download got slow. */
@@ -2072,13 +2080,25 @@ await walled.close()
 			if (type === "IDAT") idat.push(data)
 			at += 12 + len
 		}
-		if (colour !== 6 || depth !== 8) return { w, h, depth, colour }
+		if (depth !== 8 || (colour !== 6 && colour !== 2)) return { w, h, depth, colour }
+		/* Colour type 2 is RGB with no alpha channel at all — every pixel is opaque, which is a
+		   stronger form of "full bleed" than a type-6 image whose alpha happens to be 255
+		   everywhere. The promotional tile is one, so it is measured rather than skipped. */
+		const chans = colour === 6 ? 4 : 3
+		const alpha = (buf, at) => (colour === 6 ? buf[at + 3] : 255)
 		const raw = inflateSync(Buffer.concat(idat))
-		const stride = w * 4 + 1
+		const stride = w * chans + 1
+		/* ANY ALPHA AT ALL COUNTS, and it is worth saying why that survived the icons becoming
+		   rendered artwork. A rasteriser antialiases an edge that lands on a pixel boundary, and
+		   while the 128 was being padded by the BROWSER it laid down a stray column past the
+		   artwork — first at alpha 1, then, compositing it as an <img> at an integer offset, at
+		   alpha 200, which is ink you can see. Loosening this measurement to ignore faint pixels
+		   would have passed the first of those and not the second; the generator pads the canvas
+		   by copying scanlines instead, so the box is exact and this stays strict. */
 		let minX = w, maxX = -1, minY = h, maxY = -1
 		for (let y = 0; y < h; y++)
 			for (let x = 0; x < w; x++)
-				if (raw[y * stride + 1 + x * 4 + 3] !== 0) {
+				if (alpha(raw, y * stride + 1 + x * chans) !== 0) {
 					if (x < minX) minX = x
 					if (x > maxX) maxX = x
 					if (y < minY) minY = y

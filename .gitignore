@@ -21,6 +21,11 @@ public/snapshot.json
 *.png
 !src/**/*.png
 !public/**/*.png
+# The add-on's artwork, rendered from public/beanbot.svg by extension/icons.mjs and COMMITTED
+# on purpose — the build copies these rather than drawing them, so the same commit produces
+# the same zip on every machine and `npm run publish:ext` can prove the source archive AMO
+# holds rebuilds the package byte for byte. See the docblock in extension/icons.mjs.
+!extension/icons/*.png
 
 # built by `prepare` on install; not a source artifact
 dist-cli/

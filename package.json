@@ -47,7 +47,8 @@
 		"test:today": "node test/today.mjs",
 		"test:injuries": "node test/injuries.mjs",
 		"test:ext": "node --experimental-strip-types test/extension.mjs",
-		"test:all": "npm run test && node test/compete.mjs && npm run test:ext && npm run test:static"
+		"test:all": "npm run test && node test/compete.mjs && npm run test:ext && npm run test:static",
+		"publish:ext": "node extension/publish.mjs"
 	},
 	"dependencies": {
 		"@hono/arktype-validator": "^2.0.1",

@@ -30,6 +30,7 @@ import { appMatches } from "../src/data/extension.ts"
 import { readerMatches } from "../src/data/platforms.ts"
 import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { basename, dirname, resolve } from "node:path"
@@ -621,9 +622,47 @@ const promoPng = (w, h) => {
 const PACKAGE = ["manifest.json", "background.js", "yahoo.js", "bridge.js",
 	"icon-16.png", "icon-48.png", "icon-128.png"]
 
-const zip = async (browser, { readme }) => {
+/**
+ * THE THIRD FIREFOX PACKAGE, AND WHY IT CANNOT BE THE SAME FILE AS THE OTHER TWO.
+ *
+ * A SELF-DISTRIBUTED add-on updates itself only if its manifest names an update manifest to
+ * poll. Without one, every new version is a reader installing by hand again — which is the
+ * thing signing was supposed to end.
+ *
+ * And that key is REFUSED on a listed submission: AMO rejects `update_url` for an add-on
+ * listed on addons.mozilla.org, because there it is AMO's job. So the same manifest cannot
+ * serve both routes, and the difference is not cosmetic — one of the two uploads is
+ * rejected outright if they are swapped.
+ *
+ * Hence three Firefox zips, each named for the one thing it is for, all built every time so
+ * nobody has to remember a flag:
+ *
+ *   beanemachine-firefox.zip           the site's download, today's unsigned route
+ *   beanemachine-firefox-selfhost.zip  UNLISTED signing — carries update_url
+ *   beanemachine-firefox-store.zip     a LISTED submission — must not carry it
+ */
+const UPDATE_MANIFEST = "https://beanemachine.com/updates.json"
+const GECKO_ID = manifests.firefox.browser_specific_settings.gecko.id
+
+const zip = async (browser, { readme, selfhost }) => {
 	const dir = resolve(out, browser)
-	const file = resolve(out, `beanemachine-${browser}${readme ? "" : "-store"}.zip`)
+	const file = resolve(
+		out,
+		`beanemachine-${browser}${selfhost ? "-selfhost" : readme ? "" : "-store"}.zip`
+	)
+	if (selfhost) {
+		/* Written into the folder just long enough to be zipped, then the shared manifest is
+		   put back — so the unpacked folder on disk stays the one the other two zips were
+		   made from and a developer loading it never gets the self-hosted variant by accident. */
+		const shared = await readFile(resolve(dir, "manifest.json"), "utf8")
+		const m = JSON.parse(shared)
+		m.browser_specific_settings.gecko.update_url = UPDATE_MANIFEST
+		await writeFile(resolve(dir, "manifest.json"), `${JSON.stringify(m, null, "\t")}\n`)
+		const names = PACKAGE.filter(n => existsSync(resolve(dir, n)))
+		await writeFile(file, await zipOf(dir, names))
+		await writeFile(resolve(dir, "manifest.json"), shared)
+		return file
+	}
 	/* Named rather than walked, so a file nobody meant to ship cannot arrive in the download
 	   by having been left in the folder. Every one of these is written a few lines above. */
 	const names = [...PACKAGE, ...(readme ? ["README.txt"] : [])].filter(n =>
@@ -637,6 +676,8 @@ const zip = async (browser, { readme }) => {
 const zips = []
 /** The ones a store takes. Never copied anywhere; SUBMITTING.md names them. */
 const uploads = []
+/** The one a self-distributed signing takes. Firefox only: Chrome has no unlisted route. */
+let selfhostZip = null
 for (const browser of Object.keys(manifests)) {
 	zips.push(await zip(browser, { readme: true }))
 	/* NOT WRITTEN AT ALL BY A DEV BUILD. The dev build injects the bridge into every page
@@ -644,6 +685,7 @@ for (const browser of Object.keys(manifests)) {
 	   from it would be a store listing that hands a Yahoo league to anything on localhost.
 	   An artifact that must never be uploaded is safest as an artifact that does not exist. */
 	if (!DEV) uploads.push(await zip(browser, { readme: false }))
+	if (!DEV && browser === "firefox") selfhostZip = await zip(browser, { selfhost: true })
 }
 
 /*
@@ -696,6 +738,21 @@ if (!DEV && zips.length) {
    the first step of the walkthrough — the same defect as the store-search page this project
    already shipped once. So the build refuses to be quiet about either.
 */
+/*
+   THE UPDATE MANIFEST, SO A SIGNED INSTALL IS THE LAST ONE A READER DOES BY HAND.
+
+   `beanemachine-firefox-selfhost.zip` carries `update_url` pointing here. Firefox polls this
+   file, compares `version` with what is installed, and fetches `update_link` when it is
+   newer — so shipping a new build is: sign it, drop it in, bump VERSION, deploy. Without
+   this file a self-distributed add-on never updates at all, and every version is the
+   download-and-install dance again.
+
+   WRITTEN EVEN BEFORE THERE IS A SIGNED FILE, because the URL in the manifest has to resolve
+   from the moment the first signed copy is installed, and a 404 there is an add-on that
+   silently never updates. Until the signed file exists it advertises the version that is
+   built, pointing at where the signed file will be; `update_hash` is added only once there
+   is a real file to hash, because a wrong hash makes Firefox refuse the update outright.
+*/
 const signed = resolve(here, "signed", "beanemachine-firefox.xpi")
 const signedHere = existsSync(signed)
 const linked = /^const FIREFOX_XPI: string \| null = "(.+?)"/m.exec(
@@ -704,6 +761,35 @@ const linked = /^const FIREFOX_XPI: string \| null = "(.+?)"/m.exec(
 if (!DEV && signedHere) {
 	await copyFile(signed, resolve(here, "..", "public", basename(signed)))
 	console.log(`copied ${basename(signed)} into public/ — Firefox installs it in one press`)
+}
+if (!DEV) {
+	const update = {
+		addons: {
+			[GECKO_ID]: {
+				updates: [
+					{
+						version: VERSION,
+						update_link: `https://beanemachine.com/${basename(signed)}`,
+						...(signedHere ?
+							{
+								update_hash: `sha256:${createHash("sha256")
+									.update(await readFile(signed))
+									.digest("hex")}`
+							}
+						:	{})
+					}
+				]
+			}
+		}
+	}
+	await writeFile(
+		resolve(here, "..", "public", "updates.json"),
+		`${JSON.stringify(update, null, "\t")}\n`
+	)
+	console.log(
+		`wrote public/updates.json for ${VERSION}` +
+			(signedHere ? " with the signed file's hash" : " — no signed file yet, so no hash")
+	)
 }
 if (!DEV && signedHere && !linked)
 	console.log(

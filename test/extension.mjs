@@ -1916,6 +1916,52 @@ await walled.close()
 	const PACKAGE = ["manifest.json", "background.js", "yahoo.js", "bridge.js",
 		"icon-16.png", "icon-48.png", "icon-128.png"]
 
+	/*
+	 * ═══ THE THIRD FIREFOX PACKAGE, AND THE KEY THAT MUST BE IN EXACTLY ONE OF THEM ═══
+	 *
+	 * A self-distributed add-on updates itself only if its manifest names an update manifest
+	 * to poll; without one, every new version is the reader installing by hand again, which
+	 * is what signing was for. And AMO REFUSES that key on a listed submission — measured
+	 * here rather than taken on trust: `addons-linter` on the self-host package reports
+	 * 1 error, "browser_specific_settings.gecko.update_url are not allowed for Mozilla-hosted
+	 * add-ons", and 0 with `--self-hosted`, while the store package is 0/0/0 either way.
+	 *
+	 * So the two uploads cannot be the same file, and swapping them is not a cosmetic
+	 * mistake: the listed one is rejected outright, and the unlisted one silently never
+	 * updates. Nothing else in this repo can catch that, because both manifests are valid.
+	 */
+	{
+		const selfhost = entriesOf(zipPath("beanemachine-firefox-selfhost.zip"))
+		const store = entriesOf(zipPath("beanemachine-firefox-store.zip"))
+		t("the self-hosted Firefox package exists beside the store one",
+			!!selfhost && !!store, `${!!selfhost} ${!!store}`)
+		if (selfhost && store) {
+			const mf = z =>
+				JSON.parse(contentOf(z.entries.find(e => e.name === "manifest.json")).toString("utf8"))
+			const gecko = z => mf(z).browser_specific_settings.gecko
+			t("the self-hosted one names an update manifest, so a signed install updates itself",
+				gecko(selfhost).update_url === "https://beanemachine.com/updates.json",
+				String(gecko(selfhost).update_url))
+			t("…and the store one does not, because AMO refuses that key on a listed add-on",
+				gecko(store).update_url === undefined, String(gecko(store).update_url))
+			t("…and they are otherwise the same add-on, same id and same version",
+				gecko(selfhost).id === gecko(store).id &&
+					JSON.stringify(selfhost.entries.map(e => e.name)) ===
+						JSON.stringify(store.entries.map(e => e.name)),
+				`${gecko(selfhost).id} vs ${gecko(store).id}`)
+			/* The URL in that manifest has to resolve from the moment the first signed copy is
+			   installed: a 404 there is an add-on that silently never updates again. */
+			const upd = JSON.parse(readFileSync(new URL("../public/updates.json", import.meta.url), "utf8"))
+			const line = upd.addons[gecko(selfhost).id]?.updates?.[0]
+			t("the update manifest the site serves answers for this add-on, at this version",
+				!!line && line.version === mf(selfhost).version,
+				`${JSON.stringify(line)} against manifest ${mf(selfhost).version}`)
+			t("…and points at the signed file the walkthrough would install",
+				/^https:\/\/beanemachine\.com\/beanemachine-firefox\.xpi$/.test(line?.update_link ?? ""),
+				String(line?.update_link))
+		}
+	}
+
 	for (const browser of ["chrome", "firefox"]) {
 		const download = entriesOf(zipPath(`beanemachine-${browser}.zip`))
 		const upload = entriesOf(zipPath(`beanemachine-${browser}-store.zip`))

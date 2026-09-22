@@ -53,6 +53,62 @@ block in `test/extension.mjs` that opens the built zips and decodes the built PN
 
 ---
 
+## Two routes, and which package goes to each
+
+`node extension/build.mjs` writes five packages. Three are Firefox's, and sending the
+wrong one is not a cosmetic mistake — a listed submission carrying `update_url` is
+**rejected**, and an unlisted one without it **silently never updates**.
+
+| file | goes to |
+|---|---|
+| `beanemachine-chrome.zip` | the site's download (carries README.txt) |
+| `beanemachine-firefox.zip` | the site's download (carries README.txt) |
+| `beanemachine-firefox-selfhost.zip` | **route A**, AMO unlisted signing — has `update_url` |
+| `beanemachine-firefox-store.zip` | **route B**, an AMO *listed* submission — must not |
+| `beanemachine-chrome-store.zip` | **route B**, the Chrome Web Store |
+
+Lint before either: `npx addons-linter dist-ext/beanemachine-firefox-store.zip` reports
+**0 errors**. The self-host package needs the flag — `npx addons-linter --self-hosted
+dist-ext/beanemachine-firefox-selfhost.zip`, also **0** — because without it the linter
+assumes Mozilla hosting and reports the one error that route exists to avoid:
+"browser_specific_settings.gecko.update_url are not allowed for Mozilla-hosted add-ons".
+
+---
+
+## Route A — signed and self-hosted. Do this first: free, no listing, no public page.
+
+This is what turns Firefox's four-line install into one press, and makes it survive a
+restart. `Load Temporary Add-on` is wiped every time Firefox quits; a signed `.xpi` is not.
+
+1. `npm run build`
+2. Sign in at **addons.mozilla.org/developers/** → **Submit a New Add-on**.
+3. Choose **On your own** (self-distribution), *not* "On this site".
+4. Upload `dist-ext/beanemachine-firefox-selfhost.zip`.
+5. Answer the source-code question — see **Source code** below. A minified bundle needs
+   its source on either route.
+6. When it comes back signed, download the `.xpi` to
+   `extension/signed/beanemachine-firefox.xpi`.
+7. In `src/client/Connect.tsx` set `FIREFOX_XPI = "beanemachine-firefox.xpi"`.
+8. `npm run build && npm run test:all`, then commit and push.
+9. **Open the live link in Firefox once.** If it offers to install, done. If it downloads
+   instead, the host is sending the wrong `Content-Type` — add one line to the step:
+   `about:addons` → **Install Add-on From File**. Still permanent, still far shorter than
+   Developer mode. Do not infer this from headers; press the link.
+
+**Shipping a new version afterwards** is: bump `VERSION` in `extension/build.mjs`, repeat
+2–6, `npm run build`, push. `public/updates.json` is rewritten with the new version and
+the signed file's SHA-256, Firefox polls it, and every existing install updates itself.
+That file is why step 9 is the last manual install anyone does.
+
+**Chrome has no route A.** Outside the Web Store it will not install a packaged extension
+on Windows or macOS at all, so Chrome readers stay on the download-and-load route until
+route B is done.
+
+**Android has no route A either.** Firefox for Android installs add-ons from AMO and
+nowhere else, so it is sent to typing a team in until route B exists.
+
+---
+
 ## Both stores ask the same four things first
 
 **Name** — `beanemachine — read my Yahoo league` (35 characters; Chrome's limit is 75.)
@@ -74,6 +130,11 @@ beside the add-on and the page the listing links to are the same text and cannot
 written by `extension/privacy-page.mjs` into `public/privacy/index.html`, which Vite publishes.
 
 ---
+
+## Route B — listed in the stores
+
+Chrome must go this way; Firefox may, once route A is working. Both sections below
+(Chrome Web Store, and Firefox/AMO) are route B.
 
 ## Chrome Web Store
 
@@ -149,55 +210,6 @@ on; and there is no storage permission, no server and no analytics. If they ask,
 policy URL and that grep rather than a paragraph.
 
 ---
-
-## Firefox, step one: get it SIGNED, before any listing
-
-Do this first. It is free, it needs no public listing, and it is the difference between
-four lines of instructions and one press.
-
-**Why.** Firefox will not install an unsigned extension permanently. Today the site hands
-over a zip and the walkthrough talks the reader through `about:debugging` →
-**Load Temporary Add-on** — and temporary means it, the add-on is gone at the next
-restart. A page cannot shorten that by linking to `about:debugging`, because Firefox
-refuses to navigate to an `about:` URL from web content (Chrome refuses `chrome://` the
-same way). The length of that step is not a wording problem and no rewrite fixes it.
-
-A **signed** `.xpi` installs from an ordinary link: Firefox opens its own install panel,
-and it survives restarts. Mozilla signs add-ons it does not list — AMO calls it
-self-distribution — so this is available now, and a listing can follow later without
-undoing it.
-
-1. Sign in at `addons.mozilla.org/developers/`.
-2. **Submit a New Add-on** → choose **On your own** (the unlisted / self-distribution
-   option) rather than **On this site**.
-3. Upload `dist-ext/beanemachine-firefox-store.zip`. The validator runs; it is the same
-   `addons-linter` this repo runs, and it reports 0 errors.
-4. Answer the source-code question exactly as the listed submission does — see
-   **The one thing that is different** below. A minified bundle needs its source either
-   way.
-5. When review finishes, download the signed `.xpi` and put it at
-   `extension/signed/beanemachine-firefox.xpi`.
-6. Set `FIREFOX_XPI` in `src/client/Connect.tsx` to `"beanemachine-firefox.xpi"`.
-7. `npm run build`. The build copies the file into `public/` and the site serves it; the
-   Firefox step becomes **Add the reader → [Add to Firefox] → Press Add**.
-
-`extension/build.mjs` will not let those last two steps disagree: it **throws** if the
-constant names a file that is not there (the walkthrough's first step would 404, which is
-the bug this project already shipped once with a store-search page), and it warns if the
-file is published and nothing links to it.
-
-**The one thing to check on the first deploy that carries the file.** Firefox decides
-whether to offer an install or merely download by the `Content-Type` the host sends. It
-wants `application/x-xpinstall`. The link states `type="application/x-xpinstall"`, which
-is a hint and not a guarantee, and GitHub Pages' MIME table is not ours to set. So open
-the live link in Firefox once: if it offers to install, it is done. If it downloads the
-file instead, the honest fallback is one line in the step — `about:addons` →
-**Install Add-on From File** — which is still permanent and still far shorter than
-Developer mode. Do not guess this from the headers; press the link.
-
-**Android.** A self-distributed `.xpi` cannot be installed on Firefox for Android at all;
-it takes add-ons from AMO and nowhere else. `installFor` returns null there until a real
-LISTING exists, which is why the phone is sent to typing a team instead.
 
 ## Firefox (addons.mozilla.org)
 
@@ -317,9 +329,17 @@ touches nothing in the repository.
 
 ## What is left that only you can do
 
-- A Chrome Web Store developer account and its one-time registration fee.
-- An addons.mozilla.org account. Free.
-- A trader / non-trader declaration on Chrome's dashboard.
-- Pressing submit, and answering whatever comes back.
+**Route A (Firefox, one press):** an addons.mozilla.org account — free — and pressing
+submit. Nine steps, above.
 
-Everything above this line is in the repository and rebuilds from `node extension/build.mjs`.
+**Route B (the stores):**
+- A Chrome Web Store developer account and its one-time registration fee.
+- A trader / non-trader declaration on Chrome's dashboard.
+- The same AMO account, submitting `beanemachine-firefox-store.zip` as **On this site**.
+- Setting `CHROME_LISTING` / `FIREFOX_LISTING` in `src/client/Connect.tsx` to the
+  listing's own URL — not a search for it. Step 1 pointed at a store search page once,
+  which returned no results for weeks with nothing on screen saying so.
+- Flipping `IN_STORE`-dependent artwork: re-run `npm run shots` for the fourth
+  screenshot, which is withheld while the walkthrough still shows the sideload route.
+
+Everything else is in the repository and rebuilds from `node extension/build.mjs`.

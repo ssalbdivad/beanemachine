@@ -44,6 +44,7 @@ public/beanemachine-*.zip
 # tree is a build artifact that goes stale, and this one is also a signature over a
 # particular build — committing it would let the repo and the file it claims drift.
 public/beanemachine-*.xpi
+public/updates.json
 extension/signed/
 
 # Rendered from extension/PRIVACY.md by extension/privacy-page.mjs at build time. One source,

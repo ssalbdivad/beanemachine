@@ -677,6 +677,45 @@ if (!DEV && zips.length) {
 	console.log(`copied ${zips.length} zip(s) into public/, which is what the site hands out`)
 }
 
+/*
+   THE SIGNED ADD-ON, AND THE ONE INTERLOCK THAT KEEPS IT HONEST.
+
+   Mozilla will sign this add-on without listing it — AMO's self-distribution route, free and
+   private — and hand back an .xpi. A SIGNED .xpi installs from an ordinary link: Firefox
+   opens its own install panel, there is no about:debugging, no Developer mode, and the add-on
+   survives a restart, which `Load Temporary Add-on` does not. That turns the Firefox step of
+   the setup sheet from four lines into one press.
+
+   It cannot be built here. It is a file Mozilla returns, so the process is: drop it at
+   extension/signed/beanemachine-firefox.xpi, and this copies it into `public/` so the site
+   serves it. extension/SUBMITTING.md has the submission steps.
+
+   THE INTERLOCK. The page cannot check whether a file exists, so `FIREFOX_XPI` in
+   src/client/Connect.tsx states it, and exactly one of these two mistakes is possible:
+   a file nobody links to, or a link to a file that is not there. The second one is a 404 in
+   the first step of the walkthrough — the same defect as the store-search page this project
+   already shipped once. So the build refuses to be quiet about either.
+*/
+const signed = resolve(here, "signed", "beanemachine-firefox.xpi")
+const signedHere = existsSync(signed)
+const linked = /^const FIREFOX_XPI: string \| null = "(.+?)"/m.exec(
+	await readFile(resolve(here, "..", "src", "client", "Connect.tsx"), "utf8")
+)?.[1]
+if (!DEV && signedHere) {
+	await copyFile(signed, resolve(here, "..", "public", basename(signed)))
+	console.log(`copied ${basename(signed)} into public/ — Firefox installs it in one press`)
+}
+if (!DEV && signedHere && !linked)
+	console.log(
+		`  ⚠ ${basename(signed)} is published but FIREFOX_XPI in src/client/Connect.tsx is null,\n` +
+			`    so the sheet still walks Firefox readers through Load Temporary Add-on.`
+	)
+if (!DEV && !signedHere && linked)
+	throw new Error(
+		`src/client/Connect.tsx links Firefox at "${linked}" but ${signed} does not exist. ` +
+			`The walkthrough's first step would 404. Add the signed file or set FIREFOX_XPI back to null.`
+	)
+
 console.log(
 	`built ${Object.keys(manifests).join(" and ")} into ${out}` +
 		(DEV ?

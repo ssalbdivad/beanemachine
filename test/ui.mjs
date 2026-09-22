@@ -1830,6 +1830,63 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await ctx.close()
 }
 
+/*
+ * ═══ HOW THIS BROWSER CAN BE GIVEN THE READER, AND THE FLIP THAT CHANGES IT ═══════════
+ *
+ * `installFor` in src/client/Connect.tsx answers one question in three states — `unpacked`
+ * (a zip the reader loads by hand), `signed` (an AMO-signed .xpi that installs from a link
+ * in one press), `store` (a listing) — and until now NOTHING asserted any of it. The
+ * walkthrough's first step is the highest-attrition moment in the product and this project
+ * has already shipped one bug there: step 1 pointed at a store search page that returned no
+ * results, for weeks, with nothing on screen saying so.
+ *
+ * Asserted in the page rather than in node because Connect.tsx reads `import.meta.env`,
+ * which only means something under Vite.
+ *
+ * THE STATE IS ASSERTED, not merely the shape. Today every desktop browser is `unpacked`.
+ * When `FIREFOX_XPI` is set to the signed file — see extension/SUBMITTING.md — this block
+ * FAILS, deliberately: flipping it is a claim about the world, and the claim should have to
+ * be restated here with the evidence rather than slipping through green.
+ */
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+  const ip = await ctx.newPage()
+  await stubSlate(ip)
+  await ip.goto(BASE, { waitUntil: "domcontentloaded" })
+  await ip.waitForSelector("nav button", { timeout: 30000 })
+  const kinds = await ip.evaluate(async () => {
+    const m = await import("/src/client/Connect.tsx")
+    const of = b => {
+      const i = m.installFor(b)
+      return { kind: i?.kind ?? null, at: i?.at ?? null, reads: m.readsHere(b) }
+    }
+    return {
+      chrome: of("chrome"), edge: of("edge"), firefox: of("firefox"),
+      android: of("firefox-android"), safari: of("safari"), none: of("none"),
+      inStore: m.IN_STORE
+    }
+  })
+  t("no store has it yet, and the code says so in one place",
+    kinds.inStore === false, JSON.stringify(kinds.inStore))
+  t("every desktop browser is offered the file it can actually load",
+    ["chrome", "edge", "firefox"].every(b => kinds[b].kind === "unpacked" && !!kinds[b].at),
+    JSON.stringify(kinds))
+  /* A self-distributed .xpi cannot be installed on Firefox for Android — it takes add-ons
+     from AMO and nowhere else — so it stays null until a real LISTING exists, and the phone
+     is sent to typing a team instead. Safari runs no extension of this kind at all. */
+  t("and the browsers that cannot take it are null rather than nearly-offered",
+    [kinds.android, kinds.safari, kinds.none].every(x => x.kind === null && x.reads === false),
+    JSON.stringify([kinds.android, kinds.safari, kinds.none]))
+  t("readsHere and installFor cannot disagree, because one is derived from the other",
+    ["chrome", "edge", "firefox"].every(b => kinds[b].reads === true))
+  /* The file the link names has to be the file the site serves. A 404 here is the same
+     defect as the store-search page, one step earlier in the same walkthrough. */
+  const served = await ip.evaluate(async u => (await fetch(u)).status, kinds.firefox.at)
+  t("and the site really serves what the first step links to",
+    served === 200, `${kinds.firefox.at} → ${served}`)
+  await ctx.close()
+}
+
 await browser.close()
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

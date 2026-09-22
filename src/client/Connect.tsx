@@ -103,22 +103,46 @@ export const Tick = (): React.ReactElement => (
 )
 
 /**
- * WHETHER A STORE ACTUALLY HAS IT, which is a fact about the world and not about this code.
+ * HOW THIS BROWSER CAN ACTUALLY BE GIVEN THE READER, TODAY.
  *
- * Step 1 of this walkthrough sent every reader to a store search page. Rendered on
- * 2026-09-18: the Chrome Web Store answered "It looks like there aren't any search results
- * for your search", and Mozilla's own API 404s the add-on id. So the topmost offer in the
- * onboarding sheet — the first thing a desktop reader is shown, 181px above the box where he
- * could have typed his team in — led him to an empty page, and no line anywhere said so.
+ * This was two booleans and two tables — `IN_STORE`, `DOWNLOAD`, `STORE` — and the walkthrough
+ * read them in a ternary. That was fine while there were two possible worlds. There are three,
+ * and Firefox is about to be in the middle one:
  *
- * Until a listing exists the route is the one that actually works: the site hands him the
- * file and his browser loads it. That is more steps and it is honest, which is the trade this
- * project makes everywhere else.
+ *   unpacked  no signature and no listing. The site hands over a zip and the reader loads it
+ *             by hand. Three lines, a Developer-mode switch, and on Firefox the add-on is
+ *             forgotten at the next restart, because `Load Temporary Add-on` means temporary.
+ *   signed    Mozilla has SIGNED the add-on but it is not listed — AMO's self-distribution
+ *             route, which is free, needs no public listing, and returns an .xpi we host
+ *             ourselves. A signed .xpi installs from an ordinary link: Firefox shows its own
+ *             install panel. One press, and it survives a restart.
+ *   store     a listing exists. One press, from the store's own page.
  *
- * FLIP THIS WHEN THE LISTINGS ARE LIVE, and check `STORE.at` still points at the listing
- * rather than at a search for it — a search page is what produced this bug.
+ * Chrome has no middle state: outside the Web Store it will not install a packaged extension
+ * at all on Windows or macOS, so it goes from `unpacked` straight to `store`.
+ *
+ * WHY THIS IS A CONSTANT AND NOT A PROBE. The page cannot ask whether a file exists without
+ * fetching it, and a HEAD request on every render to decide what a button says is a request
+ * this app has no business making. So the fact lives here, the build refuses to disagree with
+ * it (extension/build.mjs checks the pair), and flipping it is a one-line commit with the
+ * evidence in the message.
+ *
+ * WHAT TO FLIP, AND WHEN:
+ *   · `FIREFOX_XPI` — set to the file name once AMO returns a signed .xpi and
+ *     extension/build.mjs has copied it into `public/`. See extension/SUBMITTING.md.
+ *   · `CHROME_LISTING` / `FIREFOX_LISTING` — set to the LISTING's own URL once each store
+ *     has one. Not to a search for it: step 1 used to send every reader to a store search,
+ *     and on 2026-09-18 the Chrome Web Store answered "It looks like there aren't any search
+ *     results for your search" while Mozilla's API 404'd the id. A search page is how that
+ *     bug was written in the first place.
  */
-export const IN_STORE = false
+const FIREFOX_XPI: string | null = null
+const CHROME_LISTING: string | null = null
+const FIREFOX_LISTING: string | null = null
+
+/** Kept exported because three screens and two suites still ask the same question in the
+ *  old words: is a store listing live. It is now derived rather than declared. */
+export const IN_STORE = CHROME_LISTING !== null || FIREFOX_LISTING !== null
 
 /** What the site hands out while no store does. Written by extension/build.mjs into
  *  `public/`, which Vite ships verbatim; test/static.mjs asserts the published site really
@@ -126,7 +150,7 @@ export const IN_STORE = false
  *  replaces. */
 /*
    THE PATH IS BUILT THE WAY EVERY OTHER PUBLISHED ASSET'S IS.
-   
+
    These were root-absolute. This app is published with a RELATIVE base — `scoring.json` and
    `snapshot.json` are both fetched through `import.meta.env.BASE_URL` for exactly that reason
    — so a leading slash is a promise that the site sits at the root of its host, which is true
@@ -144,31 +168,43 @@ export const DOWNLOAD: Record<Browser, string | null> = {
 	none: null
 }
 
-/** Where each browser's own page for this lives. Named once here so a step and its button
- *  cannot drift apart, and so a browser nobody has shipped to yet has an obvious null. */
-export const STORE: Record<Browser, { at: string | null; press: string; then: string }> = {
-	chrome: {
-		at: "https://chromewebstore.google.com/search/beanemachine",
-		press: "Add to Chrome",
-		then: "Add extension"
-	},
-	edge: {
-		at: "https://chromewebstore.google.com/search/beanemachine",
-		press: "Add to Chrome",
-		then: "Add extension"
-	},
-	firefox: {
-		at: "https://addons.mozilla.org/firefox/search/?q=beanemachine",
-		press: "Add to Firefox",
-		then: "Add"
-	},
-	"firefox-android": {
-		at: "https://addons.mozilla.org/firefox/search/?q=beanemachine",
-		press: "Add to Firefox",
-		then: "Add"
-	},
-	safari: { at: null, press: "", then: "" },
-	none: { at: null, press: "", then: "" }
+/**
+ * The one press, and what the browser will say after it — for the two states where there IS
+ * one press. `press` is the button on the page the link opens; `then` is the browser's own
+ * confirmation. Both are quoted so the walkthrough can name them rather than say "confirm".
+ */
+export type Install =
+	| { kind: "store"; at: string; press: string; then: string }
+	| { kind: "signed"; at: string; press: string; then: string }
+	| { kind: "unpacked"; at: string }
+	| null
+
+/**
+ * WHICH OF THE THREE APPLIES TO THIS BROWSER. One function, so a step and its button cannot
+ * drift apart and so a browser nobody has shipped to yet has one obvious answer: null.
+ *
+ * Firefox for Android is deliberately null in every state. A self-distributed .xpi cannot be
+ * installed there at all — Android Firefox takes add-ons from AMO and nowhere else — so the
+ * signed route does not reach it and only a LISTING ever will.
+ */
+export const installFor = (browser: Browser): Install => {
+	if (browser === "chrome" || browser === "edge")
+		return CHROME_LISTING ?
+				{ kind: "store", at: CHROME_LISTING, press: "Add to Chrome", then: "Add extension" }
+			: DOWNLOAD[browser] ? { kind: "unpacked", at: DOWNLOAD[browser]! }
+			: null
+	if (browser === "firefox")
+		return FIREFOX_LISTING ?
+				{ kind: "store", at: FIREFOX_LISTING, press: "Add to Firefox", then: "Add" }
+			: FIREFOX_XPI ?
+				{ kind: "signed", at: asset(FIREFOX_XPI), press: "Add to Firefox", then: "Add" }
+			: DOWNLOAD.firefox ? { kind: "unpacked", at: DOWNLOAD.firefox }
+			: null
+	if (browser === "firefox-android")
+		return FIREFOX_LISTING ?
+				{ kind: "store", at: FIREFOX_LISTING, press: "Add to Firefox", then: "Add" }
+			:	null
+	return null
 }
 
 /**
@@ -179,8 +215,7 @@ export const STORE: Record<Browser, { at: string | null; press: string; then: st
  * whether "Yahoo" leads to the reader or straight to typing a team; a browser that gains a
  * route gains the reader with it.
  */
-export const readsHere = (b: Browser): boolean =>
-	takesExtension(b) && (IN_STORE ? !!STORE[b].at : !!DOWNLOAD[b])
+export const readsHere = (b: Browser): boolean => takesExtension(b) && installFor(b) !== null
 
 /**
  * THE YAHOO STEP OF THE SETUP SHEET, and nothing else.
@@ -229,8 +264,7 @@ export const Connect = ({
 	failure: GrabFailure | null
 	browser?: Browser
 }): React.ReactElement => {
-	const store = STORE[browser]
-	const download = DOWNLOAD[browser]
+	const install = installFor(browser)
 	const firefoxish = browser === "firefox" || browser === "firefox-android"
 	/** The address of this browser's own extensions page. Edge answers `edge://`, not
 	 *  `chrome://`, and a reader typing the wrong one gets a blank page. */
@@ -308,29 +342,52 @@ export const Connect = ({
 				<li className="step">
 					<span className="step-n">1</span>
 					<div className="step-body">
-						{IN_STORE && store.at ?
+						{/*
+						  ONE BRANCH PER STATE, because only one of them is true of this browser
+						  today and showing two would be the menu the owner cut everywhere else.
+						  See `installFor`: store, signed, or unpacked.
+						*/}
+						{install?.kind === "store" || install?.kind === "signed" ?
 							<>
 								<p className="step-say">
 									Add the reader.
-									<a className="chip-btn" href={store.at} target="_blank" rel="noreferrer noopener">
-										Get it
+									{/*
+									  A SIGNED .xpi INSTALLS FROM AN ORDINARY LINK. Firefox opens its own
+									  install panel on a link to one — no extensions page, no Developer
+									  mode, and it survives a restart, which `Load Temporary Add-on`
+									  does not. `type` is stated because a host that serves the file as
+									  octet-stream makes Firefox download it instead of offering to
+									  install it, and the type is the only thing on this side that can
+									  say what it is. See extension/SUBMITTING.md, which records that as
+									  the one thing to check on the first deploy that carries the file.
+									*/}
+									<a
+										className="chip-btn"
+										href={install.at}
+										{...(install.kind === "signed" ?
+											{ type: "application/x-xpinstall" }
+										:	{ target: "_blank", rel: "noreferrer noopener" })}
+									>
+										{install.press}
 									</a>
 								</p>
 								<p className="step-aside">
-									Press <b>{store.press}</b>, then <b>{store.then}</b>.
+									Press <b>{install.then}</b>.
 								</p>
 							</>
 						:	<>
 								<p className="step-say">
 									Add the reader.
-									<a className="chip-btn" href={download ?? undefined} download>
+									<a className="chip-btn" href={install?.at ?? undefined} download>
 										Download it
 									</a>
 								</p>
 								{/* The three things a browser asks of a sideloaded extension, one line
 								    each. Chrome and Edge want a FOLDER (so unzip), Firefox takes the
 								    zip as it is. The address is selectable text because a page cannot
-								    link to a browser's own settings. */}
+								    link to a browser's own settings — Firefox refuses to navigate to
+								    `about:` from web content, and Chrome to `chrome://`, which is why
+								    this reads "open" rather than being a link. */}
 								<ul className="step-how">
 									{!firefoxish && <li>Unzip it.</li>}
 									<li>

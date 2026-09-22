@@ -150,6 +150,55 @@ policy URL and that grep rather than a paragraph.
 
 ---
 
+## Firefox, step one: get it SIGNED, before any listing
+
+Do this first. It is free, it needs no public listing, and it is the difference between
+four lines of instructions and one press.
+
+**Why.** Firefox will not install an unsigned extension permanently. Today the site hands
+over a zip and the walkthrough talks the reader through `about:debugging` →
+**Load Temporary Add-on** — and temporary means it, the add-on is gone at the next
+restart. A page cannot shorten that by linking to `about:debugging`, because Firefox
+refuses to navigate to an `about:` URL from web content (Chrome refuses `chrome://` the
+same way). The length of that step is not a wording problem and no rewrite fixes it.
+
+A **signed** `.xpi` installs from an ordinary link: Firefox opens its own install panel,
+and it survives restarts. Mozilla signs add-ons it does not list — AMO calls it
+self-distribution — so this is available now, and a listing can follow later without
+undoing it.
+
+1. Sign in at `addons.mozilla.org/developers/`.
+2. **Submit a New Add-on** → choose **On your own** (the unlisted / self-distribution
+   option) rather than **On this site**.
+3. Upload `dist-ext/beanemachine-firefox-store.zip`. The validator runs; it is the same
+   `addons-linter` this repo runs, and it reports 0 errors.
+4. Answer the source-code question exactly as the listed submission does — see
+   **The one thing that is different** below. A minified bundle needs its source either
+   way.
+5. When review finishes, download the signed `.xpi` and put it at
+   `extension/signed/beanemachine-firefox.xpi`.
+6. Set `FIREFOX_XPI` in `src/client/Connect.tsx` to `"beanemachine-firefox.xpi"`.
+7. `npm run build`. The build copies the file into `public/` and the site serves it; the
+   Firefox step becomes **Add the reader → [Add to Firefox] → Press Add**.
+
+`extension/build.mjs` will not let those last two steps disagree: it **throws** if the
+constant names a file that is not there (the walkthrough's first step would 404, which is
+the bug this project already shipped once with a store-search page), and it warns if the
+file is published and nothing links to it.
+
+**The one thing to check on the first deploy that carries the file.** Firefox decides
+whether to offer an install or merely download by the `Content-Type` the host sends. It
+wants `application/x-xpinstall`. The link states `type="application/x-xpinstall"`, which
+is a hint and not a guarantee, and GitHub Pages' MIME table is not ours to set. So open
+the live link in Firefox once: if it offers to install, it is done. If it downloads the
+file instead, the honest fallback is one line in the step — `about:addons` →
+**Install Add-on From File** — which is still permanent and still far shorter than
+Developer mode. Do not guess this from the headers; press the link.
+
+**Android.** A self-distributed `.xpi` cannot be installed on Firefox for Android at all;
+it takes add-ons from AMO and nowhere else. `installFor` returns null there until a real
+LISTING exists, which is why the phone is sent to typing a team instead.
+
 ## Firefox (addons.mozilla.org)
 
 Upload `dist-ext/beanemachine-firefox-store.zip`.

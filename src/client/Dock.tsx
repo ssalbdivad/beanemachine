@@ -160,10 +160,11 @@ export const Dock = ({
 					aria-controls="dock-sheet"
 					onClick={() => onToggle(!open)}
 				>
-					{/* Named for what it asks rather than for what it is. "Set up my league"
-					    is a chore; the button is the first thing a stranger reads and it should
-					    say the question it is about to ask. */}
-					{open ? "Close" : "Who\u2019s on my team"}
+					{/* Named for the first thing the sheet asks. It said "Who's on my team" while
+					    the sheet opened on the team box; the sheet opens on "Where's your
+					    league?" now (src/client/Onboard.tsx), so a button naming the team
+					    promised a question that is two screens in. */}
+					{open ? "Close" : "Set up my league"}
 				</button>
 			</div>
 		</aside>

@@ -1849,8 +1849,11 @@ export const Board = ({
 						    his settings page to compare finds nothing that matches and concludes the
 						    app is broken. The app's own "values to check" drawer has said the true
 						    thing all along. */}
-						<b>One real league&rsquo;s scoring, not yours.</b> Every number below is real and none of
-						it is about your league yet — set yours up and they all move.
+						{/* One status, no essay. The 25 words after it — "Every number below is real
+						    and none of it is about your league yet — set yours up and they all move"
+						    — explained the app to the reader; the setup that fixes it is the dock
+						    under every screen, one press away, with its own instruction. */}
+						<b>One real league&rsquo;s scoring, not yours.</b>
 					</p>
 				)}
 
@@ -2284,11 +2287,12 @@ export const Board = ({
 				*/}
 				{rows.length > CAP ?
 					<p className="sub" style={{ marginTop: 12 }}>
-						Showing the top <b className="count">{CAP}</b>. The other{" "}
-						<b className="count">{rows.length - CAP}</b> are ranked below them and not
-						drawn
+						{/* "are ranked below them and not drawn" was the renderer talking about
+						    itself; what the reader needs is the count and the way to one of them. */}
+						Showing the top <b className="count">{CAP}</b>.{" "}
+						<b className="count">{rows.length - CAP}</b> more are hidden
 						{filters.mode !== "stream" ?
-							" — type a name above to pull one up."
+							" — type a name above to find one."
 						:	"."}
 					</p>
 				: limit < rows.length ?

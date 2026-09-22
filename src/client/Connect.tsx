@@ -3,20 +3,18 @@ import type { GrabFailure } from "../data/extension.ts"
 import type { ExtensionState } from "./extension.ts"
 
 /**
- * HOW TO LET IT READ YOUR LEAGUE, in three steps and a drawn arrow.
+ * HOW TO LET IT READ YOUR YAHOO LEAGUE, in three one-line steps.
  *
  * Everything else in this app is built around being TOLD — typed, pasted, carried in a
  * file — because Yahoo sends no header that would let a web page read a league. This is
- * the one screen that offers the other thing, and it is the screen where a reader decides
- * whether this app is worth two minutes, so it has exactly three jobs: say what he gets,
- * name the words he will see on the next screen, and get out of the way.
+ * the one screen that offers the other thing. It used to argue for itself (what it reads,
+ * that nothing is sent anywhere, how long it takes); it instructs now, and the arguments
+ * live in the comments below. See `Connect` for what was cut and what was measured.
  *
- * IT DRAWS ITS OWN TARGETS. There are no screenshots of anybody else's browser in here.
- * A picture of Chrome's toolbar is out of date the week Chrome is restyled, it is somebody
- * else's trade dress, and it looks nothing like the toolbar on the reader's own machine
- * anyway. What is drawn instead is OUR rendering of the words he is looking for — "Add to
- * Chrome", "Add extension" — in this app's own type, with the arrow pointing at those. The
- * words are the part that is stable; the chrome around them is not.
+ * IT DRAWS ITS OWN TARGETS where it points at anything: the extensions-page address is
+ * our own selectable text, not a screenshot of somebody else's browser, which would be out of
+ * date the week that browser is restyled. (`Arrow` drew a hand-made arrow at those targets
+ * and the walkthrough no longer needs one; it stays exported for any screen that does.)
  *
  * WHAT IT NEVER DOES. It does not tell a reader who cannot install anything that he is
  * unsupported, it does not grey out a control he cannot use, and it does not take the
@@ -173,6 +171,43 @@ export const STORE: Record<Browser, { at: string | null; press: string; then: st
 	none: { at: null, press: "", then: "" }
 }
 
+/**
+ * Whether the reader can be put in THIS browser today: the browser runs extensions and
+ * there is somewhere to get it from — the store once `IN_STORE`, the site's own download
+ * until then. Firefox for Android runs extensions and has neither (no store listing, no
+ * about:debugging on a phone), so it is false there. The setup sheet uses this to decide
+ * whether "Yahoo" leads to the reader or straight to typing a team; a browser that gains a
+ * route gains the reader with it.
+ */
+export const readsHere = (b: Browser): boolean =>
+	takesExtension(b) && (IN_STORE ? !!STORE[b].at : !!DOWNLOAD[b])
+
+/**
+ * THE YAHOO STEP OF THE SETUP SHEET, and nothing else.
+ *
+ * WHAT WAS CUT, measured 2026-09-22 on the published build at 390x844: the not-installed
+ * walkthrough was 216 words and 1,246px — a privacy sentence ("It reads your league in your
+ * own browser. Nothing is sent anywhere else."), "Four steps, about a minute.", four
+ * numbered steps each with a paragraph-length aside (Mac vs Windows unzipping, where
+ * Downloads are, what appears in the list), a Firefox warning, and a closing paragraph
+ * explaining that the box would turn into a button. Every one of those sentences was the
+ * app explaining itself.
+ *
+ * WHAT IS LEFT is three numbered steps, one line each: add the reader, open your team on
+ * Yahoo, come back to this page (which then turns into the button). The first step needs the three things a browser actually asks
+ * of a sideloaded extension (unzip, open the extensions page, load it) — without them the
+ * download is a file nobody can use — so they are three one-line instructions inside it
+ * rather than prose. When the store listing is live (`IN_STORE`) they collapse to "Press
+ * Add to Chrome".
+ *
+ * INSTALLED, it is one line and the button. `useExtension` polls for the reader, so the
+ * moment it arrives this component re-renders into that shape; nothing has to say it will.
+ *
+ * The heading, the install steps and the "type instead" link live here; the "Back" to the
+ * platform question is the sheet's, above this. Classes the suites address: `.connect`,
+ * `.connect.connected` once installed, `.step` for each install step, `.connect-back` for
+ * the way out to typing.
+ */
 export const Connect = ({
 	ext,
 	leagueName,
@@ -189,6 +224,7 @@ export const Connect = ({
 	freeAgents: number | null
 	readAt: string | null
 	onRead: () => void
+	/** "Type your players instead" — the sheet's team step. */
 	onBack: () => void
 	failure: GrabFailure | null
 	browser?: Browser
@@ -202,51 +238,48 @@ export const Connect = ({
 		firefoxish ? "about:debugging#/runtime/this-firefox"
 		: browser === "edge" ? "edge://extensions"
 		: "chrome://extensions"
-	/* A `showSteps` state and the effect that cleared it used to sit here, feeding one
-	   expression at the foot of the walkthrough: `{showSteps ? null : null}`. It rendered
-	   nothing in either branch, so a `useState`, a `useEffect` and a re-render on every
-	   change of `ext.present` existed to choose between null and null. The claim it was for
-	   — a reader who has it installed is not shown how to install it — is made by the
-	   `if (ext.present) return` above, which returns before any step is drawn. */
+	const typeInstead = (
+		<p className="connect-back">
+			<button type="button" className="as-link" onClick={onBack}>
+				Type your players instead
+			</button>
+		</p>
+	)
+	/* Said above the button because it changes what pressing it will do: an older reader
+	   that still answers every ask it knows never produces a failure to hang a sentence on. */
+	const snags = (
+		<>
+			{ext.skew && (
+				<p className="connect-snag">
+					{ext.skew.what}
+					{ext.skew.fix ? <> &mdash; {ext.skew.fix}</> : null}
+				</p>
+			)}
+			{failure && (
+				<p className="connect-snag">
+					{failure.what}
+					{failure.fix ? <> &mdash; {failure.fix}</> : null}
+				</p>
+			)}
+		</>
+	)
 
 	if (ext.present)
 		return (
 			<div className="connect connected">
-				<h2>
-					<Tick /> It can read your league
-				</h2>
+				<h2>Read your league from Yahoo</h2>
 				{leagueName ?
-					<p className="sub">
-						Last read <b>{leagueName}</b>
+					/* The receipt: the league's NAME, the free agents and when. The one line on
+					   this screen he reads twice, so it is a fact rather than a sentence. */
+					<p className="sub connect-got">
+						<Tick /> Read <b>{leagueName}</b>
 						{freeAgents !== null ? <> &mdash; {freeAgents} free agents</> : null}
 						{readAt ? <> &mdash; {ago(readAt)}</> : null}.
 					</p>
-				:	/* NAMED, because "press the button" is a sentence written by somebody who can
-				     see the screen. There are two buttons under it — Read my league and Open
-				     Yahoo — and a reader following step 4 arrives here looking for the one he was
-				     promised. */
-					<p className="sub">
-						Open your team on Yahoo in another tab, then press <b>Read my league</b>.
-					</p>
+				:	<p className="sub">Open your team on Yahoo, then press Read my league.</p>
 				}
-				{/* THE TWO HALVES BEING ON DIFFERENT VERSIONS is said here rather than at the
-				    first thing that fails, because an older reader that still answers every ask
-				    it knows never produces a failure to hang a sentence on — and that is exactly
-				    the case a reader cannot work out for himself. It sits above the button
-				    because it changes what pressing the button will do. */}
-				{ext.skew && (
-					<p className="connect-snag">
-						{ext.skew.what}
-						{ext.skew.fix ? <> &mdash; {ext.skew.fix}</> : null}
-					</p>
-				)}
-				{failure && (
-					<p className="connect-snag">
-						{failure.what}
-						{failure.fix ? <> &mdash; {failure.fix}</> : null}
-					</p>
-				)}
-				<p className="onboard-go">
+				{snags}
+				<p className="connect-go">
 					<button type="button" className="primary" onClick={onRead} disabled={ext.busy}>
 						{ext.busy ? "Reading…" : leagueName ? "Read it again" : "Read my league"}
 					</button>
@@ -259,243 +292,89 @@ export const Connect = ({
 				{/* The sweep's own words, verbatim. A progress bar over somebody else's site is
 				    a promise about how long it will take, which nothing here can make. */}
 				{ext.busy && ext.progress && <p className="sub connect-progress">{ext.progress}</p>}
-				<p className="connect-back">
-					<button type="button" className="as-link" onClick={onBack}>
-						Type my team in instead
-					</button>
-				</p>
+				{typeInstead}
 			</div>
 		)
 
-	/*
-	   A BROWSER THAT TAKES THE READER AND HAS NO WAY TO GET IT.
-	
-	   `takesExtension` answers what the BROWSER can run, and Firefox for Android can run this
-	   perfectly well — from the add-ons site, which is the only route it has: there is no
-	   about:debugging on a phone and no folder to point at. With no listing yet, the install
-	   route for that reader does not exist at all, and he was being shown the store walkthrough
-	   with the note "it is not in the add-ons site yet, so it comes from here instead" directly
-	   above a button sending him to a search of that site — which returns two add-ons that are
-	   not this one.
-	
-	   So he is told the truth instead, and it is the same truth the phone branch below tells:
-	   on a computer this reads his league, and typing his team in works everywhere including
-	   here. The condition is the missing DOWNLOAD rather than the browser, so a browser that
-	   gains a route gains the walkthrough with it.
-	*/
-	if (!takesExtension(browser) || (!IN_STORE && !download))
-		return (
-			<div className="connect">
-				<h2>On a computer, it can read your Yahoo league</h2>
-				<p className="sub">
-					{"In Chrome or Firefox on a computer, it reads your league off Yahoo for you. Here, typing your team in takes about a minute."}
-				</p>
-				<p className="onboard-go">
-					<button type="button" className="primary" onClick={onBack}>
-						Type my team in
-					</button>
-				</p>
-			</div>
-		)
+	/* Never drawn by the setup sheet, which sends such a reader to typing instead (see
+	   `readsHere`). Kept safe for any other caller: no sentence about the device, just the
+	   way on. */
+	if (!readsHere(browser)) return <div className="connect">{typeInstead}</div>
 
 	return (
 		<div className="connect">
-			<h2>Let it read my Yahoo league</h2>
-			{/* Two lines, not four. Measured at 390x844: the card came to 623px inside a sheet
-			    capped at 591px, so the third step and the way back were below the fold — the
-			    exact defect this file's own header warns about, arriving in the file that warns
-			    about it. What was cut is the part a reader does not need before he presses
-			    anything; what stays is the one thing he might be worried about.
-			
-			    AND THE FOUR-STEP WALKTHROUGH BELOW DOES NOT FIT EITHER, which this comment used
-			    to be read as claiming. Measured on the published build at 390x844 with the store
-			    listing absent: the steps run 320..979, so the third ends at the fold and the
-			    fourth is under it. That is not the same defect. A numbered list of four says how
-			    many there are and that more follow, a reader works down it one step at a time
-			    with his browser's own settings open beside it, and the two things this comment
-			    was about — the way back, and the sentence he might be worried about — are both
-			    above the fold. What is not allowed is a single required action hidden with
-			    nothing indicating it; what is here is a list that continues. */}
-			<p className="sub">
-				It reads your league in your own browser. Nothing is sent anywhere else.
-			</p>
-			{!IN_STORE && (
-				/* SAID FIRST, because it changes what every step below is. He is about to be asked
-				   to do something more fiddly than pressing Add, and being told why is the
-				   difference between a walkthrough and a runaround. */
-				<p className="connect-note">Four steps, about a minute.</p>
-			)}
+			<h2>Read your league from Yahoo</h2>
 			<ol className="steps">
-				{!IN_STORE && download ?
-					<>
-						<li className="step">
-							<span className="step-n">1</span>
-							<div className="step-body">
-								{/* The headline said "then unzip the file" for everybody while the aside
-								    under it told a Firefox reader not to — two instructions, one line
-								    apart, in opposite directions. Firefox takes the zip as it is. */}
-								<p className="step-say">
-									{firefoxish ?
-										"Press this. Your browser saves a file."
-									:	"Press this, then open the file it saves."}
-								</p>
-								<p>
-									<a className="chip-btn" href={download} download>
-										Download it
-									</a>
-								</p>
-								<p className="step-aside">
-									{firefoxish ?
-										"Leave it where it lands — usually your Downloads. You do not need to open it."
-									:	/* "Double-click and it becomes a folder" is a Mac sentence. Windows
-									     opens a zip as a window you can look into and Load unpacked will
-									     not take it, so the instruction has to be the one that works on
-									     both: get a real folder out of it, however this machine does that.
-									
-									     And it says where the file went, because "open the file it saves"
-									     is an instruction a reader cannot follow if he does not know where
-									     to look, which is the commonest place to lose somebody. */
-										"It lands in your Downloads. On a Mac, double-click it and a folder appears beside it. On Windows, right-click it, choose Extract All, then Extract. You want that folder in the next steps — not the file you downloaded."}
-								</p>
-							</div>
-						</li>
-						<li className="step">
-							<span className="step-n">2</span>
-							<div className="step-body">
-								{/* IN A NEW TAB, because the closing line of this walkthrough promises this
-								    page is watching and will notice the moment the add-on arrives — and it
-								    cannot notice anything if the reader has just navigated it to his
-								    browser's settings. He would come back to a page that had never seen
-								    the install and a walkthrough still asking him to do it. */}
-								<p className="step-say">
-									Open a new tab and type this where the web address goes, then press
-									enter.
-								</p>
-								{/* A browser will not let a page link to its own settings, so this is
-								    text he copies rather than a button he presses — and it says so,
-								    because a reader who tries to click it and nothing happens has been
-								    told by the screen that the screen is broken.
-								
-								    EDGE IS NOT CHROME HERE. Edge runs the same add-on and does not open
-								    `chrome://extensions` — it answers `edge://extensions`, and a reader
-								    typing the address this screen gave him gets nothing. The address is
-								    the one thing on this step, so getting it wrong is the whole step. */}
-								<span className="step-point">
-									<Arrow label={`pointing at the address ${extensionsUrl}`} />
-									<span className="step-target step-address">{extensionsUrl}</span>
-								</span>
-								<p className="step-aside">
-									{firefoxish ?
-										""
-									:	"Then turn on the switch at the top right labelled Developer mode. Three buttons appear."}
-								</p>
-							</div>
-						</li>
-						<li className="step">
-							<span className="step-n">3</span>
-							<div className="step-body">
-								<p className="step-say">
-									Press <b>{firefoxish ? "Load Temporary Add-on" : "Load unpacked"}</b>, then
-									choose {firefoxish ? "the file you just downloaded" : "the folder from step 1"}
-									{" "}and press {firefoxish ? "Open" : "Select"}.
-								</p>
-								<span className="step-point">
-									<Arrow label={`pointing at the words ${firefoxish ? "Load Temporary Add-on" : "Load unpacked"}`} />
-									<span className="step-target" aria-hidden="true">
-										{firefoxish ? "Load Temporary Add-on…" : "Load unpacked"}
-									</span>
-								</span>
-								<p className="step-aside">
-									{firefoxish ?
-										"It appears in the list on that page straight away."
-									:	"It appears in the list with its name and a little robot. If your browser asks whether to keep it, say yes."}
-								</p>
-								{firefoxish && (
-									/* NOT A FOOTNOTE. A temporary add-on is gone when Firefox closes, and a
-									   reader who finds it missing tomorrow will think it broke. */
-									<p className="step-aside step-warn">
-										Firefox forgets it when you quit, so you would do this again next time.
-										Chrome keeps it for good — worth using Chrome for this if you have it.
-									</p>
-								)}
-							</div>
-						</li>
-						<li className="step">
-							<span className="step-n">4</span>
-							<div className="step-body">
-								<p className="step-say">
-									Open your Yahoo team in a tab and leave it open, then come back here and
-									press <b>Read my league</b>.
-								</p>
-								<p>
-									<button type="button" className="chip-btn" onClick={() => ext.openYahoo()}>
-										Open Yahoo
-									</button>
-								</p>
-							</div>
-						</li>
-					</>
-				:	<>
 				<li className="step">
 					<span className="step-n">1</span>
 					<div className="step-body">
-						<p className="step-say">Open the page below.</p>
-						{store.at && (
-							<p>
-								<a className="chip-btn" href={store.at} target="_blank" rel="noreferrer noopener">
-									Get it for {browser === "firefox" || browser === "firefox-android" ? "Firefox" : "this browser"}
-								</a>
-							</p>
-						)}
+						{IN_STORE && store.at ?
+							<>
+								<p className="step-say">
+									Add the reader.
+									<a className="chip-btn" href={store.at} target="_blank" rel="noreferrer noopener">
+										Get it
+									</a>
+								</p>
+								<p className="step-aside">
+									Press <b>{store.press}</b>, then <b>{store.then}</b>.
+								</p>
+							</>
+						:	<>
+								<p className="step-say">
+									Add the reader.
+									<a className="chip-btn" href={download ?? undefined} download>
+										Download it
+									</a>
+								</p>
+								{/* The three things a browser asks of a sideloaded extension, one line
+								    each. Chrome and Edge want a FOLDER (so unzip), Firefox takes the
+								    zip as it is. The address is selectable text because a page cannot
+								    link to a browser's own settings. */}
+								<ul className="step-how">
+									{!firefoxish && <li>Unzip it.</li>}
+									<li>
+										In a new tab, open{" "}
+										<span className="step-target step-address">{extensionsUrl}</span>
+									</li>
+									{firefoxish ?
+										<li>
+											Press <b>Load Temporary Add-on</b>, pick the file.
+										</li>
+									:	<li>
+											Turn on <b>Developer mode</b>, press <b>Load unpacked</b>, pick the folder.
+										</li>
+									}
+								</ul>
+							</>
+						}
 					</div>
 				</li>
 				<li className="step">
 					<span className="step-n">2</span>
 					<div className="step-body">
 						<p className="step-say">
-							Press <b>{store.press}</b>, then <b>{store.then}</b>.
-						</p>
-						{/* OUR drawing of the words he is looking for, with the arrow pointing INTO
-						    them. Not a screenshot: this is what the button SAYS, which is the part
-						    that does not change when somebody restyles a browser.
-						
-						    The arrow is drawn first and the words second, because the arrow's head is
-						    at its bottom-right and an arrow that ends where nothing is reads as a
-						    doodle — which is what the first version was: measured at 390px, the head
-						    landed 40px to the right of the facsimile with the facsimile to its left. */}
-						<span className="step-point">
-							<Arrow label={`pointing at the words ${store.press}`} />
-							<span className="step-target" aria-hidden="true">
-								{store.press}
-							</span>
-						</span>
-					</div>
-				</li>
-				<li className="step">
-					<span className="step-n">3</span>
-					<div className="step-body">
-						<p className="step-say">Open your Yahoo team once, then come back here.</p>
-						<p>
+							Open your team on Yahoo.
 							<button type="button" className="chip-btn" onClick={() => ext.openYahoo()}>
 								Open Yahoo
 							</button>
 						</p>
 					</div>
 				</li>
-					</>
-				}
+				<li className="step">
+					<span className="step-n">3</span>
+					<div className="step-body">
+						{/* No button here: a greyed control he cannot use yet is the thing this file
+						    promises never to draw. `useExtension` polls for the reader, and the moment it
+						    answers this component re-renders into the installed shape, with the button.
+						    So the step says only what is true on THIS screen. It used to say "Come back
+						    and press Read my league." — naming a button that is not on it. */}
+						<p className="step-say">Come back to this page.</p>
+					</div>
+				</li>
 			</ol>
-			{/* WHAT HAPPENS NEXT, and what to do when nothing does. A walkthrough that ends
-			    without saying how you know it worked leaves a reader pressing things. */}
-			<p className="sub connect-watch">
-				This box turns into that button as soon as it is added. If it has not after a few
-				seconds, reload the page.
-			</p>
-			<p className="connect-back">
-				<button type="button" className="as-link" onClick={onBack}>
-					Type my team in instead
-				</button>
-			</p>
+			{snags}
+			{typeInstead}
 		</div>
 	)
 }

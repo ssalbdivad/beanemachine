@@ -986,14 +986,9 @@ kbd{
 .onboard-meant{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2);margin:var(--sp-2) 0 0}
 .onboard-meant .chip-btn{font-size:var(--fs-3)}
 
-.onboard-alts{margin-top:var(--sp-4)}
-.onboard-alts dl{margin-top:var(--sp-3)}
-/* The route that actually works for this platform, set above the one that works for every
-   platform. The rule under it separates "this is your way in" from "and here is the fallback",
-   which is the whole reason it is a block rather than one more paragraph in the flow. */
-.onboard-first{padding:0 0 var(--sp-3);margin:0 0 var(--sp-3);border-bottom:1px solid var(--rule)}
-.onboard-first .sub{margin:0 0 var(--sp-2)}
-.onboard-first .sub:last-child{margin:var(--sp-2) 0 0}
+/* `.onboard-alts` (the "My league scores differently" fold) and `.onboard-first` (the ESPN
+   box set above the settings paste inside it) went with the fold. The wizard has no second
+   route on any screen for them to separate. */
 .onboard-url{display:flex;gap:var(--sp-2);margin-top:var(--sp-2);flex-wrap:wrap}
 .onboard-url input{flex:1 1 220px;min-width:0}
 
@@ -1305,18 +1300,32 @@ kbd{
    solved in the LABELS instead: the head is the one place a shorter word costs
    nothing, and the full definition is on its own tooltip either way. */
 
-/* ---------- the one question ----------
-   The sheet asks for a team and nothing else. Everything here is about making the
-   answer easy to give and easy to check: a box that looks like the answer, the
-   privacy line where the typing happens, and the read named back player by player.
+/* ---------- the setup wizard ----------
+   One question per screen, platform first: "where" (three stacked buttons), then one
+   route for that platform, then the team. See the note at the top of
+   src/client/Onboard.tsx. `.onboard-privacy` and `.onboard-read` went with the privacy
+   paragraph and the Yahoo offer that sat above the team box.
    ------------------------------------------------------------------------- */
-.onboard-privacy{margin:var(--sp-2) 0 0;font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
-/* `.onboard-read` shares the row layout and nothing else: it is the Yahoo offer, and it
-   was briefly given `.onboard-go` itself — which is the class on the button that submits
-   a typed team, so the two became one selector and a suite clicked the wrong one. The
-   layout is shared here rather than by sharing a name that means something else. */
-.onboard-go,.onboard-read{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
-.onboard-go .sub,.onboard-read .sub{margin:0;flex:1 1 220px;min-width:0}
+/* The three answers are the whole first screen, so they are full-width 52px targets a
+   thumb does not have to aim at, left-aligned like a list of choices rather than centred
+   like a dialog's buttons. */
+.onboard-where{display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-3) 0 0}
+.onboard-where button{
+  width:100%;min-height:52px;justify-content:flex-start;text-align:left;
+  font-size:var(--fs-4);font-weight:600;padding:0 var(--sp-4);
+}
+/* The one quiet line under the team box: where the team is kept. */
+.onboard-saved{margin:var(--sp-2) 0 0;font-size:var(--fs-2);color:var(--faint);line-height:var(--lh-snug)}
+/* The saved-file link: small and last, for the reader who already knows he wants it. */
+.onboard-file{margin:var(--sp-4) 0 0}
+/* Back sits ABOVE the heading, because on a phone the foot of the sheet is under the
+   keyboard. Its own margin is small so the heading does not drop by a line's worth. */
+.onboard-back{margin:0 0 var(--sp-2)}
+/* `.connect-go` shares the row layout and nothing else: it is the Yahoo read button, and
+   the class `.onboard-go` belongs to the one button that submits a typed team — twice a
+   second button under that class sent a suite to the wrong screen. */
+.onboard-go,.connect-go{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-3) 0 0}
+.onboard-go .sub{margin:0;flex:1 1 220px;min-width:0}
 .onboard-answer{
   margin:var(--sp-3) 0 0;padding:var(--sp-3);border-radius:var(--r-md);
   background:var(--well);border-left:2.5px solid var(--accent);
@@ -1375,18 +1384,14 @@ kbd{
   .onboard-rest>*:first-child{margin-top:0}
 }
 
-.onboard-teams{margin:var(--sp-4) 0 0}
-.onboard-teams h3{margin:0 0 var(--sp-2);font-size:var(--fs-4);font-weight:600;letter-spacing:-.01em}
-.onboard-teams .chips{margin:0 0 var(--sp-2)}
+/* The team count is its own step now, so its heading is the step's h2 like every other
+   step's, and the chips are the screen. */
+.onboard-teams .chips{margin:var(--sp-3) 0 var(--sp-2)}
 .onboard-teams .chip-btn{min-width:44px;justify-content:center}
-.onboard-where{margin:var(--sp-3) 0}
-.onboard-alts>summary{
-  cursor:pointer;list-style:none;color:var(--accent);
-  font-size:var(--fs-3);text-decoration:underline;text-underline-offset:3px;
-  padding:var(--sp-2) 0;
-}
-.onboard-alts>summary::-webkit-details-marker{display:none}
-.onboard-done{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-4) 0 0}
+.onboard-done,.onboard-next{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin:var(--sp-4) 0 0}
+/* The ESPN screen's answer to a private league: an instruction, in the warning colour the
+   team box uses for lines it could not place, directly above the link it names. */
+.onboard-private{margin:var(--sp-3) 0 0;font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--flag)}
 .onboard-done .sub{margin:0;flex:1 1 240px;min-width:0}
 /* The finish, pinned to the foot of the sheet.
    Measured on the published build at 390x844 before this: the sheet's scroll box was
@@ -1486,7 +1491,7 @@ button,summary,.chip-btn,.views button,.modes .mode{min-height:32px}
   /* `.board-controls .more>summary` was in this list, for the deleted "More filters"
      disclosure. The thumb rule itself is unchanged for every other 44px target. */
   .views button,.modes .mode,.chip-btn,
-  .onboard-alts>summary,.period-fold>summary{
+  .period-fold>summary{
     min-height:44px;display:inline-flex;align-items:center;
   }
   /* And WIDE enough. The position chips cleared 44 vertically and measured 35 to 43
@@ -1629,10 +1634,9 @@ main#main:focus{outline:none}
 .board-intro{margin:0}
 
 /* ── LETTING IT READ YOUR LEAGUE ──────────────────────────────────────────────────────
-   The one screen in this app that offers to READ rather than to be told. Three steps, a
-   drawn arrow at the words the reader is looking for, and no picture of anybody else's
-   browser — see the note at the top of src/client/Connect.tsx for why the target is our
-   own rendering of the words rather than a screenshot. */
+   The one screen in this app that offers to READ rather than to be told: three numbered
+   one-line steps, and no picture of anybody else's browser — see the note at the top of
+   src/client/Connect.tsx. */
 .connect h2 { display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2) }
 .connect .sub { margin: 0 0 var(--sp-3) }
 .steps { list-style: none; margin: 0; padding: 0 }
@@ -1657,7 +1661,11 @@ main#main:focus{outline:none}
 	place-items: center;
 }
 .step-body { min-width: 0 }
-.step-say { margin: 0 0 var(--sp-2) }
+/* The instruction and its one control on ONE row where they fit. Measured at 390x844 on
+   2026-09-22: stacked, the Yahoo step's three steps ran to 681px in a sheet that shows
+   ~590, and "Type your players instead" sat under the fold. */
+.step-say { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3) }
+.step { padding: var(--sp-2) 0 }
 /* OUR drawing of the words on the next screen. A dashed edge says "this is a picture of
    what you are looking for", which a solid button would not — a reader must never press
    this one looking for the real thing. */
@@ -1682,7 +1690,6 @@ main#main:focus{outline:none}
 @keyframes arrow-draw { from { stroke-dashoffset: 180 } }
 .connect-progress { font-family: var(--mono); font-size: var(--fs-2); color: var(--accent) }
 .connect-snag { color: var(--muted); margin: 0 0 var(--sp-3) }
-.connect-watch { color: var(--faint); font-size: var(--fs-2) }
 .connect-back { margin: var(--sp-3) 0 0 }
 .as-link {
 	background: none;
@@ -1695,18 +1702,18 @@ main#main:focus{outline:none}
 	text-underline-offset: 2px;
 	cursor: pointer;
 }
-/* The line under a step: what to expect, what it will not do, what it costs. Quieter than
-   the instruction it follows, because a reader following steps reads the bold line and comes
-   back for this one only when something is not as he expected. */
+/* The line under a step, quieter than the instruction it follows. Only the store route
+   uses it now ("Press Add to Chrome, then Add extension"); `.step-warn`, the Firefox
+   "forgets it when you quit" aside, went with the rest of the explanatory asides. */
 .step-aside { margin: var(--sp-2) 0 0; font-size: var(--fs-2); color: var(--muted) }
-/* The one aside that must not be skimmed: a Firefox temporary add-on is gone when Firefox
-   quits, and a reader who finds it missing tomorrow will think it broke. */
-.step-warn { color: var(--flag) }
+/* The sideload's three sub-instructions inside step 1, one line each. A plain list, in the
+   step's own type size, because each line is something to DO, not an aside. */
+.step-how { margin: var(--sp-2) 0 0; padding-left: 1.1em; display: grid; gap: var(--sp-1) }
+.step-how .step-target { padding: 1px 6px }
 /* An address he TYPES. Monospaced and selectable — unlike `.step-target`, which is a picture
    of a button and is aria-hidden, this is text he has to be able to copy, so it keeps its
    text selection and is not hidden from a screen reader. */
 .step-address { font-family: var(--mono); user-select: all; color: var(--ink) }
-.connect-note { margin: 0 0 var(--sp-3); color: var(--muted); font-size: var(--fs-2) }
 /* Off screen and still in the accessibility tree — `display:none` and `visibility:hidden`
    both take an element OUT of that tree, which would leave a live region that announces
    nothing. The clip-rect shape is the one that has worked in every screen reader since the

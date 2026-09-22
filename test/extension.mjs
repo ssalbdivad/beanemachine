@@ -1431,16 +1431,23 @@ await walled.close()
 	const setup = await ui.$('button:text-is("Set up a league")')
 	if (setup) await setup.click()
 	await ui.waitForSelector(".onboard", { timeout: 20000 })
-	/* THE SHEET OPENS ON THE BUTTON, not on the box, and this assertion changed to say so.
-	   It used to require the offer LINE above the team box and then click it. That was the
-	   right screen for a reader who has to be told the reader exists; it is the wrong one for
-	   a reader whose browser can already do it and who has no team stored yet, and this test
-	   is that reader — the extension is loaded in this browser. Both paths are still covered:
-	   the offer line is asserted by the walkthrough screenshot path, and the way BACK to the
-	   box is asserted below. */
+	/* THE SHEET ASKS WHERE FIRST NOW, even for a reader who has the extension installed.
+	   This used to assert the sheet opened STRAIGHT on the Yahoo button for that reader,
+	   skipping any question — which was the right shortcut for the old sheet, whose first
+	   screen was a team box nobody wanted, and the wrong one for the wizard the owner asked
+	   for on 2026-09-22: "clearly walk people through with questions like what league are you
+	   playing". The extension being installed does not say the reader's league is on Yahoo —
+	   he may have installed it and play on ESPN too — so the platform is asked, and answering
+	   Yahoo is one tap to the button. What this block protects is that the tap lands on the
+	   BUTTON rather than on an install walkthrough, which is asserted below. */
+	await ui.waitForSelector(".onboard-where button", { timeout: 10000 })
+	t("the sheet asks where the league is before anything else",
+		/where.s your league/i.test(await ui.$eval(".onboard", e => e.innerText)),
+		await ui.$eval(".onboard", e => e.innerText.slice(0, 120)))
+	await ui.click('.onboard-where button:text-is("Yahoo")')
 	await ui.waitForSelector(".connect", { timeout: 10000 })
-	t("a reader who already has it lands on the button, not on the box",
-		!(await ui.$(".onboard-offer button")) && !!(await ui.$(".connect")),
+	t("and a reader who already has it lands on the button, not on the box",
+		!!(await ui.$(".connect.connected")) && !(await ui.$("[data-ctl=onboard-team]")),
 		await ui.$eval(".onboard", e => e.innerText.slice(0, 120)))
 	t("and the way back to typing a team in is on the same screen",
 		!!(await ui.$(".connect-back button")),
@@ -1657,6 +1664,9 @@ await walled.close()
 
 	const setup = await ui.$('button:text-is("Set up a league")')
 	if (setup) await setup.click()
+	/* The wizard asks where first; answered Yahoo, it lands on the read button. */
+	await ui.waitForSelector(".onboard-where button", { timeout: 20000 })
+	await ui.click('.onboard-where button:text-is("Yahoo")')
 	await ui.waitForSelector(".connect", { timeout: 20000 })
 
 	/* Set just before the press: the counter does not move until the sweep starts, so this
@@ -2180,8 +2190,9 @@ await walled.close()
 		   yet — and on the box for everybody else, which is what the offer line is for. Either
 		   is a pass here: what this block is about is what ONE PRESS produces, not which of
 		   the two screens he pressed it from. */
-		const offerLine = await first.$(".onboard-offer button")
-		if (offerLine) await offerLine.click()
+		/* The wizard asks where first; this reader plays on Yahoo. */
+		await first.waitForSelector(".onboard-where button", { timeout: 20000 })
+		await first.click('.onboard-where button:text-is("Yahoo")')
 		await first.waitForSelector(".connect", { timeout: 20000 })
 		await first.click(".connect .primary")
 		/* A PRESS THAT NEVER LANDS IS A FAILED ASSERTION, NOT A DEAD SUITE.

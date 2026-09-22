@@ -8,6 +8,7 @@ import { bestNights, gradeRecord, recap, weekShape, type RecapMan } from "../aut
 import { dayIsFinal } from "../data/actuals.ts"
 import { normalizeName } from "../data/names.ts"
 import { andList, statLabel } from "../data/names.ts"
+import { isPreset } from "./panels.tsx"
 import { roster, rosterKey } from "./roster.ts"
 import { opponentStore } from "./opponent.ts"
 import { typingStore } from "./typing.ts"
@@ -512,9 +513,18 @@ export const Recap = ({
 						<h2>Last night</h2>
 						<span className="recap-day">{day}</span>
 					</header>
+					{/* A LABEL, NOT A PITCH. This was "The best nights in baseball, worth what one
+					    real league's scoring would have paid for them. Put your team in and this
+					    becomes your team's night." — 26 words, the second sentence a third call to
+					    add a team on a screen that already had two (the Tonight card's button and the
+					    dock's), and the first said "one real league's" even when the league in this
+					    browser was the reader's own and read off his own pages. What the reader needs
+					    is what the list is and whose scoring the numbers are in, so it says exactly
+					    that, and the "borrowed" half only when it is true. */}
 					<p className="sub">
-						The best nights in baseball, worth what one real league&rsquo;s scoring would have
-						paid for them. Put your team in and this becomes your team&rsquo;s night.
+						The best nights in baseball,{" "}
+						{/* isPreset, not !verified: a hand-typed or hand-checked league is unverified and is still his. */}
+						{isPreset(league) ? "in borrowed scoring." : "in your scoring."}
 					</p>
 					<ul className="recap-list recap-best">
 						{/* The gutter holds the RANK here, not a seat: there is no lineup on this

@@ -379,8 +379,15 @@ const blockedText = (await blocked.textContent()).replace(/\s+/g, " ").trim()
 t("the blocked card is one instruction, not a lecture about CORS",
 	blockedText.split(/\s+/).length < 50 && !/CORS|access-control|npx|command/i.test(blockedText),
 	`${blockedText.split(/\s+/).length} words: ${blockedText}`)
-t("it names the one action, and what it costs",
-	/Add your players/.test(blockedText) && /minute/.test(blockedText) && /this browser/.test(blockedText),
+/* "AND WHAT IT COSTS" WENT, BY THE OWNER'S RULE. This required "minute" and "this browser"
+   — the card's "About a minute, and it stays in this browser". Both are the app describing
+   itself to a reader who has not asked, which is the class of sentence the owner named on
+   2026-09-22 ("nowhere in the ui does it explain"), and the card is now an instruction and a
+   button: "Add the players you own." The claim that survives is the one this line was
+   really about — the card names ONE action — and the cost sentence is asserted ABSENT so it
+   cannot grow back. */
+t("it names the one action and nothing about the app",
+	/Add your players/.test(blockedText) && !/minute|this browser|nothing leaves/i.test(blockedText),
 	blockedText)
 t("and the action is a button, not a sentence telling him to go and find one",
 	await page.locator(".decide-blocked button.decide-cta").count() === 1)
@@ -1588,6 +1595,10 @@ clean("over the whole journey")
 	await sp.waitForSelector(".dock-bar button", { timeout: 30000 })
 	if ((await sp.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
 		await sp.click(".dock-bar button")
+	/* The team box is the "Somewhere else" answer on the wizard's first screen now, not the
+	   first screen itself — see the wizard note in src/client/Onboard.tsx. */
+	await sp.waitForSelector(".dock-sheet .onboard-where button", { timeout: 20000 })
+	await sp.click('.dock-sheet .onboard-where button:text-is("Somewhere else")')
 	await sp.waitForSelector(".dock-sheet .onboard textarea", { timeout: 20000 })
 	await sp.fill(".dock-sheet .onboard textarea", "Aaron Judge\nTarik Skubal\nCal Raleigh")
 	await sp.click('.dock-sheet .onboard button:has-text("That\u2019s my team")')
@@ -1609,33 +1620,29 @@ clean("over the whole journey")
 
 /*
  * ═══════════════════════════════════════════════════════════════════════════════════
- * THE ONE PRESS IS A CONTROL, AND IT WAS A FOOTNOTE.
+ * THE PLATFORM IS ASKED FIRST, AND EVERY SCREEN OF THE WIZARD FITS A PHONE.
  *
- * The browser reader is the deepest thing this product does — one press turns a signed-in
- * Yahoo tab into a league, a roster, the seats, the opponent and nine pages of free agents,
- * and it is the only route that reaches a PRIVATE league without typing. It rendered as
- * `.as-link`: `--fs-2`, `--muted`, underlined, no border, floating ABOVE the heading, which
- * is the style this app uses for footnotes. Measured at 390x844 on a first visit with the
- * sheet open: the link's top was y=216, the first bordered control under it was the textarea
- * at y=360 and the `primary` was at y=539 — so a reader scanning for something to press met
- * the box first and the best route in the product read as small print over the question. The
- * A/B below, run by putting `.as-link` back, reported `{"border":0,"underlined":true,
- * "size":11,"boxSize":13}`: the deepest control in the app was two points SMALLER than the
- * box it is an alternative to.
+ * WHAT THIS BLOCK USED TO ASSERT, under the heading "THE ONE PRESS IS A CONTROL, AND IT WAS
+ * A FOOTNOTE": that "Read my Yahoo league for me" (`.onboard-offer button`) was on the
+ * first screen, in button chrome (border, no underline, at least the team box's font size
+ * — the A/B with `.as-link` put back measured 11px underlined against a 13px box), placed
+ * under "Who's on your team?" and above the team box; that nothing the sheet offered was
+ * under an 844px fold (the deleted "If your league pays differently" sentence had pushed
+ * "Load a file I saved" to y=876); and that pressing the offer opened `.connect` with its
+ * way back.
  *
- * It is a button in the app's own chrome now (1px border, no underline, at least the box's
- * own size) and it sits UNDER the question it answers, so the sheet reads question, one-press answer,
- * typed answer — the order of effort. The assertions below are about that ordering and
- * that chrome rather than about the label, because the label has already changed twice and
- * the defect was never the words.
+ * WHY IT MOVED. That button assumed Yahoo before the sheet had asked, above a box that
+ * assumed a team before it knew the platform. The wizard (src/client/Onboard.tsx) asks
+ * "Where's your league?" first and the Yahoo route is the Yahoo answer. The claims carry
+ * over as:
  *
- * AND EVERY OFFER IN IT IS ON SCREEN. The button costs 26px more than the link did, and the
- * pixels came from deleting "If your league pays differently, here is how to tell it." — a
- * 38px sentence sitting directly under the summary "My league scores differently" that said
- * the summary again in more words and left nothing to press. Measured at 390x844 with that
- * sentence in and the button already promoted: the last control the sheet offers ("Load a
- * file I saved") bottomed at y=876, 32px under an 844px fold, with no visible scrollbar (a
- * phone's is invisible) to say anything followed. Without it: y=834.
+ *  · The one press into a Yahoo league is still ONE tap from the first screen, and still a
+ *    control rather than a footnote: the platform answers are bordered, not underlined,
+ *    and larger than the one quiet link on that screen (the saved file).
+ *  · Ordering: the question, then the answers, then the file link.
+ *  · The fold: checked on EVERY step now, not only the first, because every step is a
+ *    screen a reader stands on.
+ *  · Pressing Yahoo opens the reader on the same sheet, with a way back and a way out.
  * ═══════════════════════════════════════════════════════════════════════════════════
  */
 {
@@ -1652,17 +1659,17 @@ clean("over the whole journey")
 	await op.waitForSelector("nav button", { timeout: 30000 })
 	await op.waitForSelector(".dock-bar button", { timeout: 30000 })
 	await op.waitForTimeout(1200)
-	/* ONE gesture from landing to the whole sheet. Counted rather than assumed, because the
-	   number of gestures to a usable recommendation is the thing this block is really about. */
+	/* ONE gesture from landing to the first question. */
 	if ((await op.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
 		await op.click(".dock-bar button")
-	await op.waitForSelector(".dock-sheet .onboard textarea", { timeout: 20000 })
+	await op.waitForSelector(".dock-sheet .onboard-where", { timeout: 20000 })
 
-	const offer = op.locator(".onboard-offer button").first()
-	t("the one press into a Yahoo league is offered on the first screen a stranger reaches",
-		(await offer.count()) === 1)
+	const yahoo = op.locator('.onboard-where button:text-is("Yahoo")')
+	t("the one press into a Yahoo league is the first answer on the first screen",
+		(await yahoo.count()) === 1 &&
+			(await op.$$eval(".onboard-where button", n => n[0]?.textContent.trim())) === "Yahoo")
 
-	const chrome = await offer.evaluate(b => {
+	const chrome = await yahoo.evaluate(b => {
 		const cs = getComputedStyle(b)
 		return {
 			border: parseFloat(cs.borderTopWidth),
@@ -1670,62 +1677,91 @@ clean("over the whole journey")
 			size: parseFloat(cs.fontSize)
 		}
 	})
-	const boxSize = await op.$eval(".onboard textarea", e => parseFloat(getComputedStyle(e).fontSize))
-	/* Not "is it styled nicely" — the claim is that it is not quieter than the thing it is an
-	   alternative to. `.as-link` measured 11px underlined with no border against a 13px box;
-	   anything that reads as a footnote again fails this. The sizes are compared rather than
-	   pinned because the root size settles as the webfont lands and an absolute px here would
-	   be a flake. */
-	t("…as a control rather than as a footnote beside the box it replaces",
-		chrome.border > 0 && !chrome.underlined && chrome.size >= boxSize,
-		JSON.stringify({ ...chrome, boxSize }))
+	const linkSize = await op.$eval(".onboard-file button", e => parseFloat(getComputedStyle(e).fontSize))
+	/* Compared rather than pinned, because the root size settles as the webfont lands. */
+	t("…as a control rather than as a footnote, larger than the one quiet link",
+		chrome.border > 0 && !chrome.underlined && chrome.size > linkSize,
+		JSON.stringify({ ...chrome, linkSize }))
 
-	t("…under the question it answers, and above the box that is the slower answer",
+	t("…under the question, with the saved-file link after every answer",
 		await op.evaluate(() => {
 			const h2 = document.querySelector(".dock-sheet .onboard h2")
-			const b = document.querySelector(".onboard-offer button")
-			const box = document.querySelector('textarea[data-ctl="onboard-team"]')
+			const answers = [...document.querySelectorAll(".onboard-where button")]
+			const file = document.querySelector(".onboard-file button")
 			const after = (a, z) => !!(a.compareDocumentPosition(z) & Node.DOCUMENT_POSITION_FOLLOWING)
-			return !!h2 && !!b && !!box && after(h2, b) && after(b, box)
+			return !!h2 && answers.length === 3 && !!file &&
+				after(h2, answers[0]) && after(answers[2], file)
 		}))
 
 	/*
-	 * EVERY WAY FORWARD ON SCREEN, WITHOUT A GESTURE.
+	 * EVERY WAY FORWARD ON SCREEN, WITHOUT A GESTURE — on every step.
 	 *
-	 * The sheet is capped at min(70vh,620px) and has overflowed it twice before — 998px of
-	 * content in a 590px box with the third question 101px under, and a finish button 646px
-	 * down a 590px box. Both are recorded in src/client/Onboard.tsx. A phone's scrollbar is
-	 * invisible, so an overflowing sheet does not look like one: it looks like a sheet whose
-	 * last offer is the last offer there is.
+	 * The sheet is capped and has overflowed it three times before — 998px of content with
+	 * the third question 101px under, a finish button 646px down a 590px box, and "Load a
+	 * file I saved" at y=876. A phone's scrollbar is invisible, so an overflowing sheet looks
+	 * like a sheet whose last offer is the last offer there is. Measured against the fold,
+	 * not the scroll box: "fits its box" once passed on a sheet whose last control was 32px
+	 * off the bottom of the phone.
 	 */
-	const clipped = await op.evaluate(() => {
+	const clipped = () => op.evaluate(() => {
 		const sheet = document.querySelector(".dock-sheet")
 		const out = []
 		for (const el of sheet.querySelectorAll("button, a[href], input, textarea, summary")) {
 			const r = el.getBoundingClientRect()
 			if (!r.width || !r.height) continue
-			if (r.bottom > innerHeight) out.push(`${el.tagName}.${el.className} bottom=${Math.round(r.bottom)}`)
+			if (r.bottom > innerHeight) out.push(`${el.tagName}.${el.className} "${el.textContent.trim().slice(0, 24)}" bottom=${Math.round(r.bottom)}`)
 		}
 		return out
 	})
-	/* THE FOLD, NOT THE SCROLL BOX. A second assertion sat here comparing `.dock-sheet`'s
-	   scrollHeight against its own height, on the reasoning that a sheet which fits cannot
-	   clip. It was measured against the defect by putting the deleted paragraph back, and it
-	   PASSED while this one failed with `BUTTON bottom=876` — the sheet's box is capped at
-	   min(70vh,620px) and simply grew with its content, so "fits its box" was true of a sheet
-	   whose last control was 32px off the bottom of the phone. It is gone rather than kept as
-	   a second opinion: an assertion that passes on the bug is a claim nobody is making. */
-	t("and nothing the sheet offers is under the fold on a 390x844 phone",
-		clipped.length === 0, clipped.join(" | "))
+	const back = () => op.click(".dock-sheet .onboard-back button")
+	const where = await clipped()
+	t("nothing the first screen offers is under the fold on a 390x844 phone",
+		where.length === 0, where.join(" | "))
+	await op.click('.onboard-where button:text-is("ESPN")')
+	const espn = await clipped()
+	t("…nor on the ESPN screen", espn.length === 0, espn.join(" | "))
+	await back()
+	await op.click('.onboard-where button:text-is("Somewhere else")')
+	const team = await clipped()
+	t("…nor on the team screen", team.length === 0, team.join(" | "))
+	await back()
 
-	/* And the route the button names really is the walkthrough, one press in — not a
-	   navigation to a different screen, which is what every other "add your players" offer in
-	   this app used to be. */
-	await offer.click()
+	/* The route the answer names really is the reader, one press in, on the same sheet. */
+	await yahoo.click()
 	await op.waitForSelector(".connect", { timeout: 15000 })
-	t("pressing it opens the reader on the same sheet, with the way back on it",
+	const reader = await clipped()
+	t("…nor on the Yahoo reader's screen", reader.length === 0, reader.join(" | "))
+	t("pressing Yahoo opens the reader on the same sheet, with the way back and the way out on it",
 		(await op.locator(".connect").count()) === 1 &&
+			(await op.locator(".dock-sheet .onboard-back button").count()) === 1 &&
 			(await op.locator(".connect-back button").count()) === 1)
+
+	/* THE TEAM COUNT'S OWN STEP, under the same fold rule. Before, the count chips and the
+	   finish were drawn UNDER the team box once a team was read, so "…nor on the team screen"
+	   above covered them only as part of that screen (and only before a read, when they were
+	   not there yet). They are a step of their own now (src/client/Onboard.tsx), so the claim
+	   moves with them: the team screen after a read, and the count screen, each fit a phone —
+	   and the count screen is one question, not the team screen with a question added. */
+	await op.click(".connect-back button")
+	await op.waitForSelector("[data-ctl=onboard-team]", { timeout: 10000 })
+	const names = await op.getAttribute("[data-ctl=onboard-team]", "placeholder")
+	await op.fill("[data-ctl=onboard-team]", names)
+	await op.click(".onboard-go button")
+	await op.waitForSelector(".onboard-got", { timeout: 20000 })
+	const read = await clipped()
+	t("…nor on the team screen once the team is read", read.length === 0, read.join(" | "))
+	t("…which offers Next, and asks nothing about the league's size",
+		(await op.locator(".onboard-next button").count()) === 1 &&
+			(await op.locator(".onboard-teams").count()) === 0)
+	await op.click(".onboard-next button")
+	await op.waitForSelector(".onboard-teams", { timeout: 10000 })
+	const teams = await clipped()
+	t("…nor on the team-count screen", teams.length === 0, teams.join(" | "))
+	t("…which is that one question, with no team box on it",
+		(await op.textContent(".dock-sheet .onboard h2")) === "How many teams are in your league?" &&
+			(await op.locator("[data-ctl=onboard-team]").count()) === 0 &&
+			(await op.locator(".onboard-teams .chip-btn").count()) === 5,
+		await op.textContent(".dock-sheet .onboard h2"))
 	await op.close()
 }
 

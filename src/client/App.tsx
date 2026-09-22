@@ -25,7 +25,6 @@ import { pool as poolStore, since, type StoredPool } from "./pool.ts"
 import {
 	EligibilityPanel,
 	freshness,
-	purpose,
 	VIEW_HASH,
 	viewFromHash,
 	isPreset,
@@ -1012,10 +1011,6 @@ export const App = () => {
 				<Setup
 					leagueKey={key}
 					league={league ?? null}
-					canImport={getMode() !== "static"}
-					preset={preset?.label ?? null}
-					onUsePreset={preset ? () => void create(preset.key) : undefined}
-					onLoadFile={() => openPicker.current?.()}
 					onOpenSetup={view === "trade" ? undefined : () => go({ view: "trade" })}
 				/>
 			)}
@@ -1120,9 +1115,11 @@ export const App = () => {
 					  Measured cost for the same pattern on Pickups: 113px at 390x844 and 75px at
 					  1280x1000, with that screen's answer card still whole above the fold.
 					*/}
-					<div className="full">
-						<p className="sub board-intro">{purpose("board")}</p>
-					</div>
+					{/* REMOVED 2026-09-22, and everything above this line is the history of why it
+					    was added. The owner's rule is that UI text instructs and never explains the
+					    app, and this was the screen describing itself — 22 words, 44px at 390x844,
+					    between the tab bar and the first card. The tab says "Tonight"; the card under
+					    it asks the one question the screen exists to answer. */}
 					{/*
 					  LAST NIGHT SITS ABOVE TONIGHT, and the order is the argument.
 					  
@@ -1221,9 +1218,9 @@ export const App = () => {
 						{/* The third of the three, for the same reason — and it is the longest and
 						    says the thing nothing else on any screen says: everything the other two
 						    screens tell you is priced in these values. */}
-						<div className="full">
-							<p className="sub board-intro">{purpose("trade")}</p>
-						</div>
+						{/* REMOVED 2026-09-22: "Everything the other two screens say is priced in
+						    these" is the app explaining itself, which the owner has ruled out of UI
+						    text. 26 words at 390x844, above the first control on My league. */}
 						{/*
 						  No `key={wireKey}` here, and that is the point.
 						  
@@ -1394,7 +1391,11 @@ export const App = () => {
 						     privacy line moved inside the sheet, next to the box he types his team
 						     into, which is where that question is actually asked.
 						   */
-							<>Tell it who&rsquo;s on your team and it will tell you who to start tonight.</>
+							/* AND NOW AN INSTRUCTION. "Tell it who's on your team and it will tell you who
+							   to start tonight" was a benefit pitch — the app describing what it does —
+							   beside a button whose label already asks for the team. The sheet that
+							   button opens asks the platform first, so the line says that step. */
+							<>Start with your league.</>
 					}
 				>
 <Onboard
@@ -2198,7 +2199,15 @@ const WireChip = ({
 			   button leads to, and My league now prints where the taken/free line falls and in
 			   which league, in text, under the lineup it applies to. */
 		>
-			free agents <b>estimated</b> &mdash; make it exact
+			{/* ONE ACTION, SAID AS ONE. This read "free agents estimated — make it exact": a
+			    status, a dash, and an option, on the one control in the masthead row. The owner
+			    named exactly that shape — a chip that is really a call to action with an option in
+			    it — as the pattern to remove. What the chip is FOR is the action: the fact that
+			    availability is an estimate is already printed where it is used (the "estimated"
+			    mark on Pickups' "Only players I can add", the estimate line on Tonight). So it is
+			    now an imperative, and it keeps the word "estimated" because it is the object of
+			    the verb, not a second message. 42 characters became 25. */}
+			Fix estimated free agents
 		</button>
 	)
 }
@@ -2714,10 +2723,11 @@ const LeagueEditor = ({
 					    thinner the free-agent pool") restated the second in the abstract — it
 					    is the same fact about replacement level, told twice, above a field with
 					    one number in it. 31 words became 20, and the card 200px became 178. */}
-					<p className="sub">
-						Every player here is measured against whoever is left at his position once
-						every team has filled it. Nothing is ranked until this is set.
-					</p>
+					{/* AND NOW NONE. 20 words of why the team count matters is the app explaining
+					    its own arithmetic, which the owner has ruled out of UI text. The field's own
+					    label ("teams") is the instruction; a league without it is named, with the
+					    fix, by the Setup card and the Tonight card, which is where a reader who has
+					    not set it is actually stopped. */}
 					<TeamCountInput
 						value={draft.meta.max_teams}
 						onReject={onError}
@@ -2776,7 +2786,8 @@ const LeagueEditor = ({
 			<div className="grid">
 				<section className="card">
 					<h2>Batting</h2>
-					<p className="sub">Points per stat, as scored by this league.</p>
+					{/* "Points per stat, as scored by this league." cut 2026-09-22: it restated the
+					    heading and the table, and explained rather than instructed. */}
 					<StatTable
 						table={draft.scoring.batting}
 						side="batting"
@@ -2788,7 +2799,7 @@ const LeagueEditor = ({
 
 				<section className="card">
 					<h2>Pitching</h2>
-					<p className="sub">Negative values are penalties.</p>
+					{/* "Negative values are penalties." cut 2026-09-22: a minus sign already says it. */}
 					<StatTable
 						table={draft.scoring.pitching}
 						side="pitching"

@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
-import { leagueFromPastedSettings } from "../data/paste-settings.ts"
 import { rosterFromPaste, type PastedRoster } from "../data/paste.ts"
 import { lineupStore } from "./lineup.ts"
 import { roster } from "./roster.ts"
-import { isPreset, leagueGaps, tab } from "./panels.tsx"
-import { typingStore, type Box } from "./typing.ts"
-import { Connect, browserOf, takesExtension } from "./Connect.tsx"
-import { extensionHere, useExtension } from "./extension.ts"
+import { isPreset, leagueGaps } from "./panels.tsx"
+import { typingStore } from "./typing.ts"
+import { Connect, browserOf, readsHere } from "./Connect.tsx"
+import { useExtension } from "./extension.ts"
 import { readGrabs } from "../data/yahoo-read.ts"
 import { knownTeamId, refreshPool } from "./read-yahoo.ts"
 import { pool as poolStore } from "./pool.ts"
@@ -16,38 +15,61 @@ import { opponentStore } from "./opponent.ts"
 import type { GrabFailure } from "../data/extension.ts"
 
 /**
- * The first thing a stranger sees.
+ * The first thing a stranger sees: a wizard, one question per screen, platform first.
  *
- * What used to be here was a league: `public/scoring.json` shipped one real Yahoo
- * league — somebody's own team, with his scoring and his roster slots — and every
- * first visit was seeded from it. It ranked immediately, which looked like the app
- * working, and every number on the screen was denominated in a stranger's points.
- * The page carried a notice saying so, which is the tell: a product that has to
- * explain that its main screen is not about you is showing the wrong screen.
+ * WHAT THIS WAS, measured 2026-09-22 on the published build at 390x844 by a stranger with
+ * no league. The sheet opened on "Who's on your team?" — asking for the TEAM before it knew
+ * the PLATFORM — and then offered three routes at once: a "Read my Yahoo league for me"
+ * button that assumed Yahoo, a box to paste a roster page into, and the same box to type
+ * names into. Under that a privacy paragraph, "Only got a few? Start with your starters",
+ * and a fold titled "My league scores differently", which is where the platform question
+ * actually lived — under a paragraph explaining the app ("The board behind this runs on one
+ * real league's values..."). Inside the fold: Yahoo/ESPN/Somewhere else chips, a
+ * Ctrl+A/Ctrl+C settings-page routine, "Or type the values in myself", and "Load a file I
+ * saved". First screen: 79 words, 4 controls, 583px. With the fold open and Yahoo chosen:
+ * 137 words, 11 controls, 1,051px in a sheet capped at 590. The Yahoo reader walkthrough on
+ * its own: 216 words, 1,246px. The owner's word for it was "the epitome of bloat and
+ * confusion", and every number above agrees with him.
  *
- * So the seed is gone and this is what a first visit gets instead. It asks for the
- * three inputs the engine cannot proceed without — what each stat is worth, how
- * many roster slots, how many teams — and it asks for them in the order that gets
- * a Yahoo user to a real board fastest, which is by pasting a page rather than by
- * typing seventeen point values in.
+ * WHAT IT IS NOW. Five screens, and the reader sees two or three of them:
  *
- * The order of the routes is not arbitrary and is not a matter of taste:
+ *  · "where" — Yahoo, ESPN, Somewhere else. Three buttons and nothing else, except a
+ *    small link to load a saved file, which stays because it is the ONLY door a saved
+ *    league has back into a browser that holds nothing (App's toolbar is hidden while
+ *    this sheet is up).
+ *  · "yahoo" — the browser reader, which is the one route that gets a Yahoo league in
+ *    without typing. Only where the reader can actually be installed (`readsHere`):
+ *    anywhere else Yahoo goes straight to "team", and nothing says why, because a
+ *    sentence about what a reader's phone lacks is an explanation, not an instruction.
+ *  · "espn" — one address box. ESPN publishes a public league's settings to any page
+ *    that asks, so the whole setup is a link.
+ *  · "team" — type the players. Every platform ends here if its own route fails, and
+ *    "Somewhere else" starts here, because it is the route that works everywhere.
+ *  · "teams" — how many teams, and only when the league does not already say (`asksTeams`).
+ *    It was drawn under the team box once the team was read, and that screen then held
+ *    four things at once: "Replace my team", the "Did you mean" chips, the count chips and
+ *    the finish. The chips that correct the TEAM stay with the team; the count is its own
+ *    screen, reached by "Next", and the finish is on it.
  *
- *  · PASTE first, on every platform. Yahoo sends no `access-control-allow-origin`
- *    on any page, so no browser will ever be handed one, and — measured 2026-09-09
- *    — a server asking for it is told "Request denied". The reader's own signed-in
- *    browser is the one program in the world that can see that page, and Ctrl-A is
- *    the way out of it. It also works on a PRIVATE league, which is most leagues,
- *    and which nothing else here has ever reached.
- *  · URL second, and only where it is true. ESPN reflects our origin, so the page
- *    reads it directly; with a server behind us Yahoo can be scraped, sometimes.
- *  · The preset is not offered as a button at all any more. It is what the board
- *    behind this sheet is already running, labelled, and typing a team adopts it —
- *    so a reader never chooses it, he only ever reads that he has it.
- *  · By hand last, because it works everywhere and costs the most.
+ * ONE PATH PER PLATFORM, and the alternatives were deleted rather than folded. The
+ * settings-page paste was the richest route (it reads scoring, slots and team count off a
+ * page) and it was also a Ctrl+A instruction no phone can follow, sitting beside a reader
+ * that reads the same page in one press. Its PARSER stays — src/data/paste-settings.ts is
+ * what the browser reader hands Yahoo's settings page to, via `readGrabs` — only the box
+ * that exposed it here is gone. A league whose scoring the preset does not match has NO
+ * door from this sheet: the "missing" line under the finish links to My league only when
+ * `leagueGaps` finds a value with no answer, and a preset has an answer for every one — it
+ * is borrowed, not blank. A reader who adopted the preset (typing his team does) and scores
+ * differently changes the values on My league, reached from the app's own navigation once
+ * the sheet is closed. (This comment used to claim the "missing" line was that door.)
  *
- * Every one of them ends in the same place: a league in this browser, and a board
- * ranked in its points.
+ * EVERY SCREEN BUT THE FIRST HAS A WAY BACK to the first, at the top, because the answer
+ * to "where" is the one a reader most often gets wrong (a Yahoo reader on a phone, an
+ * ESPN reader with a private league) and the cost of that mistake must be one tap.
+ *
+ * UI TEXT INSTRUCTS AND NOTHING ELSE. Every string on these screens is an imperative or a
+ * label, under a dozen words. The arguments for each choice live here, in comments, where
+ * the next person to change the screen will read them and the reader never has to.
  */
 
 /** Four real men, so the box shows the shape of an answer rather than describing it.
@@ -68,50 +90,25 @@ const poolAt = (leagueKey: string): string | null => {
 	}
 }
 
+/** The platform a league was created for. Part of `onCreateLeague`'s signature, which
+ *  App.tsx implements, so it keeps its three members even though only "yahoo" is passed
+ *  from this file now (the settings paste that passed the other two is gone). */
 type Where = "yahoo" | "espn" | "custom"
 
-const WHERE: { id: Where; label: string; note: string }[] = [
-	{ id: "yahoo", label: "Yahoo", note: "Head-to-head points, roto or categories" },
-	{ id: "espn", label: "ESPN", note: "Can also be read straight from its URL" },
-	{ id: "custom", label: "Somewhere else", note: "CBS, Fantrax, Ottoneu, a home league" }
-]
-
-/** Where each platform prints the page this asks for. Named per platform because
- *  "your settings page" is the step people get stuck on, and it is called
- *  something different everywhere. */
-const SETTINGS_PAGE: Record<Where, React.ReactNode> = {
-	yahoo: (
-		<>
-			your league&rsquo;s <b>Settings</b> page — <b>League</b> → <b>Settings</b>, or
-			add <code>/settings</code> to your league&rsquo;s URL
-		</>
-	),
-	espn: (
-		<>
-			your league&rsquo;s <b>Settings</b> page — <b>LEAGUE</b> → <b>League Settings</b>{" "}
-			→ <b>Scoring</b>
-		</>
-	),
-	custom: (
-		<>
-			whichever page states your league&rsquo;s scoring — usually <b>Settings</b>,{" "}
-			<b>Rules</b> or <b>Scoring</b>
-		</>
-	)
-}
+/** The screens, in the order a reader can meet them. "where" is always first on a fresh
+ *  sheet; "Somewhere else" has no screen of its own because its route IS "team". */
+type Step = "where" | "yahoo" | "espn" | "team" | "teams"
 
 export const Onboard = ({
 	snapshot,
 	leagueKey,
 	league,
-	canImport,
 	openConnect = false,
 	onCreateLeague,
 	onAdoptPreset,
 	onTeamCount,
 	onAddSuggested,
 	onImportUrl,
-	onLoadFile,
 	onOpenSetup,
 	onDone
 }: {
@@ -121,9 +118,12 @@ export const Onboard = ({
 	leagueKey: string | null
 	league: League | null
 	/** Whether a league can be read from wherever this page is running: true with a
-	 *  server behind it, and on the static build true for ESPN alone. */
+	 *  server behind it, and on the static build true for ESPN alone. Unused since the
+	 *  wizard: the one URL route left is ESPN's, which reads from the browser on every
+	 *  build, and the generic "read it from that address" box that this gated is gone.
+	 *  Kept because App.tsx passes it and owns the interface. */
 	canImport: boolean
-	/** Another screen asked for the install walkthrough rather than the paste box — see
+	/** Another screen asked for the Yahoo reader rather than the first question — see
 	 *  `onConnect` in src/client/Trade.tsx, which is the screen a reader with a league is
 	 *  standing on and the one place the reader was never offered. */
 	openConnect?: boolean
@@ -132,65 +132,40 @@ export const Onboard = ({
 	 *  and returns its key. Called at the moment he first writes something of his own:
 	 *  before that there is nothing to attach it to. */
 	onAdoptPreset: () => string | null
-	/** Whether this league's lineup can be changed daily. Only the reader knows — no
-	 *  platform preset can say, because one platform hosts both kinds. */
 	/** Accept one "did you mean" — the reader has read the name and tapped it, which is
-	 *  the only way a suggestion is ever allowed to become a roster entry. */
-	/** Resolves true only when the man actually landed in a league's roster. The chip
+	 *  the only way a suggestion is ever allowed to become a roster entry.
+	 *  Resolves true only when the man actually landed in a league's roster. The chip
 	 *  below must not cross itself off on a failure — see the note at the call site. */
 	onAddSuggested: (id: number, group: "hitting" | "pitching", name: string) => Promise<boolean>
-	/** How many teams this league has. It is the second and last question, because the
-	 *  bar every player is measured against is the (teams x seats)-th best man — so the
-	 *  count moves every row on the board. */
+	/** How many teams this league has. The bar every player is measured against is the
+	 *  (teams x seats)-th best man, so the count moves every row on the board. */
 	onTeamCount: (teams: number) => void
 	onImportUrl: (url: string) => void
 	onLoadFile: () => void
 	onOpenSetup: () => void
 	onDone: () => void
 }) => {
-	const [where, setWhere] = useState<Where | null>(null)
-	/*
-	  TWO MODES IN ONE CARD, never both at once.
-	
-	  The sheet is capped at `min(70vh,620px)` — 590px on a 390px phone — and this file
-	  already carries two notes about content that overflowed it: 998px of card with the
-	  third question 101px below the fold, and a finish button 646px down a 590px box. A
-	  three-step walkthrough is another ~450px, so stacking it above "Who's on your team?"
-	  would rebuild the exact defect twice recorded here. It replaces the body instead, and
-	  the way back is a line at the foot of it.
-	*/
 	const ext = useExtension()
-	/*
-	  A READER WHO ALREADY HAS IT LANDS ON THE BUTTON, not on the box.
-	
-	  The default sheet asks him to type his team in, which is the right question for every
-	  reader who cannot have it read for him — and the wrong one for a reader whose browser
-	  is sitting there able to do it in one press. Opening in connect mode is only done when
-	  BOTH are true: the reader is there, and there is no team stored yet. With a team
-	  already in, the sheet opens where it always did, because he came back to change
-	  something rather than to be onboarded again.
-	
-	  `extensionHere()` rather than the hook's `present`, because this decides the FIRST
-	  render: the hook's state arrives a tick later, and a sheet that opens on the box and
-	  then jumps to the walkthrough is worse than either.
-	*/
-	const [connecting, setConnecting] = useState(() => {
-		/* `roster.of` THROWS on a damaged store, on purpose — a roster is typed in by hand
-		   and must never be silently treated as empty. A throw in this initialiser would
-		   blank the whole sheet, so the question it is asked here ("has he got a team yet")
-		   degrades to "assume he has", which opens the sheet exactly where it always did. */
-		try {
-			return extensionHere() && !(leagueKey ? roster.of(leagueKey).length : 0)
-		} catch {
-			return false
-		}
-	})
-	/* Opened straight onto the walkthrough when another screen asked for it — see `onConnect`
-	   in src/client/Trade.tsx. An effect rather than the initialiser above, because this sheet
-	   is mounted once and hidden while closed (closing it must not discard what he typed), so
-	   a lazy initial value would only ever be read at app start. */
+	/** Whether this browser can run the Yahoo reader AND has somewhere to get it from. A
+	 *  Yahoo reader for whom this is false is sent straight to typing his team. */
+	const reads = readsHere(browserOf())
+	/** Where the reader is. The Yahoo answer resolves to "team" wherever the reader cannot
+	 *  be installed, so no screen is ever drawn that only says it cannot help. */
+	/* A sheet with a half-typed team in it is not a fresh sheet: the draft is kept in the
+	   browser precisely so that Escape, Back and a reload do not cost him the typing (see
+	   src/client/typing.ts), and reopening onto "Where's your league?" would hide the box
+	   that holds it one screen away. So a draft reopens on the team step; everything else
+	   opens on the platform question. */
+	const [step, setStep] = useState<Step>(() =>
+		typingStore.of(leagueKey, "team").trim() ? "team" : "where"
+	)
+	const yahoo = (): Step => (reads ? "yahoo" : "team")
+	/* Opened straight onto the reader when another screen asked for it — see `onConnect`
+	   in src/client/Trade.tsx. An effect rather than the initialiser, because this sheet is
+	   mounted once and hidden while closed (closing it must not discard what he typed), so a
+	   lazy initial value would only ever be read at app start. */
 	useEffect(() => {
-		if (openConnect) setConnecting(true)
+		if (openConnect) setStep(yahoo())
 	}, [openConnect])
 	const [readFailure, setReadFailure] = useState<GrabFailure | null>(null)
 	const [receipt, setReceipt] = useState<{ league: string | null; free: number | null; at: string | null }>({
@@ -199,24 +174,20 @@ export const Onboard = ({
 		at: null
 	})
 	/*
-	  THE TWO BOXES SURVIVE THE SHEET BEING CLOSED, and they did not.
-	  
+	  THE BOX SURVIVES THE SHEET BEING CLOSED.
+
 	  This sheet is mounted by App as `{docked && <Dock>}`, and closing it with a league in
-	  existence — which there is, from the moment a first visit adopts the borrowed one —
-	  takes `docked` false and unmounts everything here. Escape is the gesture a phone
-	  keyboard teaches, and it was throwing away eighteen typed lines. The text is kept in
-	  the browser as it is typed instead, so it survives Escape, Back, a tab press and a
+	  existence takes `docked` false and unmounts everything here. Escape is the gesture a
+	  phone keyboard teaches, and it was throwing away eighteen typed lines. The text is kept
+	  in the browser as it is typed instead, so it survives Escape, Back, a tab press and a
 	  reloaded phone. See src/client/typing.ts for why the draft rather than the component.
 	*/
-	const draft = (box: Box): ((t: string) => void) => t => typingStore.set(leagueKey, box, t)
-	const [pasted, setPasted] = useState(() => typingStore.of(leagueKey, "settings"))
 	const [note, setNote] = useState<string | null>(null)
 	const [url, setUrl] = useState("")
 	const [team, setTeam] = useState(() => typingStore.of(leagueKey, "team"))
 	const [teamNote, setTeamNote] = useState<string | null>(null)
-	/** How many men this league already holds, read rather than inferred: the copy under the
-	 *  box changes on it, and a count the page guesses at is the kind of sentence this app is
-	 *  not allowed to write. Forgiving, because a damaged roster store is My league's to
+	/** How many men this league already holds, read rather than inferred: the button under
+	 *  the box changes on it. Forgiving, because a damaged roster store is My league's to
 	 *  explain and this box still has to work. */
 	const held = (() => {
 		try {
@@ -232,24 +203,16 @@ export const Onboard = ({
 	 *  not sit there inviting a second tap that would do nothing. */
 	const [added, setAdded] = useState<number[]>([])
 
-	/** Everything the sheet still wants. The lock is the one that decides whether Tonight
-	 *  is a list of changes or a plan for the period, so it is what "done" means here. */
 	/*
-	   WHAT "ANSWERED" MEANT, AND WHAT IT MEANS NOW.
-	
-	   It was `!!league?.scoring_period?.lineup_lock` — the third question, "can you change
-	   your lineup every day?", which was REMOVED from this sheet (see the note where it used
-	   to be). Nothing set that field afterwards on the ordinary first visit, so the condition
-	   was permanently false and the finish was never pinned: measured at 390x844 immediately
-	   after "That's my team", the team-count chips sat at y=850, six pixels under the fold,
-	   and "Show me tonight" 172px under that, with nothing scrolling and nothing pinned. A
-	   condition that outlives the question it was about is worse than no condition, because it
-	   reads as deliberate.
-	
-	   The last question left is the team count, and it is PRE-FILLED — ten, Yahoo's own
-	   default, said on the screen to be a guess. So "answered" is now about the reader rather
-	   than about the data: once he has touched it there is nothing left below the button, and
-	   pinning it is what the note below argues for.
+	   WHAT "ANSWERED" MEANS.
+
+	   The last question on the sheet is the team count, and it is PRE-FILLED — ten, Yahoo's
+	   own default. So "answered" is about the reader rather than about the data: once he has
+	   touched it there is nothing left below the finish, and pinning it is what the note on
+	   `.onboard-foot` argues for. (It used to be `!!league?.scoring_period?.lineup_lock`, the
+	   answer to a question this sheet stopped asking, which left the finish permanently
+	   unpinned — measured at 390x844, the chips six pixels under the fold and "Show me
+	   tonight" 172px under that.)
 	*/
 	const [teamsAnswered, setTeamsAnswered] = useState(false)
 
@@ -258,38 +221,59 @@ export const Onboard = ({
 
 	   Yahoo prints "Max Teams" on the settings page and every press of the reader fetches
 	   that page, so a reader with the add-on installed is being asked for a number that is
-	   two requests away and that he has already given the app permission to go and read.
-	   Where the press is available it is offered INSTEAD of the chips, and where it is not
-	   — no add-on, or a press already made that came back without the row — the chips are
-	   exactly what they were.
-
-	   `readTried` is the whole fallback. A settings page that is not what we think (label
-	   renamed, value non-numeric, scoring missing so `leagueFromPastedSettings` returns no
-	   league) leaves `max_teams` null, so the question would otherwise offer the same press
-	   for ever. One press, then the chips.
+	   two requests away. Where the press is available it is offered INSTEAD of the chips,
+	   and where it is not — no add-on, or a press already made that came back without the
+	   row — the chips are exactly what they were. `readTried` is the whole fallback: one
+	   press, then the chips.
 	*/
 	const [readTried, setReadTried] = useState(false)
+	/** The step "teams" was reached from, so its Back returns there — the team box, or the
+	 *  Yahoo reader whose read came back without the count. */
+	const [teamsFrom, setTeamsFrom] = useState<Step>("team")
+	/*
+	   A PRIVATE ESPN LEAGUE, SAID ON THE ESPN SCREEN AS AN INSTRUCTION.
+
+	   `onImportUrl` returns nothing, and the failure it produces is App's `run` putting the
+	   ImportError's text in the toast: "ESPN returned HTTP 401 for league X: that league is
+	   not publicly viewable, and reading a private one would need your ESPN cookies." (from
+	   src/import.ts). That sentence explains; the screen the reader is standing on should
+	   instruct, and the instruction is the link already on it. Neither App's interface nor
+	   import.ts is this file's to change, so the sheet reads what reaches the page: App's
+	   always-mounted live region (`role="status"`), watched only between a press and the
+	   next edit of the address. 401 and 403 are the two statuses import.ts words as "not
+	   publicly viewable", and the match is on that phrase or on those statuses together
+	   with "ESPN", so a toast about something else cannot trip it.
+	*/
+	const [espnAsked, setEspnAsked] = useState(false)
+	const [espnPrivate, setEspnPrivate] = useState(false)
+	useEffect(() => {
+		if (!espnAsked) return
+		const region = document.querySelector('[role="status"]')
+		if (!region) return
+		const check = () => {
+			const said = region.textContent ?? ""
+			if (/not publicly viewable|ESPN returned HTTP 40[13]\b/i.test(said)) setEspnPrivate(true)
+		}
+		/* No check on arming: a bad toast lives 6.5s, so a press on a NEW address inside that
+		   window read the old league's refusal and called the new one private before its read
+		   had answered. Only a change to the region, made after the press, is this press's. */
+		const watch = new MutationObserver(check)
+		watch.observe(region, { childList: true, characterData: true, subtree: true })
+		return () => watch.disconnect()
+	}, [espnAsked])
 	const asksTeams = !!league && (league.meta.max_teams === null || isPreset(league))
 	const offerPress = asksTeams && ext.present && !readTried
 
-	/* Nothing below the button to answer means the button is the finish, and pinning it is
-	   what the note above argues for. A league that has said its own size never asks. */
 	const answered = !asksTeams || teamsAnswered
 
 	/*
 	   THE MOMENT A LEAGUE APPEARS, THE REST OF THE SHEET IS BELOW THE FOLD.
-	
+
 	   Pressing "That's my team" replaces the question he answered with two things he has not
-	   seen: the team count, and the button that ends setup. Measured at 390x844 they land at
-	   y=850 and y=1016 against an 844px screen — six pixels and 172 pixels under — and the
-	   sheet does not move. The page behind it scrolls normally and the sheet's own scrollbar
-	   is a phone's, which is to say invisible, so there is nothing on screen to suggest that
-	   anything follows. One wheel gesture reveals both, which is the whole distance between
-	   this working and not.
-	
-	   So the sheet brings them to him, once, on the transition. `block: "nearest"` scrolls the
-	   least that will do — a reader on a desktop where both are already visible sees nothing
-	   move, which is the correct amount of movement.
+	   seen: the team count, and the button that ends setup. Measured at 390x844 they landed at
+	   y=850 and y=1016 against an 844px screen and the sheet did not move; a phone draws no
+	   scrollbar, so nothing said anything followed. So the sheet brings them to him, once, on
+	   the transition. `block: "nearest"` scrolls the least that will do.
 	*/
 	const rest = useRef<HTMLDivElement | null>(null)
 	const had = useRef(false)
@@ -300,60 +284,11 @@ export const Onboard = ({
 		}
 		if (had.current) return
 		had.current = true
-		/* Not smooth: this is orientation, not decoration, and `prefers-reduced-motion` is a
-		   request not to animate rather than a request not to arrive. */
 		rest.current?.scrollIntoView({ block: "nearest" })
 	}, [league])
 	const gaps = league ? leagueGaps(league) : []
 	const missing = gaps.filter(g => g.have === null)
 	const ready = !!league && missing.length === 0
-
-	/**
-	 * Read the settings page out of whatever was pasted.
-	 *
-	 * A page with no stat table on it is not a settings page, and the honest answer
-	 * is to say which page to open rather than to store an empty league that ranks
-	 * nothing and looks configured.
-	 */
-	const readSettings = () => {
-		if (!where) return
-		const { league: made, read } = leagueFromPastedSettings(pasted, where)
-		if (!made) {
-			setNote(
-				`No scoring table in that. Open ` +
-					`the page that lists what each stat is worth, select all of it, and paste ` +
-					`again.` +
-					(read.slots ? ` (The roster slots WERE in that paste, so it is close.)` : "")
-			)
-			return
-		}
-		const stats =
-			Object.keys(made.scoring.batting).length + Object.keys(made.scoring.pitching).length
-		const seats = Object.values(made.roster.slots).reduce((a, b) => a + b, 0)
-		onCreateLeague(where, made)
-		setPasted("")
-		/* Read into a league, so the draft goes with it: a box that re-offers text the app
-		   has already acted on invites the reader to send it twice. */
-		typingStore.clear(leagueKey, "settings")
-		setNote(
-			`Read ${stats} scored stats` +
-				(seats ? `, ${seats} roster seats` : "") +
-				(made.meta.max_teams ? ` and ${made.meta.max_teams} teams` : "") +
-				`. ` +
-				/* Two different shortfalls and two different sentences. A missing scoring table is
-				   fixed by filling the form in below; a row whose value would not parse is on his
-				   settings page and no form here can supply it, so "fill those in below" pointed
-				   at a form that had nothing to fill — `leagueGaps` returns no gap for it, and the
-				   finish button sat enabled beside the instruction. */
-				(read.missing.length ?
-					`It carried no ${read.missing.join(" and no ")} — fill those in below and the board can rank.`
-				: read.unpriced.length ?
-					`${read.unpriced.join(", ")} ${read.unpriced.length === 1 ? "is" : "are"} on that page and ` +
-					`the value could not be read, so ${read.unpriced.length === 1 ? "it scores" : "they score"} ` +
-					`nothing — worth checking in My league.`
-				:	`That is everything the board needs.`)
-		)
-	}
 
 	/**
 	 * THE ONE PRESS.
@@ -410,10 +345,9 @@ export const Onboard = ({
 			teamId: knownTeamId(leagueKey) ?? undefined
 		})
 		if (reading.league && reading.leagueKey) {
-			/* `onCreateLeague` is what the paste route calls, so an extension read lands in
-			   exactly the same place a pasted settings page does, with the same validation
-			   and the same provenance rules. The extension is a way of getting the page, not
-			   a second way of having a league. */
+			/* `onCreateLeague` is the one door a league comes in by, so an extension read
+			   lands with the same validation and provenance rules as every other route. The
+			   extension is a way of getting the page, not a second way of having a league. */
 			onCreateLeague("yahoo", reading.league)
 		}
 		const key = reading.leagueKey ?? leagueKey ?? onAdoptPreset()
@@ -515,10 +449,7 @@ export const Onboard = ({
 		setAdded([])
 		if (!got.players.length) return setTeamNote(got.note)
 		const key = leagueKey ?? onAdoptPreset()
-		if (!key)
-			return setTeamNote(
-				"Something went wrong saving your team. Nothing was lost — try again."
-			)
+		if (!key) return setTeamNote("Your team could not be saved. Try again.")
 		try {
 			roster.set(key, got.keys)
 			if (got.spots.length)
@@ -540,175 +471,228 @@ export const Onboard = ({
 		}
 	}
 
-	/* `step()` drew a numbered `<li class="onboard-step">` for a three-step sheet and
-	 * nothing has called it since the sheet became one question. Its CSS went with the
-	 * layout; this was the last of it. */
+	/*
+	  "LOAD A FILE I SAVED" DID NOTHING ON A FIRST VISIT, and still would through the prop.
+
+	  `onLoadFile` is `() => openPicker.current?.()` in App.tsx, and `openPicker` is filled in
+	  by the management toolbar's own `<input type=file>` — which is not mounted while this
+	  sheet is up on a browser with no league. Measured on the published build 2026-09-22:
+	  pressing the link raised no file chooser at all (Playwright's `filechooser` wait timed
+	  out), so the one door a saved league has back into an empty browser was a dead link.
+
+	  The prop's signature is `() => void` and App.tsx is not this file's to change, so the
+	  sheet carries its own picker and hands the chosen file to App's loader by the one other
+	  route App already has: its window-level `drop` handler, which calls the same `loadFile`
+	  (same confirm, same `leagues.replace`, same toast) that the toolbar's picker does. A
+	  synthetic drop is a strange shape for a button press and is written down here so nobody
+	  mistakes it for an accident; the clean fix is for App to pass `loadFile` itself (it has
+	  `(file: File) => void` already, used by the Setup card), and then this becomes
+	  `onLoadFile(file)` and the dispatch goes. `onLoadFile` stays in the prop interface.
+	*/
+	const picker = useRef<HTMLInputElement | null>(null)
+	const handOver = (file: File) => {
+		const dt = new DataTransfer()
+		dt.items.add(file)
+		window.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }))
+	}
+
+	/** The one way off every screen but the first. At the TOP, because on a phone the foot
+	 *  of the sheet is under the keyboard. Every step backs to "where" except "teams",
+	 *  which backs to the step that sent the reader to it. */
+	const backTo = (to: Step) => (
+		<p className="onboard-back">
+			<button type="button" className="as-link" onClick={() => setStep(to)}>
+				&larr; Back
+			</button>
+		</p>
+	)
+	const back = backTo("where")
+	/** The one alternative a platform route offers, and it exists because a read can fail:
+	 *  a private ESPN league, a Yahoo reader that will not install. Same words on both. */
+	const typeInstead = (
+		<p className="connect-back">
+			<button type="button" className="as-link" onClick={() => setStep("team")}>
+				Type your players instead
+			</button>
+		</p>
+	)
+
 	return (
 		<div className="grid">
-			<section className="card full onboard">
+			<section className="card full onboard" data-step={step}>
 				{/*
 				  TWO WRAPPERS, and they exist for ONE viewport: a phone held sideways.
-				  
-				  Measured at 844x390 with the sheet open: the box is 288px tall holding 557px of
+
+				  Measured at 844x390 with the sheet open: the box was 288px tall holding 557px of
 				  content, so the team-count question sat 19px below the visible bottom while the
-				  finish button sat above it — a reader's natural gesture is the big button he can
-				  see, so the question he answered was the one he never saw. Portrait is fine (590
-				  holding 676, everything reachable), and the content is not the problem: 844px of
-				  WIDTH is.
-				  
-				  So in a short, wide viewport these two become columns — the typing on the left,
-				  the one remaining question and the way out on the right — and everywhere else
-				  they are two plain blocks in a column, which is what they were. See
-				  `.onboard-cols` in src/client/app.css.
+				  finish button sat above it. In a short, wide viewport these two become columns —
+				  the step on the left, the remaining question and the way out on the right — and
+				  everywhere else they are two plain blocks in a column. See `.onboard` in the
+				  landscape rule of src/client/app.css.
 				*/}
 				<div className="onboard-main">
-				{connecting ?
-					<Connect
-						ext={ext}
-						leagueName={receipt.league}
-						freeAgents={receipt.free}
-						readAt={receipt.at}
-						failure={readFailure}
-						onRead={() => void readLeague()}
-						onBack={() => setConnecting(false)}
-					/>
-				:	<>
-				{/*
-				  ONE question, and it is about baseball.
-				  
-				  This card used to open with "Where do you play?" — a question asked for the
-				  app's benefit, not the reader's — followed by an instruction to select a
-				  whole web page with Ctrl+A, which no phone browser can do. On the device
-				  this app is opened on, the only advertised route in was impossible.
-				  
-				  What is possible on a phone, and has been all along without the app ever
-				  saying so, is typing names. `playersInText` matches known players in
-				  arbitrary text, so a list a reader thumbs in works exactly as well as a
-				  pasted page. So that is the front door, and everything about platforms and
-				  scoring tables moves behind "My league scores differently" — true for some
-				  readers, and never the first thing anybody is asked.
-				*/}
-				<h2>Who&rsquo;s on your team?</h2>
-				{/*
-				  THE ONE PRESS, AS A BUTTON, UNDER THE QUESTION IT ANSWERS.
-
-				  This was the smallest type on the screen. It rendered as `.as-link` — `--fs-2`,
-				  `--muted`, underlined, no border — floating ABOVE the heading, which put the
-				  deepest thing this product does in the one style the page uses for footnotes,
-				  where a reader scanning for a control does not look. Measured at 390x844 with the
-				  sheet open: the link's top sat at y=216, the first bordered control under it was the
-				  textarea at y=360 and the `primary` was at y=539 — so the hierarchy read, in
-				  order, "footnote, box, do this", and the footnote was the route that needs no
-				  typing at all. Measured against the box it is an alternative to: 11px, no
-				  border, underlined, against the box's 13px.
-
-				  It is now a button, in the app's own button chrome, directly under the question —
-				  so the sheet reads question, one-press answer, typed answer, which is the order of
-				  effort. `primary` only where the reader's browser already HAS the reader: for him
-				  a press really is the whole league and typing is strictly worse. Without it there
-				  is an install in the way, so it is a plain button and the typing keeps the weight.
-				  It costs 26px more than the link did (46px against 20px) and the sheet still fits
-				  the phone — see the note on the deleted sentence in the fold below, which is where
-				  those pixels came from.
-
-				  IT SAYS YAHOO BEFORE HE PRESSES IT, AND IT DID NOT. This read "Let it read my
-				  league for me" until he had already installed the add-on, and the word Yahoo first
-				  appeared in step 3 of the walkthrough — 272px below the line he pressed. An ESPN
-				  reader could therefore install an add-on called "beanemachine — read my Yahoo
-				  league" before anything on this screen told him it is Yahoo only, which costs him
-				  an install and this project a store review it can never make good on.
-
-				  SHOWN ONLY WHERE IT IS TRUE. A reader on a phone cannot run it and must not be
-				  shown a control he cannot use or a sentence about what his device lacks, so
-				  `takesExtension` gates the whole thing and the sheet underneath is unchanged for
-				  him — typing a team in is not a consolation prize, it is the route that works on
-				  every device, in a private window, and on a private league.
-				*/}
-				{takesExtension(browserOf()) && (
-					/* NOT `.onboard-go`, which is the class on the button that submits the typed
-					   team eighty lines down. This is a different press to a different screen, and
-					   giving it that class made `.onboard-go button` match two buttons — so a
-					   suite that clicks it got the Yahoo walkthrough instead of the team it had
-					   just typed, and then waited twenty seconds for a receipt that was never
-					   coming. The same collision the roster paste box and the platform offer have
-					   already caused twice; the rule is that a class naming a control belongs to
-					   one control. */
-					<p className="onboard-offer onboard-read">
-						<button
-							type="button"
-							className={ext.present ? "primary" : ""}
-							onClick={() => setConnecting(true)}
-						>
-							{ext.present ? "Read my Yahoo league" : "Read my Yahoo league for me"}
-						</button>
-					</p>
+				{step === "where" && (
+					<>
+						<h2>Where&rsquo;s your league?</h2>
+						{/* Three answers, stacked and full width, because they are the whole screen
+						    and a thumb should not have to aim. `.onboard-where` is the hook the
+						    suites click by label. */}
+						<div className="onboard-where">
+							<button type="button" onClick={() => setStep(yahoo())}>
+								Yahoo
+							</button>
+							<button type="button" onClick={() => setStep("espn")}>
+								ESPN
+							</button>
+							<button type="button" onClick={() => setStep("team")}>
+								Somewhere else
+							</button>
+						</div>
+						{/* Small and last: it is for the reader who already has a file, and he
+						    knows he is looking for it. The only door a saved league has back in —
+						    App hides its toolbar while this sheet is up. */}
+						<p className="onboard-file">
+							<button type="button" className="as-link" onClick={() => picker.current?.click()}>
+								Load a file I saved
+							</button>
+							<input
+								ref={picker}
+								type="file"
+								accept="application/json,.json"
+								hidden
+								aria-label="Load a league file you saved"
+								onChange={e => {
+									const chosen = e.currentTarget.files?.[0]
+									/* Cleared either way, so picking the same file twice fires again. */
+									e.currentTarget.value = ""
+									if (chosen) handOver(chosen)
+								}}
+							/>
+						</p>
+					</>
 				)}
-				{/* THE PASTE WAS ALREADY THE FRONT DOOR AND THE SCREEN DID NOT SAY SO.
-				
-				    This read "First and last name, one to a line. Put the position first if you
-				    know it." — which a reader on a phone correctly hears as "type your 27 names
-				    in by hand", and closes the sheet. `rosterFromPaste` has always matched names
-				    inside arbitrary text: a walk pasted a real tab-delimited Yahoo roster copy,
-				    game times and eleven stat columns per line, and got every name back with no
-				    errors. The capability was there, advertised nowhere, and the instruction
-				    pointed at the slowest route to it.
-				
-				    The roster LIST rather than the whole page, deliberately: pasting a whole team
-				    page pulls in the news and trending modules, which is how two men nobody owns
-				    ended up on a test roster. */}
-				<p className="sub">Paste your roster page, or type the names one to a line.</p>
-				<textarea
-					data-ctl="onboard-team"
-					value={team}
-					onChange={e => {
-						setTeam(e.currentTarget.value)
-						draft("team")(e.currentTarget.value)
-					}}
-					placeholder={PLACEHOLDER}
-					rows={5}
-					aria-label="The players on your team"
-				/>
-				{/* Said where the typing happens, not in a policy nobody opens. It is the
-				    question a stranger actually has before he gives an app a list of
-				    anything, and it is answered in one sentence because the answer is
-				    simple: there is no server to send it to. */}
-				<p className="onboard-privacy">
-					Nothing leaves this phone. There is no account &mdash; your team is saved in
-					this browser and nowhere else.
-				</p>
-				{/*
-				  THE BOX REPLACES, AND THE LINE UNDER IT PROMISED IT ADDED.
-				  
-				  "You can add the rest later" is true of the app and false of this box: a second
-				  paste REPLACES the stored team. Measured — thirteen names, then two more in a
-				  cleared box, leaves two men on the roster and the first thirteen gone. Nothing
-				  lies about it (the panel below honestly says "Got them. 2 players") and nothing
-				  warns either, and the box emptying itself on success is what makes the second
-				  paste look like an append.
-				  
-				  So once a team is stored, the button and the line state the rule the code already
-				  follows, and name the route that really does add one man — `roster.add`, which is
-				  what the Add control on My league's own-team search calls. The first-visit copy
-				  is untouched: "start with your starters" is the right invitation when there is
-				  nothing to lose yet, and it is also what makes the Tonight card's seat count a
-				  short list, which that card now says out loud.
-				*/}
-				<p className="onboard-go">
-					<button
-						type="button"
-						className="primary"
-						onClick={readTeam}
-						disabled={!team.trim()}
-					>
-						{held > 0 ? "Replace my team" : "That’s my team"}
-					</button>
-					<span className="sub">
-						{held > 0 ?
-							`Pasting here replaces all ${held} of them. Adding one man is on ${tab("trade")}.`
-						:	"Only got a few? Start with your starters. You can add the rest later."}
-					</span>
-				</p>
 
+				{step === "yahoo" && (
+					<>
+						{back}
+						<Connect
+							ext={ext}
+							leagueName={receipt.league}
+							freeAgents={receipt.free}
+							readAt={receipt.at}
+							failure={readFailure}
+							onRead={() => void readLeague()}
+							onBack={() => setStep("team")}
+						/>
+						{/* What the read itself said — a stat whose value would not parse, a sweep
+						    that came back empty. Written by `readLeague`, and it had nowhere to show
+						    once the settings-paste box it used to share went. */}
+						{note && <p className="sub paste-note">{note}</p>}
+					</>
+				)}
+
+				{step === "espn" && (
+					/*
+					  ONE ADDRESS, because for ESPN that is the whole setup. ESPN publishes a public
+					  league's settings to any web page that asks — lm-api-reads sends the CORS
+					  header Yahoo never will — so there is nothing to copy and nothing to install.
+					  A private league refuses, App's `run` says so in the toast, and the link
+					  under the box is the way on.
+					*/
+					<>
+						{back}
+						<h2>Paste your ESPN league link</h2>
+						<p className="sub">Copy it from the address bar on your league&rsquo;s page.</p>
+						<p className="onboard-url">
+							<input
+								type="text"
+								value={url}
+								placeholder="https://fantasy.espn.com/baseball/league?leagueId=…"
+								onChange={e => {
+									setUrl(e.currentTarget.value)
+									/* A new address is a new question; the old answer about the
+									   old one must not sit under it. */
+									setEspnAsked(false)
+									setEspnPrivate(false)
+								}}
+								aria-label="Your ESPN league's web address"
+							/>
+							<button
+								type="button"
+								className="primary"
+								onClick={() => {
+									/* Not cleared here: an edit already cleared it, and a second
+									   press on the same private address leaves the toast's text
+									   unchanged, so nothing would set it again. */
+									setEspnAsked(true)
+									onImportUrl(url)
+								}}
+								disabled={!url.trim()}
+							>
+								Read my league
+							</button>
+						</p>
+						{/* After a private league's refusal the link becomes the second half of the
+						    instruction, on one line, so the screen still has exactly one way on. */}
+						{espnPrivate ?
+							<p className="connect-back onboard-private">
+								That league is private.{" "}
+								<button type="button" className="as-link" onClick={() => setStep("team")}>
+									Type your players instead
+								</button>
+							</p>
+						:	typeInstead}
+					</>
+				)}
+
+				{step === "team" && (
+					<>
+						{back}
+						<h2>Who&rsquo;s on your team?</h2>
+						{/* "one per line" is the instruction; `rosterFromPaste` also matches names
+						    inside a pasted roster page (game times, stat columns and all), so a
+						    reader who pastes instead of typing is not wrong, just not told. */}
+						<p className="sub">Type your players, one per line.</p>
+						<textarea
+							data-ctl="onboard-team"
+							value={team}
+							onChange={e => {
+								setTeam(e.currentTarget.value)
+								typingStore.set(leagueKey, "team", e.currentTarget.value)
+							}}
+							placeholder={PLACEHOLDER}
+							rows={5}
+							aria-label="The players on your team"
+						/>
+						{/*
+						  THE BOX REPLACES, and once a team is stored the button says so.
+
+						  A second paste REPLACES the stored team — measured: thirteen names, then two
+						  more in a cleared box, leaves two men — and the box emptying on success is
+						  what makes the second paste look like an append. So with a team stored the
+						  button's own label states the rule. The line beside it ("Replaces all 3.
+						  Add one on My league.") was cut: the first half repeated the label and the
+						  second explained where another feature lives.
+
+						  `.onboard-go button` must match exactly ONE element on the sheet: the suites
+						  click it to submit the team, and twice a second button under the same class
+						  sent them to the wrong screen.
+						*/}
+						<p className="onboard-go">
+							<button
+								type="button"
+								className="primary"
+								onClick={readTeam}
+								disabled={!team.trim()}
+							>
+								{held > 0 ? "Replace my team" : "That’s my team"}
+							</button>
+						</p>
+						{/* The one line left of the privacy paragraph ("Nothing leaves this phone. There
+						    is no account — your team is saved in this browser and nowhere else."). What
+						    survives is the fact a reader acts on — the team is KEPT, here, so a cleared
+						    browser or another phone will not have it — said as a fact, not an argument. */}
+						<p className="onboard-saved">Saved in this browser.</p>
 				{/*
 				  The answer, in the same sheet, before he goes anywhere.
 				  
@@ -719,8 +703,9 @@ export const Onboard = ({
 				  recommendation for the rest of the season with nothing on screen about it.
 				*/}
 				{/* A line whose suggestion the reader has accepted is no longer missing, and
-				    saying "Nothing in them is counted anywhere" about it would be false the
-				    moment he taps. */}
+				    quoting it back as unfound would be false the moment he taps. The quote
+				    ends in an instruction; it used to end "Nothing in them is counted
+				    anywhere.", which explained the app instead of saying what to do. */}
 				{read && (() => {
 					const accepted = read.suggestions.filter(g => added.includes(g.id))
 					const acceptedLines = new Set(accepted.map(g => g.line))
@@ -746,7 +731,7 @@ export const Onboard = ({
 								{stillMissed.length === 1 ? "this line" : "these lines"}:{" "}
 								{stillMissed.slice(0, 6).map(l => `\u00ab${l}\u00bb`).join(", ")}
 								{stillMissed.length > 6 && ` and ${stillMissed.length - 6} more`}.
-								Nothing in them is counted anywhere.
+								Check the spelling and try again.
 							</p>
 						)}
 						{/*
@@ -814,8 +799,8 @@ export const Onboard = ({
 
 						{read.ambiguous.length > 0 && (
 							<p className="onboard-missed">
-								Two different players share {read.ambiguous.join(" and ")}, so neither was
-								added. Add a position in front of the one you own.
+								Two players share {read.ambiguous.join(" and ")}. Add a position in
+								front of yours.
 							</p>
 						)}
 						{/*
@@ -846,309 +831,110 @@ export const Onboard = ({
 					</div>
 					)
 				})()}
-				{/* And the same note when there is no `read` to hang it on — a throw before the
-				    parser returned anything. */}
-				{teamNote && !read && <p className="onboard-missed">{teamNote}</p>}
-				</>
-				}
+						{/* And the same note when there is no `read` to hang it on — a throw before the
+						    parser returned anything. */}
+						{teamNote && !read && <p className="onboard-missed">{teamNote}</p>}
+					</>
+				)}
+				{/*
+				  THE TEAM COUNT, ITS OWN STEP, ASKED ONLY WHEN HIS LEAGUE HAS NOT ALREADY SAID.
+
+				  Yahoo prints "Max Teams" on the settings page and ESPN states `size`, so a league
+				  that arrived by a read already carries the number. A PRESET is the case that must
+				  still ask: its ten is borrowed from somebody else's league. Ten is preselected
+				  because it is Yahoo's own default.
+
+				  Two screens can produce a league the count is missing from — typing a team (which
+				  adopts the preset) and the Yahoo reader once a read has come back without the row
+				  — and on those two the way on is "Next", to this step, instead of the finish. It
+				  used to be drawn under them, which put a second question on a screen that was
+				  still answering the first. The ESPN read always carries `size`.
+				*/}
+				{step === "teams" && league && asksTeams && (
+					<div className="onboard-teams">
+						{backTo(teamsFrom)}
+						<h2>How many teams are in your league?</h2>
+						{offerPress ?
+							/* Its own class, because a class naming a control belongs to one
+							   control and the suites address this one by it. */
+							<p className="onboard-offer onboard-teams-read">
+								<button type="button" className="as-link" onClick={() => setStep("yahoo")}>
+									Read the team count off my Yahoo league
+								</button>
+							</p>
+						:	<div className="chips">
+								{[8, 10, 12, 14, 16].map(n => (
+									<button
+										key={n}
+										type="button"
+										className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
+										aria-pressed={league.meta.max_teams === n}
+										onClick={() => {
+											setTeamsAnswered(true)
+											onTeamCount(n)
+										}}
+									>
+										{n}
+									</button>
+								))}
+							</div>
+						}
+					</div>
+				)}
 				</div>
 
 				<div className="onboard-rest" ref={rest}>
 				{/*
-				  The second question, and the only other one. It changes who counts as a
-				  good pickup more than anything else does: the bar every player is measured
-				  against is the (teams x seats)-th best man, so the number of teams moves
-				  every row on the board. Ten is preselected because it is Yahoo's own
-				  default for baseball and is what the shipped values came from — a guess,
-				  and said to be one.
-				*/}
-				{/*
-				  ASKED ONLY WHEN HIS LEAGUE HAS NOT ALREADY SAID.
-				
-				  Yahoo prints "Max Teams" on the settings page and ESPN states `size`, so a league
-				  that arrived by a read, an import or a paste already carries the number — and
-				  this asked anyway, with ten preselected, on a league whose own page says ten.
-				  Asking a reader for something he has just handed over is the app admitting it
-				  did not look.
-				
-				  A PRESET is the case that must still ask: its ten is borrowed from somebody
-				  else's league, which is exactly what the sheet exists to replace, and
-				  `provenance.method` is where that is recorded.
-				*/}
-				{league && asksTeams && !connecting && (
-					<div className="onboard-teams">
-						{offerPress ?
-							/* Its own class beside the shared one: the platform offer higher up this
-							   sheet is already `.onboard-offer`, and two buttons under one hook is how
-							   a suite silently asserts the wrong one. */
-							<p className="onboard-offer onboard-teams-read">
-								<button
-									type="button"
-									className="as-link"
-									onClick={() => setConnecting(true)}
-								>
-									Read the team count off my Yahoo league
-								</button>
-							</p>
-						:	<>
-								<h3>How many teams are in your league?</h3>
-								<div className="chips">
-									{[8, 10, 12, 14, 16].map(n => (
-										<button
-											key={n}
-											type="button"
-											className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
-											aria-pressed={league.meta.max_teams === n}
-											onClick={() => {
-												setTeamsAnswered(true)
-												onTeamCount(n)
-											}}
-										>
-											{n}
-										</button>
-									))}
-								</div>
-							</>
-						}
-					</div>
-				)}
+				  "NEXT" INSTEAD OF THE FINISH, on the two screens that lead to the count.
 
-				{/*
-				  THE THIRD QUESTION IS GONE, and the argument that put it here is why.
-				  
-				  It asked "Can you change your lineup every day?" and the case for it was real
-				  at the time: `Decide`'s Today section rendered only where
-				  `scoring_period.lineup_lock === "daily"`, and the shipped preset carries no
-				  scoring period at all — so a reader who pressed through without answering got
-				  a scoring-period plan and no tonight in it, on a screen the bar outside had
-				  promised would tell him who to start tonight.
-				  
-				  That gate changed. Today now renders unless the league is KNOWN to lock for the
-				  period, and `assumedDaily` prints the assumption on the heading it qualifies —
-				  "if your league lets you change the lineup every day — most do, and My league
-				  takes the answer". So the absence is stated where it matters instead of being
-				  asked for up front, which is this project's own rule, and the question is one
-				  select away on My league rather than one tap away here.
-				  
-				  And it cost more than a tap. Measured at 390x844 with the sheet open: the box
-				  is 590px tall holding 998px of content, this question sat at y874 — 101px below
-				  the visible bottom — and the finish button at y1113. A reader's natural gesture
-				  is to press the big button he can see, which means the question most readers
-				  answered was the one they never saw, and the two they did see were pushed
-				  further down by the one they did not.
+				  On the team box only once a team has been read (before that the one action is
+				  the submit), and on the reader only once a press has been made. Its own class
+				  rather than `.onboard-done`, which the suites press to END setup.
 				*/}
-
-				{/*
-				  Everything about platforms, scoring tables and pasted pages lives here, off
-				  the required path. It is true for the reader who wants it and it is the
-				  wrong first question for everybody.
-				*/}
-				<details className="onboard-alts">
-					{/* The summary is the claim and the chips under it are the instruction. What sat
-					    between them was "If your league pays differently, here is how to tell it." —
-					    the summary again in more words, with nothing in it to press.
-
-					    It was 38px tall plus its margin, and those were the pixels that decided
-					    whether this sheet fits a phone. Measured at 390x844 on a first visit with the
-					    sheet open: with the sentence in, the last control the sheet offers ("Load a
-					    file I saved") bottomed at y=876 — 32px under the fold, with no visible
-					    scrollbar to say anything followed. Without it, y=834. */}
-					<summary>My league scores differently</summary>
-					<div className="chips onboard-where">
-						{WHERE.map(w => (
-							<button
-								key={w.id}
-								type="button"
-								className={`chip-btn${where === w.id ? " on" : ""}`}
-								title={w.note}
-								onClick={() => {
-									setWhere(w.id)
-									setNote(null)
-								}}
-							>
-								{w.label}
-							</button>
-						))}
-					</div>
-					{where && (
-						<>
-							{/* The one sentence about Yahoo a reader needs, said once. It is a
-							    fact about Yahoo and not a thing to make his problem. */}
-							{/* THE SENTENCE BRANCHES NOW, because the claim in it stopped being true of
-							    every reader on the day the browser reader shipped. It is still true of
-							    a WEB PAGE — Yahoo sends no header that would let one read a league, and
-							    it never will — and it is false of a reader whose own browser is doing
-							    the reading from inside his own signed-in tab. Saying the old sentence
-							    to him would be claiming an absence the app has filled. */}
-
-							{where === "espn" && (
-								/*
-								  AN ESPN READER'S BEST ROUTE WAS HIS FOURTH CLICK AND OFF SCREEN.
-								
-								  ESPN publishes a public league's settings to any web page that asks —
-								  `readableInBrowser` is true for ESPN alone, because lm-api-reads sends
-								  the CORS header Yahoo never will — so for him the whole setup is one
-								  address, with nothing to copy and nothing to install. The address box
-								  sat BELOW a paste box and a three-step Ctrl+A instruction he does not
-								  need: measured at 390x844 on the published build, 36px under the fold.
-								
-								  So it comes first for him, and the paste stays underneath as the route
-								  for a private league — which is a real case and the reason the paste is
-								  not simply hidden here.
-								*/
-								<div className="onboard-first">
-									<p className="sub">
-										Paste your league&rsquo;s address.
-									</p>
-									<p className="onboard-url">
-										<input
-											type="text"
-											value={url}
-											placeholder="https://fantasy.espn.com/baseball/league?leagueId=…"
-											onChange={e => setUrl(e.currentTarget.value)}
-											aria-label="Your ESPN league's web address"
-										/>
-										<button type="button" className="primary" onClick={() => onImportUrl(url)} disabled={!url.trim()}>
-											Read my league
-										</button>
-									</p>
-									<p className="sub">
-										For a private league, copy the page below.
-									</p>
-								</div>
-							)}
-							<ol className="paste-how">
-								<li>
-									<b>On a computer</b>, open {SETTINGS_PAGE[where]}.
-								</li>
-								<li>
-									Hold <kbd>Ctrl</kbd> and press <kbd>A</kbd> &mdash; the whole page turns
-									blue &mdash; then <kbd>Ctrl</kbd> and <kbd>C</kbd> to copy it.
-								</li>
-								<li>Paste it below.</li>
-							</ol>
-							<textarea
-								data-ctl="paste-settings"
-								value={pasted}
-								onChange={e => {
-									setPasted(e.currentTarget.value)
-									draft("settings")(e.currentTarget.value)
-								}}
-								placeholder={"Max Teams\t10\nRoster Positions\tC, 1B, 2B, 3B, SS, OF, …"}
-								rows={4}
-								aria-label="Paste your league's settings page here"
-							/>
-							<p style={{ margin: "var(--sp-2) 0 0" }}>
-								<button
-									type="button"
-									onClick={readSettings}
-									disabled={!pasted.trim()}
-								>
-									Read that
-								</button>
-							</p>
-							{note && <p className="sub paste-note">{note}</p>}
-							{/* The same box again for a reader who came here some other way — a saved
-							    league whose platform is already known, or a platform that turns out to be
-							    importable. Not rendered twice for an ESPN reader, who has it above. */}
-							{where !== "espn" && canImport && (
-								<p className="onboard-url">
-									<input
-										type="text"
-										value={url}
-										placeholder="https://…"
-										onChange={e => setUrl(e.currentTarget.value)}
-										aria-label="Your league's web address"
-									/>
-									<button type="button" onClick={() => onImportUrl(url)} disabled={!url.trim()}>
-										Read it from that address
-									</button>
-								</p>
-							)}
-						</>
-					)}
-					{/*
-					  The two routes that do not care where you play, outside the platform gate.
-					  
-					  These used to sit inside `{where && …}`, so both were unreachable until the
-					  reader had named a platform — and neither of them asks. Typing the values in
-					  is the same form whoever you play with, and a saved league already HAS its
-					  platform in it. That gate mattered most for the file, because it is the only
-					  load door a browser with no league has: `WireChip` in App.tsx returns null
-					  unless the active league is a Yahoo one, and the management toolbar is gated
-					  on the dock being absent, so with nothing stored this sheet and an invisible
-					  drag-and-drop were the whole of it — and the reader it is for had to claim
-					  his league scores differently, then pick a platform, to find it.
-					  
-					  It stays behind this <details>, which is shut on a first visit: measured on
-					  the published build at 390x844 and 360x640, "Load a file I saved" is not in
-					  the document at all until the reader opens this drawer. A stranger with no
-					  file is never shown it, which is the thing that would be worth removing.
-					*/}
-					<p style={{ margin: "var(--sp-3) 0 0" }}>
-						<button type="button" onClick={onOpenSetup}>
-							Or type the values in myself
-						</button>{" "}
-						<button type="button" onClick={onLoadFile}>
-							Load a file I saved
+				{league && asksTeams && !teamsAnswered &&
+				((step === "team" && !!read?.players.length) || (step === "yahoo" && readTried)) ? (
+					<p className="onboard-next">
+						<button
+							type="button"
+							className="primary"
+							onClick={() => {
+								setTeamsFrom(step)
+								setStep("teams")
+							}}
+						>
+							Next
 						</button>
 					</p>
-				</details>
+				) : (
+				/*
+				  THE FINISH, pinned to the foot of the sheet once there is nothing left below it.
 
-				{/*
-				  The finish, pinned to the foot of the sheet rather than printed under it.
-				  
-				  Measured on the published build before this, a stranger's walk at 390x844:
-				  the sheet's own scroll box was 590px tall with 713px of content in it, and
-				  "Show me tonight" — the button that ends setup — sat 646px down, 56px below
-				  a fold the reader had no way to know was there, because the page behind the
-				  sheet goes on scrolling normally and the sheet's scrollbar is a phone's, which
-				  is to say invisible. At 360x640 it was 685px down in a 447px box, 238px under.
-				  The one question had been answered and the way forward was off screen.
-				  
-				  `onboard-foot` is only added when there IS a button: with no league this
-				  paragraph is a sentence saying what the board behind the sheet is running, and
-				  pinning an explanation would spend the scarcest 75px in the product on
-				  something nobody has to act on — and would push "That’s my team" under it on a
-				  360px phone, which is the same bug one step earlier.
-				*/}
-				{/*
-				  STICKY ONLY WHEN THERE IS NOTHING LEFT BELOW IT.
+				  Measured on the published build before pinning, at 390x844: the sheet's scroll
+				  box was 590px tall with 713px in it and "Show me tonight" sat 56px below a fold
+				  nobody could see. Pinned from the moment a league exists, though, it sat ON TOP
+				  of the team-count chips — a finish that hides the remaining work is worse than
+				  one that scrolls away — so it pins only once that question is answered.
 
-				  Pinned from the moment a league exists, this sat ON TOP of the two chip
-				  questions that come after it in the document — measured on the published
-				  build at 390x844: the button at y=701, "How many teams" at 757, "Can you
-				  change your lineup every day?" at 894, fifty pixels past the bottom of the
-				  screen. The natural gesture is to press the big button you can see, and it
-				  skipped the question the whole Tonight screen turns on.
-
-				  A finish action that hides the remaining work is worse than one that scrolls
-				  away, so it only pins once the work is done. Until then it sits in the flow
-				  and the reader reaches the questions on his way to it. (Tonight no longer
-				  DEPENDS on the answer either — see the note on `today` in Decide.tsx — but a
-				  question the reader never sees is still a question he cannot answer.)
-				*/}
-				<p className={`onboard-done${league && answered ? " onboard-foot" : ""}`}>
-					{league ?
+				  With no league there is no finish, and nothing in its place. This paragraph used
+				  to say "The board behind this runs on one real league's values. Answering the
+				  question above makes it yours." — the app explaining itself, on a screen whose
+				  only job is to ask. It is not rendered at all now.
+				*/
+				league && (
+					<p className={`onboard-done${answered ? " onboard-foot" : ""}`}>
 						<button type="button" className={ready ? "primary" : ""} onClick={onDone}>
 							{read && read.players.length ? "Show me tonight" : "Show me the board"}
 						</button>
-					:	<span className="sub">
-							The board behind this runs on one real league&rsquo;s values. Answering the
-							question above makes it yours.
-						</span>
-					}
-					{league && missing.length > 0 && (
-						<span className="sub">
-							{missing.map(g => g.label).join(" and ")} still missing &mdash; the board
-							cannot rank without{" "}
-							{missing.length === 1 ? "it" : "them"}.{" "}
-							<button type="button" className="linkish" onClick={onOpenSetup}>
-								Fill in
-							</button>
-						</span>
-					)}
-				</p>
+						{missing.length > 0 && (
+							<span className="sub">
+								{missing.map(g => g.label).join(" and ")} missing.{" "}
+								<button type="button" className="linkish" onClick={onOpenSetup}>
+									Fill in
+								</button>
+							</span>
+						)}
+					</p>
+				))}
 				</div>
 			</section>
 		</div>

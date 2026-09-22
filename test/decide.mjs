@@ -215,7 +215,9 @@ const open = async (seeds, opts = {}) => {
 		if (opp) localStorage.setItem("beanemachine:opponent", JSON.stringify(opp))
 	}, [seeds.lineup ?? null, seeds.pool ?? null, seeds.config ?? null, seeds.roster ?? null, seeds.ledger ?? null, seeds.opponent ?? null])
 	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
-	await page.waitForSelector(".decide", { timeout: 30000 })
+	/* `opts.gap`: a league one input short renders NO decide card — `Setup` is the one card
+	   that names the gap, see Decide.tsx — so waiting for `.decide` there waits for nothing. */
+	await page.waitForSelector(opts.gap ? ".setup-gaps" : ".decide", { timeout: 30000 })
 	await page.waitForTimeout(1500)
 	return page
 }
@@ -1198,13 +1200,23 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		cfg.leagues[KEY].scoring.batting[k] = 0
 	for (const k of Object.keys(cfg.leagues[KEY].scoring.pitching))
 		cfg.leagues[KEY].scoring.pitching[k] = 0
-	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
-	const text = await page.$eval(".decide", e => e.innerText)
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg }, { gap: true })
+	/* READ OFF THE ONE CARD THAT SAYS IT NOW. This read `.decide`, which carried its own
+	   "gives the roster shape but not what each stat is worth" card — directly under App's
+	   `Setup` card saying the same thing in the same state. The owner named that repetition
+	   on 2026-09-22, so Decide renders nothing for a league it cannot price and `Setup` is
+	   the one place the gap is named. The claim is unchanged: told what is missing, not
+	   handed a plan. */
+	await page.waitForSelector(".setup-gaps", { timeout: 15000 })
+	const text = await page.$eval(".setup-gaps", e => e.innerText)
 	t("a league with no scoring is told what is missing rather than given a plan",
-		/not what each stat is worth|every projection here would be exactly zero/.test(text),
-		text.slice(0, 220))
+		/what each stat is worth/i.test(text), text.slice(0, 220))
 	t("and it proposes nothing at all — no benchings, no moves",
-		!(await page.$(".decide-changes")) && !/Add .+, drop /.test(text), text.slice(0, 300))
+		!(await page.$(".decide-changes")) &&
+			!/Add .+, drop /.test(await page.evaluate(() => document.body.innerText)),
+		text.slice(0, 300))
+	t("and the gap is named once, not once per card",
+		(await page.$$(".decide-blocked")).length === 0)
 	await page.close()
 }
 
@@ -1219,8 +1231,10 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 {
 	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
 	cfg.leagues[KEY].meta.max_teams = null
-	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
-	const text = await page.$eval(".decide", e => e.innerText)
+	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg }, { gap: true })
+	/* `Setup` is the one card for a league one input short — see the note in Decide.tsx. */
+	await page.waitForSelector(".setup-gaps", { timeout: 15000 })
+	const text = await page.$eval(".setup-gaps", e => e.innerText)
 	/*
 	 * The name this sentence sends a reader to has to be a name the navigation uses.
 	 *
@@ -1253,7 +1267,7 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 */
 	const navLabels = await page.$$eval(".views button", n => n.map(e => e.textContent.trim()))
 	t("a league with no team count is told that much",
-		/how many teams are in it/.test(text), text.slice(0, 300))
+		/how many teams/i.test(text), text.slice(0, 300))
 	t("and the screen it sends him to is one the navigation actually offers",
 		navLabels.some(l => text.includes(l)) &&
 			!/League setup|Recommendations|My team &|\bSetup\b/.test(text),
@@ -1385,8 +1399,19 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	const text = await page.$eval(".decide", e => e.innerText)
 	/* "answers a browser directly" was the CORS explanation in a reader's clothing. The claim
 	   it protected is the capability, which is what the sentence says now. */
-	t("an ESPN league is told its platform can read the roster for it",
-		/can read the whole roster in one click/.test(text) && !/CORS/.test(text), text.slice(0, 400))
+	/* REWRITTEN 2026-09-22. This asserted the ESPN card carried "can read the whole roster
+	   in one click" — a promise about the platform, appended to a sentence that also sold the
+	   step and estimated its duration. The owner's rule for UI text is one short instruction
+	   per step, and the platform's one path is now the job of the sheet the button opens,
+	   which asks the platform FIRST. So the branch this protected no longer exists on this
+	   card, on purpose, and the claim that survives is the one the owner set: the card is ONE
+	   short instruction, the same one on every platform, and it does not explain the app —
+	   no duration, no privacy promise, no mechanism. */
+	const prose = (await page.$eval(".decide-blocked p:not(.decide-cta-row)", e => e.innerText)).trim()
+	t("an ESPN league is given the same one short instruction as any other",
+		prose === "Add the players you own." &&
+			!/minute|this browser|one click|CORS/i.test(text),
+		prose)
 	/*
 	 * The second assertion here used to be `!(await page.$(".decide-cmd"))` — that an
 	 * ESPN reader is not handed a command line he does not need. No reader is handed
@@ -2109,8 +2134,31 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		on.map(x => x.toLowerCase()).join() === TAB.board.toLowerCase(), JSON.stringify(on))
 	const card = await page.$eval(".recap", e => e.innerText)
 	t("and is shown what last night was actually worth", /best nights in baseball/.test(card), card.slice(0, 160))
-	t("with the scoring named as borrowed rather than as his",
-		/one real league\u2019s scoring|one real league's scoring/.test(card), card.slice(0, 300))
+	/* REWRITTEN 2026-09-22. This asserted /one real league's scoring/ on this page — the
+	   card's old sentence, which said "one real league's scoring" whatever the browser held.
+	   The seed here is scoring.json, whose league is `provenance.verified: true`: a league read
+	   off its own pages, which the rest of the app calls the reader's own (the footer says "your
+	   league's own points" on exactly this condition). So the old assertion was pinning a
+	   sentence that was false for this seed. The claim it protected is that the card names
+	   WHOSE scoring the numbers are in, honestly; that is now asserted both ways — "your
+	   scoring" for a verified league here, and "borrowed" for an unverified one just below. */
+	t("with the scoring named as his when his league was read off its own pages",
+		/in your scoring/.test(card) && !/borrowed/.test(card), card.slice(0, 300))
+	{
+		const borrowed = structuredClone(cfg)
+		for (const l of Object.values(borrowed.leagues)) l.provenance = { ...l.provenance, verified: false, method: "preset: copied from another league" } // a PRESET is borrowed; unverified alone may be his, typed by hand
+		const bp = await open({ config: borrowed }, { actuals: true, phone: true })
+		await bp.waitForSelector(".recap", { timeout: 30000 })
+		const bcard = await bp.$eval(".recap", e => e.innerText)
+		t("and as borrowed when nothing in this browser was read off the reader's own league",
+			/in borrowed scoring/.test(bcard) && !/in your scoring/.test(bcard), bcard.slice(0, 300))
+		/* The old sentence ended "Put your team in and this becomes your team's night" — a
+		   third call to add a team on a screen with two buttons for it. What is protected is
+		   that the recap is a label and not a pitch. */
+		t("and the recap does not ask for the team a second time",
+			!/Put your team in/.test(bcard) && !/Put your team in/.test(card), bcard.slice(0, 300))
+		await bp.close()
+	}
 	// Facts, not estimates — which is the distinction the whole card exists to carry onto a
 	// screen where everything else is a projection.
 	/* "Real box scores, not projections" explained the difference between this card and the

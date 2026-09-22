@@ -1260,14 +1260,35 @@ t("the page states how much of this window MLB has actually named",
  * at all, and when it does not, that is stated rather than asserted around.
  */
 const bothEmpty = pubPeriod === 0 && pubSeven === 0
-t("and that count is measured off the window rather than baked into the sentence",
-  gamesSeven > gamesPeriod && pubSeven >= pubPeriod &&
-    pubSeven / gamesSeven <= pubPeriod / gamesPeriod &&
-    (bothEmpty || pubSeven / gamesSeven < pubPeriod / gamesPeriod),
-  `${pubPeriod}/${gamesPeriod} over the period vs ${pubSeven}/${gamesSeven} over seven days` +
-    (bothEmpty ? " — this capture publishes no probables inside either window" : ""))
-
+/*
+ * AND THE SEASON'S LAST WEEK BROKE THE DENOMINATOR CLAUSE, the same way the capture broke
+ * the ratio one. Driven 2026-09-22: 0/176 over the period against 0/176 over seven days.
+ * The period is week 26 of 26, Sep 22 → Sep 27, and the regular season ends on the 27th, so
+ * a seven-day window starting today holds exactly the period's games and not one more:
+ * `gamesSeven > gamesPeriod` was false about a page telling the truth. That clause was only
+ * ever standing in for "the denominator is read off the window on screen", and it needed
+ * two windows of different game counts to show it — which the calendar no longer supplies
+ * for these two.
+ *
+ * So the witness is a THIRD window, clicked here anyway for the block below: three days
+ * hold fewer club-games than the period for as long as the period is longer than three
+ * days of a live schedule, which is every week of every season including the last. The
+ * property is unchanged and still strict — a number baked into the sentence prints the
+ * same denominator for all three windows and fails — and the monotonic clauses are kept
+ * whole: a longer window never has FEWER games or fewer named starters, and its named
+ * fraction never RISES.
+ */
 await page.click(".stream-strip .chip-btn:text-is('3 days')")
+await page.waitForTimeout(600)
+const [pubThree, gamesThree] = named(await streamNote())
+t("and that count is measured off the window rather than baked into the sentence",
+  gamesSeven >= gamesPeriod && gamesPeriod > gamesThree && pubSeven >= pubPeriod &&
+    pubPeriod >= pubThree &&
+    pubSeven / gamesSeven <= pubPeriod / gamesPeriod &&
+    (bothEmpty || gamesSeven === gamesPeriod || pubSeven / gamesSeven < pubPeriod / gamesPeriod),
+  `${pubThree}/${gamesThree} over three days, ${pubPeriod}/${gamesPeriod} over the period, ` +
+    `${pubSeven}/${gamesSeven} over seven days` +
+    (bothEmpty ? " — this capture publishes no probables inside either window" : ""))
 
 /**
  * The board does not make a second recommendation.
@@ -3016,18 +3037,27 @@ await phone.close()
     await route.fulfill({ json: j })
   })
   await sp.goto(BASE, { waitUntil: "domcontentloaded" })
-  /* `.dock-bar button`, not `.dock button`. The sheet is mounted and `hidden` while closed
-     now — it had to be, or closing it discarded everything the reader had typed — so
-     `.dock button` matches seven buttons and the first of them is the DISABLED "That's my
-     team" inside the sheet, which this waited thirty seconds to become clickable. The bar
-     is the thing that opens the sheet and is what this line always meant. */
-  await sp.waitForSelector(".dock-bar button", { timeout: 30000 })
-  await sp.click(".dock-bar button")
-  await sp.waitForSelector("summary:has-text('My league scores differently')", { timeout: 15000 })
-  await sp.click("summary:has-text('My league scores differently')")
-  await sp.click(".onboard-where button:has-text('Yahoo')")
-  await sp.fill(
-    'textarea[data-ctl="paste-settings"]',
+  /*
+   * REWRITTEN 2026-09-22: THE LEAGUE IS STILL BUILT BY THE PARSER, BUT NOT THROUGH A BOX.
+   *
+   * This drove the setup sheet: open the dock, unfold "My league scores differently", pick
+   * Yahoo, paste a settings page into `textarea[data-ctl="paste-settings"]`, press "Read
+   * that". That fold, that box and that button are gone — the owner named the sheet the
+   * epitome of bloat, and Onboard.tsx now asks the platform first and offers one path per
+   * platform, with the settings-page paste deleted as a route (its parser stays: the browser
+   * reader hands Yahoo's settings page to it). So there is no UI box left to type this into,
+   * and waiting for one timed the whole suite out at this line.
+   *
+   * What the old route protected was that the ONE-SIDED STATE UNDER TEST IS THE PARSER'S,
+   * not something this file invented — "the parser is what decides what 'no pitching
+   * scoring' means". That is kept exactly: the same ten lines go through the same
+   * `leagueFromPastedSettings` the browser reader calls, in this process, and the league it
+   * returns is what is stored. Only the typing is skipped. The `sides` assertion below still
+   * reads the stored league back, so a parser that started inventing pitching values fails
+   * here as it always did.
+   */
+  const { leagueFromPastedSettings } = await import("../src/data/paste-settings.ts")
+  const parsed = leagueFromPastedSettings(
     [
       "Max Teams\t10",
       "Scoring Type\tHead-to-Head - Points",
@@ -3039,10 +3069,18 @@ await phone.close()
       "Runs Batted In (RBI)\t1",
       "Walks (BB)\t1",
       "Stolen Bases (SB)\t2"
-    ].join("\n")
-  )
-  await sp.click("button:text-is('Read that')")
-  await sp.waitForTimeout(1200)
+    ].join("\n"),
+    "yahoo"
+  ).league
+  const oneSided = JSON.parse((await import("node:fs")).readFileSync("scoring.json", "utf8"))
+  oneSided.leagues = { "yahoo:onesided": parsed }
+  oneSided.active_league = "yahoo:onesided"
+  delete oneSided.pools
+  delete oneSided.rosters
+  delete oneSided.lineups
+  await sp.addInitScript(c => localStorage.setItem("beanemachine:config", JSON.stringify(c)), oneSided)
+  await sp.reload({ waitUntil: "domcontentloaded" })
+  await sp.waitForSelector(".views button", { timeout: 30000 })
   await sp.click('.views button:has-text("Pickups")')
   await sp.waitForSelector(".board-row", { timeout: 30000 })
   await sp.waitForTimeout(800)

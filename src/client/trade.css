@@ -203,15 +203,19 @@
 }
 .verdict-missing{margin-top:0}
 
-/* The paste route — see `readPaste` in Trade.tsx. It leads because it is the only
-   way in that another company cannot switch off. */
+/* The paste route — see `readPaste` in Trade.tsx. It no longer leads: since 2026-09-22
+   the league's own platform route comes first and this is the one fallback under it. */
 .paste-roster{display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-3) 0}
 /* The offer to set the reader up, where there is no reader yet. Shaped like the paste block
    beside it and deliberately not named like it — the suites address the paste box by class,
    and a second block answering to that name is a test pressing the wrong button. */
+/* It is one button now — the h3 and the pitch under it were cut on 2026-09-22 — so the
+   two rules that styled them went with them. */
 .connect-offer{display:flex;flex-direction:column;gap:var(--sp-2);margin:var(--sp-3) 0}
-.connect-offer h3{margin:0;font-size:var(--fs-1)}
-.connect-offer p{margin:0;max-width:70ch}
+.connect-offer .primary{align-self:flex-start}
+/* [Read my league] and the secondary [Read the other N rosters] on one row, wrapping on a
+   phone rather than overflowing it. */
+.read-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center}
 .paste-roster h3{margin:0;font-size:var(--fs-1)}
 .paste-roster p{margin:0;max-width:70ch}
 .paste-roster textarea{
@@ -291,7 +295,10 @@
    innerText as "PASTE YOUR FREE AGENTS", and test/decide.mjs — which reads this card's
    own text to check that the exact free-agent list is got here and needs no terminal —
    went red against a screen that was correct apart from its capitals. */
-.paste-wire-fold>summary h3{text-transform:none;letter-spacing:normal;font-family:var(--sans)}
+.paste-wire-fold>summary h3,
+/* and the type-it-in fold's, which came out as "OR TYPE YOUR TEAM IN": an instruction set
+   in the shouting label face reads as a section name, which is what it stopped being. */
+.paste-team-fold>summary h3{text-transform:none;letter-spacing:normal;font-family:var(--sans);margin:0}
 
 /* The presses on the collapsed deal card. Two of them once the league's window has
    shut — the evaluator anyway, and the screen that still takes adds and drops — so

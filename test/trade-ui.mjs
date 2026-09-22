@@ -916,12 +916,59 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			(await page.$$eval(".paste-team-fold button", n => n.map(e => e.textContent.trim())))
 				.some(x => /^read that$/i.test(x)),
 			JSON.stringify(await page.$$eval(".paste-team-fold button", n => n.map(e => e.textContent.trim()))))
-		t("the paste route is offered above the platform read, not below it",
+		/*
+		 * ONE ROUTE FOR THE LEAGUE'S PLATFORM, ABOVE THE ONE FALLBACK. (Rewritten 2026-09-22.)
+		 *
+		 * This used to assert "the paste route is offered above the platform read, not below
+		 * it" — that `.paste-roster` preceded `.pull-roster` — because the Yahoo server read
+		 * stopped answering on 2026-09-09 and the paste was the route no platform could switch
+		 * off. The owner reversed the order on purpose: the card now offers exactly ONE route
+		 * chosen by `league.meta.platform`, first, and the paste is the one fallback under it.
+		 * What the old assertion was really protecting survives in two new ones: the paste is
+		 * still on the card whatever the platform, and exactly one route stands above it — so
+		 * the Yahoo server read can no longer sit beside the reader offer as a second choice.
+		 *
+		 * MEASURED at 390x844 against the dev server, Yahoo league, chromium, no reader: the
+		 * card was 595px and 72 words with 422px above "add a player", and is 418px and 31
+		 * words with 244px — see the card's comment in src/client/Trade.tsx.
+		 */
+		const routes = await page.evaluate(() =>
+			[".read-yahoo", ".connect-offer", ".pull-roster"].filter(c => document.querySelector(`.trade-team ${c}`))
+		)
+		t("the team card offers exactly one route for the league's platform",
+			routes.length === 1, JSON.stringify(routes))
+		t("and it comes before the type-it-in fallback, which is still on the card",
 			await page.evaluate(() => {
-				const paste = document.querySelector(".paste-roster")
-				const pull = document.querySelector(".pull-roster")
-				return !pull || !!(paste.compareDocumentPosition(pull) & Node.DOCUMENT_POSITION_FOLLOWING)
-			}), "the fragile route is listed first")
+				const route = document.querySelector(".trade-team :is(.read-yahoo,.connect-offer,.pull-roster)")
+				const fold = document.querySelector(".trade-team details.paste-team-fold")
+				return !!route && !!fold && !!(route.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING)
+			}), "no route, no fold, or the fold first")
+		if (routes[0] === ".connect-offer") {
+			/* It was an h3 "Read my league from Yahoo", a sub-line "Your team, your scoring and
+			   who is free, in one press. About a minute to set up." and a button "Set that up".
+			   One button now, and its label is the instruction. */
+			const offer = await page.$eval(".connect-offer", e => ({
+				text: e.innerText.replace(/\s+/g, " ").trim(),
+				buttons: [...e.querySelectorAll("button")].map(b => b.textContent.trim())
+			}))
+			t("the reader offer is one button whose label says what it gets him",
+				offer.buttons.length === 1 && offer.buttons[0] === "Read my league from Yahoo" &&
+					offer.text === "Read my league from Yahoo", JSON.stringify(offer))
+		}
+		/* The card explains nothing. The old copy is named so it cannot come back quietly:
+		   the sub-line under the heading, the pitch under the offer, and the free-agent
+		   summary's "Optional. Without it, who is available is estimated." */
+		const card = await page.$eval(".trade-team", e => {
+			const c = e.cloneNode(true)
+			c.querySelectorAll("details:not([open]) > :not(summary)").forEach(x => x.remove())
+			return c.textContent.replace(/\s+/g, " ")
+		})
+		t("and the card says nothing about itself: no pitch, no privacy note, no estimate",
+			!/Saved in this browser|Who you own in|in one press|About a minute|Set that up|Optional\.|is estimated/.test(card),
+			card.slice(0, 300))
+		t("and the fallback is titled as an instruction",
+			(await page.$eval("details.paste-team-fold > summary", e => e.textContent.trim())) ===
+				"Type your players instead")
 
 		await openPasteFold(page)
 
@@ -954,11 +1001,15 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 		 * it, for a step whose own first word is "optional". The summary keeps the offer and
 		 * keeps the one fact that decides whether it is worth a minute.
 		 */
-		const wireSummary = (await page.textContent("details.paste-wire-fold > summary")) ?? ""
-		t("the optional free-agent paste is folded, and says so without being opened",
+		/* REWRITTEN 2026-09-22. This asserted the summary also said "Optional" and
+		   "estimated" — "Optional. Without it, who is available is estimated." — on the
+		   ground that a fold must say what is inside it. The heading already does; the
+		   sentence explained the app, which the owner ruled out for UI text. The claim that
+		   survives is the fold's: closed, and its summary is the instruction and nothing else. */
+		const wireSummary = ((await page.textContent("details.paste-wire-fold > summary")) ?? "").trim()
+		t("the free-agent paste is folded, and its summary is the instruction alone",
 			(await page.$eval("details.paste-wire-fold", d => d.open)) === false &&
-				/Paste your free agents/.test(wireSummary) && /[Oo]ptional/.test(wireSummary) &&
-				/estimated/.test(wireSummary), wireSummary)
+				wireSummary === "Paste your free agents", wireSummary)
 		await page.$eval("details.paste-wire-fold", d => { d.open = true })
 		await page.fill("[data-ctl=paste-wire]", fa.map(x => `${x.name} ${x.team ?? ""} - OF`).join("\n"))
 		await page.click("[data-ctl=paste-wire] ~ button")
@@ -983,6 +1034,63 @@ t("still no page errors", errors.length === 0, errors.join(" | "))
 			(await page.textContent(".paste-note")) ?? "")
 	}
 	await page.close()
+}
+
+/**
+ * WITH THE READER INSTALLED, THE CARD IS TWO BUTTONS AND A RECEIPT. (Added 2026-09-22.)
+ *
+ * The reader-installed branch used to be an h3 "Read it from Yahoo", an instruction, a
+ * primary, an "Open Yahoo" button, the roster button, progress text and up to three
+ * receipt sentences, one of them 38 words about "a gap in the read, not an empty wire".
+ * The owner's rule: one primary [Read my league], [Read the other N rosters] beside it as
+ * a secondary, one receipt line. `extensionHere` reads the attribute the bridge stamps on
+ * the document, so stamping it is the reader being present as far
+ * as this card can tell; nothing here presses the buttons — test/extension.mjs drives
+ * them against a fixture Yahoo.
+ */
+{
+	const rp = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	await rp.goto(BASE, { waitUntil: "domcontentloaded", timeout: 60000 })
+	await rp.waitForSelector(".views button", { timeout: 30000 })
+	/* After the page is up, not in an init script: an attribute set on the document before
+	   the parser builds <html> is set on an element the parser then replaces. The bridge's
+	   own late-arrival poll (see `useExtension`) notices it within two seconds and
+	   re-renders, which is the same path a reader who installs mid-visit takes. */
+	await rp.evaluate(() => document.documentElement.setAttribute("data-beanemachine-extension", "0.0.0-test"))
+	if (await toScreen(rp, SCREEN.setup)) {
+		const here = await rp.waitForSelector(".trade-team .read-yahoo", { timeout: 30000 }).then(() => true, () => false)
+		t("with the reader installed, a Yahoo league's card leads with the reader", here)
+		if (here) {
+			const got = await rp.$eval(".trade-team", card => {
+				const block = card.querySelector(".read-yahoo")
+				const buttons = [...block.querySelectorAll("button")].map(b => ({
+					text: b.textContent.trim(), primary: b.classList.contains("primary")
+				}))
+				return {
+					buttons,
+					headings: block.querySelectorAll("h3").length,
+					offer: !!card.querySelector(".connect-offer"),
+					pull: !!card.querySelector(".pull-roster"),
+					wire: !!card.querySelector(".paste-wire-fold"),
+					fold: !!card.querySelector("details.paste-team-fold"),
+					lines: [...block.querySelectorAll("p.sub")].map(p => p.textContent.replace(/\s+/g, " ").trim())
+				}
+			})
+			t("one primary, Read my league, and the rosters read beside it as a secondary",
+				got.buttons.filter(b => b.primary).length === 1 &&
+					got.buttons[0].text === "Read my league" && got.buttons[0].primary &&
+					got.buttons.slice(1).every(b => !b.primary && /^Read the other \d+ rosters$/.test(b.text)) &&
+					got.buttons.length <= 2,
+				JSON.stringify(got.buttons))
+			t("and no heading, no offer to set up what is already set up, no second read",
+				got.headings === 0 && !got.offer && !got.pull, JSON.stringify(got))
+			t("and no free-agent paste, because Read my league reads the free agents",
+				!got.wire && got.fold, JSON.stringify(got))
+			t("and every line on it is a short instruction or receipt, never a paragraph",
+				got.lines.every(l => l.split(/\s+/).length <= 14), JSON.stringify(got.lines))
+		}
+	}
+	await rp.close()
 }
 
 /**

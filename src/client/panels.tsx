@@ -775,8 +775,6 @@ export const PresetNote = ({
 // Re-exported so every consumer keeps importing it from here, and read from
 // src/client/command.ts so api.ts can use the same string without importing React.
 export { IMPORT_COMMAND } from "./command.ts"
-import { IMPORT_COMMAND } from "./command.ts"
-import { extensionHere } from "./extension.ts"
 
 /**
  * Three screens. "league" was a fourth and is gone: the League setup editor is now
@@ -899,291 +897,84 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
 		   Yahoo league wants to know whether this reads HIS league, and every word on that
 		   screen was about baseball rather than about him. This sentence is the only one with
 		   room for it, and it is the one that appears under the tab he lands on. */
-		purpose:
-			"Who to start in your fantasy league before first pitch, which of your seats scores nothing, and the one move worth making."
+		/* NO LONGER PRINTED AS A SCREEN INTRO. It was, under the tab bar on Tonight and on My
+		   league, and the owner's rule for this app is that no UI text explains the app — a
+		   sentence describing the screen the reader is already looking at is that. The tab label
+		   names the screen; the cards say what to do on it. Measured 2026-09-22 at 390x844: the
+		   Tonight intro was 22 words and 44px above the first card. What survives is this short
+		   form, read only by the disabled-tab hover in App.tsx, where there is no screen yet. */
+		purpose: "Who to start tonight."
 	},
 	{
 		id: "wire",
 		label: "Pickups",
 		season: 4,
-		purpose:
-			"Everyone you can actually get, ranked in this league's scoring, over the window you pick."
+		purpose: "Who to pick up."
 	},
 	{
 		id: "trade",
 		label: "My league",
 		season: 1,
-		purpose:
-			"Your league's scoring, slots and team count, and the men on your team. Everything the other two screens say is priced in these."
+		purpose: "Your league and your team."
 	}
 ]
 
 
 /**
- * How a visitor gets from this page to a board ranked in THEIR league. That was
- * the shape of the whole problem: every route in existed, none of them was named.
+ * A league that exists but cannot rank yet: what is missing, and the one place to fix it.
  *
- * Its own component because it was needed in two places that rendered for opposite
- * reasons — inside `Setup`, and again beside the demo league, which COULD rank and
- * so kept `Setup` hidden. The demo league is gone (a first visit now sets up its
- * own), so today `Setup` is the only caller. Kept separate anyway: the routes are a
- * list of their own, and the second caller comes back the moment anything else can
- * rank without being set up.
- */
-export const WaysIn = ({
-	canImport,
-	preset,
-	league,
-	onUsePreset,
-	onLoadFile,
-	onOpenSetup
-}: {
-	canImport: boolean
-	preset: string | null
-	league: League | null
-	onUsePreset?: () => void
-	onLoadFile?: () => void
-	onOpenSetup?: () => void
-}) => (
-	<>
-			{/* ── The routes in, in the order they are worth trying ──────────────
-			    This card used to end at "paste your league's URL", which is a
-			    route that does not exist for Yahoo: measured 2026-09-04, Yahoo
-			    sends no access-control headers on any page the importer reads,
-			    so a browser is never handed the response. Yahoo is where most of
-			    this app's users are, so the hosted site's only honest answers
-			    were "use a stranger's demo league" or "type nine batting values
-			    and eight pitching ones by hand". The first two routes below end
-			    in a board that ranks with nothing typed at all: the preset is
-			    instant and borrowed, the file is exact and costs one command. */}
-			<div className="routes">
-				<h3>Ways in</h3>
-				<dl>
-					{/*
-					  THE READER FIRST, WHERE THERE IS ONE, and it is not there for most readers.
-					
-					  This list is ordered by what is worth trying, and for a reader whose browser
-					  can read his league in one press nothing else on it competes: no typing, no
-					  selecting a page, no command, and it reaches a private league because the
-					  browser doing the reading is his own and already signed in.
-					
-					  Rendered only when it is actually installed — an entry that says "there is a
-					  faster way, which you do not have" at the top of a list of things he CAN do
-					  is an advert in the place a reader goes for help. The screens that teach the
-					  reader about it are the setup sheet and My league, where the button lives.
-					*/}
-					{extensionHere() && (
-						<Fragment2 term="Fastest">
-							{/* "Nothing leaves this browser" was looser than the policy it summarises,
-							    and this is the place a reader chooses a route in. The press really
-							    does ask Yahoo for pages — his own league's, from his own signed-in
-							    tab, which is the whole point — and what is true is that none of it
-							    reaches this site or any other. */}
-							Your own browser reads your league &mdash; your scoring, your seats, who is
-							free and who you are playing &mdash; off Yahoo, from the tab you are
-							already signed into. Nothing is typed, and none of it goes to this site or
-							anywhere else.
-							{onOpenSetup && (
-								<p style={{ margin: "var(--sp-2) 0 0" }}>
-									<button className="primary" onClick={onOpenSetup}>
-										Read my league on {tab("trade")}
-									</button>
-								</p>
-							)}
-						</Fragment2>
-					)}
-					{preset && onUsePreset && (
-						<Fragment2 term={extensionHere() ? "Instant" : "Fastest"}>
-							<b>{preset}</b> — a ready-made scoring table, roster and team count,
-							copied from a league that was read off its own settings page. Nothing
-							in it came from your league, so the page keeps saying so until you
-							check it, and every value is editable on {tab("trade")}.
-							<p style={{ margin: "var(--sp-2) 0 0" }}>
-								<button className="primary" onClick={onUsePreset}>
-									Start from this preset
-								</button>
-							</p>
-						</Fragment2>
-					)}
-					<Fragment2 term="From its URL">
-						{/* WHERE the field is, rather than "above".
-						    Measured 2026-09-11 on the dev server at 1280x1100, with a league
-						    one input short so this card renders: on Tonight and on Pickups the
-						    page holds no text field at all — the management row lives on My
-						    league alone — and this card sat at y=253 telling the reader to use
-						    a field that was not on the screen. `onOpenSetup` is the same
-						    discriminator the "By hand" route below already uses: App.tsx passes
-						    it only while some OTHER tab is open, so its presence means the field
-						    is one screen over and its absence means it is genuinely above. */}
-						{canImport ?
-							<>
-								Put your league&rsquo;s web address in the box{" "}
-								{onOpenSetup ? <>on {tab("trade")}</> : "above"} and it reads the
-								real values straight off <b>Yahoo</b> or <b>ESPN</b>.
-							</>
-						:	<>
-								Put an <b>ESPN</b> league&rsquo;s web address in the box{" "}
-								{onOpenSetup ? <>on {tab("trade")}</> : "above"} and it reads the
-								real values straight off it. No website can read a Yahoo league
-								&mdash; this one included &mdash; so a Yahoo league is read by your
-								own browser, or copied off the page.
-							</>
-						}
-					</Fragment2>
-					<Fragment2 term="From a file">
-						{/* The whole of this used to be four paragraphs about what one command
-						    reads, what it writes, why the free-agent half of it cannot be done
-						    from a web page, and how old each read is. All true, and all of it
-						    software talking about itself to somebody who came here about
-						    baseball. The command survives, once, named for who it is for. */}
-						Read your league once on your own computer and carry the file back. It
-						brings your team and your league&rsquo;s own list of free agents with it,
-						which copying a page cannot.
-						<details style={{ marginTop: "var(--sp-2)" }}>
-							<summary>I&rsquo;m comfortable with a terminal</summary>
-							<pre>{IMPORT_COMMAND}</pre>
-							It prints what it did and did not read, and the path to the file last.
-							Drop that file anywhere on this page.
-						</details>
-						{onLoadFile && (
-							<p style={{ margin: "var(--sp-2) 0 0" }}>
-								<button onClick={onLoadFile}>Load a file I saved&hellip;</button>
-							</p>
-						)}
-					</Fragment2>
-					<Fragment2 term="By hand">
-						{league && onOpenSetup ?
-							<>
-								Open <b>{tab("trade")}</b> and type your league&rsquo;s scoring,
-								slots and team count in. Nothing is filled in for you and nothing
-								is guessed.
-							</>
-						: league ?
-							<>
-								The cards below are the whole form — scoring, slots and team count,
-								typed in yourself. Nothing is guessed on your behalf.
-							</>
-						:	<>
-								Press <b>New</b> above with <i>a blank league</i> selected and fill it
-								in yourself. Nothing is guessed on your behalf.
-							</>
-						}
-					</Fragment2>
-				</dl>
-			</div>
-	</>
-)
-
-/**
- * Rendered above whichever tab is open, never instead of it: each tab still
- * says its own piece, and this says the piece none of them can see.
+ * THIS WAS A MENU, and the owner named the menu as the defect. Measured 2026-09-22 on the
+ * dev server at 390x844 with a league one input short: the card rendered a paragraph about
+ * why nothing is assumed, each missing input with a sentence explaining what it does to the
+ * ranking, chips for the inputs it DID have, and then `WaysIn` — a `<dl>` titled "Ways in"
+ * offering Fastest / Instant / From its URL / From a file (with a terminal fold) / By hand,
+ * followed by "What each tab does once those exist" and three screen descriptions. Five
+ * routes to one outcome, for a reader who had ALREADY chosen a route: he has a league, it is
+ * merely incomplete, and every one of those routes except "type the missing value" would
+ * throw away the league he has and start another. The routes proper belong to the setup
+ * sheet (Onboard.tsx), which asks the platform first and offers that platform's one path.
+ *
+ * So this card now says only what is missing and where to put it: the gap labels, no
+ * justification, and one button to My league — or, on My league itself, where the form is
+ * directly underneath, no button at all. `leagueGaps` still carries `why` and `blocks`
+ * because Onboard's own gap list and the tests of the schema read them; this card stopped
+ * printing them because "every player comes out at exactly zero" explains the app.
+ *
+ * `IMPORT_COMMAND` is still re-exported for the docs that print it.
  */
 export const Setup = ({
 	leagueKey,
 	league,
-	canImport,
-	preset,
-	onUsePreset,
-	onLoadFile,
 	onOpenSetup
 }: {
 	leagueKey: string | null
 	league: League | null
-	/** Whether a league can be read from wherever this page is running. True with a
-	 *  server behind it; on the static build true for ESPN, which allows a browser to
-	 *  read it, and false for Yahoo, which sends no CORS headers. */
-	canImport: boolean
-	/** How the ready-made league is named in the picker, or null if none ships. Read
-	 *  from the template rather than written here, so a preset that is removed from
-	 *  scoring.json cannot leave a button behind that offers it. */
-	preset: string | null
-	onUsePreset?: () => void
-	/** Opens the file picker the toolbar owns. Dropping a file on the page does the
-	 *  same thing, and both are named because a drop target nobody knows about is
-	 *  not a route. */
-	onLoadFile?: () => void
-	/** Absent when the league's own tab is already the open one — a button to where
-	 *  you are is furniture. Also the signal that the toolbar's URL field and New
-	 *  button are NOT on this screen, which is what `WaysIn` reads it for. */
+	/** Present only while a tab OTHER than My league is open; absent means the form is below. */
 	onOpenSetup?: () => void
 }) => {
-	const gaps = league ? leagueGaps(league) : []
-	const missing = gaps.filter(g => g.have === null)
-	const have = gaps.filter(g => g.have !== null)
+	const missing = league ? leagueGaps(league).filter(g => g.have === null) : []
 	const name = league?.meta.league_name ?? leagueKey
 	return (
 		<div className="grid">
-			<section className="card full">
-				<h2>{league ? "Finish setting this league up" : "Start with a league"}</h2>
-				<p className="sub">
-					{!league ?
-						<>
-							There is no league in this browser yet, and nothing in beanemachine means
-							anything without one — a player&rsquo;s value is his value <i>in your
-							league&rsquo;s scoring</i>.
-						</>
-					:	<>
-							<b>{name}</b> is{" "}
-							{missing.length === 1 ? "one input" : `${missing.length} inputs`} short of
-							ranking anything. Nothing is assumed in{" "}
-							{missing.length === 1 ? "its" : "their"} place: a value nobody read stays
-							missing and stays listed.
-						</>
-					}
-				</p>
-
+			<section className="card full setup-gaps">
+				<h2>Finish {name ?? "your league"}</h2>
+				<p className="sub">{onOpenSetup ? "Add these on My league:" : "Add these below:"}</p>
 				{missing.length > 0 && (
 					<ul className="flags">
 						{missing.map(g => (
 							<li key={g.label}>
-								<b>{g.label}</b> — {g.why} {g.blocks}
+								<b>{g.label}</b>
 							</li>
 						))}
 					</ul>
 				)}
-
-				{have.length > 0 && (
-					<div className="chips" style={{ marginTop: "var(--sp-3)" }}>
-						{have.map(g => (
-							<span className="chip ok" key={g.label}>
-								{g.label}: <b>{g.have}</b>
-							</span>
-						))}
-					</div>
-				)}
-
-				<WaysIn
-					canImport={canImport}
-					preset={preset}
-					onUsePreset={onUsePreset}
-					onLoadFile={onLoadFile}
-					league={league}
-					onOpenSetup={onOpenSetup}
-				/>
-
-				{league && onOpenSetup && (
+				{onOpenSetup && (
 					<p style={{ margin: "var(--sp-3) 0 0" }}>
 						<button className="primary" onClick={onOpenSetup}>
 							Open {tab("trade")}
 						</button>
 					</p>
 				)}
-
-				{/* Deliberately not `.legend`: its 110px term column breaks "Today"
-				    mid-word, and a tab you are being told to find must be spelled the way
-				    the tab is spelled. */}
-				<p className="tiny-note" style={{ margin: "var(--sp-4) 0 var(--sp-2)" }}>
-					What each tab does once those exist, in the order a season uses them:
-				</p>
-				<dl>
-					{[...VIEWS]
-						.sort((a, b) => a.season - b.season)
-						.map(v => (
-							<Fragment2 key={v.id} term={v.label}>
-								{v.purpose}
-							</Fragment2>
-						))}
-				</dl>
 			</section>
 		</div>
 	)

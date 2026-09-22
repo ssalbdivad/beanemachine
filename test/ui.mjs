@@ -198,7 +198,7 @@ const toSetupBar = async pg => {
  * time that button is relabelled it should be one line in this file.
  */
 // The bar's single button both opens and closes the sheet, and its label flips between
-// "Who's on my team" and "Close" — so it is addressed by its place in the bar rather
+// "Set up my league" and "Close" — so it is addressed by its place in the bar rather
 // than by text that is only ever half of what you are looking for.
 const DOCK_TOGGLE = ".dock-bar button"
 /** The other way in, and with a league the only one: pressing it is what puts the
@@ -239,6 +239,17 @@ const closeDock = async pg => {
 const setupFromToolbar = async pg => {
   await pg.click('.bar button:text-is("Set up a league")')
   await pg.waitForSelector(".dock-sheet .onboard")
+}
+/**
+ * The team box is the THIRD screen of the setup wizard, not the first: the sheet opens on
+ * "Where's your league?" and "Somewhere else" is the answer that goes straight to typing a
+ * team (src/client/Onboard.tsx). Every block below that types into the box reaches it here.
+ * A no-op when the box is already up — a sheet holding a half-typed draft reopens on it.
+ */
+const toTeamStep = async pg => {
+  if (await pg.locator("[data-ctl=onboard-team]").isVisible()) return
+  await pg.click('.dock-sheet .onboard-where button:text-is("Somewhere else")')
+  await pg.waitForSelector("[data-ctl=onboard-team]")
 }
 
 await toLeagueSetup(page)
@@ -669,84 +680,84 @@ t("Escape closes it too, from focus anywhere, and still leaves the way back",
 await openDock(fp)
 
 /**
- * ── The sheet asks ONE question, and it is about baseball ────────────────────────
+ * ── The sheet asks WHERE first, one question per screen ─────────────────────────
  *
- * WHAT THIS USED TO ASSERT, three lines down: that the sheet's first control was the
- * platform picker (`.onboard .chip-btn:text-is("Yahoo")` was clicked to reveal the
- * rest), that the routes in were a `<dl>` of four terms inside `.onboard-alts`, and
- * that `textarea[data-ctl="paste-settings"]` came above `.onboard-alts` — "the paste
- * route leads, because it is the only one no platform can switch off".
+ * WHAT THIS USED TO ASSERT: that the sheet opened on "Who's on your team?" with the team
+ * box and "That's my team" (the "one question, and it is about baseball" pass); that
+ * everything about platforms was shut inside `<details class="onboard-alts">` whose
+ * summary read "My league scores differently"; that the team box came above that fold;
+ * that the fold named every route in one place — "Read that" (the settings paste), "Or
+ * type the values in myself", "Load a file I saved"; and that the settings paste led the
+ * routes inside it.
  *
- * WHY THAT CHANGED, and it is the whole of this pass. The sheet opened with "Where do
- * you play?" — a question asked for the app's benefit — and the route it then led with
- * told the reader to select an entire web page with Ctrl+A, which no phone browser can
- * do. On the device this app is opened on, the advertised front door was impossible.
- * What always worked on a phone, and was never offered, is typing names:
- * `playersInText` matches known players in arbitrary prose, so a thumbed-in list reads
- * exactly as well as a pasted page. So the sheet is now the one question it can
- * actually answer with — "Who's on your team?", a textarea and a button — and every
- * word about platforms, settings pages and pasted URLs is behind a <details> whose
- * summary is a claim about the READER ("My league scores differently") rather than an
- * interrogation of him.
+ * WHY IT MOVED. Measured 2026-09-22 at 390x844, that sheet asked for the team before it
+ * knew the platform, offered three routes at once above the fold and the platform question
+ * inside it, and carried four sentences explaining the app. The owner's word was "bloat
+ * and confusion". The sheet is a wizard now (src/client/Onboard.tsx): "Where's your
+ * league?" with Yahoo / ESPN / Somewhere else, then ONE route for that platform, then the
+ * team. The settings-paste route and "type the values in myself" are deleted from the
+ * sheet (the paste parser survives in src/data/paste-settings.ts and is exercised by
+ * test/settings.mjs and by the Yahoo reader).
  *
- * So the old ordering assertion is kept, pointed at the new front: the thing that
- * leads is the question, and the platform machinery is underneath it. What has NOT
- * changed, and is asserted below rather than dropped, is that every route in is still
- * named in one place — they are buttons inside that <details> now instead of terms in
- * a list, and a route that exists but is named nowhere is the failure this has always
- * been about.
+ * WHAT CARRIES OVER. "Every route in is named in one place" is still the claim — the
+ * place is the first screen now, and the routes are the three platforms and the saved
+ * file. "The question a phone can answer is not behind one that needs a computer" is
+ * still the claim — "Somewhere else" reaches the team box in one tap from the first
+ * screen. And the deleted sentences are asserted ABSENT, so nobody restores them.
  */
-t("the sheet asks one question, and it is who is on your team",
-  (await fp.textContent(".dock-sheet .onboard h2")) === "Who’s on your team?" &&
-    (await fp.locator('.onboard textarea[data-ctl="onboard-team"]').count()) === 1 &&
-    (await fp.locator('.onboard .onboard-go button:text-is("That’s my team")').count()) === 1,
-  `${await fp.textContent(".dock-sheet .onboard h2")} — ${await fp.locator('.onboard textarea[data-ctl="onboard-team"]').count()} team boxes`)
-// The platform question is not merely further down, it is SHUT: a reader whose league
-// scores the standard way must be able to finish without ever reading the word Yahoo.
-// Asserted on `open` rather than on visibility because a <details> that ships open is
-// the easy regression and would look like a longer form rather than a broken one.
-t("and everything about platforms is shut behind a claim about the reader, not a question",
-  (await fp.locator(".onboard-alts").evaluate(e => e.open)) === false &&
-    (await fp.textContent(".onboard-alts summary")) === "My league scores differently" &&
-    !(await fp.locator('.onboard-alts .chip-btn:text-is("Yahoo")').isVisible()),
-  `open=${await fp.locator(".onboard-alts").evaluate(e => e.open)} summary="${await fp.textContent(".onboard-alts summary")}"`)
-// The ordering claim, rehomed: the question a phone can answer is above the route that
-// needs a desktop, rather than the other way round.
-t("and the question leads, above every route that needs a computer",
+const sheetText = async pg => (await pg.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
+t("the sheet asks where the league is, first",
+  (await fp.textContent(".dock-sheet .onboard h2")) === "Where’s your league?",
+  await fp.textContent(".dock-sheet .onboard h2"))
+t("…with the three platforms as the only answers, in order",
+  JSON.stringify(await fp.$$eval(".onboard-where button", n => n.map(e => e.textContent.trim()))) ===
+    JSON.stringify(["Yahoo", "ESPN", "Somewhere else"]),
+  (await fp.$$eval(".onboard-where button", n => n.map(e => e.textContent.trim()))).join(" | "))
+t("…and nothing else to fill in on that screen: no team box, no address box, no fold",
+  (await fp.locator("[data-ctl=onboard-team]").count()) === 0 &&
+    /* `:not([type=file])`: the saved-file link carries its own hidden picker (see the
+       note in Onboard.tsx on why), which is a control only the link raises. */
+    (await fp.locator(".dock-sheet .onboard input:not([type=file]), .dock-sheet .onboard textarea").count()) === 0 &&
+    (await fp.locator(".dock-sheet .onboard details").count()) === 0,
+  await sheetText(fp))
+/* The saved file is the one door a saved league has back in, and App hides its toolbar
+   while this sheet is up — so it is on the first screen, small, below the platforms. */
+t("the way back in for a saved file is on that screen, after the platforms",
   await fp.evaluate(() => {
-    const box = document.querySelector('textarea[data-ctl="onboard-team"]')
-    const alts = document.querySelector(".onboard-alts")
-    return !!box && !!alts &&
-      !!(box.compareDocumentPosition(alts) & Node.DOCUMENT_POSITION_FOLLOWING)
+    const file = [...document.querySelectorAll(".dock-sheet .onboard-file button")]
+      .find(b => b.textContent.trim() === "Load a file I saved")
+    const last = [...document.querySelectorAll(".onboard-where button")].pop()
+    return !!file && !!last && !!(last.compareDocumentPosition(file) & Node.DOCUMENT_POSITION_FOLLOWING)
   }))
+/* THE DELETED SENTENCES, asserted gone. Each of these was on the sheet on 2026-09-22 and
+   each explained the app or offered a second route; a regression that restores one is the
+   exact defect this rewrite was for. Checked on every step, not only the first. */
+const EXPLAINS =
+  /scores differently|board behind this|one real league|Nothing leaves|no account|Only got a few|start with your starters|type the values in myself|Ctrl|about a minute|Four steps|Read that/i
+t("…and no sentence on it explains the app",
+  !EXPLAINS.test(await sheetText(fp)), (await sheetText(fp)).match(EXPLAINS)?.[0] ?? "")
+t("…and the settings-paste box is gone from the sheet",
+  (await fp.locator('[data-ctl="paste-settings"]').count()) === 0)
 
-// Opened the way a reader opens it, and the platform chosen inside it — the chips moved
-// into the <details> with everything else, so they cannot be clicked until it is open.
-await fp.click(".onboard-alts summary")
-await fp.click('.onboard-alts .chip-btn:text-is("Yahoo")')
-/**
- * Every route in is still NAMED, in one place. Named as buttons now rather than as the
- * terms of a definition list, so they are counted by their labels: pasting the page,
- * typing the values, and loading a file saved by a local run. The URL field is
- * deliberately not in the count — `canImport` is false on a page with no server behind
- * it and the field is rightly absent there, so requiring it would fail for the reason
- * the app is correct.
- */
-const routes = await fp.$$eval(".onboard-alts button", n =>
-  n.map(e => e.textContent.trim()).filter(Boolean))
-t("the ways into your own league are named, in one place",
-  ["Read that", "Or type the values in myself", "Load a file I saved"].every(r => routes.includes(r)),
-  routes.join(" | "))
-// And within the platform half, the paste still leads: it is the only route no platform
-// can switch off, and the only one that works on a private league.
-t("and pasting the page leads the routes that need permission",
-  await fp.evaluate(() => {
-    const box = document.querySelector('textarea[data-ctl="paste-settings"]')
-    const byHand = [...document.querySelectorAll(".onboard-alts button")]
-      .find(b => b.textContent.trim() === "Or type the values in myself")
-    return !!box && !!byHand &&
-      !!(box.compareDocumentPosition(byHand) & Node.DOCUMENT_POSITION_FOLLOWING)
-  }))
+// "Somewhere else" is the route that works everywhere, and it is the team box itself.
+await fp.click('.onboard-where button:text-is("Somewhere else")')
+t("somewhere else goes straight to the team, in one tap",
+  (await fp.textContent(".dock-sheet .onboard h2")) === "Who’s on your team?" &&
+    (await fp.locator('.onboard textarea[data-ctl="onboard-team"]').count()) === 1,
+  await fp.textContent(".dock-sheet .onboard h2"))
+/* `.onboard-go button` is how every suite submits a typed team, so it must be ONE element:
+   twice a second button under that class sent a suite to the wrong screen. */
+t("…with exactly one submit, and it is about the answer",
+  (await fp.locator(".onboard-go button").count()) === 1 &&
+    /^(That’s my team|Replace my team)$/.test((await fp.textContent(".onboard-go button")).trim()),
+  `${await fp.locator(".onboard-go button").count()} × "${await fp.textContent(".onboard-go button")}"`)
+t("…one instruction, and no explanation",
+  /Type your players, one per line\./.test(await sheetText(fp)) && !EXPLAINS.test(await sheetText(fp)),
+  await sheetText(fp))
+await fp.click('.dock-sheet .onboard-back button')
+t("Back returns to the platform question",
+  (await fp.textContent(".dock-sheet .onboard h2")) === "Where’s your league?",
+  await fp.textContent(".dock-sheet .onboard h2"))
 // back out of the setup the way a reader does
 await fp.click(".onboard-done button")
 // `onDone` sends the reader to Tonight, so the toolbar has to be walked back to rather
@@ -779,6 +790,22 @@ await toSetupBar(fp)
  * the assertions further down count the leagues in the file.
  */
 {
+  /*
+   * THE TERMINAL ROUTE IS NO LONGER ON ANY SCREEN, and the assertion moved with it.
+   *
+   * This drove a blank league into `Setup` and opened `WaysIn`, a <dl> titled "Ways in"
+   * whose last entry hid `npx --yes github:…` behind "I'm comfortable with a terminal".
+   * On 2026-09-22 `WaysIn` was deleted outright: it offered Fastest / Instant / From its URL
+   * / From a file / By hand — five routes to one outcome, for a reader who had ALREADY
+   * chosen a route and merely had a league one input short — and the owner named exactly
+   * that menu as the defect. The routes proper live in the setup sheet now, which asks the
+   * platform first and offers that platform's one path.
+   *
+   * Two claims survive and are asserted. The incomplete-league card offers ONE way forward
+   * and no menu of routes. And the command, which is still exported for the docs that print
+   * it, is still the form a visitor with no clone could actually run — the reason the old
+   * block existed, and a regression a string constant can make silently.
+   */
   const cli = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
   await stubSlate(cli)
   const cp = await cli.newPage()
@@ -787,16 +814,16 @@ await toSetupBar(fp)
   await toSetupBar(cp)
   await cp.selectOption("#tpl", "custom")
   await cp.click('.bar button:text-is("New")')
-  await cp.waitForSelector(".routes")
-  const gate = '.routes details summary:text-is("I’m comfortable with a terminal")'
-  t("the terminal route is shut until a reader says that is him",
-    (await cp.locator(".routes details").evaluate(e => e.open)) === false &&
-      (await cp.locator(gate).count()) === 1,
-    `open=${await cp.locator(".routes details").evaluate(e => e.open)}, ${await cp.locator(".routes details summary").textContent()}`)
-  await cp.click(gate)
-  const printed = (await cp.textContent(".routes pre")).trim()
-  t("and the command it prints is one a visitor could actually run",
-    /^npx --yes github:/.test(printed), printed)
+  await cp.waitForSelector(".setup-gaps", { timeout: 15000 })
+  const card = await cp.$eval(".setup-gaps", e => e.innerText)
+  t("an incomplete league is told what is missing, not handed a menu of routes",
+    (await cp.locator(".routes").count()) === 0 && !/ways in|fastest|terminal/i.test(card),
+    card.slice(0, 240))
+  t("…and no screen puts a terminal command in front of a novice",
+    !/npx|terminal/i.test(await cp.evaluate(() => document.body.innerText)))
+  const { IMPORT_COMMAND } = await cp.evaluate(async () => import("/src/client/command.ts"))
+  t("the command the docs print is still one a visitor could actually run",
+    /^npx --yes github:/.test(IMPORT_COMMAND), IMPORT_COMMAND)
   await cli.close()
 }
 
@@ -1390,6 +1417,7 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await bp.click(TOOLBAR_SETUP)
 	await bp.waitForSelector(".dock-sheet .onboard")
 	t("the sheet is up", (await sheetUp()) === true)
+	await toTeamStep(bp)
 	await bp.fill("#dock-sheet textarea", "Judge\nSoto\nAlonso")
 	await bp.goBack()
 	await bp.waitForTimeout(700)
@@ -1438,6 +1466,7 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	   browser as it is typed (src/client/typing.ts). Eighteen is the count from the walk that
 	   found it. */
 	const typed = Array.from({ length: 18 }, (_, i) => `Player Number ${i + 1}`).join("\n")
+	await toTeamStep(bp)
 	await bp.fill("[data-ctl=onboard-team]", typed)
 	const depth = await bp.evaluate(() => history.length)
 	await bp.keyboard.press("Escape")
@@ -1502,32 +1531,63 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	if ((await ep.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
 		await ep.click(".dock-bar button")
 	await ep.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
-	await ep.click("summary:has-text('My league scores differently')")
-	await ep.click(".onboard-where button:has-text('ESPN')")
-	await ep.waitForSelector(".onboard-first", { timeout: 10000 })
-	const say = await ep.$eval(".onboard-first", e => e.innerText)
-	/* THESE REQUIRED THE EXPLANATIONS — "ESPN hands a public league straight over", "a private
-	   league answers nobody, this app included" — and no screen explains itself any more. What
-	   the claims were protecting survives: he is told what to do with his address, and told
-	   where to go when it is a private league. */
-	t("an ESPN reader is told what to do with his league's address",
-		/paste your league.{0,3}s address/i.test(say), say.slice(0, 200))
-	t("…and where to go when it is a private one",
-		/private league/i.test(say), say)
-	t("there is one address box on that screen, not two",
-		(await ep.locator(".onboard-url").count()) === 1,
-		String(await ep.locator(".onboard-url").count()))
-	const order = await ep.evaluate(() => {
-		const url = document.querySelector(".onboard-url")
-		const paste = document.querySelector('textarea[data-ctl="paste-settings"]')
-		if (!url || !paste) return null
-		return {
-			url: Math.round(url.getBoundingClientRect().top),
-			paste: Math.round(paste.getBoundingClientRect().top)
-		}
-	})
-	t("and it comes before the paste box rather than under it",
-		order && order.url < order.paste, JSON.stringify(order))
+	/* WHAT THIS USED TO DO: open the "My league scores differently" fold, pick ESPN, and
+	   read `.onboard-first` — an address box set ABOVE a settings-paste box and a Ctrl+A
+	   routine, with "For a private league, copy the page below." between them. It asserted
+	   the address came first and the paste second. The fold and the paste are gone (see the
+	   wizard note in src/client/Onboard.tsx), so the successor claims are: ESPN is one tap
+	   from the first screen, its screen is ONE address box and one instruction, there is no
+	   paste box to come second at all, and the way on for a private league is the team box. */
+	await ep.click('.onboard-where button:text-is("ESPN")')
+	await ep.waitForSelector(".onboard-url", { timeout: 10000 })
+	const say = (await ep.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
+	t("an ESPN reader is asked for his league's link",
+		/paste your espn league link/i.test(say), say.slice(0, 200))
+	t("…and told where to copy it from, in one line",
+		/Copy it from the address bar on your league.s page\./.test(say), say)
+	t("there is one address box on that screen, and no paste box at all",
+		(await ep.locator(".onboard-url").count()) === 1 &&
+			(await ep.locator('[data-ctl="paste-settings"], .dock-sheet .onboard textarea').count()) === 0,
+		`${await ep.locator(".onboard-url").count()} url boxes`)
+	t("…and the way on when the league is private is typing the team, after the box",
+		await ep.evaluate(() => {
+			const url = document.querySelector(".onboard-url")
+			const alt = [...document.querySelectorAll(".dock-sheet .connect-back button")]
+				.find(b => b.textContent.trim() === "Type your players instead")
+			return !!url && !!alt && !!(url.compareDocumentPosition(alt) & Node.DOCUMENT_POSITION_FOLLOWING)
+		}))
+	t("…and it says nothing about why",
+		!/public|private|CORS|anybody|nobody/i.test(say), say)
+
+	/* A PRIVATE LEAGUE, NEW CLAIM. Before, the only word a refused read produced was App's
+	   toast — src/import.ts's "ESPN returned HTTP 401 … not publicly viewable, and reading a
+	   private one would need your ESPN cookies." — an explanation, and away from the screen.
+	   The ESPN step now answers it itself with an instruction whose second half is the link.
+	   Both routes are stubbed so this is a 401 on either build, whatever ESPN does today. */
+	await ep.route("**/api/import", route => route.fulfill({
+		status: 400,
+		contentType: "application/json",
+		body: JSON.stringify({ error: "ESPN returned HTTP 401 for league 12345: that league is not publicly viewable, and reading a private one would need your ESPN cookies." })
+	}))
+	await ep.route("**lm-api-reads**", route => route.fulfill({ status: 401, body: "" }))
+	await ep.fill(".onboard-url input", "https://fantasy.espn.com/baseball/league?leagueId=12345")
+	await ep.click(".onboard-url button")
+	await ep.waitForSelector(".onboard-private", { timeout: 15000 }).catch(() => {})
+	const priv = (await ep.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
+	t("a private ESPN league is answered on the ESPN step, as an instruction",
+		/That league is private\. Type your players instead/.test(priv) &&
+			(await ep.locator(".onboard-private button", { hasText: "Type your players instead" }).count()) === 1,
+		priv)
+	t("…with one way on, not the link twice, and none of the toast's explanation in the sheet",
+		(await ep.locator(".dock-sheet button", { hasText: "Type your players instead" }).count()) === 1 &&
+			!/cookies|HTTP 40|publicly viewable/i.test(priv),
+		priv)
+	await ep.fill(".onboard-url input", "https://fantasy.espn.com/baseball/league?leagueId=54321")
+	t("…and a new address clears it",
+		(await ep.locator(".onboard-private").count()) === 0)
+	await ep.unroute("**/api/import")
+	await ep.unroute("**lm-api-reads**")
+	await ep.click(".dock-sheet .onboard-back button")
 	/*
 	   AND THE SCREEN HIS TEAM IS ON OFFERS THE READER, which it never did.
 	
@@ -1551,8 +1611,13 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 		if (offered) {
 			await offered.click()
 			await lp.waitForTimeout(800)
+			/* Was `>= 4`: the sideload walkthrough had four numbered steps (download and unzip,
+			   open the extensions page, load it, open Yahoo). It is three one-line steps now —
+			   add the reader, open your team on Yahoo, come back to this page — with the sideload's
+			   three sub-lines inside step 1. The claim is the same: the one walkthrough opens,
+			   with its steps, straight from My league. */
 			t("…and pressing it opens the walkthrough rather than a second copy of it",
-				(await lp.locator(".dock-sheet .connect .step").count()) >= 4,
+				(await lp.locator(".dock-sheet .connect .step").count()) === 3,
 				`${await lp.locator(".dock-sheet .connect .step").count()} steps`)
 		}
 		await lp.close()
@@ -1561,12 +1626,35 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	/* A Yahoo reader must not be shown an address box at all: no website can read a Yahoo
 	   league from its URL, and offering one would be the app claiming a capability it does not
 	   have on the one screen that exists to explain that it does not. */
-	await ep.click(".onboard-where button:has-text('Yahoo')")
-	await ep.waitForTimeout(300)
+	await ep.click('.onboard-where button:text-is("Yahoo")')
+	await ep.waitForSelector(".dock-sheet .connect", { timeout: 10000 })
 	t("a Yahoo reader is offered no address box, because no website can read his league",
-		(await ep.locator(".onboard-url").count()) === 0 &&
-			(await ep.locator(".onboard-first").count()) === 0,
+		(await ep.locator(".onboard-url").count()) === 0,
 		`${await ep.locator(".onboard-url").count()} url boxes`)
+	/* The Yahoo screen on a desktop browser: the reader, in three one-line steps, and the
+	   one alternative, which exists because an install can fail. */
+	const ysay = (await ep.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
+	t("…he is shown the reader, as three numbered steps",
+		/Read your league from Yahoo/i.test(ysay) && (await ep.locator(".dock-sheet .connect .step").count()) === 3,
+		ysay.slice(0, 200))
+	/* NEW: step 3 said "Come back and press Read my league." on a screen with no such button
+	   (it appears only once the reader is detected, when this screen turns into the installed
+	   one). The step must be true where it is drawn. */
+	t("…and no step names a button that is not on this screen",
+		/Come back to this page\./.test(ysay) && !/press Read my league/i.test(ysay) &&
+			(await ep.locator('.dock-sheet button:text-is("Read my league")').count()) === 0,
+		ysay)
+	t("…each step one short line",
+		(await ep.$$eval(".dock-sheet .step-say", n => n.map(e => e.innerText.trim().split(/\s+/).length)))
+			.every(w => w <= 12),
+		(await ep.$$eval(".dock-sheet .step-say", n => n.map(e => e.innerText.trim()))).join(" | "))
+	t("…and one way out to typing, and no explanation",
+		(await ep.locator(".dock-sheet .connect-back button", { hasText: "Type your players instead" }).count()) === 1 &&
+			!/Nothing is sent|about a minute|Four steps|turns into that button|reload the page/i.test(ysay),
+		ysay)
+	await ep.click(".dock-sheet .connect-back button")
+	t("…which lands on the team box",
+		(await ep.locator("[data-ctl=onboard-team]").count()) === 1)
 	await ep.close()
 }
 
@@ -1605,28 +1693,31 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	if ((await ap.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
 		await ap.click(".dock-bar button")
 	await ap.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
-	const offer = await ap.$(".onboard-offer button")
-	t("a Firefox phone is still offered the reader, because the browser can run it", !!offer)
-	if (offer) {
-		await offer.click()
-		await ap.waitForSelector(".connect", { timeout: 10000 })
-		const say = await ap.$eval(".connect", e => e.innerText)
-		/* THIS REQUIRED THE EXPLANATION — "Mozilla's add-ons site", "not there yet" — and the
-		   explanation is gone on purpose: no screen in this app argues its own case any more.
-		   What a reader on a phone needs is the thing he can do, which is the claim now. */
-		t("and is told what to do instead of why he cannot",
-			/Chrome or Firefox on a computer/i.test(say) && !/not there yet|add-ons site/i.test(say),
-			say.slice(0, 300))
-		t("…and is offered no steps he cannot carry out",
-			(await ap.locator(".connect .step").count()) === 0,
-			`${await ap.locator(".connect .step").count()} steps`)
-		/* The worst of the three: a link to a store search for an add-on the store does not
-		   have, under a sentence saying it is not in that store. */
-		t("…and no link into a store that does not have it",
-			(await ap.locator('.connect a[href*="addons.mozilla.org"]').count()) === 0)
-		t("…and the route that does work on his phone is the one he is given",
-			/typing your team in/i.test(say), say.slice(0, 300))
-	}
+	/* WHAT THIS USED TO ASSERT: that a Firefox phone was still OFFERED the reader (a "Read
+	   my Yahoo league for me" button above the team box), and that pressing it showed a
+	   screen saying "Chrome or Firefox on a computer" reads the league and "typing your team
+	   in" works here, with no steps and no store link.
+
+	   WHY IT MOVED. That screen was a sentence about the reader's device between him and
+	   the one route that works on it. The wizard asks where first, and a Yahoo answer on a
+	   browser that cannot get the reader (`readsHere` false: no listing, no about:debugging
+	   on a phone) goes STRAIGHT to the team box, with nothing said about why. The three
+	   protections carry over as: no install steps he cannot carry out, no store link, and
+	   the route that works is the one he is given — now without a detour. */
+	await ap.click('.onboard-where button:text-is("Yahoo")')
+	await ap.waitForSelector("[data-ctl=onboard-team]", { timeout: 10000 })
+	const say = (await ap.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
+	t("a Firefox phone that answers Yahoo is taken straight to the team box",
+		/Who’s on your team\?/i.test(say), say.slice(0, 200))
+	t("…and is offered no steps he cannot carry out",
+		(await ap.locator(".connect, .connect .step").count()) === 0,
+		`${await ap.locator(".connect .step").count()} steps`)
+	t("…and no link into a store that does not have it",
+		(await ap.locator('a[href*="addons.mozilla.org"]').count()) === 0)
+	t("…and no sentence about his device or why",
+		/* "browser" alone is not on the list: "Saved in this browser." is the team step's one
+		   quiet line, and it is about his team, not his device. */
+		!/computer|phone|Chrome|Firefox|extension|install|not there yet|add-ons site/i.test(say), say.slice(0, 300))
 	await ap.close()
 	await ctx.close()
 }
@@ -1662,15 +1753,58 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await ap.waitForSelector(".dock-sheet .onboard", { timeout: 15000 })
 	/* A team typed in is what creates the preset league, which is the one case that must
 	   still be asked: its ten is borrowed from somebody else's league. */
+	await toTeamStep(ap)
 	const names = await ap.getAttribute('.onboard textarea[data-ctl="onboard-team"]', "placeholder")
 	await ap.fill("[data-ctl=onboard-team]", names)
 	await ap.click(".onboard-go button")
 	await ap.waitForSelector(".onboard-got", { timeout: 20000 })
+	/* TWO SENTENCES THAT EXPLAINED, NOW ABSENT. The unfound-lines quote ended "Nothing in them
+	   is counted anywhere." and, with a team stored, the submit carried "Replaces all 3. Add
+	   one on My league." Neither was asserted before; both were cut for explaining rather
+	   than instructing, and these pin the cut plus the instruction that replaced the first.
+	   A second read, with one line that matches nobody, is what draws both. */
+	await ap.fill("[data-ctl=onboard-team]", names + "\nzzqq xyz")
+	await ap.click(".onboard-go button")
+	await ap.waitForSelector(".onboard-missed", { timeout: 20000 })
+	const reread = (await ap.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
+	t("an unfound line is quoted back with an instruction, not an explanation",
+		/«zzqq xyz»\. Check the spelling and try again\./.test(reread) &&
+			!/Nothing in them is counted/i.test(reread),
+		reread)
+	t("…and the replace button carries no line explaining it",
+		(await ap.textContent(".onboard-go")).trim() === "Replace my team" && !/Replaces all|Add one on/i.test(reread),
+		await ap.textContent(".onboard-go"))
+	/* WAS: straight after the read, `.onboard-teams .chip-btn` counted 5 on the team screen.
+	   MOVED because that screen then held four things at once — "Replace my team", the "Did
+	   you mean" chips, the count chips and the finish — against the one-question-per-screen
+	   rule; the count is its own step now (src/client/Onboard.tsx). The successor claims:
+	   the team screen asks nothing about teams and offers "Next" instead of the finish, and
+	   Next opens a screen whose heading IS the question, with the same five chips. */
+	t("once the team is read, the team screen does not also ask the team count",
+		(await ap.locator(".onboard-teams").count()) === 0 &&
+			(await ap.locator(".onboard-done").count()) === 0 &&
+			(await ap.locator('.onboard-next button:text-is("Next")').count()) === 1,
+		`${await ap.locator(".onboard-teams").count()} count questions, ${await ap.locator(".onboard-done").count()} finishes, ${await ap.locator(".onboard-next").count()} Next`)
+	await ap.click(".onboard-next button")
+	await ap.waitForSelector(".onboard-teams", { timeout: 10000 })
+	t("…Next opens it as its own step, under its own heading",
+		(await ap.textContent(".dock-sheet .onboard h2")) === "How many teams are in your league?" &&
+			(await ap.locator("[data-ctl=onboard-team]").count()) === 0,
+		await ap.textContent(".dock-sheet .onboard h2"))
 	const chips = ap.locator(".onboard-teams .chip-btn")
 	t("with no reader in the browser the team count is still asked, as chips",
 		(await chips.count()) === 5, `${await chips.count()} chips`)
 	t("…and nothing offers to read a number off a page nothing here can open",
 		(await ap.locator(".onboard-teams-read").count()) === 0)
+	/* New with the step: its finish is on it, and Back goes to the team, not the platform. */
+	t("…and the finish is on that step",
+		(await ap.locator(".onboard-done button").count()) === 1)
+	await ap.click(".dock-sheet .onboard-back button")
+	t("…whose Back returns to the team screen",
+		(await ap.textContent(".dock-sheet .onboard h2")) === "Who’s on your team?",
+		await ap.textContent(".dock-sheet .onboard h2"))
+	await ap.click(".onboard-next button")
+	await ap.waitForSelector(".onboard-teams", { timeout: 10000 })
 
 	await ap.evaluate(() =>
 		document.documentElement.setAttribute("data-beanemachine-extension", "0.0.0-test")
@@ -1682,9 +1816,9 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	t("…and the button names what it reads and where from",
 		/team count/i.test(await ap.textContent(".onboard-teams-read button")),
 		await ap.textContent(".onboard-teams-read button"))
-	/* And it is the SAME door, not a second one: both this and the offer at the top of the
-	   sheet open the walkthrough, so the two entry points cannot disagree about what the
-	   reader is being asked to do. */
+	/* And it is the SAME door, not a second one: this and the Yahoo answer on the first
+	   screen open the one walkthrough, so the two entry points cannot disagree about what
+	   the reader is being asked to do. */
 	await ap.click(".onboard-teams-read button")
 	await ap.waitForSelector(".connect", { timeout: 10000 })
 	t("…and it opens the one walkthrough this app has",

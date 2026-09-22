@@ -1633,36 +1633,27 @@ export const Decide = ({
 	 * to "no projection could be made for this period", which names the symptom and
 	 * not the missing input, and sends nobody anywhere.
 	 */
-	if (league.meta.max_teams === null)
-		return (
-			<section className="card full decide decide-blocked">
-				<h2>What should I do?</h2>
-				<p>
-					Nothing yet — <b>{league.meta.league_name ?? "this league"}</b> does not say how
-					many teams are in it.
-				</p>
-				<p className="sub">
-					Open <b>My league</b> and set the team count.
-				</p>
-			</section>
-		)
+	/*
+	   A LEAGUE ONE INPUT SHORT GETS ONE CARD, AND IT IS NOT THIS ONE.
 
+	   With no team count, or no scoring, this rendered its own blocked card — "Nothing yet —
+	   <league> does not say how many teams are in it. Open My league and set the team
+	   count." — directly underneath App's `Setup` card, which renders in exactly the same
+	   states (`leagueReady` is false precisely when a gap has no value) and says "Finish
+	   <league> · Add these on My league: How many teams · [Open My league]". Walked on
+	   2026-09-22 at 390x844: the same instruction twice on one screen, and three times on My
+	   league once the field's own caption was counted. The owner named that pattern.
+
+	   `Setup` is the one that stays: it lists every missing input at once rather than
+	   whichever one this function checked first, and it carries the button. Here, nothing —
+	   the refusal is still made (no plan is offered for a league that cannot be priced), it
+	   is just not announced twice.
+	*/
+	if (league.meta.max_teams === null) return null
 	const scores =
 		Object.values(league.scoring.batting).some(v => v !== 0) ||
 		Object.values(league.scoring.pitching).some(v => v !== 0)
-	if (!scores)
-		return (
-			<section className="card full decide decide-blocked">
-				<h2>What should I do?</h2>
-				<p>
-					Nothing yet — <b>{league.meta.league_name ?? "this league"}</b> gives the roster
-					shape but not what each stat is worth.
-				</p>
-				<p className="sub">
-					Open <b>My league</b> and read the values off your platform, or enter them.
-				</p>
-			</section>
-		)
+	if (!scores) return null
 
 	// Each of these is a different missing thing with a different fix, and naming the
 	// wrong one sends the reader to the wrong button.
@@ -1688,7 +1679,6 @@ export const Decide = ({
 		 * league when this browser actually holds one — printing the author's own
 		 * league id at a stranger was worse than printing nothing.
 		 */
-		const espn = league.meta.platform === "espn"
 		return (
 			<section className="card full decide decide-blocked">
 				{/*
@@ -1718,11 +1708,17 @@ export const Decide = ({
 				  The sentence says what pressing it buys; the button says what it does. Same
 				  two facts, in the two shapes a reader already knows how to use.
 				*/}
-				<p>
-					Tonight&rsquo;s lineup and the moves to make, from the players you own. About
-					a minute, and it stays in this browser.
-					{espn && " Your platform can read the whole roster in one click."}
-				</p>
+				{/*
+				  ONE INSTRUCTION, ONE BUTTON. The sentence here was "Tonight's lineup and the
+				  moves to make, from the players you own. About a minute, and it stays in this
+				  browser." plus, on ESPN, "Your platform can read the whole roster in one
+				  click." — 21 to 30 words selling the step, estimating its duration and making a
+				  privacy promise, all of which the owner has ruled out of UI text: strings
+				  instruct, they do not explain the app. The heading already asks the question;
+				  this line says what to do; the button does it. The platform-specific promise
+				  belongs to the sheet the button opens, which asks the platform first.
+				*/}
+				<p>Add the players you own.</p>
 				<p className="decide-cta-row">
 					<button type="button" className="primary decide-cta" onClick={onOpenTeam}>
 						Add your players

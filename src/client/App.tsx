@@ -825,16 +825,34 @@ export const App = () => {
 						key={v.id}
 						/* The hover is gone where the screen now says its own sentence — a hover
 						   that repeats visible text is noise, and a hover that is the only copy of a
-						   sentence was the defect. What survives is the DISABLED case, which is
-						   information no screen can carry: a tab that highlights and then shows the
-						   same setup card reads as a broken button. */
-						title={shown ? undefined : `${v.purpose} — set a league up first`}
+						   sentence was the defect. What survives is the league-less case, which is
+						   information no screen carries: which tab is which before any of them has
+						   anything on it. `v.purpose` ends in a full stop of its own, hence the trim
+						   — the shipped title read "Who to pick up. — set a league up first". */
+						title={league ? undefined : `${v.purpose.replace(/\.$/, "")} — set a league up first`}
 						aria-current={view === v.id ? "page" : undefined}
 						className={view === v.id ? "on" : ""}
-						// Nothing on any of them exists yet. A tab that highlights and then
-						// shows the same setup card reads as a broken button; saying why
-						// costs one attribute.
-						disabled={!shown}
+						/*
+						  NO `disabled` HERE, AND THE ONE THAT WAS HERE NEVER FIRED.
+
+						  It read `disabled={!shown}`, with a comment explaining that a tab which
+						  highlights and then shows the same setup card reads as a broken button.
+						  `shown` is `league ?? preview`, and `preview` is the borrowed preset every
+						  first visit is denominated in — never null. So `!shown` was never true, the
+						  tabs were never disabled, and the comment described a behaviour the app did
+						  not have. Removed rather than repaired: a guard that has never run once is
+						  not a guard, it is a claim.
+
+						  Repairing it was tried and reverted on 2026-09-22. Disabling these until a
+						  real league exists is defensible — walked at 390x844 with nothing stored, My
+						  league is a card headed TRADE reading "Import or configure a league first."
+						  with no control on it, and Pickups is 4,807px of 516 free agents ranked
+						  against a bar computed from nobody's roster — but it makes the tabs
+						  unreachable in exactly the state test/static.mjs walks to reproduce a real
+						  regression (tapping a tab mid-setup unmounted the sheet and lost a pasted
+						  team). The dead end is at the destination and that is where it gets fixed;
+						  taking the door away instead would have hidden the bug and the test of it.
+						*/
 						// the .on class carries the tab's state; the accent is the same "this one
 						// is live" signal .modes and .chip-btn already use for a selected control
 						style={view === v.id ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}
@@ -1173,20 +1191,32 @@ export const App = () => {
 						  one, where the editor he wants is already mounted and where the same press
 						  has always taken him.
 						*/
-						onOpenTeam={() => {
-							if (league) return go({ view: "trade" })
-							setOnboarding(true)
-							go({ sheet: true })
-						}}
+						onOpenTeam={
+							/* Null while the league on screen is the borrowed preview: the dock is
+							   already on the page asking for a league, and Decide's own empty state
+							   asked for the same press under a different name. See the note there. */
+							league ?
+								() => go({ view: "trade" })
+							:	null
+						}
 					/>
 					{hasTeam && (
 						<Recap snapshot={snapshot} league={shown} leagueKey={key} matchup={matchup} />
 					)}
-					<p className="next-screen">
-						<button type="button" className="chip-btn" onClick={() => go({ view: "wire" })}>
-							Everyone you can get →
-						</button>
-					</p>
+					{/*
+					  NOT BEFORE THERE IS A LEAGUE. "Everyone you can get" ranks free agents against
+					  the replacement bar of the reader's own roster and scoring; with neither, it
+					  opens a list priced in a borrowed table against nobody's team. On the first
+					  screen a stranger sees it was the only control in the flow besides the dock —
+					  an arrow pointing away from the one thing he has to do first.
+					*/}
+					{league && (
+						<p className="next-screen">
+							<button type="button" className="chip-btn" onClick={() => go({ view: "wire" })}>
+								Everyone you can get &rarr;
+							</button>
+						</p>
+					)}
 				</div>
 			: view === "wire" ?
 				<div className="grid">
@@ -2014,6 +2044,24 @@ const Status = ({
 		snapshotError ? { className: "chip warn", value: "unavailable" }
 		: !snapshot ? { className: "chip", value: "loading…" }
 		: { className: `chip${age.stale ? " warn" : ""}`, value: age.label }
+	/**
+	 * NOTHING AT ALL BEFORE THERE IS A LEAGUE, which is the opposite of what the docblock
+	 * above this component argues for, so here is why it changed.
+	 *
+	 * "Degrade to a stated absence rather than to nothing" is right once a reader has a
+	 * league: a strip that vanishes when a capture fails reads as a page still loading. It
+	 * is wrong on the FIRST screen a stranger sees. Measured on the published build at
+	 * 1280px, that screen opened with two amber chips — "no league yet" and "player data
+	 * 14d ago — 14 days of games since" — above a card of last night's best games and a dock
+	 * already saying "Start with your league." The first chip restates the dock; the second
+	 * warns him that data he has not asked for yet is older than he would like. Both are the
+	 * app talking about itself before it has done anything for him.
+	 *
+	 * `store` is still allowed through, because "leagues unreadable" is not provenance — it
+	 * is this browser refusing to keep anything, and a reader who sets a league up and finds
+	 * it gone next visit needed telling before he started.
+	 */
+	if (!league && store === "read") return null
 	return (
 		<div className="chips">
 			{league ?
@@ -2057,7 +2105,7 @@ const Status = ({
 			  Hidden by CSS rather than dropped from the DOM, so it is still read out on a
 			  screen reader and still there the moment the row has room for it.
 			*/}
-			<span className={data.className}>
+			<span className={`${data.className} chip-age`}>
 				player data <b>{data.value}</b>
 				{age.stale && !snapshotError && snapshot ?
 					<span className="chip-aside">
@@ -2207,7 +2255,20 @@ const WireChip = ({
 			    mark on Pickups' "Only players I can add", the estimate line on Tonight). So it is
 			    now an imperative, and it keeps the word "estimated" because it is the object of
 			    the verb, not a second message. 42 characters became 25. */}
-			Fix estimated free agents
+			{/* AND ONE WORD OF IT GOES AT PHONE WIDTH, by the same clip `.chip-aside` uses.
+
+			    346px of row at 390px has to carry the capture's age and this button, and it
+			    could not: measured with a league stored, the age ran to 418px and, once it was
+			    given the lead, this ran to 396px. One of the two was always off the edge —
+			    a warning a reader must not miss, or the only control in the row.
+
+			    "estimated" is the word that goes, because it is the one already printed where
+			    it is USED: the "estimated" mark on Pickups' "Only players I can add", and the
+			    estimate line on Tonight. "Fix free agents" is still an imperative with its
+			    object, it is 15 characters against 25, and both chips then fit inside the
+			    screen with 30px to spare. It stays in the accessibility tree, so a screen
+			    reader still hears the whole label. */}
+			Fix <span className="chip-aside">estimated </span>free agents
 		</button>
 	)
 }

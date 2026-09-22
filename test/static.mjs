@@ -315,8 +315,22 @@ t("but the way to it is on the page, as a short instruction rather than a pitch"
    with the board it was a caveat about; see the three-way note above. What is left to
    assert on a first visit is that the dock names the league state rather than implying
    one, which is the half of the pair that survives. */
-t("and the masthead says there is no league yet rather than implying there is one",
-  await p.locator(".chip.warn", { hasText: /no league yet/i }).isVisible(),
+/* REWRITTEN 2026-09-22, and the claim got STRONGER rather than being dropped.
+
+   This required the chip "no league yet" to be visible. The underlying property is that a
+   first visit must not imply a league it does not have, and a chip saying so is one way to
+   satisfy it — but on the published build it came with a second chip beside it, "player data
+   14d ago — 14 days of games since", warning a stranger in amber that data he has not asked
+   for is older than the app would like. Two chips of the app talking about itself, above a
+   card of last night's games and a dock already reading "Start with your league."
+
+   So the masthead renders NOTHING before there is a league (src/client/App.tsx, `Status`),
+   which implies a league even less than saying there is none, and what is asserted is that:
+   no chip on the page, no league name anywhere in the masthead, and the dock still carrying
+   the instruction — which the two assertions around this one already check. A future version
+   that brings a chip back for a league-less reader fails here, which is the point. */
+t("and the masthead says nothing at all before there is a league, rather than implying one",
+  await p.evaluate(() => document.querySelectorAll(".wrap > .chips .chip").length === 0),
   (await p.$$eval(".chip", n => n.map(e => e.textContent.trim()).join(" / "))))
 /* WAS /^Who.s on my team$/, "the button asks the question it is about to ask". The claim
    is unchanged and the question changed under it: the sheet opens on "Where's your
@@ -2527,8 +2541,18 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
       window: row.clientWidth
     }
   })
+  /* WAS `chips.left === 0` — this chip held `order:-1` and led the row. It no longer does.
+     The capture's age took the lead on 2026-09-22, because with a league stored the row is
+     wider than the screen and the age is the one chip in it that is ever a WARNING: it ran
+     to 418px in a 346px track, off the edge, and nothing caught that because the only state
+     this row was ever measured in was a first visit, which has no league chip in front of it.
+
+     Both fit now — the age leads at 0–185 and this follows at 188–329, inside 346 — because
+     "estimated" is clipped out of this label at phone width, the same way the age's own
+     trailing clause is. So what is asserted is the property that mattered all along: the one
+     control in the row is entirely on the screen, wherever in the row it sits. */
   t("the only chip a reader can press is not scrolled off the screen",
-    !chips || chips.noButton || (chips.left === 0 && chips.right <= chips.window),
+    !chips || chips.noButton || (chips.left >= 0 && chips.right <= chips.window),
     JSON.stringify(chips))
   await ph.close()
 }
@@ -2572,7 +2596,16 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
  * ═══════════════════════════════════════════════════════════════════════════════════
  */
 {
+  /* WITH A LEAGUE IN THE BROWSER, which it did not used to need and now does.
+     `Status` renders nothing at all before a reader has a league of his own (see the
+     assertion above, and the note in src/client/App.tsx), so a first visit has no chip row
+     to measure and this block was reading an element that no longer exists. The property —
+     the capture's age fits the phone rather than being cut mid-word — is about the row a
+     reader with a league sees, which is the only reader who ever saw it. So the league goes
+     in first, from the same fixture the rest of this file reads. */
   const ph = await b.newPage({ viewport: { width: 390, height: 844 } })
+  await ph.addInitScript(c => localStorage.setItem("beanemachine:config", JSON.stringify(c)),
+    { ...JSON.parse(readFileSync("scoring.json", "utf8")), active_league: "yahoo:228947" })
   await ph.goto(BASE, { waitUntil: "domcontentloaded" })
   await ph.waitForSelector("nav button", { timeout: 30000 })
   await ph.waitForTimeout(2500)
@@ -2580,17 +2613,34 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
     const r = e.getBoundingClientRect()
     return { width: Math.round(r.width), scroll: Math.round(e.scrollWidth) }
   })
-  t("the chips fit the phone rather than running off it",
-    row.scroll <= row.width + 2, JSON.stringify(row))
+  /* NOT "the row has no overflow" — it scrolls sideways at this width BY DESIGN, and that
+     claim only ever passed because the state measured was a first visit, which has a two-chip
+     row and, since Status stands down before there is a league, now has none at all. With a
+     league stored the row is 396px of chips in a 346px track, which is the design working.
+     What has to be true is that the chip a reader must not miss is reachable without a swipe,
+     and that is the assertion below. */
+  t("the chip row scrolls rather than wrapping, which is what the mask is for",
+    row.scroll >= row.width, JSON.stringify(row))
   const chip = await ph.$$eval(".wrap > .chips > *", els =>
     els.map(e => {
       const r = e.getBoundingClientRect()
-      return { text: (e.innerText || "").replace(/\s+/g, " ").trim(), right: Math.round(r.right) }
+      return {
+        text: (e.innerText || "").replace(/\s+/g, " ").trim(),
+        left: Math.round(r.left),
+        right: Math.round(r.right)
+      }
     })
   )
   const age = chip.find(c => /player data/i.test(c.text))
+  /* AND IT IS FIRST, which is the only position a scrolling row guarantees. The button
+     "Fix estimated free agents" held `order:-1` and this chip held none, so with a league in
+     front of it the age ended at 418px in a 346px screen — the one chip here that is ever a
+     warning, off the edge. See the note in src/client/app.css. */
   t("the capture's age is on the screen, not past its right edge",
     !!age && age.right <= row.width + 24, JSON.stringify(chip))
+  t("…and it leads the row, because a swipe is the only other way to reach it",
+    !!age && chip.every(c => c === age || c.left >= age.left),
+    JSON.stringify(chip.map(c => `${c.left} ${c.text}`)))
   /* Hidden by clipping rather than removed, so a screen reader still reads the whole
      sentence — the elaboration is lost to the eye, not to the tree. */
   t("…and the clause is still in the page for a reader who cannot see the row",
@@ -2614,8 +2664,24 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
   await cta.goto(BASE, { waitUntil: "domcontentloaded" })
   await cta.waitForSelector("nav button", { timeout: 30000 })
   await cta.waitForTimeout(2000)
-  const button = await cta.$("button.decide-cta")
-  t("the first screen offers to take his players", !!button)
+  /* REWRITTEN 2026-09-22: TWO BUTTONS, ONE ACTION, TWO NAMES.
+
+     This required `button.decide-cta` — "Add your players", in the flow — on the first screen.
+     Walked on the published build at 1280px with nothing stored, that screen ALSO carried a
+     docked bar reading "Start with your league. [Set up my league]", and both presses ran the
+     same handler, because a reader with no league of his own has exactly one next step. Two
+     names for one press is the reader having to work out whether they differ.
+
+     The dock is the one that stays: pinned, on every tab, and its sentence names the actual
+     first step, which is the league and not the players. So the card stands down while the
+     league on screen is the borrowed preview, and what is asserted is the stronger property —
+     the first screen makes exactly ONE ask. Everything below still walks that ask to the
+     textarea, from the dock's button instead of the card's. */
+  t("the first screen makes exactly one ask, and the second door is gone",
+    (await cta.locator("button.decide-cta").count()) === 0 &&
+      (await cta.locator(".dock-bar button").count()) === 1,
+    `${await cta.locator("button.decide-cta").count()} card CTAs, ${await cta.locator(".dock-bar button").count()} dock buttons`)
+  const button = await cta.$(".dock-bar button")
   if (button) {
     await button.click()
     await cta.waitForTimeout(800)
@@ -2673,8 +2739,13 @@ t("no page errors after all of that", errs.length===0, errs.join(" | "))
     heads.some(h => /won.t keep anything/i.test(h)), JSON.stringify(heads).slice(0, 200))
   t("…and is NOT told its leagues could not be read, because they were",
     !heads.some(h => /couldn.t be read/i.test(h)), JSON.stringify(heads).slice(0, 200))
+  /* WAS `.decide` — "What should I do?" rendered its own empty state for a reader with no
+     league, and a browser that refuses storage has no league. It stands down now (one ask per
+     screen; the dock carries it — see src/client/Decide.tsx), so the claim is asserted on what
+     it was always about: the page is the app and not a blank sheet with an error on it. */
   t("tonight's card is on the screen all the same",
-    (await np.locator(".decide").count()) === 1)
+    (await np.locator(".card").count()) > 0 && (await np.locator(".dock-bar").count()) === 1,
+    `${await np.locator(".card").count()} cards, ${await np.locator(".dock-bar").count()} docks`)
   await np.click("nav button:nth-child(2)")
   await np.waitForTimeout(2500)
   t("and the ranked board is a board, not an empty page",

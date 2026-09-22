@@ -1137,6 +1137,22 @@ kbd{
    first — and this is a phone-width layout problem. The fade at the right edge still says
    there is more to the row. */
 @media(max-width:640px){
+  /* THE AGE FIRST, THEN THE BUTTON, THEN EVERYTHING ELSE.
+
+     This row scrolls sideways at this width by design, so "first" is the only position that
+     is guaranteed readable without a swipe — and the button was taking it. Measured at 390px
+     with a league stored: the row was 346px wide holding 396px of chips, the free-agent
+     button sat at the left edge, and "player data 14d ago" ended at 418px, seventy-two
+     pixels past the right edge of the screen. The one chip in this row that is ever a
+     WARNING was the one a reader could not see, and no test caught it because the only state
+     the suite measured this row in was a first visit, where there is no league chip in front
+     of it — and now no row at all.
+
+     The age leads because it is the only thing here that says whether the ranking below is
+     current. The button is next because it is the only thing in the row he can press. The
+     league chips, which say what he already chose, bring up the rear and are what the swipe
+     is for. */
+  .wrap>.chips>.chip-age{order:-2}
   .wrap>.chips>button{order:-1}
   .wrap>.chips{
     flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;

@@ -103,8 +103,13 @@ export const Decide = ({
 	error: string | null
 	/** Takes the reader to the one screen that always works, on every platform:
 	 *  entering his own players. A card that says "add your players" and does not
-	 *  take him there is a card that has told him to go and find something. */
-	onOpenTeam: () => void
+	 *  take him there is a card that has told him to go and find something.
+	 *
+	 *  NULL MEANS SOMETHING ELSE ON SCREEN IS ALREADY ASKING. See the empty state
+	 *  below: with no league of his own, the setup dock is on the page carrying the
+	 *  same press under a different name, and this card stands down rather than
+	 *  offering a second door to one room. */
+	onOpenTeam: (() => void) | null
 }) => {
 	const storedSeats = leagueKey ? lineupStore.of(leagueKey) : null
 	/** Tonight, live, from MLB. One request, no server — see src/data/today.ts. */
@@ -1658,6 +1663,27 @@ export const Decide = ({
 	// Each of these is a different missing thing with a different fix, and naming the
 	// wrong one sends the reader to the wrong button.
 	if (!seats?.spots.length) {
+		/**
+		 * TWO BUTTONS, ONE ACTION, TWO NAMES — and this is the one that goes.
+		 *
+		 * Walked on the published build at 1280px with nothing stored: the page carried
+		 * "What should I do? / Add the players you own. [Add your players]" in the flow, and a
+		 * docked bar under it reading "Start with your league. [Set up my league]". Both
+		 * presses ran the same handler — open the setup sheet — because a reader with no
+		 * league of his own has exactly one next step. Two names for it is the reader having
+		 * to work out whether they differ, and they do not.
+		 *
+		 * The dock is the one that stays: it is pinned, it is on every tab, and its sentence
+		 * names the actual first step, which is the LEAGUE and not the players. So App passes
+		 * null here while the league on screen is the borrowed preview, and this card renders
+		 * nothing — leaving last night's best games, which is the app showing what it does,
+		 * above one ask.
+		 *
+		 * Once he has a league of his own the dock is gone, `onOpenTeam` is a function again,
+		 * and everything below is what he sees: the ask for players, which is then the only
+		 * one on the page.
+		 */
+		if (!onOpenTeam) return null
 		/**
 		 * The first thing a stranger sees, and for a long time it was a command line.
 		 *

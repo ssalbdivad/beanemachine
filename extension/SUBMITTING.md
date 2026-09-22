@@ -10,12 +10,15 @@ pnpm install --frozen-lockfile
 node extension/build.mjs
 ```
 
-That writes `dist-ext/`. **Four zips, and only two of them are uploadable:**
+That writes `dist-ext/`. **Five zips, and which one you upload depends on the route** — the
+table under *Two routes* below is the authority, and sending the wrong Firefox package is
+the one mistake here that is not cosmetic. In short:
 
 | file | what it is |
 | --- | --- |
-| `dist-ext/beanemachine-chrome-store.zip` | upload this to the Chrome Web Store |
-| `dist-ext/beanemachine-firefox-store.zip` | upload this to addons.mozilla.org |
+| `dist-ext/beanemachine-firefox-selfhost.zip` | **route A** — AMO unlisted signing |
+| `dist-ext/beanemachine-chrome-store.zip` | **route B** — the Chrome Web Store |
+| `dist-ext/beanemachine-firefox-store.zip` | **route B** — an AMO *listed* submission |
 | `dist-ext/promo-440x280.png` | the Chrome promotional tile |
 | `dist-ext/beanemachine-chrome.zip` | **not for a store.** What the site hands a reader while no listing exists |
 | `dist-ext/beanemachine-firefox.zip` | **not for a store.** The same, for Firefox |
@@ -37,12 +40,18 @@ this file.
 and needs nothing installed:
 
 ```sh
-npx addons-linter dist-ext/beanemachine-firefox-store.zip
+npx addons-linter dist-ext/beanemachine-firefox-store.zip              # route B
+npx addons-linter --self-hosted dist-ext/beanemachine-firefox-selfhost.zip   # route A
 ```
 
-Measured 2026-09-19 on this build: **0 errors, 0 warnings, 0 notices.** The same command
-earlier the same day returned 2 warnings, both `KEY_FIREFOX_UNSUPPORTED_BY_MIN_VERSION` —
-see the Firefox section below for what they were and what fixed them.
+Measured on this build: **0 errors, 0 warnings, 0 notices** for both. The `--self-hosted`
+flag is not optional on the second: without it the linter assumes Mozilla hosting and
+reports 1 error, `browser_specific_settings.gecko.update_url are not allowed for
+Mozilla-hosted add-ons` — which is the rule route A exists to sit outside of, and is why
+the two packages cannot be the same file.
+
+An earlier run on 2026-09-19 returned 2 warnings, both `KEY_FIREFOX_UNSUPPORTED_BY_MIN_VERSION`
+— see the Firefox section below for what they were and what fixed them.
 
 **Point it at the Firefox package only.** Run against
 `beanemachine-chrome-store.zip` it reports `ADDON_ID_REQUIRED` and
@@ -74,6 +83,65 @@ assumes Mozilla hosting and reports the one error that route exists to avoid:
 "browser_specific_settings.gecko.update_url are not allowed for Mozilla-hosted add-ons".
 
 ---
+
+## Source code — asked on BOTH routes, and the answer is yes
+
+AMO asks: *"Do you use code generators or minifiers, tools that combine multiple files into
+a single file such as webpack, web template engines, or any other tool that takes code and
+generates files to include in the extension?"*
+
+**Yes.** Two of the four apply: the three bundles are minified (61,833 bytes of JavaScript
+to 16,011), and Vite 8 — whose bundler is Rolldown — combines `extension/src/` into three
+self-contained IIFEs. No template engine. Answering yes obliges a source submission, on the
+unlisted route as much as on the listed one.
+
+Make the source zip from the TRACKED TREE rather than by zipping the working directory —
+that is what keeps `node_modules/`, `dist/` and `dist-ext/` out of it, and it is
+reproducible:
+
+```sh
+git archive --format=zip HEAD -o beanemachine-source.zip
+```
+
+Paste these as the build instructions, naming the package for the route being submitted —
+`beanemachine-firefox-selfhost.zip` on **route A**, `beanemachine-firefox-store.zip` on
+**route B**:
+
+> Node 24 or newer (built and checked on Node 25.2.1) and pnpm 10. From the unpacked source:
+>
+>     pnpm install --frozen-lockfile
+>     node extension/build.mjs
+>
+> The reviewed files are `dist-ext/firefox/`, and `dist-ext/<the uploaded zip>` is the
+> uploaded package rebuilt. `extension/build.mjs` is the whole build: it bundles three entry
+> points from `extension/src/` with Vite 8 (whose bundler is Rolldown) as three
+> self-contained IIFEs, minifies them, prepends a four-line provenance banner, writes both
+> manifests from `src/data/extension.ts` and `src/data/platforms.ts`, draws the icons and the
+> promotional tile procedurally as PNGs, and writes the zips. No step fetches anything, and
+> the build is deterministic: the zip entries carry a fixed timestamp, so the same commit
+> produces the same archive.
+>
+> `pnpm install` runs a `prepare` script that builds an unrelated command-line bundle
+> (`dist-cli/`). It is harmless and nothing the add-on uses comes from it; `pnpm install
+> --frozen-lockfile --ignore-scripts` skips it and the add-on still builds. Both were run on
+> 2026-09-19 and gave the same bytes.
+
+**These instructions were followed, in a clean directory, on 2026-09-19, and the result was
+compared byte for byte against `dist-ext/firefox/`: manifest.json, background.js, yahoo.js,
+bridge.js and all three icons were identical, and so was the zip itself.** That is the point
+of the fixed timestamp in the zip writer and of `minify` being a setting rather than an
+environment: a reviewer who runs this gets the same bytes he was sent, and can say so.
+
+**The two Firefox packages differ by one manifest key**, `browser_specific_settings.gecko.
+update_url`, and a reviewer comparing a rebuild against the other route's zip will see it.
+It is present on the self-host package because a self-distributed add-on updates itself only
+if it names an update manifest, and absent from the store package because AMO refuses that
+key on a listed add-on. `addons-linter` reports exactly that: 1 error on the self-host zip,
+0 with `--self-hosted`, 0 either way on the store zip.
+
+It says **Vite, not esbuild.** This file said esbuild until 2026-09-19 and esbuild has never
+been installed in this project — `pnpm ls` resolves `vite@8.2.2` onto `rolldown@1.2.6`. A
+reviewer following the old text would have looked for a tool that is not in the lockfile.
 
 ## Route A — signed and self-hosted. Do this first: free, no listing, no public page.
 
@@ -211,53 +279,10 @@ policy URL and that grep rather than a paragraph.
 
 ---
 
-## Firefox (addons.mozilla.org)
+## Firefox (addons.mozilla.org) — route B, the listed submission
 
-Upload `dist-ext/beanemachine-firefox-store.zip`.
-
-### The one thing that is different, and it is not the manifest
-
-**AMO requires a source-code submission when the uploaded files are generated or minified.**
-Ours are both. Upload the repository as the source and give the build instructions below.
-
-**These instructions were followed, in a clean directory, on 2026-09-19, and the result was
-compared byte for byte against `dist-ext/firefox/`: manifest.json, background.js, yahoo.js,
-bridge.js and all three icons were identical, and so was
-`beanemachine-firefox-store.zip` itself.** That is the point of the fixed timestamp in the zip
-writer and of `minify` being a setting rather than an environment: a reviewer who runs this
-gets the same bytes he was sent, and can say so.
-
-Make the source zip from the tracked tree rather than by zipping the working directory — that
-is what keeps `node_modules/`, `dist/` and `dist-ext/` out of it, and it is reproducible:
-
-```sh
-git archive --format=zip HEAD -o beanemachine-source.zip
-```
-
-Paste these as the build instructions:
-
-> Node 24 or newer (built and checked on Node 25.2.1) and pnpm 10. From the unpacked source:
->
->     pnpm install --frozen-lockfile
->     node extension/build.mjs
->
-> The reviewed files are `dist-ext/firefox/`, and `dist-ext/beanemachine-firefox-store.zip`
-> is the uploaded package rebuilt. `extension/build.mjs` is the whole build: it bundles three
-> entry points from `extension/src/` with Vite 8 (whose bundler is Rolldown) as three
-> self-contained IIFEs, minifies them, prepends a four-line provenance banner, writes both
-> manifests from `src/data/extension.ts` and `src/data/platforms.ts`, draws the icons and the
-> promotional tile procedurally as PNGs, and writes the zips. No step fetches anything, and
-> the build is deterministic: the zip entries carry a fixed timestamp, so the same commit
-> produces the same archive.
->
-> `pnpm install` runs a `prepare` script that builds an unrelated command-line bundle
-> (`dist-cli/`). It is harmless and nothing the add-on uses comes from it; `pnpm install
-> --frozen-lockfile --ignore-scripts` skips it and the add-on still builds. Both were run on
-> 2026-09-19 and gave the same bytes.
-
-It says **Vite, not esbuild.** This file said esbuild until 2026-09-19 and esbuild has never
-been installed in this project — `pnpm ls` resolves `vite@8.2.2` onto `rolldown@1.2.6`. A
-reviewer following the old text would have looked for a tool that is not in the lockfile.
+Upload `dist-ext/beanemachine-firefox-store.zip`. Source is required here too; see
+**Source code** above.
 
 ### Manifest
 

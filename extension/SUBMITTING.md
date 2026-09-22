@@ -126,11 +126,22 @@ Paste these as the build instructions, naming the package for the route being su
 > --frozen-lockfile --ignore-scripts` skips it and the add-on still builds. Both were run on
 > 2026-09-19 and gave the same bytes.
 
-**These instructions were followed, in a clean directory, on 2026-09-19, and the result was
-compared byte for byte against `dist-ext/firefox/`: manifest.json, background.js, yahoo.js,
-bridge.js and all three icons were identical, and so was the zip itself.** That is the point
-of the fixed timestamp in the zip writer and of `minify` being a setting rather than an
-environment: a reviewer who runs this gets the same bytes he was sent, and can say so.
+**These instructions were followed again on 2026-09-22, from the source zip itself rather
+than from a checkout — unzipped into an empty directory, `pnpm install --frozen-lockfile`,
+`node extension/build.mjs` — and all THREE uploadable packages came out byte for byte
+identical to the ones here: `beanemachine-firefox-selfhost.zip`,
+`beanemachine-firefox-store.zip` and `beanemachine-chrome-store.zip`.** (The first run, on
+2026-09-19, compared the unpacked `dist-ext/firefox/` files and the store zip; this one
+covers the self-host package the build has gained since, and starts from the artifact a
+reviewer is actually handed.)
+
+That is the point of the fixed timestamp in the zip writer and of `minify` being a setting
+rather than an environment: a reviewer who runs this gets the same bytes he was sent, and
+can say so.
+
+Regenerate the archive whenever the tree moves — `git archive` reads HEAD, not the working
+directory, so uncommitted work is silently absent from it and the source would not match
+the upload.
 
 **The two Firefox packages differ by one manifest key**, `browser_specific_settings.gecko.
 update_url`, and a reviewer comparing a rebuild against the other route's zip will see it.

@@ -1069,19 +1069,41 @@ t("and where the slate is light enough for the count to explain something, it is
 const locked = /every seat has started|all of tonight.s games have started/i.test(
 	await page.$eval(".decide", e => e.innerText).catch(() => "")
 )
-const benchGroups = await page.$$eval(".decide-bench-group", rows => rows.map(r => ({
-	why: r.querySelector(".decide-why")?.textContent.trim(),
-	men: [...r.querySelectorAll("b")].map(b => b.textContent.trim())
-})))
+/*
+   GROUPED BY SEAT NOW, NOT BY REASON, and the claim that made grouping safe is the one that
+   survived the change.
+
+   `.decide-bench-group` was a row per distinct reason, naming every man it applied to. The
+   card draws one list of SEATS — who arrives, who leaves, what it is worth — because a bench
+   row with no replacement is not a move a manager can make: measured on a real 27-man
+   imported roster (2026-09-23) the old shape benched ten men and named a starter for none of
+   them. A seat-keyed row collapses the same wall the reason-keyed one did (three outfielders
+   leaving three OF seats are still one row) and buys what a reason-keyed one could not — the
+   man taking the seat belongs on the row with the men losing it.
+
+   So "one row per reason" becomes "one row per seat", which is checkable and is the property
+   that actually stops a regression to a row per man. "Several men behind one reason" becomes
+   "at least one row carries more than one man OR there are fewer rows than men benched",
+   which is the same claim about this night's data: that the grouping is doing work.
+*/
+const benchGroups = await page.$$eval(".decide-do > li", rows =>
+	rows
+		.filter(r => r.querySelector(".decide-out"))
+		.map(r => ({
+			slot: r.getAttribute("data-slot"),
+			whys: [...r.querySelectorAll(".decide-reason")].map(e => e.textContent.trim()),
+			men: [...r.querySelectorAll(".decide-out b")].map(b => b.textContent.trim())
+		})))
+const benchedMen = benchGroups.reduce((n, g) => n + g.men.length, 0)
 t("some of the pasted seats are wrong for tonight, so there is a diff to group",
 	benchGroups.length > 0 || locked,
-	`${benchGroups.length} bench rows, locked=${locked}`)
-t("every bench row is a different reason — one row per reason, never one per man",
-	new Set(benchGroups.map(g => g.why)).size === benchGroups.length,
-	benchGroups.map(g => g.why).join(" | "))
-t("and this night really does put several men behind one reason",
-	benchGroups.reduce((n, g) => n + g.men.length, 0) > benchGroups.length || locked,
-	`${benchGroups.reduce((n, g) => n + g.men.length, 0)} men in ${benchGroups.length} rows, locked=${locked}`)
+	`${benchGroups.length} seat rows, locked=${locked}`)
+t("every row is a different seat — one row per seat, never one per man",
+	new Set(benchGroups.map(g => g.slot)).size === benchGroups.length,
+	benchGroups.map(g => g.slot).join(" | "))
+t("and this night really does put several men behind one row",
+	benchedMen > benchGroups.length || locked,
+	`${benchedMen} men in ${benchGroups.length} rows, locked=${locked}`)
 /**
  * The reasons themselves. "he is not projected to play today" was printed about
  * Roman Anthony on 2026-09-08 — a man rateable at 4.14 points with Boston playing,
@@ -1092,9 +1114,10 @@ t("and this night really does put several men behind one reason",
  * can know.
  */
 const LIVE_FACTS = ["no game today", "not in today's lineup"]
+const allWhys = benchGroups.flatMap(g => g.whys)
 t("no row dresses a ranking up as a fact about the schedule",
-	!benchGroups.some(g => /not projected to play today/.test(g.why)),
-	benchGroups.map(g => g.why).join(" | "))
+	!allWhys.some(w => /not projected to play today/.test(w)),
+	allWhys.join(" | "))
 /*
  * This asked for at least one live fact among the reasons, and it failed on a night
  * when every man on the pasted roster had a game and was in his lineup — the only
@@ -1112,23 +1135,38 @@ t("no row dresses a ranking up as a fact about the schedule",
  */
 const RANKING_CLAIMS = [
 	"a better man is projected for that seat today",
+	/* The successor to the blanket "a better man" fallback, and it is here because the old
+	   one was FALSE for most of the men who got it. Measured on the 27-man imported roster:
+	   five men were told a better man had their seat and for four of them the seat ended up
+	   empty. The card now asks the planner whether anybody is actually arriving at that slot
+	   and says the smaller true thing when nobody is. */
+	"nobody you own can legally fill that seat tonight, so it stays empty either way",
 	"his club is not playing today",
 	"no projection could be made for him over this window",
 	"he is not on the board — no projection exists for that name"
 ]
-const unknown = benchGroups
-	.map(g => g.why)
-	.filter(w => !LIVE_FACTS.includes(w) && !RANKING_CLAIMS.includes(w) && !/[a-z]/.test(w[0] ?? "X"))
+/* One reason carries a SLOT in it — "no record here that he may play SS" — so it cannot be
+   an exact-match member of the list above. It is still a closed form written in one place
+   (Decide.tsx, the `misseated` branch), which is what this assertion is protecting, so it is
+   matched as the shape it is rather than left to fall through as an unknown sentence. */
+const MISSEATED = /^no record here that he may play [A-Za-z0-9+]+$/
+const unknown = allWhys.filter(
+	w =>
+		!LIVE_FACTS.includes(w) &&
+		!RANKING_CLAIMS.includes(w) &&
+		!MISSEATED.test(w) &&
+		!/[a-z]/.test(w[0] ?? "X")
+)
 t("every reason is one the code writes, and says which kind of claim it is",
 	unknown.length === 0, unknown.join(" | "))
 // And when tonight's read DOES contradict the paste, it is the live fact that is
 // printed and not the ranking — asserted with its precondition stated, so a full
 // slate reports that it was a full slate instead of looking like a pass.
-const liveReasons = benchGroups.filter(g => LIVE_FACTS.includes(g.why))
+const liveReasons = allWhys.filter(w => LIVE_FACTS.includes(w))
 t(liveReasons.length ?
 	"tonight's card outranks the capture where the two disagree"
 :	"tonight's card agrees with the paste on every man, so no live reason is due",
-	true, `${liveReasons.length} live of ${benchGroups.length}: ${benchGroups.map(g => g.why).join(" | ")}`)
+	true, `${liveReasons.length} live of ${allWhys.length}: ${allWhys.join(" | ")}`)
 
 /**
  * The baseline line, and it is the one sentence on the card that changes what the
@@ -1223,10 +1261,17 @@ t("and the paragraphs really are inside them rather than beside them",
  * conditional is the invariant: every man named here is somebody ELSE, because naming
  * a man the reader already owns would be telling him to add his own player.
  */
-const fill = await page.$$eval(".decide-fill li", n => n.map(li => ({
-	slot: li.querySelector(".decide-slot")?.textContent.trim(),
-	name: li.querySelector("b")?.textContent.trim()
-})))
+/* THE SECTION BECAME A ROW KIND, so the selector follows it. `.decide-fill` was a block of
+   its own headed "Empty seats"; the seat it fills is a row in the one list now, and the man
+   arriving into it is marked `.decide-add-wire` because he is the one kind of arrival the
+   reader does not already own. Both claims below are unchanged, and the seat now comes off
+   the row's `data-slot` rather than a gutter cell that no longer exists. */
+const fill = await page.$$eval(".decide-do > li", n =>
+	n.flatMap(li =>
+		[...li.querySelectorAll(".decide-add-wire b")].map(b => ({
+			slot: li.getAttribute("data-slot"),
+			name: b.textContent.trim()
+		}))))
 if (fill.length) {
 	t("every empty seat is offered a man who is gettable, not one already on the team",
 		fill.every(f => !mine.some(m => m.name === f.name)),
@@ -1234,8 +1279,8 @@ if (fill.length) {
 	t("and each one names the seat it would fill",
 		fill.every(f => f.slot && f.slot.length > 0), JSON.stringify(fill))
 } else
-	t("this night left no seat for the Empty seats section to fill (nothing exercised)", true,
-		"no .decide-fill rows — the fourteen men off the board covered every slot, or nobody gettable plays tonight")
+	t("this night left no empty seat for a free agent to fill (nothing exercised)", true,
+		"no .decide-add-wire rows — the fourteen men off the board covered every slot, or nobody gettable plays tonight")
 clean("after the roster hand-off, on the card that uses it")
 
 // --- 7. what is the same under all three screens ------------------------------
@@ -1450,10 +1495,11 @@ t("the seats read on the other screen survived the reload, and are still dated",
  * one would be the card claiming a baseline it does not have. It is asserted so that
  * a future change which DOES seat him has to come past this line and say so.
  *
- * `.decide-fill` is deliberately NOT one of the lists read here. It names men the
- * reader does not own — the gettable bodies for seats nobody he owns can fill — so
- * folding it in would make "accounts for every seat the paste carried" pass on
- * strangers.
+ * MEN THE READER DOES NOT OWN ARE DELIBERATELY NOT READ HERE. The one list carries both
+ * kinds of arrival now — his own men moving seats, and the gettable bodies for seats nobody
+ * he owns can fill — and `.decide-add-wire` is what separates them. Folding the wire men in
+ * would make "accounts for every seat the paste carried" pass on strangers, which is the
+ * same reason the old `.decide-fill` block was excluded before the two lists became one.
  */
 /*
    AND THE SEATS THE PLATFORM HAS ALREADY SHUT, which this used to miss.
@@ -1472,8 +1518,16 @@ t("the seats read on the other screen survived the reload, and are still dated",
 const seated = await page.$$eval(".decide", (cards, mineNames) => {
 	const card = cards[0]
 	const starters = [...card.querySelectorAll(".decide-today li:not(.decide-empty) b")].map(b => b.textContent.trim())
-	const benched = [...card.querySelectorAll(".decide-bench-group b")].map(b => b.textContent.trim())
-	const moved = [...card.querySelectorAll(".decide-changes li:not(.decide-bench-group) b")].map(b => b.textContent.trim())
+	/* Every man the one list takes OUT of a seat, and every man it puts INTO one or reports
+	   moving between two — minus the men he does not own yet, which `.decide-add-wire`
+	   marks. Three selectors for what used to be two lists; the claim is unchanged. */
+	const benched = [...card.querySelectorAll(".decide-out b")].map(b => b.textContent.trim())
+	const wire = new Set(
+		[...card.querySelectorAll(".decide-add-wire b")].map(b => b.textContent.trim())
+	)
+	const moved = [...card.querySelectorAll(".decide-in b, .decide-moved b")]
+		.map(b => b.textContent.trim())
+		.filter(n => !wire.has(n))
 	const shut = [...card.querySelectorAll(".decide-locked, .decide-stuck")]
 		.map(n => n.innerText)
 		.join(" ")
@@ -1566,8 +1620,14 @@ clean("over the whole journey")
   const after = await live.$eval(".decide", e => e.innerText)
   t("and the moment a team is entered the card stops asking, with no reload",
     !/add your players/i.test(after) && after !== before, after.slice(0, 140))
+  /* "seats score nothing" was the Empty-seats heading, which no longer exists: every seat
+     something can be done about is a row in the one list, and the seats nothing can fill are
+     one line reading "N seats have nobody". The other two clauses are unchanged, and a third
+     is added for the state this card reaches most often on a freshly typed team — a list of
+     things to do, which is the whole point of the screen. */
   t("and it is about the team that was just entered",
-    /of your men can score|seats score nothing|nothing to change/i.test(after),
+    /of your men can score|in tonight.s card|seats? ha(?:s|ve) nobody|nothing to (?:change|do)/i.test(after) ||
+      (await live.$$(".decide-do > li")).length > 0,
     after.slice(0, 200))
   await live.close()
 }

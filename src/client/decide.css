@@ -30,8 +30,21 @@
 .decide-notes{margin:var(--sp-3) 0 0;font-size:var(--fs-2);color:var(--muted)}
 .decide-notes summary{cursor:pointer}
 .decide-notes ul{margin:var(--sp-2) 0 0;padding-left:var(--sp-4);display:flex;flex-direction:column;gap:4px}
-.decide-changes .decide-slot{color:var(--accent)}
-.decide-rest,.decide-read,.decide-locked{margin:var(--sp-2) 0 0;color:var(--muted)}
+/* The one list. `.decide-changes` (the lineup diff), `.decide-fill` (the Empty-seats
+   adds) and `.decide-moves` (the waiver adds) were three lists with three idioms on one
+   card, in that order, with the add the reader came for last. There is one now, and the
+   gutter holds a number for every row rather than a slot name.
+
+   TWO SCALES SHARE THAT GUTTER and they must not look alike. A priced add's figure is a
+   gain over the whole scoring period; a seat's is what the arriving man projects tonight.
+   Both used to be accent green and both sat on rows beginning "Add", so the only thing
+   telling them apart was a legend under the list — which is the tell that the column was
+   not doing its job. The period gains keep the accent and the plus sign, because they are
+   the expensive move and the one that costs a player; tonight's points are ink, unsigned,
+   and every row states its own unit in words. */
+.decide-do-add .decide-delta{color:var(--accent)}
+.decide-do-start .decide-delta{color:var(--ink);font-weight:500}
+.decide-rest,.decide-read,.decide-locked,.decide-empty-seats,.decide-adds{margin:var(--sp-2) 0 0;color:var(--muted)}
 /* A scratch is the one line on this card that is somebody else's fact rather than this app's
    judgement, and the only one a reader loses points by missing. It takes the negative colour
    the innings warning uses — not a panel, not an icon: the sentence is the alarm. */
@@ -50,7 +63,6 @@
   font-style:normal;font-family:var(--mono);font-size:var(--fs-1);
   color:var(--faint);letter-spacing:.04em;
 }
-.decide-bench-group .decide-slot{color:var(--faint)}
 
 /* Fine print is one tap away, not four lines down. The summary reads as a quiet
    aside rather than as a control, because opening it is optional in a way that
@@ -64,18 +76,20 @@
 .decide-fine>summary::-webkit-details-marker{display:none}
 .decide-fine[open]>summary{display:block;margin:0 0 4px}
 
-/* Empty seats are the biggest measured lever in a points season, so they read like
-   the moves rather than like a footnote — same list idiom, same slot gutter. */
-.decide-fill .decide-slot{color:var(--flag)}
-.decide-fill-head{margin-top:var(--sp-4)}
+/* Empty seats are the biggest measured lever in a points season, and the way this card
+   used to honour that was a block of their own under a heading. That put the same fact on
+   the card twice — "×10 Bench …" above, "12 seats score nothing tonight" below — so the
+   rows moved into the one list, where a fillable seat is an Add like any other, and what
+   is left is the count of seats nobody can fill: one quiet line, because nothing can be
+   done about it. */
 
-/* Fourteen names in bold is a wall, not a list. In a bench group the fact is the
-   REASON — "no game today" — and the names are who it applies to, so they read at
-   normal weight with the seat quieter still. Individual rows keep their emphasis:
-   one name in bold is a decision, fourteen is shouting. */
-.decide-bench-group b{font-weight:500;color:var(--muted)}
-.decide-bench-group .decide-seat{opacity:.72}
-.decide-bench-group .decide-why{color:var(--ink);font-style:normal}
+/* A row with nobody arriving buys the reader nothing — the seat scores nothing either
+   way — so its gutter carries a dash rather than a figure and the dash is not shouted.
+   Fourteen names in bold is still a wall (the finding that grouped the old bench rows),
+   and a sit row groups by SEAT now, so it names one or two men and keeps their emphasis:
+   one name in bold is a decision. */
+.decide-do-sit .decide-delta{color:var(--faint);font-weight:400}
+.decide-do-sit .decide-why{color:var(--ink);font-style:normal}
 
 /* The card is a list of decisions, not prose, so it sets one step down from body
    text: more rows in a screen, and the numbers still line up. */

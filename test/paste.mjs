@@ -693,5 +693,57 @@ const arms = pick("pitching", 3)
     JSON.stringify(seated[0]))
 }
 
+// ── the seat he is already in is evidence, and the fourth tier ────────────────
+//
+// Yahoo enforces eligibility on every startable seat: it will not let a man sit at 1B
+// unless it grants him 1B. So a roster page showing him at 1B is a FACT about his
+// eligibility, and a better one than the two fallbacks under the page — the capture's
+// 328-of-1,446 grid, and StatsAPI's single primary position.
+//
+// WHAT IT COST. Measured 2026-09-23 on a 27-man fixture whose seats came from a real
+// card and whose positions came from the capture: zero of the 27 were in the grid, so
+// all 27 fell to their primary position, nine of the eighteen active seats then
+// contradicted it, `planLineup` could seat those nine nowhere, and the period plan came
+// back at -144.42 against the lineup it was replacing — a loss made entirely of men
+// leaving the model. Put each man's own seat back and nothing else changes: +16.36,
+// nobody unplaceable, 16 of 18 seats filled instead of 12.
+//
+// The bound on it is the half that makes it safe: a seat that accepts ANYBODY proves
+// nothing about the man in it, so Util, BN, IL and NA may not widen him. That is the
+// same refusal `eligibilityInText` above makes when a line offers more tokens than a
+// league could be tracking — evidence, or nothing, never half of it.
+{
+  // A catcher, pasted into a 1B seat his capture position does not grant, with no
+  // eligibility line beside him so the page tier cannot answer either.
+  const c = all.find(p => p.group === "hitting" && p.position === "C" && !snap.eligibility?.[String(p.id)])
+  if (c) {
+    const seat = n => rosterFromPaste(`${n}\t${c.name}`, snap).spots[0]?.positions ?? []
+    t("a man in a startable seat is eligible there, because his league put him in it",
+      seat("1B").includes("1B"), `${c.name} at 1B: ${seat("1B").join(",")}`)
+    t("…and keeps what the capture already knew about him",
+      seat("1B").includes("C") && seat("1B").includes("Util"),
+      `${c.name} at 1B: ${seat("1B").join(",")}`)
+    /* `seat("C")` is the unwidened baseline: his own capture position already grants C,
+       so the union is a no-op there and whatever it returns is what the tiers alone say.
+       A seat that accepts anybody must come back identical to it. */
+    const base = seat("C").join(",")
+    t("a Util seat widens nobody, because it accepts everybody",
+      seat("Util").join(",") === base, `Util: ${seat("Util").join(",")} vs ${base}`)
+    t("and neither does the bench or the injured list",
+      seat("BN").join(",") === base && seat("IL").join(",") === base,
+      `BN: ${seat("BN").join(",")} | IL: ${seat("IL").join(",")} vs ${base}`)
+    t("a startable seat that IS in his positions adds nothing twice",
+      seat("C").length === new Set(seat("C")).size, seat("C").join(","))
+    /* And the page still wins where it answers: a man Yahoo prints as C,1B needs no
+       help from his seat, and the seat must not push a third position onto him. */
+    const printed = rosterFromPaste(`3B\t${c.name} NYY - C,1B\tAdd/Drop`, snap).spots[0]
+    t("a seat the page contradicts still adds itself, because the page is about eligibility and the seat is a fact",
+      (printed?.positions ?? []).includes("3B") && (printed?.positions ?? []).includes("1B"),
+      JSON.stringify(printed))
+  } else {
+    t("this capture holds a catcher the eligibility grid does not list", false, "fixture gap")
+  }
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`)
 process.exit(fail ? 1 : 0)

@@ -311,8 +311,27 @@ const held = planLineup(marginal)
 t("a lineup change below the lineup bar is not proposed",
 	held.swaps.length === 0 && held.shifts.length === 0 && held.sits.length === 0,
 	JSON.stringify(held.swaps))
+/*
+   MOVED OFF `skipped`, AND THE CLAIM IS STRICTLY LARGER.
+
+   The old assertion read `held.skipped.some(n => /lineup bar/ && /worth 1 more/)`: the
+   bar had to be named, somewhere, in the list of men left out of the planning. It went
+   on passing while that sentence was being rendered as a PLAYER'S NAME — every consumer
+   of `skipped` splits on the first ": " to get one, this sentence has no colon, and the
+   card printed "One player on your roster could not be priced, so nothing above counts
+   him: the best legal lineup is worth -144.42 more than today's…". Reproduced on a real
+   27-man imported roster, 2026-09-23.
+
+   So the same two things are still asserted — the bar is named, with the margin in it —
+   and two more are asserted on top: it is on a field of its own, and `skipped` now holds
+   nothing but men. That is what makes the mis-render impossible rather than merely fixed.
+*/
 t("and the bar, not an absence of options, is named as the reason",
-	held.skipped.some(n => /lineup bar/.test(n) && /worth 1 more/.test(n)), JSON.stringify(held.skipped))
+	/lineup bar/.test(held.leftAlone ?? "") && /worth 1 more/.test(held.leftAlone ?? ""),
+	JSON.stringify(held.leftAlone))
+t("and it is named apart from the men, so nothing can render it as one",
+	held.skipped.every(n => n.includes(": ")) && !held.skipped.some(n => /lineup bar/.test(n)),
+	JSON.stringify(held.skipped))
 // The bar governs whether a marginal optimisation is worth reading about. It must
 // never leave a seat held by a man who is not going to play in it.
 const forcedOut = planLineup({
@@ -329,6 +348,75 @@ t("the lineup bar never silences a man who cannot play coming out of the lineup"
 	JSON.stringify([forcedOut.sits, forcedOut.swaps, forcedOut.skipped]))
 t("an already-optimal lineup reports no gain, so it cannot be printed as one held back by the bar",
 	settled.gain === 0 && held.gain === 1, `${settled.gain} / ${held.gain}`)
+t("a lineup nothing beats leaves that field null rather than explaining a bar that never bit",
+	settled.leftAlone === null && forcedOut.leftAlone === null,
+	JSON.stringify([settled.leftAlone, forcedOut.leftAlone]))
+
+/*
+   ---------------- the bar may not fire on a number that is not a gain ----------------
+
+   `gain` is `pointsPlanned - pointsNow`, and the bar's premise is that those are two
+   valuations of the SAME lineup. A man in a seat this league's rules do not grant him
+   breaks that premise: he counts in `pointsNow` and can appear in no seat of the planned
+   lineup, so his points leave the model and read as a loss the rearrangement caused.
+
+   Measured on a 27-man imported roster, 2026-09-23: the bar fired at -28.99 for one night
+   and -144.42 for the period, and 35.86 and 203.21 of those were men dropping out of the
+   model. The same 27 men re-seated where the league does allow them: +8.81 and +39.09,
+   nobody dropped, bar silent.
+
+   It mattered because the card reads `starters` to pair each seat, so in exactly this state
+   it printed nine "Start X at 1B, and sit Y" rows while `leftAlone` said the rearrangement
+   should not be made — one screen, two positions, the second of them an artifact.
+
+   The fixture below is the smallest thing that reproduces it: an outfielder parked in the
+   catcher's seat, a bar high enough to swallow any real optimisation, and a bench man who
+   can legally take a seat. Without the exemption the whole plan is withheld and the reason
+   given is a bar reading on a number nothing can interpret.
+*/
+{
+	const parked = {
+		roster: [
+			// legal nowhere near C: `slot_accepts.C` is ["C"] and he is an outfielder
+			spot("C", "Wrong Seat", ["OF"]),
+			spot("OF", "Right Seat", ["OF"]),
+			spot("BN", "Bench Bat", ["OF"])
+		],
+		rated: [
+			rated("Wrong Seat", { points: 40, slots: ["OF"] }),
+			rated("Right Seat", { points: 30, slots: ["OF"] }),
+			rated("Bench Bat", { points: 31, slots: ["OF"] })
+		],
+		availableNames: new Set(),
+		shape: shape({ C: 1, OF: 2, BN: 2 }, { C: ["C"], OF: ["OF"], BN: "any" }),
+		options: opts({ lineupMinGain: 500 })
+	}
+	const plan = planLineup(parked)
+	t("a man in a seat his league's rules do not grant him is named, not silently dropped",
+		plan.misseated.length === 1 && plan.misseated[0].name === "Wrong Seat" &&
+			plan.misseated[0].slot === "C",
+		JSON.stringify(plan.misseated))
+	t("and the lineup bar stands down, because the difference it reads is not a gain",
+		plan.leftAlone === null && plan.swaps.length + plan.shifts.length > 0,
+		JSON.stringify([plan.leftAlone, plan.gain, plan.swaps, plan.shifts]))
+	t("and the plan it then gives is one the league's own rules permit",
+		plan.starters.every(st =>
+			(parked.shape.slot_accepts[st.slot] ?? []).some(pos =>
+				(parked.rated.find(r => r.player.name === st.name)?.slots ?? []).includes(pos))),
+		JSON.stringify(plan.starters))
+	/* And the exemption is NARROW: a lineup the rules do permit still answers to the bar,
+	   which is the behaviour every assertion above this block is about. */
+	t("a lineup the rules do permit is still held back by the bar",
+		planLineup({ ...parked, roster: parked.roster.map(r =>
+			r.name === "Wrong Seat" ? { ...r, slot: "OF" } : r.name === "Right Seat" ? { ...r, slot: "BN" } : r
+		) }).leftAlone !== null,
+		JSON.stringify(planLineup({ ...parked, roster: parked.roster.map(r =>
+			r.name === "Wrong Seat" ? { ...r, slot: "OF" } : r.name === "Right Seat" ? { ...r, slot: "BN" } : r
+		) }).leftAlone))
+	t("and a seat nothing contradicts leaves the list empty rather than absent",
+		Array.isArray(held.misseated) && held.misseated.length === 0,
+		JSON.stringify(held.misseated))
+}
 
 /* ---------------- rail: the keep floor ---------------- */
 

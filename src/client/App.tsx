@@ -672,10 +672,38 @@ export const App = () => {
 	 * swallows its own failure: an unreadable roster means "no team to answer about", which
 	 * is the same placement as no team, and My league owns the explaining either way.
 	 */
+	/**
+	 * A TEAM BY EITHER MEASURE, which this was not, and the cost was the whole point of
+	 * the page.
+	 *
+	 * This read the roster store alone. Two of this app's routes store SEATS and no roster
+	 * list — the pasted lineup on My league, and any read whose roster page landed while the
+	 * list did not — and for those readers `hasTeam` was false while the page was holding
+	 * twenty-seven of their men.
+	 *
+	 * What that bought them, measured on the published build with 27 seated men stored and no
+	 * roster list: Tonight opened on LAST NIGHT, reading "105.1 from the lineup you have now
+	 * · 14 of 27 of your men played" — the page naming his men, scoring his lineup, and
+	 * pushing "What should I do?" below a card about yesterday. `!hasTeam` is what orders
+	 * those two, on the deliberate rule that a reader with no team gets the demonstration
+	 * first and a reader with one gets the lock he is working against. He had a team.
+	 *
+	 * The correction already existed ten lines below, inline, in the `useMatchup` call, with a
+	 * comment saying in as many words that inferring a team from the roster alone "took the
+	 * recap card's week block away from exactly those readers". It was right there and used
+	 * once. It is the definition now, and the inline copy is gone, so the two cannot disagree
+	 * again.
+	 */
 	const hasTeam = useMemo(() => {
 		if (!key) return false
 		try {
-			return roster.of(key).length > 0
+			if (roster.of(key).length > 0) return true
+		} catch {
+			/* An unreadable roster is not an absent one, so fall through to the seats rather
+			   than concluding there is no team — the two stores fail independently. */
+		}
+		try {
+			return !!lineupStore.of(key)?.spots.length
 		} catch {
 			return false
 		}
@@ -704,10 +732,10 @@ export const App = () => {
 		snapshot?.horizon.end ?? null,
 		key,
 		ownedIds,
-		/* A team by EITHER measure: the hand-typed route stores seats and no roster, and
-		   inferring "has a team" from the roster alone took the recap card's week block away
-		   from exactly those readers. */
-		hasTeam || !!(key && lineupStore.of(key)?.spots.length),
+		/* `hasTeam` IS "a team by either measure" now — see its own note. This argument used
+		   to carry the correction inline while the flag above stayed roster-only, which is how
+		   one screen could know he had a team and the card ordering not. */
+		hasTeam,
 		rev
 	)
 	/**

@@ -499,8 +499,67 @@ export interface LineupPlan {
 	gain: number
 	/** Startable seats no rostered player can legally fill. */
 	emptySlots: string[]
-	/** Everyone left out of the planning, each with the reason. */
+	/**
+	 * Everyone left out of the planning, each with the reason, as `Name: reason`.
+	 *
+	 * ONE KIND OF LINE, and it is a line ABOUT A MAN. The min-gain return below used
+	 * to push a sentence about the whole lineup in here — "the best legal lineup is
+	 * worth -144.42 more than today's, below the 0-point lineup bar, so the lineup is
+	 * left alone" — and every reader of this array splits on the first ": " to get a
+	 * name. That sentence has no colon, so `src/client/Decide.tsx` took the whole of
+	 * it as the name and rendered it in the player slot of its could-not-be-priced
+	 * bullet: "One player on your roster could not be priced, so nothing above counts
+	 * him: the best legal lineup is worth -144.42 more than today's…". Reproduced on
+	 * a real 27-man imported roster, 2026-09-23. Two different kinds of note sharing
+	 * one array is what made that possible, so they no longer share it.
+	 */
 	skipped: string[]
+	/**
+	 * Men in an active seat this league's own slot rules do not grant them.
+	 *
+	 * WHAT IT BREAKS. `pointsNow` sums the men in active seats; `pointsPlanned` sums the men
+	 * this solver could seat. A man whose seat is not in his `legal` list is in the first
+	 * total and can be in no seat of the second, so the two are not totals of the same
+	 * lineup and their difference is not a gain — which matters because the `lineupMinGain`
+	 * bar below reads exactly that difference.
+	 *
+	 * Measured 2026-09-23 on a 27-man fixture: five such men took 35.86 points out of the
+	 * model between "now" and "planned" over one night and six took 203.21 over the period,
+	 * which is the whole of the -28.99 and the -144.42 the bar fired on. Re-seat the same 27
+	 * men where the league's rules do allow them and nothing else changes: +8.81 and +39.09,
+	 * zero men dropped, bar silent.
+	 *
+	 * AND A RETRACTION, because the first version of this note drew the wrong conclusion
+	 * from the right measurement. It said a man the capture's position contradicts is "the
+	 * ordinary way to land here", implying a real Yahoo import hits this constantly. That is
+	 * false, and the control that settles it is the one above run the other way round: the
+	 * fixture's SEATS came from a real card and its POSITIONS from the capture, assigned
+	 * independently and never reconciled — zero of its 27 men were in the 328-of-1,446
+	 * eligibility grid, so all 27 fell through to StatsAPI's single primary position, and
+	 * nine of eighteen active seats then contradicted it. A real read does not work that
+	 * way: `rosterFromPaste` in src/data/paste.ts reads Yahoo's own eligibility off the page
+	 * first, and since 2026-09-23 also unions the man's own startable seat into his
+	 * positions — so the seat he is actually in can no longer be contradicted at all. What
+	 * is left is a man whose OTHER seats the lower tiers get wrong, which this cannot see.
+	 *
+	 * THE FIELD AND THE EXEMPTION STAY ANYWAY. A bar that fires on a quantity that is not a
+	 * gain is wrong however rare its input, and the exemption is what stops the planner
+	 * withholding a plan on a number nothing can interpret. The list is carried out so a
+	 * screen can say WHY its planned total is lower than the reader's own, rather than
+	 * letting two numbers disagree in silence.
+	 */
+	misseated: { name: string; slot: string; legal: string[] }[]
+	/**
+	 * Why a better lineup was found and not proposed — the `lineupMinGain` bar, and
+	 * nothing else.
+	 *
+	 * Null in every other state, including an already-optimal lineup: "nothing beats
+	 * what you have" and "something beats it by less than the bar" are different
+	 * facts and `src/auto/run.ts` has printed them as different sentences all along.
+	 * It is a claim about the LINEUP, so it is typed as one rather than smuggled
+	 * through a list of men.
+	 */
+	leftAlone: string | null
 	/** Set when no lineup could be planned at all. An already-optimal lineup is
 	 *  not blocked — it is a plan with no swaps, and the two must not read alike. */
 	blocked: string | null
@@ -516,6 +575,8 @@ const noLineup = (blocked: string): LineupPlan => ({
 	gain: 0,
 	emptySlots: [],
 	skipped: [],
+	misseated: [],
+	leftAlone: null,
 	blocked
 })
 
@@ -612,6 +673,22 @@ export const planLineup = (input: PlanInput): LineupPlan => {
 	const emptySlots = open.filter((_, si) => !held.has(si))
 
 	const startingNow = pool.filter(c => !isBench(c.spot.slot))
+	/**
+	 * THE MEN WHOSE PRESENT SEAT THIS PLANNER CANNOT ACCOUNT FOR — see `misseated` on
+	 * LineupPlan for the measurement and for why the bar below is exempted while there
+	 * are any.
+	 *
+	 * `legal` is null where the question cannot be asked at all (no `slot_accepts`, or no
+	 * printed eligibility beside the name), and null is not a no: an absence is not a
+	 * disqualification, and `resolveRoster` has already refused the cases it can decide
+	 * into `blocked`. So only a KNOWN, non-empty eligibility that omits his own seat
+	 * counts, which is the one shape that positively contradicts the lineup as read.
+	 */
+	const misseated = startingNow.flatMap(c =>
+		c.legal?.length && !c.legal.includes(c.spot.slot) ?
+			[{ name: c.spot.name, slot: c.spot.slot, legal: c.legal }]
+		:	[]
+	)
 	const pointsNow = r2(startingNow.reduce((a, c) => a + c.points, 0))
 	const pointsPlanned = r2(starters.reduce((a, s) => a + s.points, 0))
 	const gain = r2(pointsPlanned - pointsNow)
@@ -670,7 +747,45 @@ export const planLineup = (input: PlanInput): LineupPlan => {
 	// A man no source says will play comes out whatever the bar says. The bar decides
 	// whether a marginal optimisation is worth reading about; it does not get to
 	// leave a seat held by somebody who is not going to fill it.
-	if (!vacated.length && swaps.length + shifts.length > 0 && gain < options.lineupMinGain)
+	/*
+	   AND IT DOES NOT GET TO FIRE ON A NUMBER THAT IS NOT A GAIN.
+	
+	   `gain` is `pointsPlanned - pointsNow`, and the bar's whole premise is that those are
+	   two valuations of the same lineup. They are not when a man sits in a seat this league's
+	   rules do not grant him: he is counted in the first and can appear in no seat of the
+	   second, so his points leave the model and read as a loss the rearrangement caused.
+	
+	   Measured 2026-09-23: the bar fired at -28.99 for one night and -144.42 for the period,
+	   and 35.86 and 203.21 of those were men dropping out of the model rather than value being
+	   given up. The same 27 men re-seated where this league does allow them: +8.81 and +39.09,
+	   nobody dropped, bar silent. The negative gain does not survive a lineup the model can
+	   reproduce, so it is a property of the mismatch and not of the plan.
+	
+	   What that cost on screen is the reason this is a correctness fix and not a tidy-up. The
+	   card reads `starters` to pair each seat — who comes out, and who goes in instead — so in
+	   exactly this state it printed nine "Start X at 1B, and sit Y" rows while `leftAlone` said
+	   the whole rearrangement should not be made. One screen, two positions, and the model's
+	   own reason for the second was an artifact.
+	
+	   HOW RARE THE INPUT IS DOES NOT COME INTO IT, and the first version of this note got that
+	   backwards by calling the state ordinary. The fixture that surfaced it was synthetic —
+	   seats off a real card, positions off the capture, never reconciled — and `rosterFromPaste`
+	   now unions a man's own startable seat into his positions, so a real read cannot produce
+	   the contradiction at all. See `misseated` above for the retraction in full. The guard
+	   stays because a bar reading a quantity nothing can interpret is wrong whether it fires
+	   once a season or never.
+	
+	   The plan is still the honest answer here: it is the only lineup this app can vouch for,
+	   because it is the only one its own rules permit. What it may not do is suppress itself on
+	   a number that does not mean what it says — so the bar stands down and `misseated` is
+	   carried out for the screen to state.
+	*/
+	if (
+		!vacated.length &&
+		!misseated.length &&
+		swaps.length + shifts.length > 0 &&
+		gain < options.lineupMinGain
+	)
 		return {
 			starters,
 			swaps: [],
@@ -680,11 +795,11 @@ export const planLineup = (input: PlanInput): LineupPlan => {
 			pointsPlanned,
 			gain,
 			emptySlots,
-			skipped: [
-				...skipped,
+			skipped,
+			misseated,
+			leftAlone:
 				`the best legal lineup is worth ${gain} more than today's, below the ` +
-					`${options.lineupMinGain}-point lineup bar, so the lineup is left alone`
-			],
+				`${options.lineupMinGain}-point lineup bar, so the lineup is left alone`,
 			blocked: null
 		}
 
@@ -698,6 +813,8 @@ export const planLineup = (input: PlanInput): LineupPlan => {
 		gain,
 		emptySlots,
 		skipped,
+		misseated,
+		leftAlone: null,
 		blocked: null
 	}
 }

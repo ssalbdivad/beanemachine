@@ -305,12 +305,25 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * exists: a ranked list is not a decision, and a decision that does not say who
 	 * leaves cannot be carried out.
 	 */
-	const priced = await page.$$eval(".decide li", ns =>
-		ns
-			.filter(e => e.querySelector(":scope > .decide-delta"))
-			.map(e => e.textContent.replace(/\s+/g, " ").trim()))
+	/*
+	   RE-AIMED AT `.decide-do-add`, AND THE CLAIM IS THE SAME ONE.
+
+	   It read every `li` carrying a `.decide-delta` badge and required each whose text began
+	   "Add" to contain ", drop". The badge used to belong to waiver moves alone; the card now
+	   draws ONE list — waiver adds, seat changes and the free agents who fill an empty seat —
+	   and every row in it has a badge, so the old selector would have demanded a drop from
+	   rows that correctly name none. `.decide-do-add` is the waiver half, which is the half
+	   the claim was always about and is the reason this card exists: a ranked list is not a
+	   decision, and a decision that does not say who leaves cannot be carried out.
+
+	   The free-seat escape is asserted explicitly rather than tolerated. `planSwaps` pairs an
+	   add with a drop only once every seat is taken, and a row that says so in words is not a
+	   row that forgot to.
+	*/
+	const priced = await page.$$eval(".decide-do-add", ns =>
+		ns.map(e => e.textContent.replace(/\s+/g, " ").trim()))
 	t("every priced move names the man who leaves",
-		priced.filter(r => /^Add /.test(r)).every(r => /, drop \S/.test(r)),
+		priced.every(r => /, drop \S/.test(r) || /free seat, so nobody comes out/.test(r)),
 		JSON.stringify(priced))
 	/*
 	 * The empty-seat list is the other kind, and its own rules.
@@ -321,9 +334,21 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * seat, and the measured bug was Sam Antonacci offered for 2B, 3B, OF and Util at
 	 * once — four adds that are really one, with three seats still empty after them.
 	 */
-	const fills = await page.$$eval(".decide-fill li", ns =>
+	/*
+	   THE EMPTY-SEAT ADDS MOVED INTO THE ONE LIST, so they are read out of it.
+
+	   `.decide-fill` was a block of its own — "Empty seats · 12 seats score nothing tonight"
+	   — which stated the same fact as the bench rows above it from the other end and pushed
+	   the priced add five blocks down the card. A fillable seat is now a row in the one list,
+	   and the man arriving into it is marked `.decide-add-wire` because on the row the only
+	   thing separating him from one of the reader's own is the verb. The slot is no longer in
+	   a gutter cell, so it is read out of the row's own sentence — "Add X at SP, and sit Y".
+	*/
+	const fills = await page.$$eval(".decide-do .decide-add-wire", ns =>
 		ns.map(e => ({
-			slot: e.querySelector(".decide-slot")?.textContent?.trim(),
+			slot: (/ at ([A-Za-z0-9+]+)[,. ]/.exec(
+				e.closest("li")?.textContent?.replace(/\s+/g, " ") ?? ""
+			) ?? [])[1],
 			name: e.querySelector("b")?.textContent?.trim()
 		})))
 	t("a seat-filling add offers a man who is not already yours",
@@ -340,13 +365,19 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * fixed count, since how many seats are open is tonight's schedule and not this
 	 * code's business.
 	 */
-	const openSeats = Number(
-		(/(\d+) seats? scores? nothing/.exec(
-			(await page.textContent(".decide-fill-head")) ?? ""
-		) ?? [])[1] ?? NaN
-	)
-	const rest = (await page.$$eval(".decide-fill-rest", n => n.map(e => e.textContent.trim())))[0] ?? ""
-	const shutOut = (await page.$$eval(".decide-fill-shut", n => n.map(e => e.textContent.trim())))[0] ?? ""
+	/* The heading that carried this number is gone with the block. The seats it counted are
+	   still counted, one per row, in the fold that has always had to account for every active
+	   seat — so the identity is now asserted against the fold rather than against a heading
+	   whose only job was to restate it. */
+	const emptySeats = await page.$$eval(".decide-today .decide-empty .decide-slot", ns =>
+		ns.map(e => e.textContent.trim()))
+	const openSeats = emptySeats.length
+	const emptyLine =
+		(await page.$$eval(".decide-empty-seats", n => n.map(e => e.textContent.trim())))[0] ?? ""
+	/* One sentence now, two clauses, because the two reasons are different and only one of
+	   them is a seat there was never anything to do about. */
+	const rest = (/(One seat has|\d+ seats have) nobody/.exec(emptyLine) ?? [])[0] ?? ""
+	const shutOut = (/(One more had|\d+ more had)/.exec(emptyLine) ?? [])[0] ?? ""
 	/* THE ACCOUNTING IS NOW ACROSS TWO SENTENCES, and this assertion adds them up rather than
 	   matching one of them. The single sentence it used to read asserted one reason for every
 	   unfilled seat — "no free man eligible there is on a card tonight" — which is true of a
@@ -358,18 +389,58 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	   for your Util seat" under Make these moves — one man, one seat, two rows, and no way to
 	   tell whether that is one add or two. The moves row is the one that survives, because it
 	   prices the add against the rest of the roster. */
-	const moveNames = await page.$$eval(".decide-moves b", bs => bs.map(b => b.textContent.trim()))
-	t("a man the moves already offer is not offered again under Empty seats",
+	const moveRows = await page.$$eval(".decide-do-add", ns =>
+		ns.map(e => ({
+			name: e.querySelector("b")?.textContent?.trim(),
+			seats: e.querySelector(".decide-seat")?.textContent?.trim() ?? ""
+		})))
+	const moveNames = moveRows.map(m => m.name)
+	/* Still the same claim — one man, one row — but now it is about one list rather than two,
+	   which is what made the duplicate possible in the first place. */
+	t("a man the priced moves offer is not offered a second time for a seat",
 		fills.every(f => !moveNames.includes(f.name)),
 		`fills: ${fills.map(f => f.name).join(", ") || "(none)"} | moves: ${moveNames.join(", ") || "(none)"}`)
 
 	const said = t =>
 		/^(One|one)\b/.test(t) ? 1 : Number((/(\d+)/.exec(t) ?? [])[1] ?? (t ? NaN : 0))
-	const moved = (await page.$$eval(".decide-fill-moved", n => n.map(e => e.textContent.trim())))[0] ?? ""
-	t("every seat the heading counts is offered a man, or explained by one of the three reasons",
-		Number.isNaN(openSeats) ||
-			fills.length + said(rest) + said(shutOut) + said(moved) === openSeats,
-		`${openSeats} open, ${fills.length} offered, nobody-eligible: ${rest || "(none)"}, already-locked: ${shutOut || "(none)"}, filled-by-a-move: ${moved || "(none)"}`)
+	/*
+	   THE THIRD REASON IS NO LONGER A SENTENCE, so the test derives it instead of reading one.
+
+	   "2 of them are the seats the moves above fill" existed because the moves lived in a
+	   different block, three headings away, and a reader could not see that the empty seat he
+	   was being told about was the one the add filled. In one list he can, so the sentence
+	   went — and the seats it accounted for are still accounted for, by the add row that
+	   names them. `.decide-seat` is that row's own "for your SP or RP or P seat" clause, which
+	   is where the planner already puts the seats an arriving man may fill.
+	*/
+	const filledByMove = new Set(
+		[...new Set(emptySeats)].filter(slot =>
+			moveRows.some(m => new RegExp(`\\b${slot.replace("+", "\\+")}\\b`).test(m.seats))
+		)
+	).size
+	/*
+	   A SANDWICH, NOT AN IDENTITY, and the reason is named rather than the assertion weakened
+	   in silence.
+
+	   The exact sum used to be readable off the screen because the card printed all three
+	   reasons as sentences, including "2 of them are the seats the moves above fill". That
+	   third sentence existed only because the moves lived three headings away; in one list
+	   the reader can see the add that fills the seat, so it went. What is left on screen is
+	   the two counts, and `filledByMove` here is this file's own upper bound on the third,
+	   derived from the seat clause each priced add already carries.
+
+	   So both directions are still asserted and neither is the weak one: the card may not
+	   claim MORE unfillable seats than it has empty seats (the lower rail — that is a card
+	   inventing a hole), and it may not leave an empty seat unaccounted for by any of the
+	   three (the upper rail — that is the quiet failure this assertion exists for, a list
+	   shorter than the truth with nothing saying so).
+	*/
+	t("the card never claims more empty seats than the lineup leaves",
+		fills.length + said(rest) + said(shutOut) <= openSeats,
+		`${openSeats} empty, ${fills.length} offered from the wire, nobody-eligible: ${rest || "(none)"}, already-locked: ${shutOut || "(none)"}`)
+	t("and every seat it leaves empty is offered a man, priced into a move, or counted",
+		fills.length + filledByMove + said(rest) + said(shutOut) >= openSeats,
+		`${openSeats} empty, ${fills.length} offered from the wire, ${filledByMove} covered by a priced move, nobody-eligible: ${rest || "(none)"}, already-locked: ${shutOut || "(none)"}`)
 	/*
 	 * The seat phrase has to come off the name before the name is compared.
 	 *
@@ -416,17 +487,24 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			/free seat, so nobody comes out|seats are free/.test(text),
 		text.slice(-300))
 
-	/* Two shapes now: paired with a drop, and standing alone into a free seat. The two
-	   assertions below are about the man arriving and the man leaving, so a pure add
-	   contributes only an arrival and `drop` is null for it. */
-	const adds = [
-		...[...text.matchAll(/Add (.+?)(?: for your [^,]*seat)?, drop (.+)/g)].map(m => [m[1], m[2]]),
-		/* `innerText`, so the seat clause and the reason can arrive on separate lines —
-		   `.decide-why` is its own block. `[\s\S]` rather than `.` for that reason. */
-		...[...text.matchAll(/Add ([^\n]+?)(?:[\s\S]{0,60}?seat)?[\s\S]{0,4}you have a free seat/g)].map(
-			m => [m[1], null]
-		)
-	]
+	/*
+	   READ OFF THE ROW, NOT OUT OF THE PROSE.
+
+	   Two shapes — paired with a drop, and standing alone into a free seat — and this pulled
+	   both out of `innerText` with two regexes, one of which allowed at most four characters
+	   between the seat clause and "you have a free seat". That clause moved into the row's own
+	   `<em>`, behind the unit the row now states ("over this scoring period · you have a free
+	   seat, so nobody comes out"), and four characters was not enough: the assertion went red
+	   about rows that were correct and present. A regex whose margin is a character count is a
+	   regex that fails on the next wording change, so the arriving and leaving men come off
+	   the row's own elements instead. `.decide-do-add` carries exactly one add; its first <b>
+	   is the man arriving and its second, where there is one, the man leaving.
+	*/
+	const adds = await page.$$eval(".decide-do-add", ns =>
+		ns.map(e => {
+			const names = [...e.querySelectorAll("b")].map(b => b.textContent.trim())
+			return [names[0] ?? null, names[1] ?? null]
+		}))
 	t("it proposes at least one move, so the two rules below are tested against something",
 		adds.length > 0 || /none clear the bar|None worth making/.test(text), text.slice(-400))
 	t("it never proposes adding a player already on the roster",
@@ -524,102 +602,197 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	}
 
 	/*
-	 * The card leads with the DIFFERENCE, not the lineup.
+	 * The card leads with the DIFFERENCE, not the lineup — and now with the WHOLE
+	 * difference, in one list.
 	 *
-	 * He already has a lineup in Yahoo; what he needs is the handful of seats that
-	 * should change. Every row it asks him to change has to be a real change against
-	 * the seats it was given, or he is being sent to move a man who is already there.
+	 * THE SHAPE THIS SUITE READS CHANGED TWICE, and the second time is why these
+	 * assertions were rewritten rather than repointed. `.decide-changes` was a lineup diff
+	 * — bench rows grouped by reason, start rows, "Move X from A to B" rows — sitting above
+	 * a separate `Empty seats` block and, five blocks further down, the priced adds under
+	 * `Make these moves`. Walked on a real 27-man imported roster, 2026-09-23: it benched
+	 * ten men and named a starter for none of them, because `today.start` holds only men
+	 * coming off the BENCH and every one of those ten lost his seat to a man already in the
+	 * lineup moving across. The card then said, in its own next block, that twelve seats
+	 * would score nothing — the same fact from the other end.
 	 *
-	 * The shape of this list changed. Bench rows used to be one per man; they are now
-	 * ONE PER REASON, each naming every man it applies to, because on a real 27-man
-	 * roster on a five-game night it printed sixteen consecutive rows identical but
-	 * for the name. So the parse is per-row-and-per-name rather than per-row: reading
-	 * only `querySelector("b")` — which is what this test used to do — now sees the
-	 * first man in each group and silently stops checking the rest, which on that
-	 * same five-game night would have been fifteen unchecked names.
+	 * So there is one list now, `.decide-do`, ordered by what each row is worth, and a row
+	 * is a SEAT rather than a man: who goes in, who comes out, and — where the seat's old
+	 * occupant went somewhere better — where he went. Three row kinds, and the class says
+	 * which: `decide-do-add` is a priced waiver move, `decide-do-start` is a seat somebody
+	 * is arriving into, `decide-do-sit` is a seat nobody is.
+	 *
+	 * WHAT THE OLD ASSERTIONS CLAIMED AND WHERE EACH WENT, because four of them were the
+	 * only thing standing between this card and a silent regression:
+	 *
+	 *  · "everyone it says to bench is currently in an active seat" — unchanged in force,
+	 *    read off `.decide-out` instead of `.decide-bench-group b`.
+	 *  · "everyone it says to start is not already in one" — REPLACED, because it is now
+	 *    false of correct output: Matt Olson moving SP→1B is both started and already in an
+	 *    active seat, and that row is the fix. The successor claims strictly more: every man
+	 *    a row starts is a man the planner really seated, checked against the seat-by-seat
+	 *    fold, which the old assertion never looked at.
+	 *  · "everyone it says to move seats is already in the lineup" — kept, against
+	 *    `.decide-moved`, which is where a seat change is now reported.
+	 *  · "bench rows are one per reason, not one per man" — the grouping key changed from
+	 *    the reason to the SEAT, so the successor is "one row per seat" plus the property
+	 *    that made grouping safe in the first place and still does: every man named exactly
+	 *    once across the whole list.
+	 *  · "each man keeps his own seat beside his name" — kept, as `data-slot` on the row,
+	 *    which is the same fact now that a row is a seat rather than a bag of men.
+	 *  · "the badge is the count, or his seat" — REPLACED. The badge is a NUMBER now, which
+	 *    is the point of the rebuild, so what is asserted is that it is the row's own value
+	 *    and that a row worth nothing does not print one.
+	 *
+	 * And one claim is new, because it is the defect this rebuild exists to end: no man is
+	 * told to sit without either the man taking his seat named beside him, or the fact that
+	 * the seat scores nothing said out loud.
 	 */
-	const changeRows = await page.$$eval(".decide-changes li", ns =>
+	const doRows = await page.$$eval(".decide-do > li", ns =>
 		ns.map(e => ({
-			group: e.classList.contains("decide-bench-group"),
-			badge: e.querySelector(".decide-slot")?.textContent?.trim() ?? null,
-			// the bench reason, the "N projected today" on a start, the "from X to Y" on
-			// a move: one per row either way
+			kind:
+				e.classList.contains("decide-do-add") ? "add"
+				: e.classList.contains("decide-do-start") ? "start"
+				: "sit",
+			slot: e.getAttribute("data-slot"),
+			badge: e.querySelector(":scope > .decide-delta")?.textContent?.trim() ?? null,
 			why: e.querySelector("em.decide-why")?.textContent?.trim() ?? "",
-			verb:
-				e.classList.contains("decide-bench-group") ? "bench"
-				: /Move /.test(e.textContent) ? "move"
-				: "start",
-			// every name in the row, each with the seat printed beside it — a grouped
-			// bench row carries one <b> and one <em class="decide-seat"> per man
-			men: [...e.querySelectorAll("b")].map(b => ({
-				name: b.textContent.trim(),
-				seat: b.parentElement?.querySelector("em.decide-seat")?.textContent?.trim() ?? null
-			}))
+			text: (e.textContent ?? "").replace(/\s+/g, " ").trim(),
+			in: [...e.querySelectorAll(".decide-in b")].map(b => b.textContent.trim()),
+			wire: [...e.querySelectorAll(".decide-add-wire b")].map(b => b.textContent.trim()),
+			out: [...e.querySelectorAll(".decide-out b")].map(b => b.textContent.trim()),
+			moved: [...e.querySelectorAll(".decide-moved b")].map(b => b.textContent.trim())
 		})))
 	const activeSeated = new Set(
 		seedLineup[KEY].spots.filter(sp => !/^(BN|IL|NA)/i.test(sp.slot)).map(sp => sp.name)
 	)
-	const benchRows = changeRows.filter(c => c.verb === "bench")
-	const benched = benchRows.flatMap(c => c.men)
-	const startRows = changeRows.filter(c => c.verb === "start")
-	const moveRows = changeRows.filter(c => c.verb === "move")
-
-	t("everyone it says to bench is currently in an active seat",
-		benched.every(m => activeSeated.has(m.name)),
-		JSON.stringify(benched.filter(m => !activeSeated.has(m.name))))
-	t("everyone it says to start is not already in one",
-		startRows.every(c => c.men.every(m => !activeSeated.has(m.name))),
-		JSON.stringify(startRows.filter(c => c.men.some(m => activeSeated.has(m.name)))))
-	// a man asked to change seat must be one who is already in the lineup — the row
-	// exists to free a seat for somebody else, and moving a man who is not there
-	// would be an instruction that cannot be followed
-	t("everyone it says to move seats is already in the lineup",
-		moveRows.every(c => c.men.every(m => activeSeated.has(m.name))),
-		JSON.stringify(moveRows.filter(c => c.men.some(m => !activeSeated.has(m.name)))))
+	const inFold = new Set(rows.filter(r => r.who).map(r => r.who))
+	const seatRows = doRows.filter(c => c.kind !== "add")
+	const sitRows = doRows.filter(c => c.kind === "sit")
+	const startRows = doRows.filter(c => c.kind === "start")
+	const benched = seatRows.flatMap(c => c.out.map(name => ({ name, seat: c.slot })))
+	const benchNames = new Set(benched.map(m => m.name))
 
 	/*
-	 * GROUPING, as four properties rather than as a sentence.
+	   THE ANSWER IS FIRST, which is the whole complaint this rebuild answers: "I still don't
+	   see any direct recommendations in terms of who I should be streaming". The priced add
+	   was the fifth block down and behind a fold. It is a row in the one list now, so what
+	   is asserted is that there IS one list and that the priced moves are in it — never a
+	   second `.decide-moves` list on a card that has a Today section.
+	*/
+	t("a daily-lock card draws one list of things to do, not four",
+		!!(await page.$(".decide-do")) && !(await page.$(".decide-moves")),
+		`decide-do: ${!!(await page.$(".decide-do"))}, stray decide-moves: ${!!(await page.$(".decide-moves"))}`)
+	t("and the priced adds are rows in it",
+		doRows.some(c => c.kind === "add"),
+		JSON.stringify(doRows.map(c => c.kind)))
+	/* Biggest first, and the rows that buy nothing last. A list whose order a reader cannot
+	   trust is a list he has to read all of. */
+	{
+		const vals = doRows.map(c =>
+			c.badge && /[\d.]/.test(c.badge) ? Number(c.badge.replace("+", "")) : null)
+		const ordered = vals.every(
+			(v, i) => i === 0 || (vals[i - 1] === null ? v === null : v === null || v <= vals[i - 1])
+		)
+		t("and it is ordered by what each row is worth, with the ones worth nothing last",
+			ordered, JSON.stringify(vals))
+		t("and a row that buys nothing prints no figure",
+			doRows.every(c => (c.kind === "sit") === (vals[doRows.indexOf(c)] === null)),
+			JSON.stringify(doRows.map(c => [c.kind, c.badge])))
+	}
+
+	t("everyone it says to sit is currently in an active seat",
+		benched.every(m => activeSeated.has(m.name)),
+		JSON.stringify(benched.filter(m => !activeSeated.has(m.name))))
+	/*
+	   THE SUCCESSOR TO "everyone it says to start is not already in one".
+
+	   That claim was written when a start could only come off the bench, and the card's
+	   biggest defect was that it could only REPORT one that came off the bench. A man
+	   already in an active seat moving to a better one is now a start row, correctly, so the
+	   property worth protecting is not where he came from but whether the planner really put
+	   him there: every man a row starts, other than one being added off the wire, has to
+	   appear in the seat-by-seat fold, which is the planner's own lineup.
+	*/
+	t("everyone it says to start is a man the planner really seated",
+		startRows.every(c => c.in.every(n => c.wire.includes(n) || inFold.has(n))),
+		JSON.stringify(startRows.map(c => [c.slot, c.in, c.wire])))
+	// a man reported as changing seat must be one who is already in the lineup — the clause
+	// exists to explain where a seat went, and naming a man who is not there would be an
+	// instruction that cannot be followed
+	t("everyone it says moves seats is already in an active seat",
+		seatRows.every(c => c.moved.every(n => activeSeated.has(n))),
+		JSON.stringify(seatRows.filter(c => c.moved.some(n => !activeSeated.has(n)))))
+
+	/*
+	 * A BENCH WITH NO REPLACEMENT IS NOT A MOVE A MANAGER CAN MAKE — the claim the whole
+	 * rebuild is for, and the one thing no assertion in this file used to make.
 	 *
-	 * What was measured, and what made the change: sixteen rows reading "Bench X — he
-	 * is not projected to play today", identical but for the name, sitting above the
-	 * two moves that were the point of the card. Sixteen rows of one sentence is not
-	 * sixteen decisions; it is one fact about the schedule and a list of who it applies
-	 * to. The properties that make that safe, each of which a naive grouping breaks:
-	 *
-	 *  · one row per DISTINCT reason — if two rows share a reason the grouping did not
-	 *    happen and the sixteen rows are back
-	 *  · every man named EXACTLY ONCE across the rows — a grouping keyed on the wrong
-	 *    thing duplicates men, and a reader shown a name twice cannot tell whether it
-	 *    is two seats
-	 *  · every man's own SEAT printed beside him — the row's badge is "×5" for a group,
-	 *    so without the per-man seat he has no way to find any of them in Yahoo
-	 *  · the badge IS the count for a group of several, and the man's own seat for a
-	 *    group of one
-	 *
-	 * None of these mentions which reasons came back, because that is tonight's
-	 * schedule talking.
+	 * Measured before it: "×10 Bench Pete Crow-Armstrong C, Alex Bregman 1B, Iván Herrera
+	 * 2B, …" with not one starter named, on a card whose own fold showed Matt Olson at 1B
+	 * and Ketel Marte at 2B. Two honest shapes and no third: the row names who goes in, or
+	 * it says the seat will score nothing. There is deliberately no shape in which the card
+	 * guesses which departing man an arriving one displaced.
 	 */
-	const reasons = benchRows.map(c => c.why)
-	t("bench rows are one per reason, not one per man",
-		new Set(reasons).size === reasons.length,
-		JSON.stringify(reasons))
-	t("and every man it benches is named exactly once across them",
+	t("no man is told to sit without either his replacement or the fact the seat goes empty",
+		seatRows.every(c => c.out.length === 0 || c.in.length > 0 ||
+			/scores nothing tonight either way/.test(c.text)),
+		JSON.stringify(seatRows.filter(c => c.out.length && !c.in.length).map(c => c.text)))
+	t("and a row that says the seat was empty names nobody coming out of it",
+		doRows.every(c => !/over an empty seat/.test(c.text) || (!c.out.length && !c.moved.length)),
+		JSON.stringify(doRows.filter(c => /over an empty seat/.test(c.text)).map(c => c.text)))
+	/*
+	   AND A SEAT THE PLATFORM HAS CLOSED CANNOT BE HANDED TO ANYBODY.
+
+	   The departures on a row are freeze-filtered — a man whose game has started is never
+	   offered up — so a slot whose only departure was frozen came back with an empty `out`
+	   and the row took the empty-seat branch. Seen on the built card at 13:40: "Start Pete
+	   Crow-Armstrong at OF — over an empty seat", with Riley Greene in one of the three OF
+	   seats and his 1:10pm lock an hour past. The arrival is now capped at the room the slot
+	   really has: its free seats, plus the men who can still leave it.
+
+	   An INVARIANT, so it is asserted unconditionally and is quiet in the morning when
+	   nothing is frozen. The existence half — that a frozen seat really does suppress an
+	   arrival — is what the two-page freeze comparison further down this file measures.
+	*/
+	{
+		const seatsOf = slot => league.roster.slot_order.filter(x => x === slot).length
+		const before = slot =>
+			seedLineup[KEY].spots.filter(sp => sp.slot === slot).length
+		const overbooked = seatRows.filter(
+			c => c.in.length > seatsOf(c.slot) - before(c.slot) + c.out.length + c.moved.length
+		)
+		t("no row seats more men than the slot has room for",
+			overbooked.length === 0,
+			JSON.stringify(overbooked.map(c => [c.slot, `${c.in.length} in`, `${seatsOf(c.slot)} seats`, `${before(c.slot)} held`, `${c.out.length} out`, `${c.moved.length} moved`])))
+	}
+
+	/*
+	 * GROUPING, as the properties that make it safe — the same four as before, keyed on the
+	 * seat instead of on the reason.
+	 *
+	 * What was measured: sixteen rows reading "Bench X — he is not projected to play today",
+	 * identical but for the name, above the two moves that were the point of the card. A
+	 * seat-keyed grouping collapses those the same way (the three outfielders share one OF
+	 * row) and buys the thing a reason-keyed one could not: the man arriving into that seat
+	 * belongs on the row with the men leaving it.
+	 */
+	t("seat rows are one per seat, not one per man",
+		new Set(seatRows.map(c => c.slot)).size === seatRows.length,
+		JSON.stringify(seatRows.map(c => c.slot)))
+	t("and every man it sits is named exactly once across them",
 		new Set(benched.map(m => m.name)).size === benched.length,
 		JSON.stringify(benched.map(m => m.name)))
-	t("each man keeps his own seat beside his name, which is what he changes in Yahoo",
-		benched.every(m => m.seat && activeSeated.has(m.name) &&
+	t("each man's own seat is on the row, which is what he changes in Yahoo",
+		benched.every(m => m.seat &&
 			seedLineup[KEY].spots.some(sp => sp.name === m.name && sp.slot === m.seat)),
 		JSON.stringify(benched))
-	t("the badge on a grouped row is the count, and on a single row his seat",
-		benchRows.every(c =>
-			c.men.length > 1 ? c.badge === `×${c.men.length}` : c.badge === c.men[0]?.seat),
-		JSON.stringify(benchRows.map(c => [c.badge, c.men.length])))
 	/*
 	 * A reason has to be a fact about the world, not about a man — which is the
 	 * precondition for grouping at all. If a reason ever carried a name in it, two men
 	 * could never share one, every group would be of size one, and the sixteen rows
 	 * would come back through the back door while this suite stayed green.
 	 */
+	const reasons = sitRows.map(c => c.why)
 	t("no reason names a player, which is why men can share one",
 		reasons.every(r => r && ![...activeSeated].some(n => r.includes(n))),
 		JSON.stringify(reasons))
@@ -631,26 +804,9 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * grouped list can — a reason the reducer does not handle, a man whose reason came
 	 * back undefined — and the symptom is the quiet one this card exists to prevent: a
 	 * seat that is neither "change this" nor "this is right", simply unmentioned. So
-	 * every man in an active seat must be in exactly one of the two lists the card
-	 * shows: the bench groups, or the seat-by-seat fold of the lineup it wants.
+	 * every man in an active seat must be in one of the lists the card shows: the one
+	 * list, the seat-by-seat fold of the lineup it wants, or one of the sentences below it.
 	 */
-	const inFold = new Set(rows.filter(r => r.who).map(r => r.who))
-	const benchNames = new Set(benched.map(m => m.name))
-	/*
-	   THERE IS A THIRD LIST, and this assertion did not know about it until live data
-	   produced one.
-	
-	   A man the engine cannot price at all is in neither the lineup nor the bench rows — he
-	   is in the "could not be priced" note at the foot, by name, which is the card's whole
-	   answer to the quiet failure this assertion exists to catch. It went unnoticed because
-	   the note only appears when somebody on the seeded roster is unrateable, and on the
-	   committed capture nobody was: it took MLB putting William Contreras on the injured
-	   list, read live on 2026-09-17, for the branch to be taken at all.
-	
-	   The claim is unchanged and is now stated in full: every man in an active seat is
-	   accounted for SOMEWHERE the reader can see. What would still fail is a man in none of
-	   the three, which is the seat that is simply unmentioned.
-	*/
 	/* FOUR PLACES, not three, and the fourth is what caught this.
 	
 	   A man whose game has already started is named in the locked sentence — "his game was
@@ -690,11 +846,15 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			.$$eval(".decide-locked, .decide-stuck", n => n.map(e => e.innerText ?? "").join(" "))
 			.catch(() => "")
 	).replace(/\s+/g, " ")
+	/* A man who moved to a better seat is named on the row for the seat he LEFT, which is a
+	   fourth way to be accounted for and the one this rebuild added. */
+	const movedOn = new Set(seatRows.flatMap(c => c.moved))
 	const unaccounted = [...activeSeated].filter(
-		n => !inFold.has(n) && !benchNames.has(n) && !unpriced.has(n) && !shut.includes(n)
+		n => !inFold.has(n) && !benchNames.has(n) && !movedOn.has(n) && !unpriced.has(n) &&
+			!shut.includes(n)
 	)
 	const twice = [...activeSeated].filter(n => inFold.has(n) && benchNames.has(n))
-	t("every man in an active seat is either benched, in tonight's lineup, or named as unpriceable",
+	t("every man in an active seat is either sat, in tonight's lineup, or named as unpriceable",
 		unaccounted.length === 0, JSON.stringify(unaccounted))
 	t("and no man is in two of those at once",
 		twice.length === 0, JSON.stringify(twice))
@@ -709,10 +869,13 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	 * already knows about. The correct answer is silence in the change list.
 	 */
 	if (shelved) {
+		/* Read across the whole of the one list rather than across the old `.decide-changes`
+		   rows: the claim is that he is nowhere in the instructions, so it has to look at
+		   every kind of row there now is. */
 		t("a man on the injured list is not told to take a seat he cannot leave",
 			!benchNames.has(shelved.name) &&
-				!changeRows.some(c => c.men.some(m => m.name === shelved.name)),
-			`${shelved.name} appears in ${JSON.stringify(changeRows.filter(c => c.men.some(m => m.name === shelved.name)))}`)
+				!doRows.some(c => c.text.includes(shelved.name)),
+			`${shelved.name} appears in ${JSON.stringify(doRows.filter(c => c.text.includes(shelved.name)).map(c => c.text))}`)
 	}
 
 	/*
@@ -1177,7 +1340,11 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
 	const text = await page.$eval(".decide", e => e.innerText)
 	t("a weekly-lock league is shown no daily lineup at all",
-		!/\bToday\b/.test(text) && !(await page.$(".decide-changes")),
+		/* `.decide-do` is the one list Today draws; a period-lock league must draw none of
+		   it. Same claim as the old `.decide-changes` check, against the list that replaced
+		   that one — and it is NOT enough to check the heading, because the whole failure
+		   this asserts against is a daily list appearing under a period card. */
+		!/\bToday\b/.test(text) && !(await page.$(".decide-do")),
 		text.slice(0, 200))
 	t("and it still answers the question it does have — the period",
 		/Set your lineup/.test(text), text.slice(0, 200))
@@ -1212,7 +1379,7 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("a league with no scoring is told what is missing rather than given a plan",
 		/what each stat is worth/i.test(text), text.slice(0, 220))
 	t("and it proposes nothing at all — no benchings, no moves",
-		!(await page.$(".decide-changes")) &&
+		!(await page.$(".decide-do")) && !(await page.$(".decide-moves")) &&
 			!/Add .+, drop /.test(await page.evaluate(() => document.body.innerText)),
 		text.slice(0, 300))
 	t("and the gap is named once, not once per card",
@@ -1347,8 +1514,33 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("a daily-lock league is given exactly one lineup answer",
 		/\bToday\b/.test(text) && !/Over the rest of the period/.test(text),
 		text.slice(0, 300))
+	/*
+	   THE HEADING WENT AND THE CLAIM DID NOT, so the claim is asserted directly instead.
+
+	   This looked for "Make these moves", which was the priced adds' own heading. In a
+	   daily-lock league those rows are in Today's one list now — the whole point of the
+	   rebuild is that an add and a start are the same kind of instruction to the reader —
+	   so the heading is gone and a test that reads for it is testing the layout rather than
+	   the fact. The fact is that the adds are still priced over the PERIOD and not over
+	   tonight, which is what an add accrues over, and the card says exactly that in the
+	   sentence that separates the two units. Asserted with the rows' own presence, so it
+	   cannot pass on a card that has no adds on it at all.
+	*/
+	/* The unit moved from a legend under the list onto the rows themselves — a legend that
+	   has to explain a column is a column that does not work, and both scales were sharing
+	   one gutter on rows that both began "Add". So the claim is read off the add row, which
+	   is where the reader meets it. */
+	const addUnits = await page.$$eval(".decide-do-add em.decide-why", ns =>
+		ns.map(e => e.textContent.replace(/\s+/g, " ").trim()))
 	t("and the moves are still priced over the period, which is what an add accrues over",
-		/Make these moves/.test(text), text.slice(0, 300))
+		addUnits.length > 0 && addUnits.every(u => /^over this scoring period/.test(u)),
+		JSON.stringify(addUnits))
+	t("…and a seat's figure says it is tonight's, so the two scales are never read as one",
+		(await page.$$eval(".decide-do-start em.decide-why", ns =>
+			ns.map(e => e.textContent.replace(/\s+/g, " ").trim()))).every(u =>
+			/^projected tonight/.test(u)),
+		JSON.stringify(await page.$$eval(".decide-do-start em.decide-why", ns =>
+			ns.map(e => e.textContent.replace(/\s+/g, " ").trim()))))
 	/* HIS LEAGUE'S OWN WAIVER ROW, read at last. The gain beside every move is accrued
 	   from today, and in this league a claimed man is not his tonight: five waiver rows
 	   have been stored verbatim since the first real read and nothing looked at one. */
@@ -1482,7 +1674,8 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	/*
 	   TIME-OF-DAY FLAKE, FIXED BY ASSERTING THE RIGHT THING RATHER THAN BY LOOSENING IT.
 
-	   This required at least one row in `.decide-changes`. That list is the LINEUP diff —
+	   This required at least one row in the lineup list (`.decide-changes` then, `.decide-do`
+	   now). That list is the LINEUP diff —
 	   who to start and who to sit — and a lineup change is only possible for a seat whose
 	   game has not begun. Run in the evening, every seat has started, the card correctly
 	   offers no lineup change, and the assertion failed on a card that was right. Measured
@@ -1498,7 +1691,7 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	   how many of his men are playing. Both are answers; an empty card is not, and an empty
 	   card still fails.
 	*/
-	const rows = (await page.$$(".decide-changes li")).length
+	const rows = (await page.$$(".decide-do > li")).length
 	t("it produces an answer about that team, at any hour",
 		rows > 0 || /every seat has started|of your men are in tonight.s card/.test(text),
 		`${rows} lineup rows | ${text.slice(0, 400)}`)
@@ -1514,6 +1707,147 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		text.slice(-700))
 	t("and nothing on it claims a free-agent list was read",
 		!/read off your league|as it stood|free-agent list, read /.test(text), text.slice(-700))
+	await page.close()
+}
+
+/**
+ * THE OTHER HALF OF THE SAME ASYMMETRY: SEATS AND NO ROSTER LIST.
+ *
+ * Two routes store seats with no roster beside them — the pasted lineup on My league, and
+ * any platform read whose roster page landed while the list did not — and `seats` falls
+ * through to the stored spots for both. It is the state this card is WORST in: there are no
+ * owned ids to disambiguate a name with, and a short pasted lineup means most of the active
+ * seats have nobody the reader owns who can legally fill them.
+ *
+ * Before the rebuild that produced "×14 Bench <fourteen names> — a better man is projected
+ * for that seat today", with not one starter named and, for most of those men, no better man
+ * anywhere: their seats ended the night empty. So the two claims asserted here are exactly
+ * the two the rebuild is for, made in the state that used to break them hardest — no row
+ * invents a partner, and no row that says a seat was empty is about a seat somebody is
+ * sitting in.
+ *
+ * `beanemachine:roster` is deliberately NOT written. Every other block in this file seeds
+ * both stores, so nothing here covered the shape until now.
+ */
+{
+	const page = await browser.newPage({ viewport: { width: 1100, height: 1400 } })
+	/* The length a paste produces: the active seats only, and no bench or injured list —
+	   which is what the setup sheet tells him is fine ("Only got a few? Start with your
+	   starters"). */
+	const pasted = seedLineup[KEY].spots.filter(sp => !reserve(sp.slot)).slice(0, 14)
+	await page.addInitScript(([l, c]) => {
+		localStorage.setItem("beanemachine:lineup", JSON.stringify(l))
+		localStorage.setItem("beanemachine:config", JSON.stringify(c))
+	}, [{ [KEY]: { at: new Date().toISOString(), spots: pasted } }, JSON.parse(readFileSync("scoring.json", "utf8"))])
+	await page.goto(BASE, { waitUntil: "networkidle", timeout: 60000 })
+	await page.waitForSelector(".decide", { timeout: 30000 })
+	await page.waitForTimeout(2500)
+	t("a team stored as seats with no roster list is still answered",
+		(await page.evaluate(() => localStorage.getItem("beanemachine:roster"))) === null &&
+			(await page.$$(".decide-do > li")).length + (await page.$$(".decide-do-sit")).length > 0,
+		await page.$eval(".decide", e => e.innerText.slice(0, 300)))
+	const seatOnly = await page.$$eval(".decide-do > li", ns =>
+		ns.map(e => ({
+			slot: e.getAttribute("data-slot"),
+			text: (e.textContent ?? "").replace(/\s+/g, " ").trim(),
+			in: [...e.querySelectorAll(".decide-in b")].map(b => b.textContent.trim()),
+			out: [...e.querySelectorAll(".decide-out b")].map(b => b.textContent.trim()),
+			moved: [...e.querySelectorAll(".decide-moved b")].map(b => b.textContent.trim())
+		})))
+	t("…and no man is sat without a named replacement or the fact the seat goes empty",
+		seatOnly.every(c => !c.out.length || c.in.length ||
+			/scores nothing tonight either way/.test(c.text)),
+		JSON.stringify(seatOnly.filter(c => c.out.length && !c.in.length).map(c => c.text)))
+	t("…and no seat somebody is still sitting in is called an empty one",
+		seatOnly.every(c => !/over an empty seat/.test(c.text) || (!c.out.length && !c.moved.length)),
+		JSON.stringify(seatOnly.filter(c => /over an empty seat/.test(c.text)).map(c => c.text)))
+	/* The sentence the old fallback got wrong. "A better man is projected for that seat" may
+	   only be said where the planner really seats one, and this is the roster it was falsest
+	   on — measured before the rebuild, four of five men who got it had seats that ended the
+	   night empty. */
+	t("…and no row claims a better man for a seat nobody is arriving at",
+		seatOnly.every(c =>
+			!/a better man is projected for that seat today/.test(c.text) || c.in.length > 0),
+		JSON.stringify(seatOnly.filter(c =>
+			/a better man is projected for that seat today/.test(c.text) && !c.in.length).map(c => c.text)))
+	await page.close()
+}
+
+/**
+ * A LINEUP THIS APP CANNOT REPRODUCE, AND THE TWO THINGS IT MAY NOT DO ABOUT IT.
+ *
+ * `planLineup` sums `pointsNow` over the men in active seats and `pointsPlanned` over the men
+ * it could seat. A man whose seat is not in his own eligibility is in the first and can be in
+ * no seat of the second, so his points leave the model and the difference reads as a loss the
+ * rearrangement caused. Measured on a 27-man imported roster, 2026-09-23: -28.99 for one night
+ * and -144.42 for the period, of which 35.86 and 203.21 were men dropping out; re-seat the
+ * same men where the league does allow them and it is +8.81 and +39.09 with nobody dropped.
+ *
+ * The `lineupMinGain` bar fired on that difference and returned no swaps and no shifts while
+ * still returning `starters` — and this card pairs its rows off `starters`, so it printed nine
+ * "Start X at 1B, and sit Y" rows while the model's own note said the whole rearrangement
+ * should be left alone. One screen, two positions.
+ *
+ * So: the bar stands down (asserted in test/auto.mjs, where the planner is), and the card owes
+ * the reader the reason its planned total is lower than his lineup's. Both halves are asserted
+ * here — the caveat is present and names the men, and it is in the fold rather than on every
+ * affected row, because twenty-three words of provenance repeated eight times is the wall this
+ * whole card was rebuilt to stop.
+ */
+{
+	/* Three men put in seats their own eligibility does not reach — a catcher at 1B, an
+	   outfielder at 2B, an infielder in the outfield.
+	
+	   CONSTRUCTED, and it has to be said plainly because an earlier note here implied it was
+	   the ordinary shape of a real import. It is not: `rosterFromPaste` reads Yahoo's own
+	   eligibility off the page first and, since 2026-09-23, unions each man's own startable
+	   seat into his positions — so the seat a man is actually in can no longer be
+	   contradicted by a read. What can still reach this state is a hand-typed team. The
+	   fixture is built by hand for the same reason test/auto.mjs builds one: the planner must
+	   not withhold a plan over a number that is not a gain, however the input arose. */
+	const wrong = seedLineup[KEY].spots.map(sp =>
+		sp.slot === "1B" ? { ...sp, positions: ["C"] }
+		: sp.slot === "2B" ? { ...sp, positions: ["OF"] }
+		: sp.slot === "OF" ? { ...sp, positions: ["SS"] }
+		: sp)
+	const page = await open({ lineup: { [KEY]: { at: new Date().toISOString(), spots: wrong } }, pool: seedPool })
+	const rows = await page.$$eval(".decide-do > li", ns =>
+		ns.map(e => ({
+			text: (e.textContent ?? "").replace(/\s+/g, " ").trim(),
+			reasons: [...e.querySelectorAll(".decide-reason")].map(r => r.textContent.trim())
+		})))
+	const watch = (await page.$$eval(".decide-watch li", ns =>
+		ns.map(e => (e.textContent ?? "").replace(/\s+/g, " ").trim()))).join(" \u00b7 ")
+	t("a lineup the app's own rules forbid is not planned in silence",
+		/sits? in a seat nothing here records (him|them) as eligible for/.test(watch),
+		watch.slice(0, 400) || "(no watch bullets)")
+	t("…and the men it means are named, with the seat each is in",
+		/ at (C|1B|2B|3B|SS|OF|Util|SP|RP|P)\b/.test(watch), watch.slice(0, 400))
+	/* The card and the planner may not take two positions on one screen. With the bar
+	   standing down there are rows; what must never happen is rows AND a sentence saying the
+	   lineup was left alone. */
+	t("…and the card never prints the plan beside a note saying it was withheld",
+		!(rows.length > 0 && /lineup bar|left alone/.test(
+			await page.evaluate(() => document.querySelector(".decide")?.textContent ?? ""))),
+		`${rows.length} rows`)
+	/* The provenance is in the fold; the row keeps the fact. Five words, not twenty-three. */
+	t("…and the reason on the row is the fact, not the paragraph behind it",
+		rows.flatMap(r => r.reasons).every(w => w.split(/\s+/).length <= 12),
+		JSON.stringify(rows.flatMap(r => r.reasons).filter(w => w.split(/\s+/).length > 12)))
+	/*
+	   A ROW IS A MOVE, NOT A CASCADE.
+
+	   Two rows on the imported roster read "Start Rafael Devers and Yordan Alvarez at Util,
+	   and sit Nick Kurtz — Junior Caminero moves to 3B" and "Add Matthew Liberatore at P, and
+	   sit Sandy Alcantara and Cristopher Sánchez — Zach Neto and Rafael Devers move to SS and
+	   Util". Five men and three seats in one sentence cannot be carried out in one pass. The
+	   mover clause now appears only where the row would otherwise claim the seat was standing
+	   empty, which is where nobody is being sat, and with several movers it gives the count
+	   rather than the names.
+	*/
+	t("no row both sits somebody and describes where somebody else went",
+		rows.every(r => !(/ and sit /.test(r.text) && / moves? to /.test(r.text))),
+		JSON.stringify(rows.filter(r => / and sit /.test(r.text) && / moves? to /.test(r.text)).map(r => r.text)))
 	await page.close()
 }
 
@@ -2045,7 +2379,7 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 			line ? await line.innerText() : "(no scratch line)")
 		if (line) {
 			const scratchY = await line.evaluate(e => Math.round(e.getBoundingClientRect().top))
-			const changes = await page.$(".decide-changes")
+			const changes = await page.$(".decide-do")
 			const changesY = changes ? await changes.evaluate(e => Math.round(e.getBoundingClientRect().top)) : Infinity
 			t("and it sits above the changes, not inside them",
 				scratchY < changesY, `scratch y=${scratchY}, changes y=${changesY}`)
@@ -2076,7 +2410,7 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 {
 	const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
 	const page = await open({ lineup: seedLineup, pool: seedPool, config: cfg })
-	const named = await page.$$eval(".decide-changes b", bs => bs.map(b => b.textContent.trim()))
+	const named = await page.$$eval(".decide-do b", bs => bs.map(b => b.textContent.trim()))
 	const unpriced = await page.$$eval(".decide-list li", ls =>
 		ls
 			.filter(l => /could not be priced/.test(l.textContent ?? ""))
@@ -2124,10 +2458,30 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 				}
 			}
 		})
-		const text = await parked.$eval(".decide", e => e.innerText)
+		/*
+		   READ WITH THE FOLD SHUT, which is where this sentence lives now.
+
+		   The Watch bullets are caveats and not instructions — an innings floor, the men
+		   nothing could price, what the moves cost against that floor — and they were sitting
+		   between the reader and the foot of the card, above nothing. They are behind one
+		   "N things to watch" summary now, so `innerText` no longer reaches them and this
+		   assertion went red about a card that was still saying the thing.
+
+		   `textContent` is the suite's own idiom for exactly this (see `deep` above): the card
+		   got shorter by FOLDING prose, not by deleting it, and a claim that is one tap away
+		   still has to be there. The summary is asserted separately, so a fold that swallowed
+		   this silently would still fail.
+		*/
+		const text = await parked.$eval(".decide", e => e.textContent)
 		t("a man parked in a reserve seat that nothing says he needs is still reported",
 			text.includes(healthy.name) && /could not be priced|parked in the/.test(text),
 			`${healthy.name} — ${text.slice(0, 240).replace(/\n+/g, " | ")}`)
+		/* Case-insensitively: the summary is upper-cased in CSS and `innerText` returns what
+		   the reader sees, so a case-sensitive match here tests the stylesheet. */
+		t("…and the card says there is something there to open",
+			/\d+ things? to watch/i.test(await parked.$eval(".decide", e => e.innerText)),
+			(await parked.$$eval(".decide-watch-fold summary", n => n.map(e => e.textContent)))[0] ??
+				"(no watch summary)")
 		await parked.close()
 	}
 }
@@ -2261,7 +2615,25 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 		await page.waitForSelector(".decide", { timeout: 30000 })
 		await page.waitForTimeout(2200)
 		const head = await page.$eval(".decide-gain", e => e.innerText)
-		const movers = await page.$$eval(".decide-changes b", bs => bs.map(b => b.textContent.trim()))
+		/*
+		   HIS OWN ARRIVING MEN, not every bold name on the card.
+
+		   This read every `<b>` in the lineup list, which was safe while that list held only
+		   his own players. The one list holds the priced adds too, so the first name it found
+		   was a free agent — and freezing THAT man's club freezes nothing of his, so both
+		   pages came back identical and the two assertions below failed on a card that was
+		   right. The men a lock can actually take away are the ones arriving into one of his
+		   seats, minus the ones he does not own yet.
+		*/
+		const movers = await page.$$eval(".decide-do-start", ns =>
+			ns.flatMap(e => {
+				const wire = new Set(
+					[...e.querySelectorAll(".decide-add-wire b")].map(b => b.textContent.trim())
+				)
+				return [...e.querySelectorAll(".decide-in b")]
+					.map(b => b.textContent.trim())
+					.filter(n => !wire.has(n))
+			}))
 		const locked = await page.$$eval(".decide-locked", ls => ls.map(l => l.innerText).join(" "))
 		await page.close()
 		const m = head.match(/or ([\d.]+) once you make these changes/)

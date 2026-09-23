@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { Snapshot } from "../data/snapshot.ts"
 import { hydrate } from "../data/snapshot.ts"
 import type { League } from "../schema.ts"
@@ -76,6 +76,18 @@ const readAgo = (at: string): string => {
  *  of Greenwich `toLocaleDateString` would then print yesterday. */
 const plainDate = (iso: string): string =>
 	new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+
+/**
+ * The one bench reason a paired row already states by naming the man taking the seat.
+ *
+ * Spelled once, because two places now have to agree about it: `today.bench` writes it
+ * and the view suppresses it on a row that names an arrival — "Start Matt Olson at 1B,
+ * over Alex Bregman · a better man is projected for that seat today" says the same thing
+ * twice, and the second time in the vaguer words. Every OTHER bench reason (an injury, a
+ * club not playing, a man left out of tonight's posted order) is news the row cannot
+ * carry any other way, so only this one is dropped.
+ */
+const OUTRANKED = "a better man is projected for that seat today"
 
 const PERIOD_NAME: Record<string, string> = {
 	matchup: "this matchup",
@@ -802,18 +814,55 @@ export const Decide = ({
 			underway: mine.filter(g => !isFinal(g.state) && started(g)).length,
 			toCome: mine.filter(g => !isFinal(g.state) && !started(g)).length
 		}
-		const used = new Map<string, number>()
-		for (const st of lineup.starters) used.set(st.slot, (used.get(st.slot) ?? 0) + 1)
-		const unfilled: string[] = []
-		for (const slot of activeSlots({
+		/* Hoisted: the seat list is now read twice — once to find the seats nobody filled,
+		   and once to walk slot by slot pairing who leaves each seat with who takes it. */
+		const seatOrder = activeSlots({
 			slots: league.roster.slots,
 			slot_order: league.roster.slot_order,
 			slot_accepts: league.roster.slot_accepts
-		})) {
+		})
+		const used = new Map<string, number>()
+		for (const st of lineup.starters) used.set(st.slot, (used.get(st.slot) ?? 0) + 1)
+		const unfilled: string[] = []
+		for (const slot of seatOrder) {
 			const left = used.get(slot) ?? 0
 			if (left > 0) used.set(slot, left - 1)
 			else unfilled.push(slot)
 		}
+		/**
+		 * THE SEATS BEFORE AND THE SEATS AFTER, indexed by slot — which is what turns a
+		 * bench row into a move a manager can make.
+		 *
+		 * `arrivesAt` is used twice below and it is the same question both times: does
+		 * anybody go into a seat of this kind who was not in one before? A man who moves
+		 * from one of his own seats to another counts, and that is the case this card had
+		 * no way to see. `today.start` holds only men coming off the BENCH, and on a real
+		 * 27-man imported roster (2026-09-23) it held ONE row while nine men were told to
+		 * sit: Matt Olson went SP→1B, Junior Caminero Util→3B, Zach Neto P→SS, Rafael
+		 * Devers P→Util, Yordan Alvarez RP→Util and Pete Crow-Armstrong C→OF, and the card
+		 * mentioned none of them. It said "Bench Alex Bregman 1B" and never said Olson was
+		 * taking the seat. `lineup.shifts` does not rescue it either — `planLineup` empties
+		 * `swaps` AND `shifts` whenever the best legal lineup does not clear `lineupMinGain`
+		 * (see the early return in src/auto/plan.ts), which on that roster it did not, by
+		 * -144.42, while `starters` still described the rearrangement.
+		 *
+		 * So the pairing is read off `lineup.starters` — the planner's own statement of who
+		 * sits where afterwards — against the seats as they were read. Nothing is inferred
+		 * and no seat is reordered to manufacture a pair.
+		 */
+		const beforeBySlot = new Map<string, string[]>()
+		for (const sp of seats.spots) {
+			if (isReserveSlot(sp.slot) || isBench(sp.slot)) continue
+			beforeBySlot.set(sp.slot, [...(beforeBySlot.get(sp.slot) ?? []), normalizeName(sp.name)])
+		}
+		const afterBySlot = new Map<string, typeof lineup.starters>()
+		for (const st of lineup.starters)
+			afterBySlot.set(st.slot, [...(afterBySlot.get(st.slot) ?? []), st])
+		/** Men the plan seats at `slot` who were not in a seat of that kind before. */
+		const arrivesAt = (slot: string): typeof lineup.starters =>
+			(afterBySlot.get(slot) ?? []).filter(
+				st => !(beforeBySlot.get(slot) ?? []).includes(normalizeName(st.name))
+			)
 		/**
 		 * What to CHANGE, not what the lineup is.
 		 *
@@ -862,9 +911,26 @@ export const Decide = ({
 		/* The arithmetic of all three, and the reasons, are in `freezeShut` in
 		   src/auto/plan.ts — it is about a plan rather than about a screen, and putting it
 		   there is what let test/auto.mjs reach the case a card cannot easily produce. */
+		/**
+		 * EVERY MAN THE CARD HAS A ROW FOR, which is more men than it used to be.
+		 *
+		 * `named` was the men coming off the bench and the men going onto it. That was the
+		 * whole card once; it is not now. A man already in an active seat who moves to a
+		 * better one is an instruction too — "Start Matt Olson at 1B" — and his own first
+		 * pitch closes that seat exactly as it closes anybody else's. Left out of `named` he
+		 * was never frozen, so the card went on offering a seat change the platform had
+		 * already refused, and never appeared in the sentence that says which changes it has
+		 * stopped offering. Caught by test/decide.mjs's two-page freeze comparison once that
+		 * suite started picking its mover out of the arrivals.
+		 */
+		const arriving = [...new Set(seatOrder)].flatMap(slot => arrivesAt(slot))
 		const { frozen, stuck, shifts: offeredShifts, lostToLocks } = freezeShut(
 			lineup,
-			[...startAll.map(st => st.name), ...benchAll.map(sp => sp.name)],
+			[
+				...startAll.map(st => st.name),
+				...benchAll.map(sp => sp.name),
+				...arriving.map(st => st.name)
+			],
 			shut
 		)
 		const bench = benchAll.filter(sp => !frozen.has(normalizeName(sp.name)))
@@ -882,15 +948,226 @@ export const Decide = ({
 		   clock, and it is the thing that actually closed the seat. */
 		const lockAt = (name: string): number | null =>
 			slate ? lockFor(byName.get(normalizeName(name))?.player.teamId, slate) : null
+		/**
+		 * Three reasons a man comes out, and they are different claims.
+		 *
+		 * This was a two-way ternary — club idle, else "not projected to play" — and
+		 * the third is the commonest: he is projected to play, and lost the seat to
+		 * somebody better. On 2026-09-08 it printed "Roman Anthony — he is not
+		 * projected to play today" about a man rateable at 4.14 points with Boston
+		 * playing, who had simply been outranked for the last outfield seat. A
+		 * ranking reported as a fact about availability is a claim the code cannot
+		 * support, and a reader who checks it finds the app wrong about the schedule.
+		 *
+		 * The fourth case is a name the board never matched, which used to fall
+		 * through `idle` and come out as "his club is not playing today" — the one
+		 * state that should reach the reader as "we could not find him".
+		 */
+		const benchRows = bench.map(sp => {
+			const r = byName.get(normalizeName(sp.name))
+			const live = liveStatus.get(normalizeName(sp.name)) ?? null
+			return {
+				name: sp.name,
+				slot: sp.slot,
+				/**
+				 * MLB's answer first, where there is one.
+				 *
+				 * "he is not projected to play today" is a statement about a projection
+				 * dressed as a statement about the schedule, and a reader who checks it
+				 * finds the app wrong about a fact. Tonight's card, tonight's schedule
+				 * and tonight's probables are all knowable for free, and they say which
+				 * of four different things is actually true.
+				 */
+				why:
+					/* Ahead of the unmatched sentence, because it is the more specific of the
+					   two and the only one that is actionable: the reader can look at his own
+					   roster and see which Max Muncy he has. Saying "no projection exists for
+					   that name" about a name the board holds two rows for would be false. */
+					twoMen.includes(sp.name) ?
+						"two different players go by that name, so nothing here can say which is yours"
+					: !r || unmatched.includes(sp.name) ?
+						"he is not on the board — no projection exists for that name"
+					: live && live.kind === "no-game" ? "no game today"
+					: live && live.kind === "benched" ? "not in today's lineup"
+					/* What HIS league says, which is a fact about his own page and is
+					   therefore ahead of anything derived. It names the day-to-day and the
+					   minors, which MLB's feed does not keep. */
+					: sp.status ? `Yahoo has him ${sp.status}`
+					/*
+					 * The ENGINE'S own reason, where it has one.
+					 *
+					 * This branch used to read "a better man is projected for that seat
+					 * today" for every man who was neither idle nor unmatched — a
+					 * sentence this file invented. `rateAll` already builds a specific
+					 * one per player (src/engine/bscore.ts:435): he is on the injured
+					 * list, MLB has published a starter for every game of the window and
+					 * he is not one of them, this league scores nothing on his side of
+					 * the ball, his projected volume rounds to zero. Throwing those away
+					 * and substituting a guess is the exact failure this app exists not
+					 * to commit: it named a gap it did not have and hid the one it did.
+					 */
+					: !r.rateable && r.unrateable ? r.unrateable
+					: !r.rateable ? "no projection could be made for him over this window"
+					: idle.includes(sp.name) ? "his club is not playing today"
+					/*
+					 * "A BETTER MAN" HAS TO BE A MAN, and for most of these rows there was
+					 * nobody.
+					 *
+					 * This was the last-resort branch for anyone rateable, playing and not
+					 * seated, and it asserted that somebody better had taken his seat.
+					 * Measured on a real 27-man imported roster (2026-09-23): five men got
+					 * this sentence and for four of them the seat ended up EMPTY — Bregman
+					 * at 1B, Tucker at 3B, Busch at SS and Greene at OF, on a card that
+					 * said in its own next block that eight seats would score nothing. A
+					 * reader who goes looking for the better man finds an empty seat, which
+					 * is the app being wrong about a fact rather than merely unhelpful.
+					 *
+					 * `arrivesAt` is the test, and it is the planner's own answer: somebody
+					 * the plan seats at that slot who was not in a seat of that kind before.
+					 * Where there is one the old sentence is true and it stays. Where there
+					 * is not, what is true is smaller and is said instead — he is not in the
+					 * best legal lineup and nothing you own fills the seat behind him. The
+					 * row this reason renders in no longer claims a gain either; see
+					 * `seatMoves`.
+					 */
+					/*
+					 * HIS SEAT, WHICH THIS APP DOES NOT BELIEVE IN, ahead of any ranking —
+					 * because it is a fact about the data rather than a judgement about the man,
+					 * and because it is the row a reader should weigh against his own eyes
+					 * before acting on it.
+					 *
+					 * `rateAll` prices him and `planLineup` can seat him nowhere, so he leaves
+					 * the lineup whatever his projection says. Telling him a better man has the
+					 * seat would be true of the plan and false about the reason: the plan did
+					 * not outrank him, it could not keep him. See `misseated` in
+					 * src/auto/plan.ts for what puts a man here and for the measurement.
+					 */
+					: lineup.misseated.some(m => normalizeName(m.name) === normalizeName(sp.name)) ?
+						/* The FACT, in five words. What it means — that this app's eligibility may
+						   simply be narrower than his league's, and that these rows are therefore
+						   worth less than the rest — is one sentence in the watch fold, said once,
+						   rather than twenty-three words repeated on every affected row. */
+						`no record here that he may play ${sp.slot}`
+					: arrivesAt(sp.slot).length ? OUTRANKED
+					:	"nobody you own can legally fill that seat tonight, so it stays empty either way"
+			}
+		})
+
+		/**
+		 * ONE ROW PER SEAT, both halves of it — the shape this card was missing.
+		 *
+		 * A bench with no replacement is not a move a manager can make. Measured on a real
+		 * 27-man imported roster (2026-09-23) the card benched ten men, named a starter for
+		 * one of them, and then said in a separate block twelve seats would score nothing:
+		 * the same fact stated twice from opposite directions, with the half that tells him
+		 * what to DO missing from both. `seatMoves` is the join — for each kind of seat, who
+		 * the planner puts in it and who comes out of it.
+		 *
+		 * THE PAIRING IS THE ENGINE'S, NEVER THIS FILE'S. `arrivesAt` reads
+		 * `lineup.starters`, which is the planner's own statement of who ends up where, and
+		 * `out` is `benchRows`, which is the men the planner left out. Nothing is matched by
+		 * value, nothing is reordered to make the counts line up, and a seat whose arrival
+		 * cannot be named gets no arrival rather than a guessed one — see the `over an empty
+		 * seat` branch in the view.
+		 *
+		 * WHY WHOLE GROUPS RATHER THAN PAIRS. A slot with three seats (OF here, P and Util
+		 * in most leagues) cannot say WHICH of two departing outfielders the arriving man
+		 * displaced, because the engine did not decide that and the two seats are the same
+		 * seat. So the row names every arrival and every departure at that slot in one
+		 * sentence — "Start A at OF, over B and C" — which is exactly what the planner
+		 * claims and is still one instruction the reader can carry out. Pairing them 1:1 in
+		 * list order would have read better and would have been invented.
+		 *
+		 * Frozen men are dropped from `in` for the same reason they are already dropped from
+		 * `out`: the platform will refuse the change, and `locked` and `stuck` below say so
+		 * in their own words.
+		 */
+		const seatedAt = new Map(lineup.starters.map(st => [normalizeName(st.name), st.slot]))
+		const seatMoves = [...new Set(seatOrder)].flatMap(slot => {
+			const arriving = arrivesAt(slot).filter(st => !frozen.has(normalizeName(st.name)))
+			const leaving = benchRows.filter(b => b.slot === slot)
+			/*
+			   A SEAT ITS OCCUPANT LEFT FOR ANOTHER SEAT IS NOT AN EMPTY SEAT.
+			
+			   Without this the row for a slot somebody vacated by moving elsewhere read "over
+			   an empty seat", which is false in exactly the direction that matters: the reader
+			   looks at his C seat, finds Pete Crow-Armstrong in it, and the card has told him
+			   it was free. The destination is named because it is the only thing that makes
+			   the two rows add up — he sees the man again three rows down, arriving somewhere
+			   else, and now knows why.
+			*/
+			const moved = (beforeBySlot.get(slot) ?? []).flatMap(n => {
+				const to = seatedAt.get(n)
+				if (to === undefined || to === slot) return []
+				const sp = seats.spots.find(x => normalizeName(x.name) === n)
+				return sp && !frozen.has(n) ? [{ name: sp.name, to }] : []
+			})
+			/*
+			   AND A SEAT SOMEBODY LOCKED CANNOT BE HANDED TO ANYBODY.
+			
+			   `leaving` is freeze-filtered — a man whose game has started is not offered up —
+			   so a slot whose departure is frozen came back with an empty `out`, and the row
+			   then took the last branch and said "over an empty seat" about a seat he was
+			   still sitting in. Seen on the built card at 13:40: "Start Pete Crow-Armstrong at
+			   OF — over an empty seat" with Riley Greene in one of the three OF seats and his
+			   1:10pm lock an hour past.
+			
+			   The room a slot really has is its free seats plus the men who can still leave it,
+			   and an arrival beyond that is a move the platform will refuse. Suppressed rather
+			   than reworded: `locked` already names the man whose seat closed, which is the one
+			   thing the reader can do something about, and offering the arrival anyway would be
+			   an instruction he cannot carry out. Best first, so what survives is the arrival
+			   worth most.
+			*/
+			const room =
+				seatOrder.filter(x => x === slot).length -
+				(beforeBySlot.get(slot)?.length ?? 0) +
+				leaving.length +
+				moved.length
+			const offered = [...arriving].sort((a, b) => b.points - a.points).slice(0, Math.max(room, 0))
+			if (!offered.length && !leaving.length && !moved.length) return []
+			return [{
+				slot,
+				in: offered.map(st => ({
+					name: st.name,
+					points: st.points,
+					/* When this seat stops being changeable — the only thing on the row that
+					   expires, and the reason the old start rows were sorted by it. */
+					lock: lockAt(st.name)
+				})),
+				out: leaving.map(b => ({ name: b.name, why: b.why })),
+				moved
+			}]
+		})
+
 		const locked = [
 			...new Map(
-				[...startAll, ...benchAll]
+				[...startAll, ...benchAll, ...arriving]
 					.filter(m => shut(m.name))
 					.map(m => [m.name, { name: m.name, at: lockAt(m.name) }] as const)
 			).values()
 		]
 		return {
 			day, lineup, idle, unmatched, twoMen, unfilled, playing: playing.size, locked, stuck, mineGames,
+			/**
+			 * Men in an active seat this league's rules do not grant them — see `misseated`
+			 * in src/auto/plan.ts for the measurement that put it there.
+			 *
+			 * It is the reason the planned total can be lower than the reader's own: their
+			 * points are in the lineup he has and in no seat of the one the planner builds.
+			 * Carried out because the card has to be able to SAY that rather than let two
+			 * numbers disagree in silence, and because it is the one caveat that tells him
+			 * which rows to weigh against his own eyes.
+			 */
+			misseated: lineup.misseated,
+			/** Every seat that changes hands tonight, arrivals and departures joined. The
+			 *  view renders this and no longer walks `bench`, `start` and `shifts` as three
+			 *  separate lists — see the note where it is built. */
+			seatMoves,
+			/** Men leaving an active seat, with the engine's reason. Still carried whole
+			 *  because the ledger records what Billy asked to be sat, and `skippedWhy`
+			 *  dedupes against it — neither wants the seat-level grouping. */
+			bench: benchRows,
 			calledOff,
 			/** What the lineup reaches if the reader does everything the card still offers.
 			 *  Equal to `lineup.pointsPlanned` when nothing is frozen. */
@@ -903,7 +1180,14 @@ export const Decide = ({
 			live: !!slate,
 			/** Seat changes within the lineup, minus any man whose game has started —
 			 *  see the note on `frozen` above; a shift is a change to HIS seat, so only
-			 *  his own lock can stop it. */
+			 *  his own lock can stop it.
+			 *
+			 *  NO LONGER RENDERED AS ROWS OF ITS OWN. A shift is an arrival at the seat the
+			 *  man moves INTO, so `seatMoves` carries it where the reader needs it — "Start
+			 *  Matt Olson at 1B, and sit Alex Bregman" rather than a "Move Olson from SP to
+			 *  1B" row three rows away from the bench row it explains. It is kept because it
+			 *  is a list of men the card has named, which is what stops the same man being
+			 *  explained a second time in the could-not-be-priced note. */
 			shifts: offeredShifts,
 			/** Nobody has said whether this league locks daily, so these changes are
 			 *  offered on the assumption that it does — which the heading states. */
@@ -940,70 +1224,6 @@ export const Decide = ({
 				!seats.at && league.roster.counts && seats.spots.length < league.roster.counts.total ?
 					{ given: seats.spots.length, total: league.roster.counts.total }
 				:	null,
-			/**
-			 * Three reasons a man comes out, and they are different claims.
-			 *
-			 * This was a two-way ternary — club idle, else "not projected to play" — and
-			 * the third is the commonest: he is projected to play, and lost the seat to
-			 * somebody better. On 2026-09-08 it printed "Roman Anthony — he is not
-			 * projected to play today" about a man rateable at 4.14 points with Boston
-			 * playing, who had simply been outranked for the last outfield seat. A
-			 * ranking reported as a fact about availability is a claim the code cannot
-			 * support, and a reader who checks it finds the app wrong about the schedule.
-			 *
-			 * The fourth case is a name the board never matched, which used to fall
-			 * through `idle` and come out as "his club is not playing today" — the one
-			 * state that should reach the reader as "we could not find him".
-			 */
-			bench: bench.map(sp => {
-				const r = byName.get(normalizeName(sp.name))
-				const live = liveStatus.get(normalizeName(sp.name)) ?? null
-				return {
-					name: sp.name,
-					slot: sp.slot,
-					/**
-					 * MLB's answer first, where there is one.
-					 *
-					 * "he is not projected to play today" is a statement about a projection
-					 * dressed as a statement about the schedule, and a reader who checks it
-					 * finds the app wrong about a fact. Tonight's card, tonight's schedule
-					 * and tonight's probables are all knowable for free, and they say which
-					 * of four different things is actually true.
-					 */
-					why:
-						/* Ahead of the unmatched sentence, because it is the more specific of the
-						   two and the only one that is actionable: the reader can look at his own
-						   roster and see which Max Muncy he has. Saying "no projection exists for
-						   that name" about a name the board holds two rows for would be false. */
-						twoMen.includes(sp.name) ?
-							"two different players go by that name, so nothing here can say which is yours"
-						: !r || unmatched.includes(sp.name) ?
-							"he is not on the board — no projection exists for that name"
-						: live && live.kind === "no-game" ? "no game today"
-						: live && live.kind === "benched" ? "not in today's lineup"
-						/* What HIS league says, which is a fact about his own page and is
-						   therefore ahead of anything derived. It names the day-to-day and the
-						   minors, which MLB's feed does not keep. */
-						: sp.status ? `Yahoo has him ${sp.status}`
-						/*
-						 * The ENGINE'S own reason, where it has one.
-						 *
-						 * This branch used to read "a better man is projected for that seat
-						 * today" for every man who was neither idle nor unmatched — a
-						 * sentence this file invented. `rateAll` already builds a specific
-						 * one per player (src/engine/bscore.ts:435): he is on the injured
-						 * list, MLB has published a starter for every game of the window and
-						 * he is not one of them, this league scores nothing on his side of
-						 * the ball, his projected volume rounds to zero. Throwing those away
-						 * and substituting a guess is the exact failure this app exists not
-						 * to commit: it named a gap it did not have and hid the one it did.
-						 */
-						: !r.rateable && r.unrateable ? r.unrateable
-						: !r.rateable ? "no projection could be made for him over this window"
-						: idle.includes(sp.name) ? "his club is not playing today"
-						:	"a better man is projected for that seat today"
-				}
-			}),
 			/**
 			 * Ordered by when each man's game starts, not by what the change is worth.
 			 *
@@ -1548,6 +1768,348 @@ export const Decide = ({
 	}, [today, candidates, league, slate, crossed, plan])
 
 	/**
+	 * ONE LIST OF THINGS TO GO AND DO, biggest first.
+	 *
+	 * THE DEFECT THIS ENDS. Walked on a real 27-man imported roster, 2026-09-23: the card
+	 * led with "×10 Bench Pete Crow-Armstrong C, Alex Bregman 1B, …" and never said who
+	 * took any of those seats; then a separate block said "Empty seats — 12 seats score
+	 * nothing tonight", which is the same fact from the other end; and the only instruction
+	 * the reader came for — the add and the drop — was the fifth block down, under a fold.
+	 * Three blocks, two of them restating each other, and the answer last.
+	 *
+	 * WHY THE WAIVER MOVES AND THE LINEUP MOVES SHARE A LIST. They are different in kind to
+	 * this codebase — one costs a move and a player, the other is free and reversible, and
+	 * `src/auto/plan.ts` prices them on different horizons — and they are the same thing to
+	 * the reader: something to go and do in Yahoo before first pitch. Splitting them by
+	 * their cost to the planner is the app organising the page around its own internals,
+	 * and it put the most valuable row on the card below two blocks of the least valuable.
+	 *
+	 * AND THE TWO NUMBERS ARE NOT THE SAME NUMBER, which is why every row says what its own
+	 * is. An add's figure is what the lineup gains over the whole scoring period with the
+	 * move made; a seat's is what the arriving man projects TONIGHT. Sorting them together
+	 * is a choice — it puts a 29.67-point week above a 10.74-point night, which is the
+	 * right order for a reader deciding what to do first and is not a comparison of like
+	 * with like. Labelling each row is what keeps that honest; hiding it behind two
+	 * headings, which is what the card did, is what did not.
+	 *
+	 * A SEAT APPEARS ONCE. `fillTonight` offers a free agent for a seat nobody you own can
+	 * fill, and its rows used to sit in their own block — so "Sit Tarik Skubal at SP" and
+	 * "SP · Add Connor Prielipp" were two rows about one seat, on one card, with nothing
+	 * saying so. Merged in by slot, that is one row: add the man, and this is who comes out.
+	 */
+	const toDo = useMemo(() => {
+		/**
+		 * THE FACT ON THE ROW, THE PROVENANCE IN THE FOLD.
+		 *
+		 * `rateAll` writes reasons of a length that suits a terminal: "Injured 60-Day — no
+		 * source states a return date, so there is no honest projection over this horizon.
+		 * The Stash view ranks him anyway" is three sentences of caveat inside a row whose
+		 * job is to say what to do. What a reader acts on is the first clause; the rest is
+		 * where the claim comes from, and it is kept — moved to the watch fold rather than
+		 * dropped, which is the same trade the card made for every other caveat on it.
+		 *
+		 * Cut at the first em-dash or sentence break, because that is where this app's own
+		 * reasons put the fact: "Injured 60-Day", "he is not on the board", "no game today".
+		 * A reason with neither is already short and survives whole.
+		 */
+		const head = (w: string): string => {
+			const marks = [w.indexOf(" \u2014 "), w.indexOf(". ")].filter(i => i > 0)
+			return marks.length ? w.slice(0, Math.min(...marks)) : w
+		}
+		/** The reasons a row shortened, in full, for the fold to carry. */
+		const caveats: { name: string; why: string }[] = []
+		type Arrival = { name: string; points: number; wire: boolean; team: string | null }
+		type Seat = {
+			slot: string
+			in: Arrival[]
+			out: { name: string; why: string }[]
+			/** Men who held one of these seats and are in the plan at a different one. */
+			moved: { name: string; to: string }[]
+			/** The earliest first pitch among the arriving men — when the row expires. */
+			lock: number | null
+		}
+		const bySlot = new Map<string, Seat>()
+		for (const m of today?.seatMoves ?? [])
+			bySlot.set(m.slot, {
+				slot: m.slot,
+				in: m.in.map(x => ({ name: x.name, points: x.points, wire: false, team: null })),
+				out: m.out.map(o => {
+					const short = head(o.why)
+					if (short !== o.why) caveats.push({ name: o.name, why: o.why })
+					return { name: o.name, why: short }
+				}),
+				moved: [...m.moved],
+				lock: m.in.reduce<number | null>(
+					(a, x) => (x.lock === null ? a : a === null ? x.lock : Math.min(a, x.lock)),
+					null
+				)
+			})
+		for (const f of fillTonight.fills) {
+			const row = bySlot.get(f.slot)
+			const arrival = { name: f.name, points: f.points, wire: true, team: f.team }
+			if (row) row.in.push(arrival)
+			else bySlot.set(f.slot, { slot: f.slot, in: [arrival], out: [], moved: [], lock: null })
+		}
+		/* A slot whose only news is that its man went to a better seat has nothing for the
+		   reader to do — the row where he ARRIVES is the instruction. It is carried this far
+		   because a free agent may still be offered for the seat he left, and that row has to
+		   be able to say the seat is not standing empty. */
+		for (const [slot, row] of bySlot) if (!row.in.length && !row.out.length) bySlot.delete(slot)
+		const rows = [
+			...(plan?.swaps.moves ?? []).map(m => ({ kind: "add" as const, value: m.gain, move: m, seat: null })),
+			...[...bySlot.values()].map(seat => ({
+				kind: "seat" as const,
+				/* Null for a row with nobody arriving: there is no gain to claim, because the
+				   seat scores nothing either way. A row that printed a number there would be
+				   pricing a change that buys the reader nothing. */
+				value:
+					seat.in.length ?
+						Number(seat.in.reduce((a, x) => a + x.points, 0).toFixed(2))
+					:	null,
+				move: null,
+				seat
+			}))
+		]
+		/* Stable, so the rows with no value keep the league's own slot order rather than
+		   whatever order a comparator that cannot separate them happens to leave them in.
+		   `(a.value ?? -Infinity) - (b.value ?? -Infinity)` is NaN for two of them, which
+		   leaves the sort unspecified — the first version of this did exactly that. */
+		rows.sort((a, b) =>
+			a.value === null && b.value === null ? 0
+			: a.value === null ? 1
+			: b.value === null ? -1
+			: b.value - a.value
+		)
+		return { rows, caveats }
+	}, [today, fillTonight, plan])
+
+	/**
+	 * A row of the one list, drawn the same way wherever it is drawn.
+	 *
+	 * `addRow` is shared with the period-lineup branch further down, which still renders
+	 * the waiver moves under a heading of their own because a league that locks its lineup
+	 * for the week has no Today list to fold them into. One markup, two callers — the two
+	 * copies this replaces had already drifted once.
+	 */
+	const addRow = (m: NonNullable<typeof plan>["swaps"]["moves"][number]): ReactNode => (
+		<li key={`add-${m.add}-${m.drop}`} className="decide-do-add">
+			{/*
+			  TWO SCALES, AND THE COLUMN HAS TO SHOW WHICH IS WHICH.
+
+			  "+29.67" and "18.56" sat in one gutter, in one colour, on two rows that both
+			  began with the word "Add" — and they are a gain over the whole scoring period
+			  and a man's points for one night. A legend under the list explained the
+			  difference, which is the tell that the column did not. Three things separate
+			  them now and none of them is a legend: the sign, the colour (see
+			  `.decide-do-add .decide-delta` in decide.css), and a unit clause on every row.
+			*/}
+			<span className="decide-delta">+{m.gain}</span>
+			<span>
+				Add <b>{m.add}</b>
+				{m.seats?.length ?
+					<span className="decide-seat"> for your {m.seats.join(" or ")} seat</span>
+				:	null}
+				{/* No drop clause when nothing is dropped. The planner only pairs an
+				    add with a drop once every seat is taken — see `room` in
+				    planSwaps — and printing ", drop —" or an empty <b> here is how a
+				    card ends up telling somebody to drop Aaron Judge for nothing. */}
+				{m.drop ?
+					<>
+						, drop <b>{m.drop}</b>
+					</>
+				:	null}
+				<em className="decide-why">
+					over this scoring period
+					{!m.drop && <> · you have a free seat, so nobody comes out</>}
+				</em>
+			</span>
+		</li>
+	)
+
+	/** Names, bolded, read as a sentence rather than as a CSV. `className` marks the men
+	 *  who are NOT yours — a suite has to be able to tell an add from a start, and on the
+	 *  row the only difference is the verb three words to the left. */
+	const nameList = (names: string[], className?: string): ReactNode =>
+		names.map((n, i) => (
+			<span key={n} className={className}>
+				{i > 0 && (i === names.length - 1 ? " and " : ", ")}
+				<b>{n}</b>
+			</span>
+		))
+
+	/**
+	 * One seat, both halves.
+	 *
+	 * Three shapes, and which one is drawn is decided by the data rather than chosen:
+	 * somebody arrives and somebody leaves (the pair), somebody arrives into a seat that
+	 * was standing empty, or somebody leaves and nobody takes it. There is no fourth, and
+	 * in particular there is no shape in which this file guesses which departing man an
+	 * arriving one displaced — see the note on `seatMoves`.
+	 */
+	const seatRow = (
+		seat: {
+			slot: string
+			in: { name: string; points: number; wire: boolean }[]
+			out: { name: string; why: string }[]
+			moved: { name: string; to: string }[]
+			lock: number | null
+		},
+		value: number | null
+	): ReactNode => {
+		const own = seat.in.filter(x => !x.wire).map(x => x.name)
+		const wired = seat.in.filter(x => x.wire).map(x => x.name)
+		/* The reason a man is coming out, minus the one the row itself already gives. See
+		   `OUTRANKED`: on a paired row the better man is named three words to the left. */
+		/* The engine's own sentences, some of which end in a full stop and some of which do
+		   not, and the row puts a clause after them either way — "not scheduled to pitch in
+		   this window. — that seat scores nothing". The reason is the engine's to write and
+		   the punctuation is this row's to fit, so the terminal stop comes off here rather
+		   than being normalised upstream, where several other readers print these verbatim. */
+		const whys = [...new Set(seat.out.map(o => o.why))]
+			.filter(w => !(seat.in.length && w === OUTRANKED))
+			.map(w => w.replace(/\.$/, ""))
+		/* Each reason in its own element, separated rather than joined into one string. Two
+		   suites assert that every reason on this card comes from the closed vocabulary
+		   Decide writes — the check that stops a blanket sentence being invented here — and a
+		   reason they can only reach by splitting prose on a middot is a check that a
+		   punctuation edit turns off. */
+		const reasons = (
+			<>
+				{whys.map((w, i) => (
+					<span key={w} className="decide-reason">
+						{i > 0 && " · "}
+						{w}
+					</span>
+				))}
+			</>
+		)
+		/*
+		  "AND SIT", NOT "OVER", and the word is load-bearing now that a wire man arrives in
+		  the same row shape as one of his own. "Add Connor Prielipp at SP, over Tarik Skubal"
+		  reads as DROP Skubal, on a card whose other rows say "drop" and mean it. One of
+		  those two costs him a player and one is undone in a click, and the verb is the only
+		  thing on the row that tells them apart.
+
+		  `decide-in` / `decide-out` / `decide-moved` wrap the three groups so a suite can read
+		  a row as the three claims it makes rather than by splitting its prose on a comma,
+		  and `decide-add-wire` separates the men inside `decide-in` who are not yet his.
+		*/
+		const over =
+			seat.out.length ?
+				<>
+					, and sit <span className="decide-out">{nameList(seat.out.map(o => o.name))}</span>
+				</>
+			:	null
+		/*
+		  THE MOVER IS NAMED ONLY WHERE THE ROW WOULD OTHERWISE BE WRONG, which is a narrower
+		  place than the first version put it.
+		
+		  It exists for one reason: a seat its occupant left for a better one is NOT an empty
+		  seat, and the branch at the foot of this row would otherwise say it was. That branch
+		  only fires when nobody is being sat here, so that is the only case the clause is
+		  needed in — and adding it everywhere turned two rows into cascade descriptions
+		  nobody can execute in one pass:
+		
+		    "Start Rafael Devers and Yordan Alvarez at Util, and sit Nick Kurtz — Junior
+		     Caminero moves to 3B"
+		    "Add Matthew Liberatore at P, and sit Sandy Alcantara and Cristopher Sánchez —
+		     Zach Neto and Rafael Devers move to SS and Util"
+		
+		  Five men and three seats in one sentence is not a move. Where somebody IS being sat,
+		  the departure already proves the seat was occupied and the clause buys nothing — and
+		  every mover named here has his own arrival row a few lines away, which is where the
+		  reader acts on him. With several movers and nobody sat, the count goes in without the
+		  names: what the row has to establish is that the seats were not standing empty, not
+		  who used to be in which.
+		*/
+		const movedOn =
+			seat.out.length ? null
+			: seat.moved.length === 1 ?
+				<span className="decide-moved">
+					{" "}
+					&mdash; {nameList(seat.moved.map(m => m.name))} moves to {seat.moved[0]!.to}
+				</span>
+			: seat.moved.length > 1 ?
+				<span className="decide-moved">
+					{" "}
+					&mdash; {seat.moved.length} men move out of {seat.slot} to better seats
+				</span>
+			:	null
+		return (
+			<li
+				key={`seat-${seat.slot}-${seat.in.map(x => x.name).join()}-${seat.out.map(o => o.name).join()}`}
+				className={seat.in.length ? "decide-do-start" : "decide-do-sit"}
+				/* The seat this row is about, as data. It is in the sentence too — "at SS" —
+				   but a suite that has to split prose on a preposition to find out which seat
+				   a row changes is a suite that goes red on a wording edit. */
+				data-slot={seat.slot}>
+				<span className="decide-delta">{value === null ? <>&mdash;</> : value}</span>
+				<span>
+					{seat.in.length ?
+						<>
+							<span className="decide-in">
+								{own.length > 0 && <>Start {nameList(own)}</>}
+								{own.length > 0 && wired.length > 0 && <>, and add </>}
+								{own.length === 0 && wired.length > 0 && <>Add </>}
+								{wired.length > 0 && nameList(wired, "decide-add-wire")}
+							</span>{" "}
+							at {seat.slot}
+							{over}
+							{movedOn}
+							{/* THE ONLY UNPAIRED SHAPE THIS FILE MAY INVENT IS NONE. Where the data
+							    cannot say which man an arrival displaced it says the seat was empty,
+							    which is what an empty `out` AND an empty `moved` mean together, and
+							    is checkable against the seat-by-seat fold below. */}
+							{!over && !movedOn && <> &mdash; over an empty seat</>}
+							{/* THE NUMBER IS IN THE GUTTER AND THE UNIT IS HERE, because the two are
+							    different quantities on one card: a priced add's figure is a gain over
+							    the whole scoring period and this one is what the arriving man projects
+							    TONIGHT. Printing the figure again beside the word was the first
+							    version and it read as a second number. */}
+							<em className="decide-why">
+								projected tonight
+								{whys.length > 0 && <> · {reasons}</>}
+								{/* When this seat stops being changeable. It is the only thing on the
+								    row that expires. */}
+								{seat.lock !== null && (
+									<span className="decide-lock"> · locks {clock(seat.lock)}</span>
+								)}
+							</em>
+						</>
+					:	<>
+							Sit <span className="decide-out">{nameList(seat.out.map(o => o.name))}</span> at{" "}
+							{seat.slot}
+							{movedOn}
+							{/*
+							  AND SAY THAT THE SEAT GOES EMPTY, which is the whole difference between
+							  this row and the paired one above it. Nobody is arriving, so the
+							  instruction buys nothing on its own and the reader is entitled to know
+							  that before he acts on it. It is a fact rather than a judgement: the
+							  planner seats fewer men at this slot than the slot has seats, so at
+							  least one of them ends the night empty whatever he does.
+							*/}
+							<em className="decide-why">
+								{reasons} &mdash; that seat scores nothing tonight either way
+							</em>
+						</>
+					}
+				</span>
+			</li>
+		)
+	}
+
+	/** Seats the plan leaves exactly as it found them — one line, so the list above can be
+	 *  only the changes. Counted off the arrivals rather than off `start` and `shifts`,
+	 *  which between them missed six of this roster's movers; see `seatMoves`. */
+	const settledSeats = today ?
+		Math.max(
+			today.lineup.starters.length -
+				today.seatMoves.reduce((a, m) => a + m.in.length, 0),
+			0
+		)
+	:	0
+
+	/**
 	 * WHAT WAS RECOMMENDED, WRITTEN DOWN BEFORE THE GAMES ARE PLAYED.
 	 *
 	 * This is the only write this card makes, and the only reason it exists is that the
@@ -1657,19 +2219,51 @@ export const Decide = ({
 				...(today?.bench ?? []).map(b => b.name),
 				...(today?.start ?? []).map(x => x.name),
 				...(today?.shifts ?? []).map(x => x.name),
+				/* And the men on the one list's own rows, who are not all in `start`: a man
+				   moving between two active seats is an arrival the card names and is in
+				   neither `start` nor `bench`. Left out, he could be named on a row AND in the
+				   could-not-be-priced note, which is the duplication this whole block exists
+				   to prevent. */
+				...(today?.seatMoves ?? []).flatMap(m => m.in.map(x => x.name)),
 				...(today?.locked ?? []).map(l => l.name),
 				...(today?.stuck ?? []).map(st => st.in)
 			].map(normalizeName)
 		)
+		/*
+		 * A LINE WITH NO NAME IN IT IS NOT A MAN, and this used to make one up out of it.
+		 *
+		 * Every entry `planLineup` writes is `Name: reason`, and this splits on the first
+		 * ": " to get the two halves. One entry was not: the `lineupMinGain` return pushed
+		 * "the best legal lineup is worth -144.42 more than today's, below the 0-point lineup
+		 * bar, so the lineup is left alone" into the same array, with no colon in it — so
+		 * `name` became the whole sentence and the card rendered it in the player slot: "One
+		 * player on your roster could not be priced, so nothing above counts him: the best
+		 * legal lineup is worth -144.42 more than today's…". Reproduced on a real 27-man
+		 * imported roster, 2026-09-23.
+		 *
+		 * That entry is now `LineupPlan.leftAlone`, typed as the claim about the lineup that
+		 * it is, and it is rendered where the card already makes that claim. This branch is
+		 * the second lock on the same door: a line this function cannot read a name out of
+		 * still reaches the reader — an absence is stated, never swallowed — but it reaches
+		 * him as a SENTENCE, with no names beside it, because a name is the one thing it does
+		 * not contain. `men` empty is what the view reads to draw that shape.
+		 *
+		 * It also removed a near-duplicate bullet. The invented reason for a no-colon line
+		 * was "No projection could be made for him, so he is neither started nor offered up",
+		 * one word away from the engine's own "no projection could be made for him, so he has
+		 * no number to compare" — two bullets, both opening "N players on your roster could
+		 * not be priced", stacked on top of each other, for what a reader reads as one fact.
+		 */
 		const by = new Map<string, string[]>()
 		for (const line of plan?.lineup.skipped ?? []) {
 			const at = line.indexOf(": ")
-			const name = at === -1 ? line : line.slice(0, at)
+			if (at === -1) {
+				by.set(`${line[0]!.toUpperCase()}${line.slice(1)}.`, [])
+				continue
+			}
+			const name = line.slice(0, at)
 			if (named.has(normalizeName(name))) continue
-			const why =
-				at === -1 ?
-					"No projection could be made for him, so he is neither started nor offered up."
-				:	`${line.slice(at + 2)[0]!.toUpperCase()}${line.slice(at + 2).slice(1)}.`
+			const why = `${line.slice(at + 2)[0]!.toUpperCase()}${line.slice(at + 2).slice(1)}.`
 			by.set(why, [...(by.get(why) ?? []), name])
 		}
 		return [...by].map(([why, men]) => ({ why, men }))
@@ -2118,98 +2712,195 @@ export const Decide = ({
 							{today.bench.length} {today.bench.length === 1 ? "man is" : "men are"} in
 							your active seats.
 						</p>
-					: today.bench.length || today.start.length || today.shifts.length ?
+					: toDo.rows.length ?
 						<>
-							<ul className="decide-list decide-changes">
-								{today.start.map(st => (
-									<li key={`in-${st.name}`}>
-										<span className="decide-slot">{st.slot}</span>
-										<span>
-											Start <b>{st.name}</b>{" "}
-											<em className="decide-why">
-												{st.points} projected today
-												{/* When this seat stops being changeable. It is the only
-												    thing on the row that expires, and the rows are ordered
-												    by it — see the note on `start`. */}
-												{st.lock !== null && (
-													<span className="decide-lock"> · locks {clock(st.lock)}</span>
-												)}
-											</em>
-										</span>
-									</li>
-								))}
-								{/*
-								  Grouped by REASON, not one row per man.
-								  Measured on a real 27-man roster on a five-game night: sixteen
-								  consecutive rows reading "Bench X — he is not projected to play
-								  today", identical but for the name, above the two moves that were
-								  the point of the card. Sixteen rows of the same sentence is not
-								  sixteen decisions; it is one fact about the schedule and a list of
-								  who it applies to. The names stay — each is still a seat he has to
-								  change in Yahoo — but they cost a line each instead of a row each.
-								*/}
-								{Object.entries(
-									today.bench.reduce<Record<string, typeof today.bench>>((by, b) => {
-										;(by[b.why] ??= []).push(b)
-										return by
-									}, {})
-								).map(([why, men]) => (
-									<li key={`out-${why}`} className="decide-bench-group">
-										<span className="decide-slot">
-											{men.length === 1 ? men[0]!.slot : `×${men.length}`}
-										</span>
-										<span>
-											Bench{" "}
-											{men.map((b, i) => (
-												<span key={b.name}>
-													{i > 0 && ", "}
-													<b>{b.name}</b>{" "}
-													<em className="decide-seat">{b.slot}</em>
-												</span>
-											))}{" "}
-											<em className="decide-why">{why}</em>
-										</span>
-									</li>
-								))}
-								{/* A man who stays in the lineup but changes seat is a change he has
-								    to make, and leaving it out made the rest impossible to follow:
-								    "Start Jac Caglianone at 1B" cannot be done while Aranda is in
-								    that seat, and the card never mentioned Aranda. `planLineup`
-								    reports these separately and they were dropped on the floor. */}
-								{today.shifts.map(sh => (
-									<li key={`shift-${sh.name}`}>
-										<span className="decide-slot">{sh.to}</span>
-										<span>
-											Move <b>{sh.name}</b>{" "}
-											<em className="decide-why">
-												from {sh.from} to {sh.to}, to free the seat above
-											</em>
-										</span>
-									</li>
-								))}
-							</ul>
-							{/* Only where some seats ARE already right. With no seats read there is no
-							    baseline, every row is a "start", and the count is zero — "your other 0
-							    seats are already right" is a sentence about nothing. */}
-							{(() => {
-								const rest = Math.max(
-									today.lineup.starters.length -
-										today.start.length -
-										today.shifts.length,
-									0
-								)
-								return rest > 0 ?
-										<p className="sub decide-rest">
-											Your other {rest} {rest === 1 ? "seat is" : "seats are"} already
-											right.
-										</p>
+							{/*
+							  THE WHOLE ANSWER, IN ONE LIST, BIGGEST FIRST.
+							
+							  This was three lists and a fold: the lineup diff, then "Empty seats",
+							  then — five blocks down, under `Make these moves` — the add and the
+							  drop the reader actually came for. Two of the three were the same fact
+							  said from opposite ends ("×10 Bench …" and "12 seats score nothing
+							  tonight"), and the half that says what to DO about a benched man was in
+							  none of them. See `toDo` for what each row's number is and why they are
+							  sorted together.
+							*/}
+							<ul className="decide-list decide-do">
+								{toDo.rows.map(row =>
+									row.move ? addRow(row.move)
+									: row.seat ? seatRow(row.seat, row.value)
 									:	null
-							})()}
+								)}
+							</ul>
+							{/*
+							  WHAT THE NUMBERS ARE, once, under the list they qualify.
+							
+							  Two units share this list on purpose and a reader comparing 29.67 with
+							  10.74 is entitled to know they are not the same quantity. Said here
+							  rather than on every row: it is one fact about the list, and the card's
+							  own measured history is that a clause repeated under each row is the
+							  thing that pushes the last instruction off the screen.
+							*/}
+							{/* A <div>, not a <p>, because it holds a <details> — see the same note in
+							    Board.tsx. */}
+							<div className="sub decide-rest decide-numbers">
+								{/* The ordering, which is a property of the LIST. What each figure is
+								    denominated in used to be here too and is on the rows now — a legend
+								    that has to explain a column is a column that does not work. */}
+								{toDo.rows.length > 1 ? <>Biggest first. </> : null}
+								{estimatedWire ?
+									<b>Who is free is an estimate</b>
+								: wireAge ?
+									<>Your league&rsquo;s own free-agent list, read {wireAge}</>
+								:	<>Points your lineup gains over this period</>}
+								<details className="decide-fine">
+									<summary>what these numbers are</summary>
+									An add&rsquo;s figure is what your starting lineup projects over this
+									period with the move made; a seat&rsquo;s is what the arriving man
+									projects tonight. Everyone leaving on an add is under the keep floor —
+									no more than{" "}
+									{/* A GAME. The floor is `bscorePerGame < keepFloor`, and printing a rate
+									    with "points" after it is the same unit slip that let the planner
+									    compare a whole-window total against this number for months. */}
+									{DEFAULTS.keepFloor} a game clear of what the wire still offers at his own
+									slot — and none is worth holding for the rest of the season either.
+									{estimatedWire ?
+										<>
+											{" "}
+											Nothing has read your league&rsquo;s own free-agent list, so these
+											are the men rostered in {estimatedWire.cut.cut}% of leagues or fewer
+											— the boundary a {estimatedWire.cut.depth / estimatedWire.cut.seats}
+											-team league with {estimatedWire.cut.seats} seats implies. Some will
+											already be taken in yours.
+										</>
+									: wireAge ?
+										<> Anyone picked up or dropped since is not in it.</>
+									:	null}
+								</details>
+							</div>
+							{/*
+							  THE RULE THAT GOVERNS THE ADDS, kept beside them rather than in a heading
+							  of its own.
+							
+							  It was the subtitle of `Make these moves`, which no longer exists as a
+							  block — but every word of it still changes what the reader does: how many
+							  moves this run is proposing, how many his league would allow, and when a
+							  claim he makes tonight actually lands. "2 of the 6 your league allows"
+							  reads as four left on the table, so the two numbers stay separate and the
+							  cap is named as the league's rule rather than as a finding. The
+							  measurement behind the app's own limit is in src/auto/plan.ts, beside the
+							  cap it governs, which is where the next person to change it stands.
+							*/}
+							{plan && (rules.cap !== null || plan.swaps.moves.length > 0) && (
+								<p className="sub decide-adds">
+									{/* "No add clears the bar" is a claim about a search, and with no wire
+									    and no usable ownership estimate no search was made. The list's own
+									    empty state says this where the list is empty; it has to be said
+									    here too, because a card with lineup rows and no candidates would
+									    otherwise report a bar that nothing was ever measured against. */}
+									{!candidates.length ?
+										"No add can be judged: nothing has read your league\u2019s free-agent list, and who is free cannot be estimated from this capture either"
+									: plan.swaps.moves.length === 0 ? "No add clears the bar"
+									: plan.swaps.moves.length < DEFAULTS.maxMoves ?
+										`${plan.swaps.moves.length} add${plan.swaps.moves.length === 1 ? "" : "s"} clear${plan.swaps.moves.length === 1 ? "s" : ""} the bar`
+									:	`Stopping at ${plan.swaps.moves.length} adds`}
+									{candidates.length > 0 && rules.cap !== null &&
+										` · your league allows ${rules.cap}`}
+									{/* WHEN, not why. The gain above is accrued from today, and in a league
+									    with a waiver period the claimed man is not his tonight — so the one
+									    thing the reader needs beside the instruction is the day it lands.
+									    The rows it was read from sit in the title, which is where this app
+									    already sends provenance. */}
+									{candidates.length > 0 && rules.waivers.days !== null && (
+										<span title={rules.waivers.sources.join(" · ")}>
+											{` · waivers clear in ${rules.waivers.days} day${rules.waivers.days === 1 ? "" : "s"}`}
+										</span>
+									)}
+								</p>
+							)}
 						</>
+					: !candidates.length ?
+						/* Two absences and no third sentence about them. Both stay, because they are
+						   different absences with different fixes: a free-agent list nobody has read,
+						   and a capture whose ownership figures cannot locate the boundary. */
+						<p className="sub">
+							Nothing to change in your lineup, and no add can be judged: nothing has read
+							your league&rsquo;s free-agent list, and who is free cannot be estimated from
+							this capture either.
+						</p>
 					:	<p className="sub">
-							Nothing to change — every seat already holds the right man for today.
+							Nothing to do — every seat already holds the right man for today, and no add
+							clears the bar.
 						</p>
 					}
+					{/* Only where some seats ARE already right. With no seats read there is no
+					    baseline, every row is a "start", and the count is zero — "your other 0
+					    seats are already right" is a sentence about nothing. */}
+					{settledSeats > 0 && (
+						<p className="sub decide-rest">
+							Your other {settledSeats} {settledSeats === 1 ? "seat is" : "seats are"}{" "}
+							already right.
+						</p>
+					)}
+					{/* WHERE THE SEAT COUNT CAME FROM, said before the count it justifies. See
+					    `partial` above: a hand-typed team is as long as the reader made it, the
+					    sheet told him a short list was fine, and nothing on this card distinguished
+					    a seat he has not filled in his league from a seat he simply has not told
+					    this page about. */}
+					{today.partial && (
+						<p className="sub decide-partial">
+							{/* NO ARITHMETIC BETWEEN THE TWO NUMBERS. The first draft said "so 14 of
+							    these are empty" — 27 seats minus 13 men — over a heading that counted
+							    6, because the heading counted STARTABLE seats and the league's total
+							    includes the bench and the injured list. The honest claim is about
+							    provenance, not about a count. */}
+							These seats come from the {today.partial.given} men you have named, not from
+							your league&rsquo;s own {today.partial.total}. Read your roster off your
+							platform on <b>{tab("trade")}</b> to settle it.
+						</p>
+					)}
+					{/*
+					  THE SEATS NOTHING CAN BE DONE ABOUT — ONE LINE, and it used to be a block.
+					
+					  "Empty seats · 12 seats score nothing tonight" was a heading, a count, a list
+					  of adds, and three explanatory sentences, sitting above the only instruction
+					  on the card that cost anything. Every seat it could DO something about is now
+					  a row in the list above, which leaves this one fact: how many are left that
+					  nobody can. That is a caveat, not an instruction, so it gets the shape of one.
+					
+					  Still two reasons and still two clauses, because they are different: a seat no
+					  free man is eligible for is a seat nothing was ever going to fill, and a seat
+					  whose best answer has already started is one there is nothing LEFT to do about
+					  — which is what stops a reader going to look for the move he missed.
+					*/}
+					{(() => {
+						const nobody =
+							today.unfilled.length -
+							fillTonight.fills.length -
+							fillTonight.lockedOut -
+							fillTonight.movedIn
+						if (nobody <= 0 && fillTonight.lockedOut <= 0) return null
+						return (
+							<p className="sub decide-empty-seats">
+								{nobody > 0 && (
+									<>
+										{nobody === 1 ? "One seat has" : `${nobody} seats have`} nobody: no
+										free man eligible there is on a card tonight.
+									</>
+								)}
+								{nobody > 0 && fillTonight.lockedOut > 0 && " "}
+								{fillTonight.lockedOut > 0 && (
+									<>
+										{fillTonight.lockedOut === 1 ?
+											"One more had somebody, and his game has already begun"
+										:	`${fillTonight.lockedOut} more had somebody, and those games have already begun`}{" "}
+										&mdash; so there is nothing left to do about{" "}
+										{fillTonight.lockedOut === 1 ? "it" : "them"}.
+									</>
+								)}
+							</p>
+						)
+					})()}
 					{/* The changes NOT offered, named. Without this the card looks like it found
 					    fewer moves rather than like it refused to offer ones the platform will
 					    reject, and a reader who remembers seeing a shortstop swap an hour ago
@@ -2246,110 +2937,7 @@ export const Decide = ({
 								</p>
 							)
 						})()}
-					{/*
-					  The seats that will score nothing, and the men who could stop that.
-					  
-					  This is the largest measured lever in a points-league season — never
-					  leaving an allowed slot unused — and it was buried inside the seat-by-seat
-					  disclosure below, described as "leave empty". Leaving it empty is the
-					  right answer only if nobody gettable is playing; where somebody is, the
-					  seat is worth about seven points a night and the upgrade a move usually
-					  buys is worth about one.
-					  
-					  Both conditions are hard. He has to be free — or as free as the wire can
-					  say, and the line under the moves says which — and he has to be on a card
-					  TONIGHT, because a free agent who is not playing fills the seat with the
-					  same zero it already has.
-					*/}
-					{/* THE HEADING IS ABOUT THE SEATS, so it is rendered whenever a seat is empty
-					    rather than only when there is somebody to put in one. It used to be gated
-					    on the rows, and once the offers are gated on the lock that becomes the
-					    ordinary nine-o'clock case: empty seats, nobody left who can fill them, and
-					    a card that said nothing about either. */}
-					{today.unfilled.length > 0 && (
-						<>
-							<h3 className="decide-head decide-fill-head">
-								Empty seats
-								<span className="decide-gain">
-									{today.unfilled.length}{" "}
-									{today.unfilled.length === 1 ? "seat scores" : "seats score"} nothing
-									tonight
-								</span>
-							</h3>
-							{/* WHERE THE SEAT COUNT CAME FROM, said before the adds it justifies. See
-							    `partial` above: a hand-typed team is as long as the reader made it,
-							    the sheet told him a short list was fine, and nothing on this card
-							    distinguished a seat he has not filled in his league from a seat he
-							    simply has not told this page about. */}
-							{today.partial && (
-								<p className="sub decide-partial">
-									{/* NO ARITHMETIC BETWEEN THE TWO NUMBERS. The first draft said "so 14
-									    of these are empty" — 27 seats minus 13 men — over a heading that
-									    counted 6, because the heading counts STARTABLE seats and the
-									    league's total includes the bench and the injured list. The honest
-									    claim is about provenance, not about a count. */}
-									These seats come from the {today.partial.given} men you have named, not
-									from your league&rsquo;s own {today.partial.total}. Read your roster off
-									your platform on <b>{tab("trade")}</b> to settle it.
-								</p>
-							)}
-							<ul className="decide-list decide-fill">
-								{fillTonight.fills.map(f => (
-									<li key={`${f.slot}-${f.name}`}>
-										<span className="decide-slot">{f.slot}</span>
-										<span>
-											Add <b>{f.name}</b>{" "}
-											<em className="decide-why">
-												{f.points} projected tonight{f.team ? ` · ${f.team}` : ""}
-											</em>
-										</span>
-									</li>
-								))}
-							</ul>
-							{/*
-							  THE SEATS IT COULD NOT FILL, counted rather than left to be inferred,
-							  and in TWO sentences because there are two reasons.
-							  
-							  The heading says "4 seats score nothing tonight" and the list under it
-							  named two. A reader left to work that out from a list shorter than its
-							  own heading reads it as the app having run out of room.
-							  
-							  And the single sentence it used to give asserted one reason for every
-							  such seat — "no free man eligible there is on a card tonight. Leaving
-							  them empty is the right answer." That is true of a seat nobody is
-							  eligible for. It is false of a seat whose best answer exists and has
-							  already locked, which is the commonest kind after the first pitch, and
-							  "leaving it empty is the right answer" is not advice about that seat at
-							  all: nothing can be done about it now, which is a different thing to be
-							  told and the thing that stops a reader going to look.
-							*/}
-							{fillTonight.movedIn > 0 && (
-								<p className="sub decide-fill-moved">
-									{fillTonight.movedIn === 1 ? "One of them is the seat" : `${fillTonight.movedIn} of them are the seats`}{" "}
-									the {fillTonight.movedIn === 1 ? "move" : "moves"} above{" "}
-									{fillTonight.movedIn === 1 ? "fills" : "fill"}.
-								</p>
-							)}
-							{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut - fillTonight.movedIn > 0 && (
-								<p className="sub decide-fill-rest">
-									{today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut - fillTonight.movedIn === 1 ?
-										"One other seat has"
-									:	`${today.unfilled.length - fillTonight.fills.length - fillTonight.lockedOut - fillTonight.movedIn} others have`}{" "}
-									nobody: no free man eligible there is on a card tonight.
-								</p>
-							)}
-							{fillTonight.lockedOut > 0 && (
-								<p className="sub decide-fill-shut">
-									{fillTonight.lockedOut === 1 ?
-										"One seat had somebody, and his game has already begun"
-									:	`${fillTonight.lockedOut} of them had somebody, and those games have already begun`}{" "}
-									&mdash; so {fillTonight.lockedOut === 1 ? "it scores" : "they score"} nothing
-									tonight and there is nothing left to do about{" "}
-									{fillTonight.lockedOut === 1 ? "it" : "them"}.
-								</p>
-							)}
-						</>
-					)}
+
 					<details className="decide-notes">
 						<summary>The whole lineup, seat by seat</summary>
 						<ul className="decide-list decide-today">
@@ -2607,9 +3195,30 @@ export const Decide = ({
 			: plan.lineup.blocked ?
 				<p className="sub">{plan.lineup.blocked}</p>
 			: !plan.lineup.swaps.length && !plan.lineup.shifts.length ?
+				/*
+				  "NOTHING BEATS IT" AND "NOTHING BEATS IT BY ENOUGH" ARE DIFFERENT FACTS, and
+				  this said the first about both.
+				
+				  `planLineup` empties `swaps` and `shifts` when the best legal lineup does not
+				  clear `lineupMinGain`, and until now the only trace of that was a sentence
+				  pushed into `skipped` — a list of MEN, one per line as "Name: reason". Every
+				  reader of that array splits on the first ": " to get the name, so the card
+				  rendered the whole sentence in the player slot of its could-not-be-priced
+				  bullet: "One player on your roster could not be priced, so nothing above
+				  counts him: the best legal lineup is worth -144.42 more than today's…".
+				  Reproduced on a real 27-man imported roster, 2026-09-23.
+				
+				  It is now `LineupPlan.leftAlone`, typed as what it is, and it lands here —
+				  the one place on the card that was already making this exact claim, and
+				  making it too strongly. src/auto/run.ts has printed the two as different
+				  sentences all along.
+				*/
 				<p className="sub">
-					Already right — {plan.lineup.pointsNow} projected points, and no legal
-					rearrangement of your own players beats it.
+					Already right — {plan.lineup.pointsNow} projected points
+					{plan.lineup.leftAlone ?
+						<>, and {plan.lineup.leftAlone}</>
+					:	<>, and no legal rearrangement of your own players beats it</>}
+					.
 				</p>
 			:	<ul className="decide-list">
 					{plan.lineup.swaps.map(s => (
@@ -2648,9 +3257,17 @@ export const Decide = ({
 				</ul>
 			}
 
-				</>
-			)}
 
+			{/*
+			  THE MOVES STAY WITH THE LINEUP THEY BELONG TO.
+
+			  In a daily-lock league the adds are rows in Today's one list — see `toDo` —
+			  because to the reader an add and a start are the same kind of thing and
+			  splitting them put the most valuable instruction on the card five blocks down.
+			  A league that locks its lineup for the whole period has no Today list to fold
+			  them into, so here they keep a heading of their own. Same rows, same planner,
+			  one place that draws them.
+			*/}
 			<h3 className="decide-head">
 				Make these moves
 				{/* "2 of the 6 your league allows" reads as four left on the table. The cap
@@ -2739,31 +3356,10 @@ export const Decide = ({
 				*/
 				<p className="sub">None worth making.</p>
 			:	<>
-					{/* Named so a suite can tell this list from the four others on the card — the
-					    one assertion that catches the same man being offered twice needs to read
-					    the two lists separately. */}
-					<ul className="decide-list decide-moves">
-						{plan.swaps.moves.map(m => (
-							<li key={`${m.add}-${m.drop}`}>
-								<span className="decide-delta">+{m.gain}</span>
-								<span>
-									Add <b>{m.add}</b>
-									{m.seats?.length ?
-										<span className="decide-seat"> for your {m.seats.join(" or ")} seat</span>
-									:	null}
-									{/* No drop clause when nothing is dropped. The planner only pairs an
-									    add with a drop once every seat is taken — see `room` in
-									    planSwaps — and printing ", drop —" or an empty <b> here is how a
-									    card ends up telling somebody to drop Aaron Judge for nothing. */}
-									{m.drop ?
-										<>
-											, drop <b>{m.drop}</b>
-										</>
-									:	<em className="decide-why"> &mdash; you have a free seat, so nobody comes out</em>}
-								</span>
-							</li>
-						))}
-					</ul>
+					{/* Named so a suite can tell this list from the others on the card. The row
+					    markup itself is `addRow`, shared with the one list Today renders — two
+					    copies of it had already drifted once. */}
+					<ul className="decide-list decide-moves">{plan.swaps.moves.map(addRow)}</ul>
 					{/* Said once. Every move carried the same two clauses — what the gain is
 					    denominated in, and why the man leaving can be spared — which on a
 					    phone was an eight-line paragraph under each of two moves, most of it
@@ -2813,10 +3409,44 @@ export const Decide = ({
 					</div>
 				</>
 			}
+				</>
+			)}
 
-			{(rules.floor !== null || !!plan?.lineup.skipped.length) && (
-				<>
-					<h3 className="decide-head">Watch</h3>
+
+			{/*
+			  CAVEATS, BEHIND ONE LINE — they are not instructions and they were sitting where
+			  instructions go.
+
+			  Four bullets stood between the reader and the foot of the card: an innings floor
+			  he is nowhere near, two groups of men nothing could price, and what the moves
+			  cost against that floor. Every one of them is true and worth keeping, and not one
+			  of them is a thing to go and do tonight. The summary counts them, so a reader who
+			  is being warned about something knows there is something to open; it names no
+			  number and makes no claim, so an unopened fold cannot outrun what is inside it.
+
+			  The COSTS bullet is the one that could argue for staying out here, and it does not
+			  get to: it qualifies the adds in the list above, which already carry their own
+			  number, and a warning that fires on a floor the same fold says he clears is not a
+			  warning the card should lead with.
+			*/}
+			{(() => {
+				const watch =
+					(rules.floor !== null && rules.projected !== null ? 1 : 0) +
+					skippedWhy.length +
+					(today?.misseated.length ? 1 : 0) +
+					toDo.caveats.length +
+					(rules.floor !== null &&
+					rules.after !== null &&
+					rules.projected !== null &&
+					rules.after < rules.projected ?
+						1
+					:	0)
+				if (!watch) return null
+				return (
+				<details className="decide-notes decide-watch-fold">
+					<summary>
+						{watch} {watch === 1 ? "thing" : "things"} to watch
+					</summary>
 					<ul className="decide-list decide-watch">
 						{/* Two numbers that are NOT comparable, and used to be compared. The floor
 						    is "min innings pitched per team per WEEK"; the projection is rated over
@@ -2931,6 +3561,71 @@ export const Decide = ({
 								</div>
 							</li>
 						)}
+						{/*
+						  THE MEN THIS APP CANNOT PUT WHERE IT FOUND THEM — the caveat that explains
+						  why the plan's total can be lower than his own lineup's.
+						
+						  `rateAll` prices them and `planLineup` can seat them nowhere, so their
+						  points are in the lineup he has and in no seat of the lineup it builds.
+						  Measured on a 27-man imported roster, 2026-09-23: five such men, 35.86
+						  points for one night and 203.21 over the period, and the planner's own
+						  min-gain bar then fired on the difference as though the rearrangement had
+						  lost them. That bar now stands down here (see `misseated` in
+						  src/auto/plan.ts) — which means the card gives the plan, and this sentence
+						  is what stops it being a silent claim that he has his lineup wrong.
+						
+						  It names this app's data first and his lineup second, in that order, because
+						  that is the likelier of the two to be at fault — and because after
+						  src/data/paste.ts started unioning a man's own startable seat into his
+						  positions (2026-09-23) a real platform read cannot produce this state at
+						  all. What is left that can: a hand-typed team, and a man whose OTHER seats
+						  the capture's eligibility gets wrong, which it covers for 328 of 1,446
+						  players. So the bullet is rare rather than ordinary, and the earlier note
+						  here that called it ordinary was wrong — see `misseated` in
+						  src/auto/plan.ts for the retraction and the control behind it.
+						*/}
+						{today && today.misseated.length > 0 && (
+							<li>
+								<span className="decide-note">·</span>
+								<span>
+									{today.misseated.length === 1 ? "One of your men sits" : `${today.misseated.length} of your men sit`}{" "}
+									in a seat nothing here records {today.misseated.length === 1 ? "him" : "them"} as
+									eligible for, so no lineup above can keep{" "}
+									{today.misseated.length === 1 ? "him" : "them"} in{" "}
+									{today.misseated.length === 1 ? "it" : "them"}:{" "}
+									<b>
+										{andList(today.misseated.map(m => `${m.name} at ${m.slot}`))}
+									</b>
+									.
+									{/* The union of what it DOES have them at was here and said nothing: over
+									    eight men it read "This app has them at OF, Util, 3B, 1B and SS", which
+									    is a set no reader can attach to a man. Each man's own seat is already
+									    in the list above; what he needs after it is which way to bet. */}
+									<em className="decide-why">
+										Where your league grants{" "}
+										{today.misseated.length === 1 ? "that seat" : "those seats"}, your league
+										is right and this app&rsquo;s eligibility is short &mdash; so the rows
+										about {today.misseated.length === 1 ? "it" : "them"} are worth less than
+										the rest.
+									</em>
+								</span>
+							</li>
+						)}
+						{/*
+						  AND THE PROVENANCE THE ROWS PUT DOWN. A reason like "Injured 60-Day — no
+						  source states a return date, so there is no honest projection over this
+						  horizon. The Stash view ranks him anyway" is three sentences of caveat
+						  inside a row whose job is to say what to do, so the row keeps the fact and
+						  the rest arrives here. Nothing is dropped; see `head` in `toDo`.
+						*/}
+						{toDo.caveats.map(c => (
+							<li key={`caveat-${c.name}`}>
+								<span className="decide-note">·</span>
+								<span>
+									<b>{c.name}</b> <em className="decide-why">{c.why}</em>
+								</span>
+							</li>
+						))}
 						{/* Men on his roster the model could not price at all. They are neither
 						    started nor offered up nor mentioned, which is the whole roster
 						    quietly shrinking: the lineup above is planned as if he owned 22
@@ -2939,9 +3634,15 @@ export const Decide = ({
 							<li key={g.why}>
 								<span className="decide-note">·</span>
 								<span>
-									{g.men.length === 1 ? "One player" : `${g.men.length} players`} on your
-									roster could not be priced, so nothing above counts{" "}
-									{g.men.length === 1 ? "him" : "them"}: <b>{g.men.join(", ")}</b>.
+									{/* No men, no sentence about men. See `skippedWhy`: a line the split
+									    could not read a name out of is still reported, as itself. */}
+									{g.men.length > 0 && (
+										<>
+											{g.men.length === 1 ? "One player" : `${g.men.length} players`} on
+											your roster could not be priced, so nothing above counts{" "}
+											{g.men.length === 1 ? "him" : "them"}: <b>{g.men.join(", ")}</b>.
+										</>
+									)}
 									{/*
 									  THE ENGINE'S OWN REASON, grouped — not one sentence invented here.
 									  
@@ -2977,8 +3678,9 @@ export const Decide = ({
 								</li>
 							)}
 					</ul>
-				</>
-			)}
+				</details>
+				)
+			})()}
 
 			{/* How the answer was arrived at, under it rather than in it. These are the
 			    planner's own notes — a search depth, a man it protected, a bar something

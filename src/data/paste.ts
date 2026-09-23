@@ -1,6 +1,6 @@
 import { normalizeName } from "./yahoo-pool.ts"
 import { andList } from "./names.ts"
-import { slotsFor } from "../engine/bscore.ts"
+import { isReserveSlot, slotsFor } from "../engine/bscore.ts"
 import type { PlayerSeason } from "./statsapi.ts"
 
 /**
@@ -843,8 +843,45 @@ export const rosterFromPaste = (
 				 * unseatable), adds P beside SP/RP, and falls back to the primary position when
 				 * a set maps to nothing.
 				 */
-				positions:
-					p ? slotsFor(p, fromPage.get(f.id) ?? snapshot.eligibility?.[String(f.id)]) : [],
+				/*
+				 * AND THE SEAT HE IS ALREADY IN, WHICH IS EVIDENCE AND NOT A GUESS.
+				 *
+				 * Yahoo enforces eligibility on every startable seat: it will not let a man
+				 * sit at 1B unless it grants him 1B. So a roster page showing him at 1B is a
+				 * FACT READ OFF THE PAGE that he is 1B-eligible — strictly better evidence
+				 * than tier 3 below, which is StatsAPI's single primary position and which
+				 * `slotsFor` itself calls the largest known accuracy gap in this file.
+				 *
+				 * WHAT IT COST TO LEAVE OUT. Tiers 2 and 3 can contradict the seat a man is
+				 * actually in, and when they do `resolveRoster` finds no legal slot for him,
+				 * `planLineup` can seat him nowhere, his points leave the planned lineup while
+				 * staying in the current one, and the whole rearrangement reads as a loss.
+				 * Measured 2026-09-23 on a 27-man fixture built this way: zero of the 27 were
+				 * in the 328-of-1,446 eligibility grid, so all 27 fell to their primary
+				 * position, nine of the eighteen active seats then contradicted it, and the
+				 * period plan came back at -144.42 against the lineup it was replacing. Put
+				 * each man's own seat back into his positions and nothing else changes: +16.36,
+				 * nobody unplaceable, 16 of 18 seats filled instead of 12.
+				 *
+				 * NOT FOR Util, BN, IL OR NA. Those seats accept anybody, so sitting in one
+				 * proves nothing about a man — widening him on that would be the same "half the
+				 * evidence" failure `eligibilityInText` above refuses when a line yields more
+				 * tokens than a league tracks. Only a seat with a rule behind it is evidence.
+				 *
+				 * A COMPOUND SEAT IS A NO-OP AND THAT IS FINE. `legalSlotsFor` asks whether a
+				 * position appears in the seat's `slot_accepts` list, and a P seat's list is
+				 * ["SP","RP"] rather than ["P"] — so adding "P" grants nothing. It costs
+				 * nothing either: only pitchers may sit there, and `slotsFor` gives every
+				 * pitcher SP or RP whichever tier answered.
+				 */
+				positions: (() => {
+					const read =
+						p ? slotsFor(p, fromPage.get(f.id) ?? snapshot.eligibility?.[String(f.id)]) : []
+					const seat = f.slot!.trim()
+					return isReserveSlot(seat) || /^Util$/i.test(seat) || read.includes(seat) ?
+							read
+						:	[...read, seat]
+				})(),
 				team: p?.team ?? null,
 				status: f.status
 			}

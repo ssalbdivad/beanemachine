@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
 	FROM_APP,
+	MARK,
 	isFromExtension,
 	protocolSkew,
 	type Ask,
@@ -80,7 +81,7 @@ const PATIENCE_MS = 90_000
  */
 export const extensionHere = (): boolean => {
 	try {
-		return !!document.documentElement.getAttribute("data-beanemachine-extension")
+		return !!document.documentElement.getAttribute(MARK)
 	} catch {
 		return false
 	}
@@ -103,11 +104,15 @@ export const useExtension = (): ExtensionState => {
 	const waiting = useRef(new Map<string, (m: never) => void>())
 
 	useEffect(() => {
-		const stamped = document.documentElement.getAttribute("data-beanemachine-extension")
+		const stamped = document.documentElement.getAttribute(MARK)
 		if (stamped) {
 			setPresent(true)
 			setVersion(stamped)
 		}
+		/** What the poll below last saw, so it only acts on a CHANGE. A plain local rather
+		 *  than state: it is read and written inside one interval and must not be a render's
+		 *  worth of stale. */
+		let had = !!stamped
 		const onMessage = (event: MessageEvent): void => {
 			if (event.source !== window || event.origin !== location.origin) return
 			if (!isFromExtension(event.data)) return
@@ -146,15 +151,41 @@ export const useExtension = (): ExtensionState => {
 		
 		  A poll rather than a MutationObserver: the attribute is set on `document.documentElement`
 		  at `document_start`, an observer on the root element with `attributes: true` is the same
-		  cost, and this stops as soon as it finds it. Two seconds is under the time it takes to
-		  read the step it sits beside.
+		  cost, and two seconds is under the time it takes to read the step it sits beside.
+
+		  ── AND IT WATCHES IT GO AWAY, WHICH IS THE HALF THAT WAS MISSING ─────────────────
+
+		  This was `if (!now) return; clearInterval(watch)` — it stopped the moment it found the
+		  attribute, so nothing on a live page could ever observe the attribute being REMOVED.
+		  `present` was written true in three places and false in none.
+
+		  The bridge takes the mark off when it is orphaned and its comment claims that is what
+		  makes the app recover: "it is the same flag the app's first render reads, so the offer
+		  stops being made without the app needing to know any of this happened." True of a page
+		  that RELOADS, and a reader who has just switched the add-on off or taken a store update
+		  has not reloaded — that is the whole situation. So Connect stayed in its `ext.present`
+		  branch offering "Read my league" to a browser with nothing left to read it with, and he
+		  found out by pressing the button and reading the orphan failure.
+
+		  Kept running costs one attribute read every two seconds for the life of the page, which
+		  is the price of the claim in bridge.ts being true. `had` is what makes it a change
+		  detector rather than four state writes a second.
 		*/
 		const watch = setInterval(() => {
-			const now = document.documentElement.getAttribute("data-beanemachine-extension")
-			if (!now) return
-			clearInterval(watch)
-			setPresent(true)
+			const now = document.documentElement.getAttribute(MARK)
+			if (!!now === had) return
+			had = !!now
+			setPresent(had)
 			setVersion(now)
+			if (!had) {
+				/* Everything that was known ABOUT it is now unknown, and stale answers here are
+				   what the screens read to decide what to offer: a remembered "a Yahoo tab is
+				   open" would keep the read on offer, and a remembered skew would tell him to
+				   update a thing that is no longer installed. */
+				setYahooOpen(false)
+				setSkew(null)
+				return
+			}
 			/* And ask, so `yahooOpen` and the protocol version arrive too — the attribute alone
 			   says it is there and nothing else. */
 			window.postMessage({ from: FROM_APP, id: "hello", ask: "hello" as Ask }, location.origin)
@@ -188,17 +219,41 @@ export const useExtension = (): ExtensionState => {
 				setProgress(null)
 				const done = (
 					answer:
-						| { kind: "grabs"; grabs: Grab[]; failure?: GrabFailure }
-						| { kind: "failed"; failure: GrabFailure }
+						| { kind: "grabs"; grabs: Grab[]; failure?: GrabFailure; yahooOpen?: boolean }
+						| { kind: "failed"; failure: GrabFailure; yahooOpen?: boolean; gone?: true }
 				): void => {
 					clearTimeout(timer)
 					setBusy(false)
 					setProgress(null)
-					/* A Yahoo tab was found or it was not, and the next press should offer the
-					   right thing without waiting for another hello. */
-					if (answer.kind === "failed" && /no Yahoo/i.test(answer.failure.what))
+					/*
+					   A YAHOO TAB WAS FOUND OR IT WAS NOT, AND THE ROUTER NOW SAYS WHICH.
+
+					   This was `/no Yahoo/i.test(answer.failure.what)` — a regex over a sentence
+					   written for a reader. The router writes three different refusals when it
+					   cannot use a tab and only one of them contains those two words, so the
+					   football refusal — "the Yahoo tab that is open is your football league",
+					   whose own `fix` says to open a baseball one — set `yahooOpen` TRUE, and
+					   Connect hides the "Open Yahoo" button when `yahooOpen` is true. He was told
+					   to open a tab at the moment the button for it disappeared. The orphan
+					   failure did the same, for a browser that can no longer read anything.
+
+					   `hello` has carried the fact as a typed field since the first build; the
+					   answer to an ask now carries it too. The `??` is the older half in the
+					   browser, which sends neither field: a `grabs` answer came through a tab, so
+					   it is evidence of one, and a failure that says nothing leaves the last
+					   known answer alone rather than inventing a new one.
+					*/
+					if (answer.kind === "failed" && answer.gone) {
+						/* It is not that the tab is gone — it is that the thing which reads tabs
+						   is. Everything the screens key off it is now false. The poll above
+						   would reach the same conclusion from the mark within two seconds; this
+						   is the press that is happening right now. */
+						setPresent(false)
+						setVersion(null)
 						setYahooOpen(false)
-					else setYahooOpen(true)
+						setSkew(null)
+					} else if (typeof answer.yahooOpen === "boolean") setYahooOpen(answer.yahooOpen)
+					else if (answer.kind === "grabs") setYahooOpen(true)
 					resolve(
 						answer.kind === "failed" ?
 							{ failure: answer.failure }

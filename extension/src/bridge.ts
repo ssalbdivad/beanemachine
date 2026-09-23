@@ -11,6 +11,7 @@
  */
 import {
 	FROM_EXTENSION,
+	MARK,
 	PROTOCOL,
 	isFromApp,
 	type ExtensionMessage,
@@ -18,11 +19,6 @@ import {
 } from "../../src/data/extension.ts"
 
 const version = chrome.runtime.getManifest().version
-
-/** The attribute the page reads to answer "is there anything in this browser that can read
- *  Yahoo" during its first render, before any message could have arrived. Named here
- *  because it is now written AND removed. */
-const MARK = "data-beanemachine-extension"
 
 const toPage = (msg: ExtensionMessage): void => {
 	/* Targeted at this window's own origin rather than "*": the message names a league
@@ -53,6 +49,14 @@ const toPage = (msg: ExtensionMessage): void => {
  * thing that is both true and actionable. Taking the mark off is what makes the app's own
  * state recover — it is the same flag the app's first render reads, so the offer stops being
  * made without the app needing to know any of this happened.
+ *
+ * THAT CLAIM WAS ONLY TRUE OF A PAGE THAT RELOADS, which is the one thing the reader has
+ * not done yet. The app read the mark once on mount and then polled for it to APPEAR,
+ * clearing the poll the moment it found it — so nothing on a live page could ever observe
+ * it going away, `present` was written true three times and false nowhere, and the Connect
+ * screen went on offering "Read my league" to a browser that had nothing left to read it
+ * with. The poll now watches in both directions (src/client/extension.ts), and the answer
+ * below carries `gone` so the page does not have to wait up to two seconds for it.
  */
 const ORPHANED: GrabFailure = {
 	step: "extension",
@@ -71,7 +75,9 @@ const orphan = (id: string | null): void => {
 			/* Nothing to do about a page that will not let its own root be written. */
 		}
 	}
-	if (id !== null) toPage({ from: FROM_EXTENSION, id, kind: "failed", failure: ORPHANED })
+	/* `gone` rather than a sentence for the page to match on: `step: "extension"` is shared
+	   with the two failures that mean he needs an UPDATE, which is the opposite advice. */
+	if (id !== null) toPage({ from: FROM_EXTENSION, id, kind: "failed", failure: ORPHANED, gone: true })
 }
 
 window.addEventListener("message", event => {
@@ -110,7 +116,8 @@ window.addEventListener("message", event => {
 					from: FROM_EXTENSION,
 					id,
 					kind: "failed",
-					failure: { ...ORPHANED, detail: dead?.message }
+					failure: { ...ORPHANED, detail: dead?.message },
+					gone: true
 				})
 				return
 			}

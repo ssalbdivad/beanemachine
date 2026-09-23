@@ -80,11 +80,35 @@ if (out === resolve(here, "..") || out === resolve(here))
  * which the bridge sends on every hello: "0.1.0 against 0.3.2" is not a question a page can
  * answer, and "speaks 1, needs 2" is.
  *
- * 0.2.0 is the first build that marks a swept page as swept, carries the list its sweep set
- * out to get, and refuses an ask it does not know by name instead of going quiet — which is
- * protocol 2.
+ * 0.2.0 was the first build that marks a swept page as swept, carries the list its sweep set
+ * out to get, and refuses an ask it does not know by name instead of going quiet — protocol 2.
+ * 0.3.0 adds `rosters`, the ask that reads every other team in the league — protocol 3.
+ *
+ * ── THE MINOR NUMBER IS THE PROTOCOL, AND test/extension.mjs ENFORCES IT ──────────────
+ *
+ * It was 0.2.0 while `PROTOCOL` was 3, and had been since commit 7296c31 bumped the protocol
+ * for `rosters` without touching this line. Two different builds therefore shipped as
+ * "0.2.0", one of which refuses `rosters` — and the self-hosted update manifest is keyed on
+ * this exact string (`updates: [{ version: VERSION, ... }]` near the foot of this file), so
+ * Firefox, which only fetches when the advertised version is HIGHER, never offered the newer
+ * one to a reader holding the older. Meanwhile both halves told him to go and get it:
+ * `protocolSkew` says "Update it in your browser's extensions list", and so do
+ * extension/src/yahoo.ts and extension/src/background.ts. It was the one instruction in the
+ * product that could not work, which is precisely the failure the protocol number exists to
+ * end.
+ *
+ * The interlock is a rule a hand-bump cannot satisfy by accident: the minor number IS the
+ * protocol. Bump `PROTOCOL` to 4 and the suite demands 0.4.x here; there is no table to edit
+ * instead and no convention to remember. It is asserted in test/extension.mjs against the
+ * BUILT manifest rather than thrown here, so the statement lives beside the other things the
+ * two stores are checked for, and one place says what a version is allowed to be.
+ *
+ * The cost is that the major stays 0 for as long as the rule does. That is the right trade
+ * while a hand-bumped string gates whether an update is ever offered; the day this add-on
+ * wants a 1.0 is the day the rule is rewritten as "minor OR a recorded table", on purpose,
+ * with the suite changed in the same commit.
  */
-const VERSION = "0.2.0"
+const VERSION = "0.3.0"
 
 const NAME = "beanemachine — read my Yahoo league"
 

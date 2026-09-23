@@ -51,6 +51,22 @@ export const FROM_APP = "beanemachine-page" as const
 export const FROM_EXTENSION = "beanemachine-extension" as const
 
 /**
+ * THE ATTRIBUTE THAT SAYS SOMETHING IN THIS BROWSER CAN READ YAHOO.
+ *
+ * Written on `document.documentElement` by the bridge at `document_start` and taken off
+ * again when the bridge is orphaned, and read by the app's first render — which is why it
+ * is an attribute rather than a message: a page that was already open when the reader
+ * installed the add-on cannot hear an announcement made before it was listening, and a page
+ * that reloads after it was uninstalled must not go on believing.
+ *
+ * Here rather than in either half because BOTH halves name it now. It was spelled out as a
+ * literal in extension/src/bridge.ts and again in src/client/extension.ts, in a file pair
+ * where one writes it and the other watches it: a typo in either is not a compile error, it
+ * is a reader who is told to install something he already has.
+ */
+export const MARK = "data-beanemachine-extension"
+
+/**
  * THE TWO HALVES SHIP ON DIFFERENT CLOCKS, AND THIS IS THE NUMBER THAT SAYS SO.
  *
  * The app is a static site: a fix is live a minute after it is pushed, and every reader
@@ -78,13 +94,53 @@ export const FROM_EXTENSION = "beanemachine-extension" as const
  *      half for it would be refused by name, which is why the number moved — the list of
  *      asks is the one thing a page can need and an older half cannot fake. Bumped in
  *      commit 7296c31 and left undocumented here until now.
+ *
+ * ── WHAT DOES NOT MOVE IT, AND WHY 3 SURVIVED A DELETION AND TWO NEW FIELDS ───────────
+ *
+ * `page` was REMOVED from the list below at the same time as this note was written, and the
+ * number stayed at 3. The rule above is "the page starts NEEDING something an older half
+ * cannot do", and a deletion is the opposite of that: nothing in the app has asked for
+ * `page` since src/client/extension.ts stopped posting one, so an older half that still
+ * answers it is answering a question nobody puts. Bumping for a deletion would tell every
+ * reader on the current build that he is behind, about an ask he never makes.
+ *
+ * `yahooOpen` and `gone` on an answer are the same case one step out. Both are fields the
+ * page READS and neither is one it needs: an older half omits them, and the page falls back
+ * to exactly the behaviour it had before they existed — see `done` in
+ * src/client/extension.ts, where the fallbacks are written next to the reads.
+ *
+ * THE NUMBER IS ALSO THE MINOR VERSION OF THE SHIPPED BUILD, and test/extension.mjs asserts
+ * it. That is the interlock: `VERSION` in extension/build.mjs is bumped by hand, it gates
+ * the self-hosted update manifest, and it did not move when this number went from 2 to 3 —
+ * so two different builds shipped as "0.2.0", one of them refusing `rosters`, while both
+ * halves told the reader to go and get an update that could never arrive. A hand-bumped
+ * number that gates auto-update is worth one assertion.
  */
 export const PROTOCOL = 3
 
-/** Every ask this protocol defines. The browser half checks an incoming ask against this
- *  rather than falling through, because falling through is what made an unknown ask look
- *  like a lost connection. */
-export const ASKS = ["hello", "page", "league", "pool", "rosters"] as const
+/**
+ * Every ask this protocol defines. The browser half checks an incoming ask against this
+ * rather than falling through, because falling through is what made an unknown ask look
+ * like a lost connection.
+ *
+ * ── `page` IS NOT ONE OF THEM ANY MORE ────────────────────────────────────────────────
+ *
+ * It was: "give me whatever Yahoo tab you pick, read out of its DOM". Nothing in the app
+ * had asked for it since the "take me to Yahoo" press stopped posting one (the account of
+ * that removal is at `openYahoo` in src/client/extension.ts), and what was left was the one
+ * ask that passed no gate and no ceiling — it sat ABOVE the `gateHeld()`/`waitFor()` checks
+ * in extension/src/yahoo.ts and returned `document.body.innerText`, plus the row markup on
+ * a players page, for whatever league tab the router happened to choose.
+ *
+ * That is a capability at exactly the seam this design names as its threat model: the app
+ * is a static site with no server, so the realistic abuse is a script injected into a page
+ * of its own origin, and `page` was the shortest route from such a script to the contents
+ * of the reader's signed-in Yahoo. Narrowing it was considered and rejected — a gate on an
+ * ask the product does not make is a gate nobody exercises. Deleted instead, and the test
+ * probes that used it now use `league`, which reads the same page he is standing on and
+ * goes through the gate like everything else.
+ */
+export const ASKS = ["hello", "league", "pool", "rosters"] as const
 
 export const isKnownAsk = (ask: unknown): ask is Ask =>
 	typeof ask === "string" && (ASKS as readonly string[]).includes(ask)
@@ -264,7 +320,7 @@ export interface GrabFailure {
  * team in the league, which is the only way to know who is taken rather than to estimate
  * it — nine pages for a ten-team league, so it is a press and never a side effect.
  */
-export type Ask = "hello" | "page" | "league" | "pool" | "rosters"
+export type Ask = "hello" | "league" | "pool" | "rosters"
 
 export interface AppMessage {
 	from: typeof FROM_APP
@@ -336,8 +392,48 @@ export type ExtensionMessage =
 			 * sides cannot drift.
 			 */
 			failure?: GrabFailure
+			/** See the note on the `failed` variant below. Set on every answer the ROUTER
+			 *  forwarded, because reaching a content script at all means it found a tab. */
+			yahooOpen?: boolean
 	  }
-	| { from: typeof FROM_EXTENSION; id: string; kind: "failed"; failure: GrabFailure }
+	| {
+			from: typeof FROM_EXTENSION
+			id: string
+			kind: "failed"
+			failure: GrabFailure
+			/**
+			 * WHETHER A BASEBALL TAB IS OPEN, STATED RATHER THAN GUESSED AT.
+			 *
+			 * The page needs this to decide between offering "Read my league" and offering
+			 * "Open Yahoo", and it used to work it out by running a regex over the failure's
+			 * PROSE: `/no Yahoo/i.test(answer.failure.what)`. The router writes three
+			 * different sentences when it cannot find the right tab and only one of them
+			 * contains those two words, so the football case — "the Yahoo tab that is open is
+			 * your football league, and this only knows baseball", whose own `fix` says to
+			 * open a baseball tab — set `yahooOpen` TRUE and hid the one button that opens
+			 * one. The reader was told to open a tab at the moment the control for it
+			 * disappeared.
+			 *
+			 * `hello` has carried this fact as a typed field since the first build. The
+			 * answer to an ask had no way to carry it, so the page string-matched something
+			 * it was designed to be told. Optional because an older half in the browser does
+			 * not send it, and the page then falls back to what it assumed before.
+			 */
+			yahooOpen?: boolean
+			/**
+			 * THIS EXTENSION IS GONE, said by the only half that can still say anything.
+			 *
+			 * A content script outlives the extension that injected it: disable, update or
+			 * uninstall, and every `chrome.runtime` call from the script already in the page
+			 * throws for as long as the tab is open. The bridge catches that, takes `MARK`
+			 * off the document and answers with `ORPHANED`. The page has to distinguish that
+			 * from every other `step: "extension"` failure — the protocol-skew sentence and
+			 * the unknown-ask refusal share the step and mean the opposite, that the reader
+			 * needs an update rather than that he has none — so it is a field and not a
+			 * sentence to match on.
+			 */
+			gone?: true
+	  }
 	| {
 			from: typeof FROM_EXTENSION
 			id: string

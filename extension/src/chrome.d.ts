@@ -67,6 +67,12 @@ declare namespace chrome {
 		const onRemoved: { addListener(fn: (tabId: number) => void): void }
 		const onActivated: { addListener(fn: (info: { tabId: number; windowId: number }) => void): void }
 	}
+	/** One member, for one line. `tabs.update({active:true})` selects a tab inside its own
+	 *  window and does not raise that window, so the toolbar button did nothing visible for
+	 *  a reader keeping Yahoo and the board in two windows — see `action.onClicked`. */
+	namespace windows {
+		function update(windowId: number, info: { focused?: boolean }): Promise<unknown>
+	}
 	namespace action {
 		const onClicked: { addListener(fn: (tab: tabs.Tab) => void): void }
 	}

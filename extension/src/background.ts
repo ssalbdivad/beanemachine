@@ -170,14 +170,26 @@ const anyBaseball = async (): Promise<boolean> =>
  *     who is told nothing is open has been told something he can see is false.
  *
  * `want` is the league the ask named, or null for "whatever he is looking at".
+ *
+ * EVERY REFUSAL ALSO SAYS WHETHER THERE IS A BASEBALL TAB AT ALL, because that is the fact
+ * the page turns into a button and it is not the same fact as "this ask failed". The page
+ * used to derive it by testing the refusal's prose for "no Yahoo", which matches one of the
+ * three sentences below: the football refusal — whose own `fix` tells him to open a baseball
+ * tab — read as "a tab is open", and the app hid the button that opens one. Stated here
+ * instead, where it is known, as `ExtensionMessage.yahooOpen`.
  */
-const pickTab = async (want: string | null): Promise<{ tab: YahooTab } | { failure: GrabFailure }> => {
+const pickTab = async (
+	want: string | null
+): Promise<{ tab: YahooTab } | { failure: GrabFailure; yahooOpen: boolean }> => {
 	const open = await openYahooTabs()
 	const baseball = open.filter(t => t.sport === SPORT)
 
 	if (!baseball.length) {
 		const other = open.find(t => t.sport && t.sport !== SPORT)
 		return {
+			/* A football tab is not a tab this can read, so it is not a tab to offer a read
+			   from — which is the same rule `anyBaseball` answers `hello` with. */
+			yahooOpen: false,
 			failure:
 				other ?
 					{
@@ -200,6 +212,9 @@ const pickTab = async (want: string | null): Promise<{ tab: YahooTab } | { failu
 		const match = baseball.find(t => t.league === want)
 		if (match) return { tab: match }
 		return {
+			/* There IS one, on another league. Offering him "Open Yahoo" here would be an
+			   offer to open a second tab of a site he already has open. */
+			yahooOpen: true,
 			failure: {
 				step: "yahoo",
 				/* No league id and no team id in the sentence: an id is a field name to a
@@ -264,7 +279,7 @@ const askYahoo = async (
 
 	const picked = await pickTab(msg.leagueId ?? null)
 	if ("failure" in picked) {
-		reply({ kind: "failed", failure: picked.failure })
+		reply({ kind: "failed", failure: picked.failure, yahooOpen: picked.yahooOpen })
 		return
 	}
 	const tab = picked.tab.id
@@ -292,11 +307,20 @@ const askYahoo = async (
 						what: "that Yahoo tab could not be read",
 						fix: "Reload your Yahoo tab, then try again.",
 						detail: chrome.runtime.lastError?.message
-					}
+					},
+					/* The tab is there and it is baseball — `pickTab` just chose it — so the
+					   answer to "is there anything to read" is yes, whatever went wrong with
+					   reading it. Offering "Open Yahoo" for a tab he already has open is how
+					   this went wrong in the other direction. */
+					yahooOpen: true
 				})
 				return
 			}
-			reply(answer)
+			/* Every answer that came back through a CHOSEN tab carries the fact that a tab was
+			   chosen, so the page never has to infer it from a sentence — including the
+			   refusals the content script writes itself (a wall, the gate, the ceiling), which
+			   say nothing about tabs and were being read as though they did. */
+			reply({ ...(answer as object), yahooOpen: true })
 		}
 	)
 }
@@ -375,7 +399,24 @@ chrome.action.onClicked.addListener(() => {
 		   back undefined, and here that would throw on the reader's own press of the
 		   toolbar button — the one gesture where nothing else can report the failure. */
 		const open = (tabs ?? []).find(t => typeof t.id === "number")
-		if (open?.id !== undefined) void chrome.tabs.update(open.id, { active: true })
-		else void chrome.tabs.create({ url: "https://beanemachine.com/" })
+		if (open?.id === undefined) {
+			void chrome.tabs.create({ url: "https://beanemachine.com/" })
+			return
+		}
+		void chrome.tabs.update(open.id, { active: true })
+		/*
+		   AND RAISE THE WINDOW IT IS IN, which `tabs.update` does not do.
+
+		   `active: true` SELECTS a tab within its own window and stops there. The reader this
+		   whole feature is written for has two windows — Yahoo in one, the board in the other,
+		   side by side, which is the arrangement the press exists to serve — and for him the
+		   button selected a tab he could not see and nothing appeared to happen. The one
+		   gesture with no other way to report a failure was the one that silently did nothing.
+
+		   `windowId` was already declared on `Tab` in chrome.d.ts and read nowhere. Guarded
+		   because a tab from a refused or partial query need not carry it, and a `windows`
+		   call with an undefined id is an error in a listener where nothing can report it.
+		*/
+		if (typeof open.windowId === "number") void chrome.windows.update(open.windowId, { focused: true })
 	})
 })

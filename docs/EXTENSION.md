@@ -78,11 +78,9 @@ and the `-store.zip` itself came out byte for byte identical.
 ### `extension/src/yahoo.ts` — the half inside Yahoo
 
 Runs on `*://*.fantasysports.yahoo.com/*`, at `document_idle`, top frame only. It is the
-only code in the project that can see a Yahoo page, and it answers exactly three
-questions, each of them a reply to something the reader pressed:
+only code in the project that can see a Yahoo page, and it answers exactly three asks
+beyond `hello`, each of them a reply to something the reader pressed.
 
-- **`page`** — `document.body.innerText` and `location.href` of the tab he has open, and
-  nothing else.
 - **`league`** — that page, plus one fetch of `/b1/<id>/settings` and one of
   `/b1/<id>/matchup`, both reduced to text inside the content script. One press, three
   pages, because a team page carries a roster and no scoring table, a settings page
@@ -94,6 +92,18 @@ questions, each of them a reply to something the reader pressed:
   tell a nine-position sweep that returned four positions from a reader who happened to be
   standing on the shortstop page. This is the only ask that costs Yahoo more than the page
   the reader already has open, and it is the only one behind a button of its own.
+- **`rosters`** — the matchup page read as two sides, so the app knows which men are the
+  opponent's. It was missing from this list for some time; `ASKS` in
+  `src/data/extension.ts` is the list that is true, and it is four entries long counting
+  `hello`.
+
+**There used to be a fifth, and its absence is the point.** `page` handed back
+`document.body.innerText` and `location.href` of whatever tab the reader had open, for a
+caller that no longer existed: nothing in the product asked for it, and while it stood,
+any page on the app's own origin could read the reader's open Yahoo tab through it. It is
+removed from `ASKS` rather than narrowed — a narrower version is still a general-purpose
+page reader with a smaller argument — and an old page that asks for it is refused by name
+by the rule below.
 
 An ask it does not recognise is **refused by name** (`isKnownAsk`) rather than falling
 through the listener. Falling through returns `false`, which closes the reply channel,

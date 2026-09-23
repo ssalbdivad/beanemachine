@@ -28,12 +28,49 @@ import {
 	type GrabFailure
 } from "../../src/data/extension.ts"
 import { YAHOO, type Fetchable } from "../../src/data/platforms.ts"
+/* The app's own entity decoder, so a page read here and the same page fetched from Node
+   produce the same text. See `renderedText`. */
+import { decodeEntities } from "../../src/html.ts"
 
 /** Yahoo throttles by serving a wall rather than an error status, so the words are the
- *  only signal — the same two tests `src/auto/roster.ts` uses against the same site, kept
+ *  only signal — the same test `src/auto/roster.ts` uses against the same site, kept
  *  identical on purpose so both readers call the same page the same thing. */
 const THROTTLED = /too many requests|unusual traffic|rate limit|temporarily blocked|request denied/i
-const SIGN_IN = /login\.yahoo\.com|\/account\/challenge|guce\.yahoo\.com|please sign in/i
+
+/**
+ * THE SIGN-IN WALL ARRIVES TWO WAYS, AND ONE REGEX WAS BEING ASKED TO CATCH BOTH.
+ *
+ * It was `/login\.yahoo\.com|\/account\/challenge|guce\.yahoo\.com|please sign in/i`, applied
+ * to TEXT at all four call sites — and text here has been through `renderedText`, which
+ * deletes every tag and therefore every href, after deleting the script bodies. So three of
+ * the four alternatives could not match anything the function was ever handed. `innerText`
+ * carries no href either. What was left doing the whole job was the literal visible phrase
+ * "please sign in", on a check the file's own note calls the most expensive one it has: "a
+ * MISSED wall is a throttle parsed as a league, written into his stores as an empty team and
+ * an empty wire, and presented as the truth".
+ *
+ * The sibling reader has the same pattern and applies it correctly — `src/auto/roster.ts`
+ * tests it against `page.url()` — so the two were only ever "identical on purpose" in their
+ * spelling. Split here into the two things they are:
+ *
+ *   `SIGN_IN_URL` is the definitive signal and needs no guessing at wording, and it is the
+ *   one `roster.ts` uses. It is tested against `Response.url`, which is the FINAL url after
+ *   redirects. That reaches the case that matters most in a content script — a same-origin
+ *   redirect to `/account/challenge` — and cannot reach `login.yahoo.com` or `guce`, which
+ *   are other hosts: an MV3 content script's fetch is subject to the page's CORS, so a
+ *   cross-origin redirect rejects rather than resolving, and the throw is already turned
+ *   into a sentence by every caller. Kept in full anyway, because it costs nothing and it is
+ *   the test that stops being a guess if that ever changes.
+ *
+ *   `SIGN_IN_TEXT` is the words, for the case the file's own comment says is the ordinary
+ *   one: the wall arrives as a 200 with a page at the same url. THE EXACT WORDING IS NOT
+ *   MEASURED — no capture of a Yahoo sign-in interstitial is committed here, and the fixture
+ *   in test/extension.mjs serves a sentence this file chose. So this is the half that can be
+ *   wrong, and it is deliberately a phrase rather than the bare words "sign in", which
+ *   appear in the header of every signed-in Yahoo page.
+ */
+const SIGN_IN_URL = /login\.yahoo\.com|\/account\/challenge|guce\.yahoo\.com/i
+const SIGN_IN_TEXT = /please sign in|sign in to continue|sign in to your account/i
 
 const now = (): string => new Date().toISOString()
 
@@ -108,16 +145,40 @@ const getPage = async (url: string): Promise<Response> => {
  * as "Yahoo asked you to sign in". The reader would be told to sign in on the page he was
  * already signed in to, and the read would be refused for a wall that was never there.
  * Written out once because three callers needed it and two of them had their own copy.
+ *
+ * ── AND IT DECODES WHAT THE APP'S OWN CONVERTER DECODES ───────────────────────────────
+ *
+ * This had two hand-written replaces, `&nbsp;` and `&amp;`, against `decodeEntities` in
+ * src/html.ts — six named entities plus decimal and hex numeric refs — which is what
+ * src/import.ts and src/data/yahoo-pool.ts run over THE SAME YAHOO PAGES when they are
+ * fetched server-side. So one page had two readings. Run on
+ * `<td>Mrs. Met&#39;s Harem</td><td>Hits &gt; 2</td>`, this file produced
+ * `Mrs. Met&#39;s Harem\tHits &gt; 2` and `documentText` produced `Mrs. Met's Harem Hits > 2`
+ * — and the text from here is what goes to `leagueFromPastedSettings`, the parser that names
+ * the teams. A team name carrying a literal `&#39;` does not match the same team name
+ * carrying an apostrophe, because `normalizeName` strips `'` and knows nothing about `&#39;`.
+ * Latent rather than demonstrated: no committed fixture carries an entity. It is here
+ * because the two files are the reader and the fetcher of one page and only one of them
+ * decoded.
+ *
+ * IMPORTING IT IS NOT PARSING. The rule at the top of this file is that the extension hands
+ * over text and the app decides what it means; `decodeEntities` is a leaf with no imports
+ * that turns `&gt;` into `>`, which is a fact about HTML rather than a fact about Yahoo, and
+ * it is the same function the app would have applied a moment later if the page had been
+ * fetched from Node. Nothing about a league is decided here.
+ *
+ * Decoded AFTER the tags come out and BEFORE the whitespace passes, so `&nbsp;` becomes the
+ * plain space `ENTITIES` maps it to and is then collapsed with the rest.
  */
 const renderedText = (html: string): string =>
-	html
-		.replace(/<script[\s\S]*?<\/script>/gi, " ")
-		.replace(/<style[\s\S]*?<\/style>/gi, " ")
-		.replace(/<\/(tr|div|p|li|h\d|table)>/gi, "\n")
-		.replace(/<\/t[dh]>/gi, "\t")
-		.replace(/<[^>]+>/g, "")
-		.replace(/&nbsp;/g, " ")
-		.replace(/&amp;/g, "&")
+	decodeEntities(
+		html
+			.replace(/<script[\s\S]*?<\/script>/gi, " ")
+			.replace(/<style[\s\S]*?<\/style>/gi, " ")
+			.replace(/<\/(tr|div|p|li|h\d|table)>/gi, "\n")
+			.replace(/<\/t[dh]>/gi, "\t")
+			.replace(/<[^>]+>/g, "")
+	)
 		.replace(/[ \t]+\n/g, "\n")
 		.replace(/\n{3,}/g, "\n\n")
 
@@ -170,11 +231,12 @@ const grabHere = (): Grab => {
 }
 
 /**
- * The sign-in wall and the throttle wall both arrive as a 200 with a page, so the only
- * way to tell them from a real answer is to read the words. Checked on the text rather
- * than the HTML because the HTML of every Yahoo page contains the string "sign in"
- * somewhere in its header — and on text put through `renderedText`, which is what takes
- * `login.yahoo.com` out of the inline script in the head where it would have matched.
+ * The sign-in wall and the throttle wall both arrive as a 200 with a page, so for a page
+ * that did not redirect the words are the only way to tell them from a real answer —
+ * `wallAt` below is the half that reads the url instead, and it runs first wherever there is
+ * a `Response` to read it off. Checked on the text rather than the HTML because the HTML of
+ * every Yahoo page contains the string "sign in" somewhere in its header, and on text put
+ * through `renderedText`, which is what takes the inline script in the head out of the way.
  *
  * TWO THOUSAND CHARACTERS, not six hundred, AND THE TRADE IS DELIBERATE.
  *
@@ -192,14 +254,27 @@ const grabHere = (): Grab => {
  * as an empty team and an empty wire, and presented as the truth — which is the single most
  * expensive failure this feature has, and the reason the check exists at all.
  */
+const SIGNED_OUT: GrabFailure = {
+	step: "yahoo",
+	what: "Yahoo asked you to sign in",
+	fix: "Sign in to Yahoo in that tab, then try again."
+}
+
+/**
+ * THE WALL AS THE URL TELLS IT, before anybody reads a word of the page.
+ *
+ * `Response.url` is the url the fetch ENDED on, so a page that redirected to Yahoo's own
+ * sign-in challenge says so in a field rather than in prose. Checked first because it cannot
+ * be wrong: there is no wording to guess at and no false wall to trade against (a league
+ * NAMED "Request Denied" is a live hazard for the text test below and is no hazard at all
+ * here). See `SIGN_IN_URL` for what this can and cannot reach from inside a content script.
+ */
+const wallAt = (res: Response): GrabFailure | null =>
+	SIGN_IN_URL.test(res.url) ? SIGNED_OUT : null
+
 const wallIn = (text: string): GrabFailure | null => {
 	const head = text.slice(0, 2000)
-	if (SIGN_IN.test(head))
-		return {
-			step: "yahoo",
-			what: "Yahoo asked you to sign in",
-			fix: "Sign in to Yahoo in that tab, then try again."
-		}
+	if (SIGN_IN_TEXT.test(head)) return SIGNED_OUT
 	if (THROTTLED.test(head))
 		return {
 			step: "yahoo",
@@ -239,6 +314,25 @@ const SPOKEN: Record<string, string> = {
 	RP: "relievers"
 }
 
+/**
+ * THE SAME THING FOR PAGES, and for the same reason.
+ *
+ * A one-press read fetches three or four pages of the reader's own league, and when one of
+ * them will not come the sentence has to name WHICH — "Yahoo would not answer for your
+ * league's scoring page" tells him what he is missing off the board, and `/settings` or a
+ * `PageKind` tells him nothing he can hold. `unknown` is here so the lookup cannot produce
+ * `undefined` for a page kind added later; the fallback at the call site is the same words.
+ */
+const SPOKEN_PAGE: Record<string, string> = {
+	team: "your team's roster page",
+	settings: "your league's scoring page",
+	eligibility: "your league's eligibility page",
+	matchup: "this week's matchup page",
+	players: "your league's player list",
+	league: "your league's home page",
+	unknown: "one of your league's pages"
+}
+
 const sweep = async (
 	leagueId: string,
 	sport: string,
@@ -263,6 +357,10 @@ const sweep = async (
 			   the request and its deadline live. */
 			spend()
 			const res = await getPage(url)
+			/* The sign-in wall as the url tells it, before the page is read — see `wallAt`.
+			   Checked before the status, because a challenge can arrive with a 200. */
+			const sent = wallAt(res)
+			if (sent) return { grabs, failure: sent }
 			if (!res.ok)
 				return {
 					grabs,
@@ -590,10 +688,21 @@ chrome.runtime.onMessage.addListener(
 			reply({ kind: "failed", failure: wall })
 			return true
 		}
-		if (msg.ask === "page") {
-			reply({ kind: "grabs", grabs: [grabHere()] })
-			return true
-		}
+		/*
+		   THE `page` ASK IS GONE, and it stood here.
+
+		   `if (msg.ask === "page") { reply({ kind: "grabs", grabs: [grabHere()] }); return true }`
+		   — above the gate, above the ceiling, answering with `document.body.innerText` and,
+		   on a players page, the row markup, for whatever league tab the router chose. Nothing
+		   in the app had asked for it since the "take me to Yahoo" press stopped posting one;
+		   the only remaining callers were probes in test/extension.mjs, which use `league` now.
+
+		   Removed rather than narrowed. This file's threat model is a script injected into a
+		   page of the app's own origin (see `asked` below), and a gate on an ask the product
+		   does not make is a gate nobody exercises — the honest move is for the capability not
+		   to exist. `grabHere()` stays; the `league` branch is what needs it. The full account
+		   is at `ASKS` in src/data/extension.ts.
+		*/
 
 		/*
 		   ONE PRESS, TWO PAGES.
@@ -681,51 +790,152 @@ chrome.runtime.onMessage.addListener(
 			 *
 			 * Empty text is how a page Yahoo would not serve comes back, and the caller treats
 			 * that as "not read" rather than as "empty".
+			 *
+			 * ── IT RETURNS A REASON NOW, AND IT USED TO RETURN `null` ─────────────────────
+			 *
+			 * `if (!res.ok) return null` and `if (!text.trim()) return null`, and the loop below
+			 * read `if (!got) continue`. So a settings page Yahoo answered 429 or 500 for was
+			 * DROPPED, and the reply went back as `{ kind: "grabs", grabs: [...] }` with no
+			 * `failure` at all — a successful read, by its own account, missing the one page
+			 * that carries the scoring table.
+			 *
+			 * src/client/read-yahoo.ts states the opposite as settled fact: "`answer.failure` is
+			 * set whenever a page in the set could not be fetched — a settings page Yahoo
+			 * refused, a matchup page behind a wall — while the grabs that DID arrive come back
+			 * as normal." That fix was applied to the app side only; this side never set the
+			 * field. Nothing downstream compensates either — `readGrabs` has `if (settings) {`
+			 * with no else — so the reader was told "9 men, in the seats they are in" and got a
+			 * board priced on borrowed scoring values with nothing anywhere saying so.
+			 *
+			 * The sweep a hundred lines up has always done this correctly. This is the same
+			 * shape: name the page in the reader's words, keep what did arrive, send both.
 			 */
-			const fetchAs = async (want: Fetchable): Promise<Grab | null> => {
-				spend()
-				const res = await getPage(want.url)
-				if (!res.ok) return null
-				const raw = await res.text()
-				const text = renderedText(raw)
-				if (!text.trim()) return null
-				return {
-					url: want.url,
-					kind: want.kind,
-					text,
-					html: want.as === "html" ? (rowsOnly(raw) ?? raw) : undefined,
-					at: now()
+			const fetchAs = async (
+				want: Fetchable
+			): Promise<{ grab: Grab } | { failure: GrabFailure; stop?: true }> => {
+				const named = SPOKEN_PAGE[want.kind] ?? "one of your league's pages"
+				try {
+					spend()
+					const res = await getPage(want.url)
+					/* A redirect to Yahoo's own sign-in challenge is a fact about the SESSION,
+					   so it stops the press the same way a wall in the text does. */
+					const sent = wallAt(res)
+					if (sent) return { failure: sent, stop: true }
+					if (!res.ok)
+						return {
+							failure: {
+								step: "league",
+								/* A status code is Yahoo's word to a program. What the reader can
+								   act on is which page stopped — the same choice the sweep made
+								   for positions, and the code travels in `detail`. */
+								what: `Yahoo would not answer for ${named}`,
+								fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+								detail: `${res.status} ${want.url}`
+							}
+						}
+					const raw = await res.text()
+					const text = renderedText(raw)
+					if (!text.trim())
+						return {
+							failure: {
+								step: "league",
+								what: `Yahoo sent back an empty ${named}`,
+								fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+								detail: `${res.status} with no text, ${want.url}`
+							}
+						}
+					return {
+						grab: {
+							url: want.url,
+							kind: want.kind,
+							text,
+							html: want.as === "html" ? (rowsOnly(raw) ?? raw) : undefined,
+							at: now()
+						}
+					}
+				} catch (e) {
+					/* Caught HERE rather than around the loop, so a page that timed out costs
+					   that page and not the three that had already arrived. `getPage`'s abort
+					   lands here, and so does the CORS rejection a cross-origin redirect to
+					   `login.yahoo.com` produces — which is the sign-in wall arriving as a throw
+					   rather than as a url, and is why the sentence names the session. */
+					return {
+						failure: {
+							step: "league",
+							what: `${named} never came back`,
+							fix: "Check you are still signed in to Yahoo, then try again.",
+							detail: String(e)
+						}
+					}
 				}
 			}
 			void (async () => {
+				const extra: Grab[] = []
+				/*
+				   THE FIRST THING THAT WENT WRONG, KEPT — and a wall replaces it.
+
+				   `GrabFailure` is one failure and not a list, which is the right shape for a
+				   screen: the first refusal is what explains the ones after it, and four
+				   sentences about four pages is a reader reading a log. A wall is the exception
+				   and overwrites, because a throttle or a sign-in is a fact about the whole
+				   session rather than about one page, and it is the sentence he can act on.
+				*/
+				let failure: GrabFailure | null = null
 				try {
 					/*
 					   ONE PRESS, EVERY PAGE THE DESCRIPTOR ASKED FOR, SEQUENTIALLY.
-					
+
 					   Sequential rather than parallel for the reason the sweep is: Yahoo answers a
 					   burst by refusing, and commit de44045 records what that looks like — 150
 					   players, then 25, then 0, then "Request denied". Two or three requests is not
 					   a burst, and the gap is left to the sweep, which is the one that asks nine
 					   times; this loop is bounded by the descriptor and the descriptor is bounded by
 					   a reader's patience.
-					
+
 					   A WALL ON ANY PAGE STOPS THE PRESS, because a throttle is a fact about the
 					   session rather than about the page: the second request would be refused too,
 					   and a half-read league written into his stores is the failure this whole
-					   check exists to prevent.
+					   check exists to prevent. A page that merely failed does NOT stop it — the
+					   other pages are still worth having, and the reason it failed now travels
+					   with them.
 					*/
-					const extra: Grab[] = []
-					let wall: GrabFailure | null = null
 					for (const want of plan) {
 						const got = await fetchAs(want)
-						if (!got) continue
-						wall = wallIn(got.text)
-						if (wall) break
-						extra.push(got)
+						if ("failure" in got) {
+							if (got.stop) {
+								failure = got.failure
+								break
+							}
+							failure ??= got.failure
+							continue
+						}
+						const wall = wallIn(got.grab.text)
+						if (wall) {
+							failure = wall
+							break
+						}
+						extra.push(got.grab)
 					}
-					reply({ kind: "grabs", grabs: [here, ...extra], failure: wall ?? undefined })
-				} catch {
-					reply({ kind: "grabs", grabs: [here] })
+					reply({ kind: "grabs", grabs: [here, ...extra], failure: failure ?? undefined })
+				} catch (e) {
+					/*
+					   AND THE UNPLANNED THROW SAYS SO TOO.
+
+					   This replied `{ kind: "grabs", grabs: [here] }` and nothing else, so a
+					   failure nobody predicted — inside `wallIn`, inside `rowsOnly`, inside the
+					   reply itself — was reported as a completed read of one page. The pages that
+					   had already arrived went with it.
+					*/
+					reply({
+						kind: "grabs",
+						grabs: [here, ...extra],
+						failure: failure ?? {
+							step: "league",
+							what: "your league could not be read all the way through",
+							fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+							detail: String(e)
+						}
+					})
 				} finally {
 					/* Given back on every path, including the ones that threw: a gate that is not
 					   released is an extension that has quietly stopped working, which is worse
@@ -795,6 +1005,11 @@ chrome.runtime.onMessage.addListener(
 			void (async () => {
 				try {
 					const grabs: Grab[] = []
+					/* The wall, or — kept for the same reason the `league` branch keeps one —
+					   the first roster that simply would not come. A missing roster is already
+					   refused downstream by counting `askedTeams`, so this does not decide
+					   anything; it is the difference between the app saying "one of the rosters
+					   did not come back" and the app saying nothing while it refuses. */
 					let wall: GrabFailure | null = null
 					for (let i = 0; i < plan.length; i++) {
 						const want = plan[i]!
@@ -814,14 +1029,40 @@ chrome.runtime.onMessage.addListener(
 						if (i > 0) await new Promise(r => setTimeout(r, 250))
 						spend()
 						const res = await getPage(want.url)
-						if (!res.ok) continue
+						/* A redirect to the sign-in challenge, read off the url rather than
+						   guessed at from the words — see `wallAt`. Same stop as a wall. */
+						const sent = wallAt(res)
+						if (sent) {
+							wall = sent
+							break
+						}
+						if (!res.ok) {
+							wall ??= {
+								step: "rosters",
+								what: `Yahoo would not answer for roster ${i + 1} of ${plan.length}`,
+								fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+								detail: `${res.status} ${want.url}`
+							}
+							continue
+						}
 						const text = renderedText(await res.text())
-						if (!text.trim()) continue
+						if (!text.trim()) {
+							wall ??= {
+								step: "rosters",
+								what: `Yahoo sent back an empty roster ${i + 1} of ${plan.length}`,
+								fix: "Wait a few minutes and try again. Nothing is wrong with your league.",
+								detail: `${res.status} with no text, ${want.url}`
+							}
+							continue
+						}
 						/* A WALL STOPS THE PRESS. A throttle is a fact about the session, not about
 						   the page: the next request would be refused too, and a union missing one
 						   roster is not a smaller answer — it is 27 taken men reported as free. */
-						wall = wallIn(text)
-						if (wall) break
+						const walled = wallIn(text)
+						if (walled) {
+							wall = walled
+							break
+						}
 						grabs.push({
 							url: want.url,
 							kind: want.kind,

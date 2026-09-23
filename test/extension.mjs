@@ -352,6 +352,17 @@ let teamsServed = 0
 let teamsUntil = Infinity
 let playersServed = 0
 
+/**
+ * WHEN THE SETTINGS PAGE IS THE ONE YAHOO WILL NOT SERVE.
+ *
+ * A one-press read fetches four pages and only one of them carries the scoring table. A
+ * refusal on that one used to be DROPPED — `if (!res.ok) return null`, `if (!got) continue`
+ * — and the reply went back as a completed read, so the reader was told "9 men, in the seats
+ * they are in" and got a board priced on somebody else's scoring values. Set to a status for
+ * one block below and put back afterwards.
+ */
+let settingsStatus = 0
+
 /** After this many players pages, answer with a STATUS rather than with a page. Yahoo
  *  refuses both ways — a wall served as 200 and a plain 429 — and the two take different
  *  branches through the sweep, only one of which was covered. */
@@ -380,7 +391,13 @@ const server = createServer((req, res) => {
 		res.writeHead(200, { "content-type": "text/html; charset=utf-8" })
 		res.end(html)
 	}
-	if (url.pathname.endsWith("/settings")) return send(settingsPage(real))
+	if (url.pathname.endsWith("/settings")) {
+		if (settingsStatus) {
+			res.writeHead(settingsStatus, { "content-type": "text/html; charset=utf-8" })
+			return res.end("<!doctype html><body>Service Unavailable</body>")
+		}
+		return send(settingsPage(real))
+	}
 	if (url.pathname.endsWith("/positioneligibility")) return send(eligibilityPage(real.eligibility))
 	if (url.pathname.endsWith("/matchup")) return send(matchupPage())
 	if (url.pathname.endsWith("/players")) {
@@ -680,6 +697,44 @@ t("and the other side of the matchup, told apart from his own team",
 	read.opponent === rivals.length, JSON.stringify({ got: read.opponent, want: rivals.length }))
 t("with none of his own men on the other side of it", read.mineOnBoth === 0, String(read.mineOnBoth))
 
+/* ── A PAGE YAHOO REFUSES IS SAID, NOT DROPPED ───────────────────────────────────────
+   THE MOST EXPENSIVE SILENCE THIS FEATURE HAD.
+
+   `fetchAs` in extension/src/yahoo.ts returned `null` on a status it did not like and on an
+   empty body, and the loop read `if (!got) continue`. So the settings page — the ONE page of
+   the four that carries the scoring table — could be refused by Yahoo and the reply still
+   went back as `{ kind: "grabs", grabs: [...] }` with no `failure` field at all. A completed
+   read, by its own account, missing the thing that prices every row.
+
+   Nothing downstream compensated. src/data/yahoo-read.ts is `const settings = grabs.find(...)`
+   followed by `if (settings) {` with no else, so a missing settings grab produces no note;
+   `readLeagueHere` only pushes "Read your league's own scoring" when a league came back. The
+   reader was told "9 men, in the seats they are in" and given a board priced on the borrowed
+   values his preset came with.
+
+   src/client/read-yahoo.ts states the opposite as settled fact — "`answer.failure` is set
+   whenever a page in the set could not be fetched — a settings page Yahoo refused, a matchup
+   page behind a wall — while the grabs that DID arrive come back as normal" — and the fix
+   that comment describes was applied to the app side only. This is the extension side of it.
+
+   BOTH HALVES OF THE CLAIM ARE ASSERTED, because either alone is a worse product: the pages
+   that did arrive still arrive (three of four, not none), and the one that did not is named
+   in words the reader can hold rather than as a status code. */
+{
+	settingsStatus = 503
+	const short = await askFor("league")
+	settingsStatus = 0
+	t("a page Yahoo refuses is reported, not dropped from a read that then calls itself complete",
+		short.kind === "grabs" && !!short.failure,
+		JSON.stringify({ kind: short.kind, failure: short.failure ?? null }).slice(0, 240))
+	t("…naming the page in the reader's words rather than by a status code",
+		/scoring page/.test(short.failure?.what ?? "") && /503/.test(short.failure?.detail ?? ""),
+		JSON.stringify(short.failure ?? null))
+	t("…and the three pages that did arrive still arrive, because four of four is not the only useful answer",
+		(short.grabs ?? []).map(g => g.kind).join(",") === "team,eligibility,matchup",
+		(short.grabs ?? []).map(g => g.kind).join(","))
+}
+
 /* ── the sweep ───────────────────────────────────────────────────────────────────── */
 const before = asked.length
 const pool = await askFor("pool", { leagueId: LEAGUE_ID, sport: "baseball" })
@@ -725,7 +780,22 @@ await walled.goto(`http://baseball.fantasysports.yahoo.com/b1/${LEAGUE_ID}/8`, {
 await walled.evaluate(() => {
 	document.body.textContent = "Request denied. Too many requests from your network."
 })
-const refused = await askFor("page")
+/*
+   THE PROBE IS `league` NOW, AND IT USED TO BE `page`.
+
+   Six blocks in this file reached for `askFor("page")` as a generic "read whatever tab you
+   pick" — the cheapest way to make the extension do something and look at the answer. That
+   ask has been deleted: nothing in the product had asked for it since the "take me to Yahoo"
+   press stopped posting one, and what was left was the only ask that passed no gate and no
+   ceiling, handing back the contents of the reader's signed-in Yahoo page to anything on the
+   app's origin that asked. The account is at `ASKS` in src/data/extension.ts.
+
+   `league` is the successor everywhere, and it claims MORE rather than less: it returns the
+   same `grabHere()` page as its first grab — which is the thing every one of these blocks
+   was actually looking at — and it also goes through the wall check, the gate and the
+   ceiling, so each of these assertions is now made about a press the product really makes.
+*/
+const refused = await askFor("league")
 t("a throttle is reported as a throttle, not as an empty league",
 	refused.kind === "failed" && /refusing to answer/i.test(refused.failure.what),
 	JSON.stringify(refused).slice(0, 200))
@@ -846,6 +916,26 @@ await walled.close()
 	t("an ask this build has never heard of is refused by name, not by going quiet",
 		unknown.kind === "failed" && /older than this page/.test(unknown.failure?.what ?? ""),
 		JSON.stringify(unknown).slice(0, 200))
+
+	/*
+	   AND `page` IS ONE OF THOSE NOW.
+
+	   It was the only ask that passed no gate and no ceiling — above `gateHeld()` and
+	   `waitFor()` in extension/src/yahoo.ts — and it handed back `document.body.innerText`,
+	   plus the row markup on a players page, for whatever Yahoo tab the router chose. The
+	   product stopped asking for it when the "take me to Yahoo" press stopped posting one;
+	   what remained was a capability at the exact seam this design names as its threat model,
+	   which is a script injected into a page of the app's own origin. Deleted rather than
+	   gated, because a gate on an ask nobody makes is a gate nobody exercises.
+
+	   Asserted as a REFUSAL rather than as a silence: an old page that still posts one gets a
+	   sentence naming which half is behind, which is the same treatment every retired ask
+	   gets and is the thing that stops it reading as a lost connection.
+	*/
+	const retired = await askFor("page")
+	t("the `page` ask is gone, and a page that still asks for it is refused by name",
+		retired.kind === "failed" && /older than this page/.test(retired.failure?.what ?? ""),
+		JSON.stringify(retired).slice(0, 200))
 }
 
 /* ── TWO LEAGUES OPEN AT ONCE ────────────────────────────────────────────────────────
@@ -921,6 +1011,23 @@ await walled.close()
 	t("and with only football open, it says which sport is open rather than that none is",
 		onlyFootball.kind === "failed" && /football/.test(onlyFootball.failure?.what ?? ""),
 		JSON.stringify(onlyFootball).slice(0, 200))
+
+	/*
+	   AND IT SAYS, IN A FIELD, THAT THERE IS STILL NOTHING TO READ.
+
+	   The page turns this fact into a button: `{!ext.yahooOpen && <button>Open Yahoo</button>}`
+	   on Connect.tsx. It used to derive it by testing the refusal's PROSE for "no Yahoo",
+	   which matches the empty-browser sentence and does not match this one — so the football
+	   refusal, whose own `fix` is "Open your baseball team on Yahoo in another tab", set
+	   `yahooOpen` true and hid the only control that does that. He was told to open a tab at
+	   the moment the button for it disappeared.
+
+	   A football tab is not a tab this can read, so it is not a tab to offer a read from —
+	   the same rule `anyBaseball` answers `hello` with, now said on the answer to an ask.
+	*/
+	t("…and the answer carries the fact itself, so the app is not reading a sentence for it",
+		onlyFootball.yahooOpen === false,
+		JSON.stringify({ yahooOpen: onlyFootball.yahooOpen }))
 
 	await football.close()
 	/* A baseball tab again, for everything below — including the reader's own path through
@@ -1206,7 +1313,7 @@ await walled.close()
 		{ waitUntil: "domcontentloaded" }
 	)
 	await list.waitForTimeout(400)
-	const one = await askFor("page")
+	const one = await askFor("league")
 	const readOne = await app.evaluate(async grabs => {
 		const { readGrabs } = await import("/src/data/yahoo-read.ts")
 		const snap = await (await fetch("/snapshot.json")).json()
@@ -1284,7 +1391,7 @@ await walled.close()
 	   match pattern is concerned, and no league in its path at all. */
 	await only.goto("http://baseball.fantasysports.yahoo.com/", { waitUntil: "domcontentloaded" })
 	await only.waitForTimeout(600)
-	const gone = await askFor("page")
+	const gone = await askFor("league")
 	t("a tab that has wandered off his league is not read as though it were still on it",
 		gone.kind === "failed" && /no Yahoo fantasy page is open/.test(gone.failure?.what ?? ""),
 		JSON.stringify(gone).slice(0, 200))
@@ -1402,7 +1509,7 @@ await walled.close()
 	await out.evaluate(() => {
 		document.body.textContent = "Please sign in to continue to Yahoo Fantasy."
 	})
-	const asked = await askFor("page")
+	const asked = await askFor("league")
 	t("an expired session is reported as an expired session, not as a team of nobody",
 		asked.kind === "failed" && /sign in/i.test(asked.failure?.what ?? ""),
 		JSON.stringify(asked).slice(0, 200))
@@ -2170,6 +2277,32 @@ await walled.close()
 		chromeM.version)
 
 	/*
+	   AND THE ONE THING THE FORMAT RULES ABOVE COULD NOT CATCH: A VERSION THAT DID NOT MOVE.
+
+	   `VERSION` was "0.2.0" while `PROTOCOL` was 3, and had been since commit 7296c31 bumped
+	   the protocol for `rosters` and left the version alone. Everything above passed: the two
+	   browsers agreed, the string was one Chrome takes. What shipped was two different builds
+	   under one version string, one of which refuses `rosters`.
+
+	   That is not a cosmetic drift. `public/updates.json` — written by the `update` block in
+	   extension/build.mjs — advertises this exact string, and Firefox fetches an update only
+	   when the advertised version is HIGHER than the installed one. So a reader on the older
+	   0.2.0 was never offered the newer 0.2.0, while `protocolSkew` (src/data/extension.ts),
+	   extension/src/yahoo.ts and extension/src/background.ts all told him, in the same
+	   sentence, to update it in his browser's extensions list. The one instruction in the
+	   product that could not work.
+
+	   THE RULE IS THE MINOR NUMBER, not a recorded table of what each version shipped. A table
+	   is satisfiable by editing the row for a version that is already published, which is the
+	   same hand-bump failure one level up; this is not satisfiable at all except by moving the
+	   version. It holds for 0.2.0 ↔ 2 and 0.3.0 ↔ 3, and the trade it makes — the major stays
+	   0 while the rule stands — is written down at `VERSION` in extension/build.mjs.
+	*/
+	t("the shipped version's minor number is the protocol it speaks, so neither can move alone",
+		Number(parts[1]) === PROTOCOL,
+		`version ${chromeM.version} against PROTOCOL ${PROTOCOL}`)
+
+	/*
 	   AND THE DOCUMENT SOMEBODY PASTES FROM.
 
 	   extension/SUBMITTING.md holds the exact text to paste into each store's form and names
@@ -2205,8 +2338,35 @@ await walled.close()
 				js.includes(chromeM.version),
 			js.slice(0, 60))
 		t(`${f} is minified, not shipped as commented source`,
-			js.length < 12_000 && !js.includes("\n *"), `${js.length} bytes`)
+			js.length < 16_000 && !js.includes("\n *"), `${js.length} bytes`)
 	}
+
+	/*
+	   AND THE NUMBER THAT MEANS "MINIFIED", RATHER THAN A CEILING ANY FEATURE CAN BREAK.
+
+	   The per-file cap above was 12,000 and yahoo.js reached 12,467 the day it stopped
+	   dropping pages in silence — four sentences naming which page Yahoo refused, a table of
+	   what each page is called in the reader's words, and the app's own entity decoder pulled
+	   in so a page read here and the same page fetched from Node produce the same text. None
+	   of that is "shipped as commented source", which is what the assertion is for, so the
+	   cap moved to 16,000 and the claim it was standing in for is written down here instead.
+
+	   The RATIO is the honest statement, and it is PRINTED as well as asserted so the number
+	   in this comment can be re-derived by running the file: 139,278 characters of source
+	   across the three entry points and the three modules in src/ they pull in, against
+	   18,328 of bundle — 13.2%, measured 2026-09-22. A build that shipped commented source
+	   could not come near a fifth, which is where the assertion sits.
+	*/
+	const bundled = ["yahoo.js", "background.js", "bridge.js"].reduce(
+		(n, f) => n + readFileSync(new URL(`../dist-ext/chrome/${f}`, import.meta.url), "utf8").length,
+		0
+	)
+	const sources = ["../extension/src/yahoo.ts", "../extension/src/background.ts", "../extension/src/bridge.ts",
+		"../src/data/extension.ts", "../src/data/platforms.ts", "../src/html.ts"].reduce(
+		(n, f) => n + readFileSync(new URL(f, import.meta.url), "utf8").length, 0)
+	console.log(`\n  bytes — ${sources} of source became ${bundled} of bundle (${(bundled / sources * 100).toFixed(1)}%)\n`)
+	t("the three bundles together are a fifth of the source they were built from, which is what minified means",
+		bundled < sources / 5, `${bundled} of ${sources}`)
 }
 
 /* THIS RUNS BEFORE THE ORPHAN BLOCK BELOW, and the order is load-bearing: that block calls
@@ -2559,7 +2719,7 @@ await walled.close()
 		{ waitUntil: "domcontentloaded" }
 	)
 	await app.waitForTimeout(400)
-	const here = await askFor("page")
+	const here = await askFor("league")
 	const html = here.grabs?.[0]?.html ?? ""
 	t("the page in hand comes across with its rows",
 		/data-ys-playerid="\d+"/.test(html), html.slice(0, 120))
@@ -2627,7 +2787,7 @@ await walled.close()
 		await app.waitForTimeout(1000)
 
 		const started = Date.now()
-		const dead = await askFor("page")
+		const dead = await askFor("league")
 		const took = Date.now() - started
 		console.log(`\n  a read after the extension went away came back in ${took} ms\n`)
 		t("a read started after it went away comes back at once, not after ninety seconds",
@@ -2636,6 +2796,19 @@ await walled.close()
 		t("and says what actually happened, rather than blaming his Yahoo tab",
 			/switched off or updated/.test(dead.failure?.what ?? ""),
 			JSON.stringify(dead).slice(0, 200))
+		/*
+		   AND IT SAYS IT IN A FIELD, NOT ONLY IN THE SENTENCE.
+
+		   `step: "extension"` is shared with the two failures that mean the reader needs an
+		   UPDATE — the protocol-skew sentence and the unknown-ask refusal — which is the
+		   opposite advice to "there is nothing installed any more". The app has to tell them
+		   apart to know whether to stop offering the read at all, and matching on prose is
+		   how the `yahooOpen` button ended up hidden at the moment it was needed. So the
+		   bridge marks this one, and src/client/extension.ts reads the mark.
+		*/
+		t("…and marks it as gone, so the app can act on it without matching the sentence",
+			dead.gone === true && interrupted.gone === true,
+			JSON.stringify({ dead: dead.gone, interrupted: interrupted.gone }))
 		/* The mark is what `extensionHere()` reads during a first render to decide whether to
 		   offer a read at all. Left on a dead page it makes every screen offer something that
 		   cannot happen; taken off, the app recovers on its own without knowing any of this

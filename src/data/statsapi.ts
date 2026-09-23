@@ -1,4 +1,7 @@
 import { KEPT_STATS } from "../engine/points.ts"
+/* One predicate for "MLB called this one off", owned by the file that had to learn what
+ * MLB actually writes there. See `readSlateRows` for why the capture needs it too. */
+import { isCalledOff } from "./today.ts"
 
 /**
  * MLB StatsAPI — the observed record. Everything here is a real measurement the
@@ -338,20 +341,53 @@ export interface SlateGame {
 	final: boolean
 }
 
-export const fetchSlate = async (
-	startDate: string,
-	endDate: string
-): Promise<SlateGame[]> => {
-	const data = await json(
-		`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}` +
-			`&hydrate=probablePitcher`
-	)
+/** The `schedule?hydrate=probablePitcher` payload, narrowed to what is read, on the
+ *  same discipline as `RawGame` in src/data/today.ts: anything MLB adds is ignored
+ *  rather than typed. Written down at all because `json` returns `any`, and a status
+ *  field read through `any` is how this file came to test two different ones. */
+interface ScheduleSide {
+	team?: { id?: number }
+	probablePitcher?: { id?: number }
+}
+interface ScheduleResponse {
+	dates?: {
+		date?: string
+		games?: {
+			officialDate?: string
+			status?: { detailedState?: string; abstractGameState?: string }
+			teams?: { home?: ScheduleSide; away?: ScheduleSide }
+		}[]
+	}[]
+}
+
+/**
+ * The parse, separate from the fetch, so a status rule can be asserted against a
+ * captured response instead of against the weather — the split src/data/today.ts makes
+ * for `readSlate` and for the same reason. Both producers of `SlateGame` now read the
+ * same two fields the same way, which is the property that was broken (see below).
+ */
+export const readSlateRows = (data: ScheduleResponse, startDate: string): SlateGame[] => {
 	const out: SlateGame[] = []
 	for (const day of data.dates ?? [])
 		for (const game of day.games ?? []) {
 			const home = game.teams?.home?.team?.id
 			const away = game.teams?.away?.team?.id
 			if (typeof home !== "number" || typeof away !== "number") continue
+			/*
+			   A GAME NOBODY WILL PLAY IS NOT A GAME ON THE SLATE.
+
+			   A postponed game kept its original date here and the makeup appears on its own,
+			   so any window spanning both credited the club with a game that was never played
+			   — the 2.02% denominator inflation `wasPlayed` above measures (36,343 postponed
+			   rows and 56 cancelled, of 1,798,000 in this project's cache), arriving through
+			   the forward-looking path instead of the played-only one. `isCalledOff` rather
+			   than a second regex, because src/data/today.ts already owns that vocabulary and
+			   already had to learn that "Suspended: Rain" and "Cancelled" are the same news as
+			   "Postponed" while "Delayed" is not. Importing it here is what keeps the capture
+			   and the live read saying the same thing about the same game; today.ts's import
+			   back is type-only, so there is no cycle at runtime.
+			*/
+			if (isCalledOff(game.status?.detailedState ?? "")) continue
 			const probable = (side: "home" | "away") => {
 				const id = game.teams?.[side]?.probablePitcher?.id
 				return typeof id === "number" ? id : null
@@ -362,8 +398,38 @@ export const fetchSlate = async (
 				away,
 				homeProbable: probable("home"),
 				awayProbable: probable("away"),
-				final: game.status?.abstractGameState === "Final"
+				/*
+				   `wasPlayed`, not `abstractGameState === "Final"`.
+
+				   This is the exact mistake that predicate was written to end, twelve lines
+				   below the docblock that ends it: MLB reports a POSTPONED game as
+				   `abstractGameState: "Final"`. `fetchSchedule` was converted and this was
+				   not, so the two functions in this file disagreed about what "final" means —
+				   and so did the two producers of `SlateGame`, since `asSlateGames` in
+				   src/data/today.ts reads `detailedState` and additionally drops called-off
+				   games. `windowFrom(..., playedOnly)` cannot tell which producer made its
+				   rows.
+
+				   Latent rather than live when fixed: all 265 rows of the committed capture
+				   are `false` and nothing in src/ passes `playedOnly: true`. That is the
+				   argument FOR doing it now — it is a one-line change while nothing depends
+				   on it, and the field's own docblock above keeps it precisely for the case
+				   where it starts being wrong, "a capture taken in the evening".
+				*/
+				final: wasPlayed(game)
 			})
 		}
 	return out
 }
+
+export const fetchSlate = async (
+	startDate: string,
+	endDate: string
+): Promise<SlateGame[]> =>
+	readSlateRows(
+		await json(
+			`${BASE}/schedule?sportId=1&gameType=R&startDate=${startDate}&endDate=${endDate}` +
+				`&hydrate=probablePitcher`
+		),
+		startDate
+	)

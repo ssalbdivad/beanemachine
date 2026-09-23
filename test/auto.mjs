@@ -68,25 +68,32 @@ const SHAPE = {
 }
 const shape = (slots, accepts, order = null) => ({ slots, slot_order: order, slot_accepts: accepts })
 /*
-   THE BARS THE FIXTURES NAME ARE STILL IN POINTS, and are converted here.
+   THE BARS ARE WRITTEN IN THE UNIT THE PLANNER READS THEM IN: PER TEAM GAME.
 
-   Every `opts({ minGain: 5, keepFloor: 25 })` in this file was written when those were
-   bscore TOTALS, and the fixtures' own numbers — a 36-point gain, an 8-point catcher —
-   were chosen to sit either side of them. The planner's bars are per team game now (see
-   `PlanOptions`), so converting at this one seam keeps every fixture below meaning what
-   its author meant, instead of thirty edited literals whose relationship to the numbers
-   around them would have to be re-derived one at a time.
+   There was a `perGameBars` helper here that took each fixture's bar in POINTS — the unit
+   they were written in before the bars were normalised — and divided it by FIXTURE_GAMES
+   on the way into `opts`. It was convenient and it was the reason a shipped defect lived
+   for months: it converted the suite AWAY from the semantics under test. `planSwaps`
+   compared raw bscore TOTALS against `keepFloor` at three sites while `planMoves` and
+   `railViolations` compared per-game rates, and this file could not tell, because after
+   the helper's division both readings agreed on every fixture in it.
 
-   Divided by the same six games the rated rows are built over — see FIXTURE_GAMES — so a
-   bar and the scores it is compared against come from one window.
+   So the bars are literals now, in the planner's own unit, with the points they were
+   chosen as beside them. A test whose fixtures need converting before the code under test
+   will accept them is a test of the converter.
+
+   The rated rows are still built over FIXTURE_GAMES team games, so a bar and the scores
+   it is measured against still come from one window — and `perGameGate` below pins that
+   the gate is the per-game one, which no fixture written in totals can do.
 */
-const perGameBars = o => {
-	const out = { ...o }
-	for (const k of ["minGain", "keepFloor"])
-		if (typeof out[k] === "number") out[k] = Number((out[k] / FIXTURE_GAMES).toFixed(4))
-	return out
-}
-const opts = o => ({ ...DEFAULTS, ...perGameBars(o) })
+/* The two bars nearly every fixture below is sized against, as rates. 5 and 25 points
+   over FIXTURE_GAMES team games — the same numbers `perGameBars` used to produce, written
+   down once so the arithmetic that relates them to a fixture's 36-point gain or 8-point
+   catcher is visible rather than applied. LOW_GAIN is the 2-point bar one case needs. */
+const MIN_GAIN = 0.8333 // 5 points over six team games
+const KEEP_FLOOR = 4.1667 // 25 points over six team games
+const LOW_GAIN = 0.3333 // 2 points over six team games
+const opts = o => ({ ...DEFAULTS, ...o })
 
 /* ---------------- the roster shape itself ---------------- */
 
@@ -353,7 +360,7 @@ const wire = {
 	],
 	availableNames: new Set(["free agent"]),
 	shape: FULL,
-	options: opts({ minGain: 5, keepFloor: 25, maxMoves: 1 })
+	options: opts({ minGain: MIN_GAIN, keepFloor: KEEP_FLOOR, maxMoves: 1 })
 }
 const wirePlan = planMoves(wire)
 t("the best add takes the worst man's spot, never the keeper's",
@@ -407,7 +414,7 @@ t("the best add takes the worst man's spot, never the keeper's",
 		// four seats, two men
 		shape: shape({ C: 1, OF: 2, BN: 1 }, { C: ["C"], OF: ["OF"], BN: "any" },
 			["C", "OF", "OF", "BN"]),
-		options: opts({ minGain: 5, keepFloor: 25, maxMoves: 1 })
+		options: opts({ minGain: MIN_GAIN, keepFloor: KEEP_FLOOR, maxMoves: 1 })
 	}
 	const p = planMoves(room)
 	t("with a seat free the add is an add, and nobody is offered up for it",
@@ -467,15 +474,15 @@ t("no player is added or dropped twice inside one run",
 const thin = {
 	...wire,
 	rated: wire.rated.map(r => r.player.name === "Free Agent" ? rescore(r, 7) : r),
-	options: opts({ minGain: 5, keepFloor: 25, maxMoves: 1 })
+	options: opts({ minGain: MIN_GAIN, keepFloor: KEEP_FLOOR, maxMoves: 1 })
 }
 t("a swap below the minimum gain is not proposed",
-	planMoves({ ...thin, options: opts({ minGain: 5 }) }).moves.length === 0)
+	planMoves({ ...thin, options: opts({ minGain: MIN_GAIN }) }).moves.length === 0)
 t("the near miss is reported with its actual margin",
-	planMoves({ ...thin, options: opts({ minGain: 5 }) }).notes.some(n => /gains 3/.test(n)),
+	planMoves({ ...thin, options: opts({ minGain: MIN_GAIN }) }).notes.some(n => /gains 3/.test(n)),
 	JSON.stringify(planMoves(thin).notes))
 t("lowering the bar lets the same swap through, so the bar is what is doing the work",
-	planMoves({ ...thin, options: opts({ minGain: 2 }) }).moves.length === 1)
+	planMoves({ ...thin, options: opts({ minGain: LOW_GAIN }) }).moves.length === 1)
 t("every proposed gain is the arithmetic it claims to be",
 	wirePlan.moves.every(m => Math.abs(m.gain - (m.addScore - m.dropScore)) < 0.01))
 
@@ -569,6 +576,77 @@ t("a man off the board is blocked with the reason, and his slots stay null",
 	resolved[1].legal !== null && resolved[1].blocked !== null && resolved[1].rated === undefined)
 t("no eligibility read means no legal slots — never a guessed one",
 	resolved[2].legal === null && /position eligibility/.test(resolved[2].blocked))
+
+/* ---------------- one name, two men ---------------- */
+/*
+ * A NORMALISED NAME IS NOT A KEY, and every join in the planner treated it as one.
+ *
+ * `new Map(rated.map(r => [normalizeName(r.player.name), r]))` keeps the LAST row per
+ * key. `normalizeName` strips accents and a trailing "Jr.", so it MANUFACTURES the
+ * collisions it then loses: on the committed capture (data/snapshot.json, 1,446 players,
+ * re-derived 2026-09-22) five keys hold two men, and last-wins made the reliever Luis
+ * García #472610 the answer for "Luis García Jr." #671277, a Washington first baseman.
+ * A 1B seat therefore resolved to a relief pitcher — wrong projection, wrong bscore,
+ * wrong club, wrong drop candidate — with no error anywhere.
+ *
+ * The three cases below are the three the capture actually contains: a cross-group
+ * collision the seat's own eligibility settles, a same-group collision only the reader's
+ * ids can settle, and one nothing can settle, which must be refused rather than guessed.
+ * See `indexByName` in src/data/names.ts.
+ */
+{
+	const garcias = [
+		rated("Luis García Jr.", { points: 40, bscore: 10, slots: ["1B"] }),
+		rated("Luis Garcia", { points: 5, bscore: -30, slots: ["RP", "P"], group: "pitching" })
+	]
+	const twoMuncys = [
+		rated("Max Muncy", { points: 50, bscore: 20, slots: ["3B"] }),
+		rated("Max Muncy", { points: 4, bscore: -40, slots: ["3B"] })
+	]
+	const ask = (roster, board, ownedIds) =>
+		resolveRoster({ roster, rated: board, availableNames: new Set(), ownedIds, shape: SHAPE })
+
+	/* The seat says 1B, and no pitcher is a first baseman. Last-wins gave this seat the
+	   reliever; the group test gives it the man who is actually there. */
+	const firstBase = ask([spot("1B", "Luis Garcia Jr.", ["1B"])], garcias)
+	t("a seat's printed eligibility picks between two men of one name",
+		firstBase[0].rated?.points === 40 && firstBase[0].blocked === null,
+		JSON.stringify({ points: firstBase[0].rated?.points, blocked: firstBase[0].blocked }))
+	const bullpen = ask([spot("BN", "Luis Garcia", ["RP"])], garcias)
+	t("…and the same collision the other way round picks the pitcher",
+		bullpen[0].rated?.points === 5, JSON.stringify(bullpen[0].rated?.points))
+
+	/* Two hitters at the same position: eligibility cannot separate them and the roster
+	   store's own ids are the only evidence left. The ids are the platform's answer to
+	   "which man is this", so they are tried first. */
+	const owned = ask([spot("3B", "Max Muncy", ["3B"])], twoMuncys,
+		new Set([String(twoMuncys[1].player.id)]))
+	t("where eligibility cannot separate two men, the reader's own ids do",
+		owned[0].rated?.points === 4, JSON.stringify(owned[0].rated?.points))
+
+	/* And where nothing can: REFUSED, into the channel the file already has for a man it
+	   cannot price. Picking one is a coin flip presented as advice — it decides which of
+	   two men this reader is told to drop. */
+	const stuck = ask([spot("3B", "Max Muncy", ["3B"])], twoMuncys)
+	t("and where nothing can separate them, the spot is blocked rather than guessed",
+		stuck[0].rated === undefined && /2 different players/.test(stuck[0].blocked),
+		JSON.stringify(stuck[0].blocked))
+
+	/* The wire side of the same join. A recommended add is a name the reader goes and
+	   claims, and there is no undoing a claim on the wrong man, so an ambiguous wire row
+	   is named in `skipped` rather than priced. */
+	const wire = planSwaps({
+		roster: [spot("3B", "Mine", ["3B"])],
+		rated: [rated("Mine", { points: 1, bscore: -50, slots: ["3B"] }), ...twoMuncys],
+		availableNames: new Set([normalizeName("Max Muncy")]),
+		available: [{ name: "Max Muncy", positions: ["3B"] }],
+		shape: shape({ "3B": 1 }, { "3B": ["3B"] }, ["3B"]),
+		options: opts({ maxMoves: 1 })
+	})
+	t("an ambiguous free agent is never offered as an add",
+		!wire.moves.length && wire.skipped.some(s => /go by that name/.test(s)),
+		JSON.stringify({ moves: wire.moves, skipped: wire.skipped }))
+}
 
 // --- execution gates: the one place in this repo where being wrong is expensive ---
 const { permits, alreadyApplied, describeMoves } = await import("../src/auto/execute.ts")
@@ -844,6 +922,69 @@ t("and the rest of the key is unchanged: accents, suffix, case, spacing",
   }
   t("a man above the keep floor is never offered up, whatever the arithmetic says",
     !planSwaps(starRoster).moves.length, JSON.stringify(planSwaps(starRoster).moves))
+
+  /*
+   * BOTH OF THIS PLANNER'S BARS ARE RATES, and until these two cases nothing in this
+   * file could tell.
+   *
+   * `planSwaps` compared a raw bscore TOTAL against `keepFloor` and a whole-window
+   * lineup gain against `minGain`, both of which `PlanOptions` documents as PER TEAM
+   * GAME. It survived because every fixture here was written in totals and converted on
+   * the way in, so the two readings agreed on all of them; and because `railViolations`
+   * cannot catch the keep-floor half — it tests per-game, and a man whose TOTAL is under
+   * 1.9 is trivially under 1.9 a game.
+   *
+   * These two straddle the readings deliberately. Each fails under the other rule, which
+   * is the only property that makes them worth keeping.
+   *
+   * Measured on data/snapshot.json (league yahoo:228947, 2026-09-22) for the size of what
+   * this was worth: of the top 270 rateable men, the total rule made 122 droppable over
+   * the league's own six-day period where the rate rule makes 226, and protected 170 over
+   * the rest of the season where the rate rule protects 40.
+   */
+  {
+    /* 6 bscore over six team games is 1.0 a game — below the shipped 1.9 floor, and
+       comfortably ABOVE 1.9 read as a total. Under the total rule nobody was droppable
+       here and the planner returned nothing at all. */
+    const rateFloor = {
+      ...input,
+      rated: [
+        rated("Borderline", { points: 10, bscore: 6, slots: ["C"] }),
+        rated("My First", { points: 40, bscore: 99, slots: ["1B"] }),
+        rated("Free Catcher", { points: 60, bscore: 10, slots: ["C"] })
+      ],
+      /* BOTH SEATS FULL, so the only thing the planner can do is a swap. With a seat free
+         it fills it instead and the keep floor never decides anything — which is how the
+         first draft of this case passed under either rule. */
+      roster: [spot("C", "Borderline", ["C"]), spot("1B", "My First", ["1B"])]
+    }
+    t("the keep floor is a rate: 6 bscore over six games is 1.0 a game, so he is droppable",
+      planSwaps(rateFloor).moves[0]?.drop === "Borderline",
+      JSON.stringify(planSwaps(rateFloor)))
+
+    /* A 2-point gain over six team games is 0.33 a game, under the 0.38 bar — and over
+       0.38 read as a total, which is how a swap worth two points across an entire scoring
+       period used to clear a bar set at 0.38 a game. */
+    const thinGain = {
+      ...input,
+      rated: [
+        rated("Borderline", { points: 10, bscore: 6, slots: ["C"] }),
+        rated("My First", { points: 40, bscore: 99, slots: ["1B"] }),
+        rated("Marginal Catcher", { points: 12, bscore: 8, slots: ["C"] })
+      ],
+      roster: [spot("C", "Borderline", ["C"]), spot("1B", "My First", ["1B"])],
+      availableNames: new Set([normalizeName("Marginal Catcher")]),
+      available: [{ name: "Marginal Catcher", positions: ["C"] }]
+    }
+    t("the minimum gain is a rate: 2 points over six games is 0.33 a game and is refused",
+      !planSwaps(thinGain).moves.length, JSON.stringify(planSwaps(thinGain).moves))
+    /* The note used to print the total and label it with the rate's unit — "worth 0.4
+       points — below the 0.38-a-game bar" — about moves it had just been ACCEPTING for
+       clearing that bar. Both numbers, so the sentence says what was measured. */
+    t("and the refusal quotes the total and the rate, not one wearing the other's unit",
+      planSwaps(thinGain).notes.some(n => /2 points over this window, 0\.33 a game/.test(n)),
+      JSON.stringify(planSwaps(thinGain).notes))
+  }
 
   /*
    * A man safe on EITHER horizon is safe.
@@ -1272,8 +1413,14 @@ const swap = (start, sit, startSlot, gain) => ({
       rated("My Arm", { points: 20, bscore: -50, slots: ["SP", "P"], group: "pitching" }),
       rated("Free Bat", { points: 200, bscore: 40, slots: ["OF"] })
     ]
-    arms[0].projection = { stats: { outs: 60 } }   // twenty innings, and he is the only arm
-    arms[1].projection = { stats: {} }
+    /* SPREAD, because a bare `{ stats }` also unsets `horizonGames` — and the planner's
+       minimum-gain gate is a RATE now, so an arriving man with no window has no rate and
+       clears no bar. Written flat, this fixture's 85-point swap was refused outright with
+       "over a window his club has no games in". It was already half-wrong before the gate
+       moved: the move it produced carried `gainPerGame: null`, which `railViolations`
+       flags, so the suite was asserting a plan its own audit would have withheld. */
+    arms[0].projection = { ...arms[0].projection, stats: { outs: 60 } }   // twenty innings, and he is the only arm
+    arms[1].projection = { ...arms[1].projection, stats: {} }
     const swapArmForBat = {
       roster: [spot("SP", "My Arm", ["SP"]), spot("OF", "Keep Me", ["OF"])],
       rated: [...arms, rated("Keep Me", { points: 95, bscore: 99, slots: ["OF"] })],

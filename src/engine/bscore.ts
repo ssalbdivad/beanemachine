@@ -24,6 +24,10 @@ import { MODEL } from "./weights.ts"
  *  needs the names and not a test. */
 export const IL_SLOTS = ["IL", "IL+", "NA"]
 
+/** Exported for one reader only: `test/engine.mjs` checks that every name in here is
+ *  also a reserve seat by the predicate below. No code in src/ tests the Set any more —
+ *  five sites did, including the two that decide which seats get a replacement bar, and
+ *  each of them was the drift `isReserveSlot` was extracted to end. */
 export const RESERVE_SLOTS = new Set(["BN", ...IL_SLOTS])
 
 /**
@@ -461,16 +465,32 @@ export interface RateOptions {
  * already been removed from the pool, so it is `count`: the reader's own seats, and
  * walking the league's depth a second time is the double-count the note at the call
  * site measures.
+ *
+ * THE MAN, NOT ONLY HIS POINTS. The walk identifies a person — "the first man left at
+ * this slot" — and threw him away on the way out, so the one screen that has to NAME a
+ * bar (`replacementPlayerBySlot`, for the lineup card) kept a second copy of the retired
+ * independent walk to get a name from. That copy drifted the moment this one was
+ * corrected: measured on the committed capture, league 228947, the card printed this
+ * function's number beside that walk's man, 23.12 points apart at Util (bar 81.23,
+ * "Matt Olson 104.35") and 19.08 at SP, and named 99%-rostered stars as free bodies.
+ * Returning `T` makes name and number the same row by construction; the numeric form
+ * below is the same map with `.points` read off it, for the four callers that only
+ * price seats.
  */
-export const jointReplacement = (
-	pool: readonly { points: number; slots: readonly string[]; rateable?: boolean }[],
+export const jointReplacementMen = <
+	T extends { points: number; slots: readonly string[]; rateable?: boolean }
+>(
+	pool: readonly T[],
 	slotCounts: Record<string, number>,
 	capacity: (slot: string, count: number) => number
-): Map<string, number> => {
+): Map<string, T | null> => {
 	const seats = new Map<string, number>()
 	const eligibleCount = new Map<string, number>()
 	for (const [slot, count] of Object.entries(slotCounts)) {
-		if (RESERVE_SLOTS.has(slot)) continue
+		/* `isReserveSlot`, not the Set it wraps: the Set misses "IL-60" and "NA(b)", both
+		   typeable in the league editor's own Add slot field, and a reserve seat that got
+		   past here would be given a replacement bar and real players spent filling it. */
+		if (isReserveSlot(slot)) continue
 		seats.set(slot, Math.max(0, Math.round(capacity(slot, count))))
 		eligibleCount.set(slot, 0)
 	}
@@ -483,7 +503,7 @@ export const jointReplacement = (
 		for (const sl of r.slots)
 			if (eligibleCount.has(sl)) eligibleCount.set(sl, eligibleCount.get(sl)! + 1)
 
-	const bars = new Map<string, number>()
+	const bars = new Map<string, T | null>()
 	for (const r of ranked) {
 		/* Scarcest first, and ties broken by the slot's own name so the assignment is
 		   deterministic — a bar that depends on object key order is a bar that moves
@@ -499,18 +519,33 @@ export const jointReplacement = (
 		}
 		/* Unseated. He is the first man left at every slot he qualifies for that has not
 		   already found one — which is the definition of replacement level. */
-		for (const sl of r.slots) if (seats.has(sl) && !bars.has(sl)) bars.set(sl, r.points)
+		for (const sl of r.slots) if (seats.has(sl) && !bars.has(sl)) bars.set(sl, r)
 	}
-	/* A slot nobody is left for: everyone eligible is seated somewhere. Zero is the
+	/* A slot nobody is left for: everyone eligible is seated somewhere. Nobody is the
 	   honest reading only when nobody qualifies at all; where the pool simply ran out,
 	   the last man in it is what you would be left with. */
 	for (const slot of seats.keys())
 		if (!bars.has(slot)) {
 			const last = [...ranked].reverse().find(r => r.slots.includes(slot))
-			bars.set(slot, last?.points ?? 0)
+			bars.set(slot, last ?? null)
 		}
 	return bars
 }
+
+/** The same assignment, priced. A slot no rated player qualifies for is 0 — the one
+ *  case that zero was ever written for, and the caller that must not print it as a bar
+ *  (`replacementBySlot`) tests eligibility itself rather than reading a 0 back. */
+export const jointReplacement = (
+	pool: readonly { points: number; slots: readonly string[]; rateable?: boolean }[],
+	slotCounts: Record<string, number>,
+	capacity: (slot: string, count: number) => number
+): Map<string, number> =>
+	new Map(
+		[...jointReplacementMen(pool, slotCounts, capacity)].map(([slot, man]) => [
+			slot,
+			man?.points ?? 0
+		])
+	)
 
 export const rateAll = (o: RateOptions): Rated[] => {
 	const slotCounts = o.league.roster.slots
@@ -930,7 +965,11 @@ export const rateAll = (o: RateOptions): Rated[] => {
 	 */
 	const speaksFor = (slot: string): boolean =>
 		o.available !== undefined && (covered === null || covered.has(slot))
-	const startable = Object.keys(slotCounts).filter(sl => !RESERVE_SLOTS.has(sl))
+	// the predicate, not the Set: `RESERVE_SLOTS.has` is the hand-shaped check that
+	// loses "IL-60" and "NA(b)", and this is the line that decides which seats get a
+	// replacement bar at all — a reserve seat that slipped through would be priced and
+	// filled, moving every bscore on the board
+	const startable = Object.keys(slotCounts).filter(sl => !isReserveSlot(sl))
 	const wirePool = o.available ? allRated.filter(r => o.available!(r)) : []
 	/** The whole-of-baseball simulation: the league's own seats, filled once between
 	 *  everybody, and the first man left at a slot is that slot's bar. */

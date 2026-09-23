@@ -181,6 +181,23 @@ const probe = proj(
 )
 t("Statcast adjustment is off by default", probe.qualityMultiplier === 1,
   String(probe.qualityMultiplier))
+/*
+   A CONSTANT NOTHING CAN REACH IS NOT A CONSTANT, IT IS A CLAIM.
+
+   `shrinkage.perStat` is looked up by StatsAPI field name while iterating a stat line
+   (`SHRINK_K[key]` in project.ts), so a key no stat line carries is never read. It held
+   `"homeRunsAllowed": 300` — MLB names the field `homeRuns` on both sides — so pitchers'
+   home runs were shrunk with the hitters' 170 while the file said 300, which is the one
+   thing model.json exists to prevent (weights.ts: "what the model believes can be diffed,
+   reviewed and reverted on its own"). The line is gone; this stops the next one.
+*/
+{
+  const { KEPT_STATS } = await import("../src/engine/points.ts")
+  const model = JSON.parse(readFileSync("model.json", "utf8"))
+  const unreachable = Object.keys(model.shrinkage.perStat).filter(k => !KEPT_STATS.has(k))
+  t("every shrinkage constant is keyed to a stat the engine actually reads",
+    unreachable.length === 0, unreachable.join(", "))
+}
 t("and the drill-down says so rather than implying it was used",
   probe.modelled.some(m => /Statcast weight is 0/.test(m) && /not applied/.test(m)),
   probe.modelled.join(" | "))
@@ -188,6 +205,49 @@ t("and the drill-down says so rather than implying it was used",
 
 
 const hyd = hydrate(snap, contact)
+
+/*
+ * 10b. ONE DENOMINATOR PER SIDE, ASSERTED FROM BOTH ENDS.
+ *
+ * The shrinkage in `project` is `(value + k * leagueRate) / (volume + k)` — one
+ * expression holding a player's own total, his own volume and the population's rate. It
+ * is only arithmetic if all three are counted in the same unit. The pitching population
+ * was counted in BATTERS FACED while `volume` was counted in OUTS, so every thin-sample
+ * pitcher was pulled toward a target in the wrong unit: on this capture the 795 pitchers
+ * carrying both fields total 163,144 BF against 114,803 outs, so the prior was 1.421x too
+ * small and the league strikeout rate entered the formula as 0.2220 where the per-out
+ * figure is 0.3154.
+ *
+ * Asserted from both ends deliberately, because a unit cannot be checked against itself:
+ * below, that the population rate IS the per-out one and is NOT the per-BF one, and that
+ * `project` still names "outs" as the volume a pitcher is missing when he has none. If
+ * either end moves without the other, these disagree.
+ */
+{
+  const { leagueRatesFrom } = await import("../src/engine/project.ts")
+  const pitchers = hyd.players.filter(p => p.group === "pitching")
+  const sum = key => pitchers.reduce((n, p) => n + (p.stats[key] ?? 0), 0)
+  const [k, outs, bf] = [sum("strikeOuts"), sum("outs"), sum("battersFaced")]
+  const rate = leagueRatesFrom(pitchers, "pitching").perUnit.strikeOuts
+  t("the pitching population rate is per OUT, the unit project divides a pitcher by",
+    Math.abs(rate - k / outs) < 1e-9, `${rate} vs ${k / outs} per out, ${k / bf} per BF`)
+  t("...and not per batter faced, which is 1.42 denominators away from it",
+    Math.abs(rate - k / bf) > 0.05 && Math.abs(bf / outs - 1.42) < 0.02,
+    `${bf} BF / ${outs} outs = ${(bf / outs).toFixed(3)}`)
+  const hitters = hyd.players.filter(p => p.group === "hitting")
+  const hSum = key => hitters.reduce((n, p) => n + (p.stats[key] ?? 0), 0)
+  t("and the hitting side is per plate appearance, which it always was",
+    Math.abs(leagueRatesFrom(hitters, "hitting").perUnit.hits - hSum("hits") / hSum("plateAppearances")) < 1e-9)
+  // the other end: project's own word for what a pitcher with no volume is missing
+  const { project: volumeProbe } = await import("../src/engine/project.ts")
+  const bare = volumeProbe(
+    { id: 2, name: "y", team: null, teamId: 1, position: "P", group: "pitching", stats: {} },
+    null, 100, 14
+  )
+  t("project measures a pitcher's own volume in outs, by its own name for it",
+    bare.missing.includes("outs") && !bare.missing.includes("battersFaced"),
+    bare.missing.join(", "))
+}
 
 // --- market edge: the board's default ranking, so it gets its own regressions ---
 const ranked = withMarketEdge(
@@ -1086,6 +1146,53 @@ t("ownership for fewer players than the league can hold is refused",
  * once and can be put back into the file by anyone who reruns an old capture. */
 for (const gone of ["recentWindow", "sources"])
   t(`the capture no longer ships ${gone}`, !(gone in snap))
+
+/*
+ * A POSTPONED GAME READS "Final", AND THE CAPTURE BELIEVED IT.
+ *
+ * `wasPlayed` in src/data/statsapi.ts exists because MLB reports a postponed game as
+ * `abstractGameState: "Final"` — not "Postponed", not "Cancelled" — and that docblock
+ * measures the cost: 36,343 postponed rows and 56 cancelled, out of 1,798,000 in this
+ * project's cache, 2.02% of every game it has ever divided by. `fetchSchedule` was
+ * converted to the predicate; `fetchSlate` twelve lines below it was not, so the two
+ * producers of `SlateGame` — this one and `asSlateGames` in src/data/today.ts, which
+ * reads `detailedState` and drops called-off games — disagreed about what `final` means,
+ * and `windowFrom(..., playedOnly)` has no way to tell which one made its rows.
+ *
+ * Asserted against a hand-built payload rather than a live read: the parse is separate
+ * from the fetch now (`readSlateRows`), for exactly this. Both halves are pinned — the
+ * status a postponed game actually carries, and the ordinary finished game that must
+ * still come back true, because the cheap way to "fix" this is to make everything false.
+ */
+{
+  const { readSlateRows } = await import("../src/data/statsapi.ts")
+  const game = (home, away, abstractGameState, detailedState) => ({
+    teams: { home: { team: { id: home } }, away: { team: { id: away } } },
+    status: { abstractGameState, detailedState }
+  })
+  const rows = readSlateRows({
+    dates: [{
+      date: "2026-09-11",
+      games: [
+        game(1, 2, "Final", "Postponed"),
+        game(3, 4, "Final", "Final"),
+        game(5, 6, "Preview", "Scheduled"),
+        game(7, 8, "Final", "Suspended: Rain"),
+        game(9, 10, "Final", "Completed Early")
+      ]
+    }]
+  }, "2026-09-11")
+  t("a POSTPONED game is not a game on the slate, whatever the abstract state says",
+    !rows.some(r => r.home === 1) && !rows.some(r => r.home === 7),
+    JSON.stringify(rows.map(r => [r.home, r.final])))
+  t("...and a game that really finished is still marked final",
+    rows.find(r => r.home === 3)?.final === true &&
+    rows.find(r => r.home === 9)?.final === true,
+    JSON.stringify(rows.map(r => [r.home, r.final])))
+  t("...and a scheduled game is a row, not yet final",
+    rows.find(r => r.home === 5)?.final === false && rows.length === 3,
+    JSON.stringify(rows.map(r => [r.home, r.final])))
+}
 
 /*
  * THE BACKTEST'S URLS ARE ITS CACHE KEYS, AND ITS CACHE IS HOW THE STORED RUNS STAY

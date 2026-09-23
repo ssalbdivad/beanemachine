@@ -460,14 +460,31 @@ if (weakC && strongC) {
     men.get("OF")[0].player.id !== men.get("OF")[1].player.id,
     JSON.stringify(men.get("OF").slice(0, 2).map(r => r.player.name)))
 
-  // the estimate is unchanged and still names one man per slot, because it cannot
-  // honestly name a second: it knows a depth, not a wire
+  // the estimate still names one man per slot, because it cannot honestly name a
+  // second: it knows a depth, not a wire
   const est = replacementPlayerBySlot(league, pool, teams)
   t("without a wire the estimate still answers, with one man per slot",
     est.get("OF").length === 1)
-  t("and he is the same man the old signature returned, at the same depth",
-    Math.abs(est.get("OF")[0].points - bars.get("OF")) < 0.01,
-    `${est.get("OF")[0].points} vs ${bars.get("OF")}`)
+  /*
+     THE NAME AND THE NUMBER, AT EVERY SLOT RATHER THAN AT ONE.
+
+     This asked only about OF — "he is the same man the old signature returned, at the
+     same depth" — and OF was one of four slots where the two rules happened to agree, so
+     the claim passed while the card was printing Matt Olson (104.35) against a Util bar
+     of 81.23 and Walbert Ureña (72.40) against an SP bar of 53.32. The premise is also
+     retired: there is no depth walk left to be "the same man at the same depth" as, since
+     `replacementPlayerBySlot` now reads the unseated man straight off the same joint
+     assignment `replacementBySlot` prices. The successor claims strictly more — every
+     slot, not one — and it is the property the screen actually depends on.
+  */
+  const apart = [...bars.keys()].filter(slot =>
+    est.has(slot) && Math.abs(est.get(slot)[0].points - bars.get(slot)) >= 0.01)
+  t("and at EVERY slot the man named is the man the bar is priced at",
+    apart.length === 0,
+    apart.map(s => `${s}: ${est.get(s)[0].player.name} ${est.get(s)[0].points} vs bar ${bars.get(s)}`).join("; "))
+  t("...and no slot has a bar with nobody to put a face on it",
+    [...bars.keys()].every(slot => est.has(slot)),
+    [...bars.keys()].filter(slot => !est.has(slot)).join(","))
 
   // a slot with nothing free is priced at zero, NOT dropped: "the wire is bare at
   // catcher" and "nobody in baseball can play catcher" are different facts
@@ -557,6 +574,75 @@ if (weakC && strongC) {
       JSON.stringify(line.starters.map(s => [s.slot, s.free?.player.name, s.points])))
     t("…so the lineup is the two men it has, not one man twice",
       line.points === 60, `${line.points} from ${JSON.stringify(line.starters.map(s => s.points))}`)
+  }
+
+  /*
+     AND THE SEATING DECISION IS MADE OVER BOTH POPULATIONS AT ONCE.
+
+     Everything above is about what the card PRINTS. These two are about what the matching
+     DECIDES, which is a separate question and was answered by a number per seat rather
+     than by an assignment — so it could be, and was, wrong in both directions at once.
+     Each case below is lost by one of the two rules that guessed:
+
+     ONE: the per-slot bar (what shipped). Every seat of a slot is priced at the best free
+     man there, and the same man prices a second slot he is also eligible at, so a marginal
+     roster man is benched against a body that is already sitting somewhere else.
+
+     TWO: one cursor across the slots (the obvious repair, not taken). It spends a free man
+     on the first seat of his slot even when the reader's own man ends up in that seat, so
+     the next seat is priced at a man nobody took, and a man who should be benched starts.
+
+     Both pass if the free men are simply put into the matching, which is what the code
+     does now. Asserted on hand-built men so the numbers are arithmetic rather than a
+     capture: the point is the rule, and a capture can stop exercising a rule.
+  */
+  {
+    const mine = (id, name, points, slots) => ({ ...rate(id, name, points), slots })
+    /* ONE. Three OF seats and a Util seat; my three outfielders beat the wire, my Util man
+       does not beat the best free man — who can only sit in ONE of the four seats. */
+    const wire = [
+      mine(921, "Free A", 100, ["OF", "Util"]), mine(922, "Free B", 90, ["OF", "Util"]),
+      mine(923, "Free C", 80, ["OF", "Util"]), mine(924, "Free D", 70, ["OF", "Util"])
+    ]
+    const roster = [
+      mine(931, "My One", 105, ["OF", "Util"]), mine(932, "My Two", 103, ["OF", "Util"]),
+      mine(933, "My Three", 101, ["OF", "Util"]), mine(934, "My Util", 95, ["Util"])
+    ]
+    const shape4 = { ...league, roster: { ...league.roster, slots: { OF: 3, Util: 1 }, slot_order: null } }
+    const freeNames = new Set(wire.map(r => r.player.name))
+    const is = r => freeNames.has(r.player.name)
+    const line = startingLineup(
+      shape4, roster,
+      replacementBySlot(shape4, wire, 10, is),
+      replacementPlayerBySlot(shape4, wire, 10, is)
+    )
+    t("the best free man takes the seat my worst starter was going to fill",
+      line.points === 409,
+      `${line.points}: ${JSON.stringify(line.starters.map(s => [s.slot, s.player?.player.name ?? s.free?.player.name, s.points]))}`)
+    t("…and the man he beat is on the bench rather than starting over him",
+      line.bench.length === 1 && line.bench[0].player.name === "My Util",
+      JSON.stringify(line.bench.map(r => r.player.name)))
+
+    /* TWO. One OF seat and one Util seat. The best free man is eligible at both, so the
+       shipped rule priced BOTH seats at him — and benched my 95-point Util man against a
+       body that can only be had once. The wire's other man is an outfielder, so there is a
+       seat for each of the three. */
+    const wire2 = [mine(941, "Free Both", 100, ["OF", "Util"]), mine(942, "Free OF", 90, ["OF"])]
+    const roster2 = [mine(951, "My Util", 95, ["Util"])]
+    const shape2 = { ...league, roster: { ...league.roster, slots: { OF: 1, Util: 1 }, slot_order: null } }
+    const names2 = new Set(wire2.map(r => r.player.name))
+    const is2 = r => names2.has(r.player.name)
+    const line2 = startingLineup(
+      shape2, roster2,
+      replacementBySlot(shape2, wire2, 10, is2),
+      replacementPlayerBySlot(shape2, wire2, 10, is2)
+    )
+    t("a man is not benched against a free agent who is sitting in another seat",
+      line2.points === 195 && line2.bench.length === 0,
+      `${line2.points}: ${JSON.stringify(line2.starters.map(s => [s.slot, s.player?.player.name ?? s.free?.player.name, s.points]))}`)
+    t("…and no seat is reported short while a man who can fill it is on the wire",
+      line2.short.length === 0 && line2.holes.length === 0,
+      JSON.stringify({ short: line2.short, holes: line2.holes }))
   }
 
   /* WITHOUT A WIRE nothing changes: the estimate regime knows one body per slot and says so,

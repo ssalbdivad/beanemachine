@@ -1,6 +1,7 @@
 import { isReserveSlot, rosterCounts, startableSeats, type Rated } from "../engine/bscore.ts"
 import type { RosterSpot } from "./roster.ts"
 import { normalizeName } from "../data/yahoo-pool.ts"
+import { indexByName } from "../data/names.ts"
 
 /**
  * Turns a ranked board plus your actual roster into what Billy would do: the
@@ -197,6 +198,18 @@ export interface PlanInput {
 	 * of a guess at where a man may play.
 	 */
 	available?: { name: string; positions: string[] }[]
+	/**
+	 * The player ids the reader's roster store says are his, as bare `${id}` strings.
+	 *
+	 * Purely a tiebreak for the name join, and the only evidence that separates two men
+	 * of the same name in the same group — the two Max Muncys in the committed capture.
+	 * See the note on `indexByName` in src/data/names.ts for the five keys that collide
+	 * and what they cost. Optional because the CLI reads a roster off a rendered page
+	 * with no ids on it at all; without it a genuinely ambiguous spot is REFUSED into
+	 * `blocked` rather than guessed, which is the same rule as every other absent source
+	 * in this file.
+	 */
+	ownedIds?: ReadonlySet<string>
 	shape: RosterShape
 	options?: PlanOptions
 	/**
@@ -356,14 +369,25 @@ export interface Resolved {
 
 /** Joins the roster Yahoo rendered to the rated board, and says what is missing. */
 export const resolveRoster = (input: PlanInput): Resolved[] => {
-	const byName = new Map(input.rated.map(r => [normalizeName(r.player.name), r]))
+	/* ONE NAME CAN BE TWO MEN, and a plain Map silently answered with the last of them.
+	   See `indexByName` in src/data/names.ts: on the committed capture "Luis Garcia Jr."
+	   in a 1B seat resolved to a relief pitcher, because the suffix strip merges him into
+	   Luis García. The seat's own printed eligibility settles that one; the reader's
+	   owned ids settle two hitters with one name. Anything still plural is refused below
+	   rather than guessed — revert this and the wrong man is priced, seated and offered
+	   up with no error anywhere. */
+	const board = indexByName(input.rated, r => r.player)
 	const accepts = input.shape.slot_accepts
 	return input.roster.map(spot => {
-		const rated = byName.get(normalizeName(spot.name))
+		const got = board.pick(spot.name, { positions: spot.positions, owned: input.ownedIds })
+		const rated = got.row ?? undefined
 		const legal =
 			!accepts || !spot.positions.length ? null : legalSlotsFor(spot.positions, accepts)
 		const blocked =
-			!rated ? "not on the board — no projection exists for him, so Billy will not move him"
+			got.why === "ambiguous" ?
+				`${got.among.length} different players on the board are called ${spot.name}` +
+				` — nothing here can say which is yours, so Billy will not move him`
+			: !rated ? "not on the board — no projection exists for him, so Billy will not move him"
 			: !rated.rateable ? "no projection could be made for him, so he has no number to compare"
 			: !accepts ?
 				"the league's slot_accepts table is absent from scoring.json, so no slot's rules are known"
@@ -928,7 +952,29 @@ export const plan = (input: PlanInput): Plan => {
 export const railViolations = (result: Plan, input: PlanInput): string[] => {
 	const options = input.options ?? DEFAULTS
 	const out: string[] = []
-	const byName = new Map(input.rated.map(r => [normalizeName(r.player.name), r]))
+	/* The rail joins names to the board the same way the planner does, because a rail
+	   that resolved "Luis Garcia Jr." to a different man than the planner did would audit
+	   somebody else's move. The eligibility comes from whichever side of the plan the
+	   name is on — a drop is a roster spot, an add is a wire row — and where the name is
+	   still plural the rail says so, which is itself a plan that cannot be audited. */
+	const board = indexByName(input.rated, r => r.player)
+	const positions = new Map(input.roster.map(s => [normalizeName(s.name), s.positions]))
+	const wire = new Map((input.available ?? []).map(a => [normalizeName(a.name), a.positions]))
+	/* One line per ambiguous NAME, not one per lookup: the same man is asked about as a
+	   drop and again as a starter, and a rail that said it twice would read as two bugs. */
+	const saidPlural = new Set<string>()
+	const rowFor = (name: string): Rated | undefined => {
+		const key = normalizeName(name)
+		const got = board.pick(name, {
+			positions: positions.get(key) ?? wire.get(key),
+			owned: input.ownedIds
+		})
+		if (got.why === "ambiguous" && !saidPlural.has(key)) {
+			saidPlural.add(key)
+			out.push(`${got.among.length} players on the board are called ${name}, so this move cannot be audited`)
+		}
+		return got.row ?? undefined
+	}
 	const onRoster = new Set(input.roster.map(s => normalizeName(s.name)))
 	const reserved = new Set(
 		input.roster.flatMap(s => (isReserve(s.slot) ? [normalizeName(s.name)] : []))
@@ -959,7 +1005,7 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 		   they are the ones that stop the planner offering somebody it cannot have. */
 		if (m.kind === "add-drop" && m.drop !== null && m.dropScore !== null) {
 			const drop = normalizeName(m.drop)
-			const rated = byName.get(drop)
+			const rated = rowFor(m.drop)
 			if (rated && (perGame(rated) ?? Infinity) >= options.keepFloor)
 				out.push(`${m.drop} is at ${perGame(rated)} a game, at or above the ${options.keepFloor} keep floor`)
 			if ((m.dropPerGame ?? -Infinity) >= options.keepFloor)
@@ -990,8 +1036,8 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 		   releases off the transactions feed. An optioned man is not on the injured list,
 		   so the rail says what the field actually means — he cannot play — and quotes
 		   MLB's own words for why. */
-		if (byName.get(add)?.injury)
-			out.push(`${m.add} cannot play (${byName.get(add)!.injury})`)
+		const arriving = rowFor(m.add)
+		if (arriving?.injury) out.push(`${m.add} cannot play (${arriving.injury})`)
 		if (seenAdd.has(add)) out.push(`${m.add} is added twice`)
 		// the two halves of a plan must agree about the same man
 		if (
@@ -1003,7 +1049,6 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 	}
 
 	const accepts = input.shape.slot_accepts
-	const positions = new Map(input.roster.map(s => [normalizeName(s.name), s.positions]))
 	const filled = new Map<string, number>()
 	const seenStarter = new Set<string>()
 	for (const s of result.lineup.starters) {
@@ -1011,7 +1056,7 @@ export const railViolations = (result: Plan, input: PlanInput): string[] => {
 		if (!onRoster.has(key)) out.push(`${s.name} is in the lineup but not on the roster`)
 		if (seenStarter.has(key)) out.push(`${s.name} is started in two slots at once`)
 		seenStarter.add(key)
-		if (byName.get(key)?.injury) out.push(`${s.name} is started while on the IL`)
+		if (rowFor(s.name)?.injury) out.push(`${s.name} is started while on the IL`)
 		if (reserved.has(key)) out.push(`${s.name} is started out of a reserve slot`)
 		if (accepts) {
 			const accept = accepts[s.slot]
@@ -1117,13 +1162,26 @@ export const planSwaps = (
 		return { moves: [], skipped, notes }
 	}
 
-	const byName = new Map(input.rated.map(r => [normalizeName(r.player.name), r]))
+	const board = indexByName(input.rated, r => r.player)
 	const onRoster = new Set(input.roster.map(sp => normalizeName(sp.name)))
 
 	/** The wire, joined to the board and to the eligibility the league prints. */
 	const candidates = input.available
 		.flatMap(a => {
-			const rated = byName.get(normalizeName(a.name))
+			/* The wire row's own eligibility picks the man, which is what stops a free
+			   agent called "Luis Garcia" at 1B being priced as the reliever of that name —
+			   see `indexByName`. A name still plural after that is REFUSED into `skipped`
+			   below rather than guessed: recommending an add means naming somebody the
+			   reader will go and claim, and there is no undoing a claim on the wrong man. */
+			const got = board.pick(a.name, { positions: a.positions })
+			if (got.why === "ambiguous") {
+				skipped.push(
+					`${a.name}: ${got.among.length} different players on the board go by that ` +
+						`name, so there is no saying which one the wire is offering`
+				)
+				return []
+			}
+			const rated = got.row ?? undefined
 			return rated?.rateable && !onRoster.has(normalizeName(a.name)) ?
 					[{ rated, positions: a.positions }]
 				:	[]
@@ -1163,11 +1221,31 @@ export const planSwaps = (
 		// A star is never offered up, whatever this week's arithmetic says. This is
 		// the one rail carried over unchanged, and it is a rail rather than a
 		// preference: a season is longer than a horizon.
+		/*
+		 * PER TEAM GAME, which is the unit `keepFloor` has been in since the bars were
+		 * normalised — and which this function alone went on ignoring.
+		 *
+		 * It compared a raw bscore TOTAL against 1.9. `planMoves` and `railViolations`
+		 * both read `(perGame(rated) ?? Infinity)`; `planSwaps` is the planner the web app
+		 * actually runs (src/client/Decide.tsx calls it; `planMoves` is CLI-only), so the
+		 * defect was the shipped one. Re-measured on data/snapshot.json, league
+		 * yahoo:228947, 2026-09-22: of the top 270 rateable men, over the league's own
+		 * period (2026-09-08..09-13, median 5 team games) the intended per-game rule makes
+		 * 226 droppable and the total rule made 122; over the rest of the season the total
+		 * rule protected 170 where the per-game rule protects 40. Roughly twice as many
+		 * men held as intended, and the protect set compounding it in the same direction —
+		 * so on a full roster the card could only ever offer pure adds, which need a free
+		 * seat, and almost never an add/drop.
+		 *
+		 * `railViolations` could not catch it: it tests per-game, and a man whose TOTAL is
+		 * under 1.9 is trivially under 1.9 a game. Revert this and the card silently stops
+		 * proposing the drops it exists to propose.
+		 */
 		const droppable = resolved.filter(
 			r =>
 				!isReserve(r.spot.slot) &&
 				r.rated?.rateable &&
-				r.rated.bscore < options.keepFloor &&
+				(perGame(r.rated) ?? Infinity) < options.keepFloor &&
 				!protect.has(normalizeName(r.spot.name))
 		)
 		if (round === 0) {
@@ -1175,7 +1253,7 @@ export const planSwaps = (
 				r =>
 					!isReserve(r.spot.slot) &&
 					r.rated?.rateable &&
-					r.rated.bscore < options.keepFloor &&
+					(perGame(r.rated) ?? Infinity) < options.keepFloor &&
 					protect.has(normalizeName(r.spot.name))
 			)
 			// One note, however many men. Eight lines each saying the same thing about a
@@ -1183,14 +1261,14 @@ export const planSwaps = (
 			if (held.length)
 				notes.push(
 					`${held.map(r => r.spot.name).join(", ")} ${held.length === 1 ? "is" : "are"} ` +
-						`below the ${options.keepFloor} keep floor over this window and still not ` +
+						`below the ${options.keepFloor}-a-game keep floor over this window and still not ` +
 						`offered up: worth too much over the rest of the season to give away for ` +
 						`one week of it`
 				)
 		}
 		if (!droppable.length) {
 			notes.push(
-				`nobody left on the roster is below the ${options.keepFloor} keep floor, so nothing ` +
+				`nobody left on the roster is below the ${options.keepFloor}-a-game keep floor, so nothing ` +
 					`further was offered up`
 			)
 			break
@@ -1317,13 +1395,48 @@ export const planSwaps = (
 		}
 
 		if (!best) break
-		if (best.gain < options.minGain) {
+		/*
+		 * THE BAR IS PER TEAM GAME AND THE GAIN IS A WHOLE-WINDOW TOTAL, and this line
+		 * compared them directly.
+		 *
+		 * `best.gain` is the difference of two `planLineup(...).pointsPlanned` totals over
+		 * the entire horizon; `minGain` ships at 0.38 BECAUSE it is a rate (25 and 5 were
+		 * divided by the ~13 team games of the fortnight they were tuned on — see the note
+		 * above `DEFAULTS`). Over this league's six-game period the effective bar was
+		 * therefore about a sixth of what it was set to: a swap worth 0.4 points across a
+		 * whole scoring period cleared it, and the refusal note then said "worth 0.4
+		 * points — below the 0.38-a-game bar" about moves it had just been accepting for
+		 * exceeding that same bar. The mirror of the keepFloor defect above: too lax
+		 * exactly where that one is too strict.
+		 *
+		 * The rate was already being computed three lines below, for the move's own
+		 * `gainPerGame`, and compared to nothing. It is computed here now and the move
+		 * carries it, so the number the planner DECIDED on is the number it reports —
+		 * which is what lets `railViolations` (`(m.gainPerGame ?? -Infinity) < minGain`)
+		 * audit this planner at all. Before this, every sub-bar swap planSwaps emitted
+		 * would have been flagged by the repo's own rail, had anything run it over
+		 * planSwaps output.
+		 *
+		 * Null games means no rate, and no rate cannot clear a rate bar — the same reading
+		 * `perGame` takes for the keep floor, and honest: a man whose club is not playing
+		 * inside this window is not an upgrade to anything.
+		 */
+		const horizonGames = best.add.rated.projection.horizonGames
+		const gainPerGame = horizonGames > 0 ? r2(best.gain / horizonGames) : null
+		if ((gainPerGame ?? -Infinity) < options.minGain) {
+			/* Both numbers, because neither is the whole claim: the total is what a reader
+			   would have gained and the rate is what was measured against the bar. The note
+			   used to quote the total alone and label it with the rate's unit. */
+			const worth =
+				gainPerGame === null ?
+					`is worth ${best.gain} points over a window his club has no games in`
+				:	`is worth ${best.gain} points over this window, ${gainPerGame} a game`
 			notes.push(
 				best.drop ?
 					`the best remaining swap, ${best.add.rated.player.name} for ${best.drop.spot.name}, ` +
-						`is worth ${best.gain} points — below the ${options.minGain}-a-game bar`
-				:	`the best remaining add, ${best.add.rated.player.name}, is worth ${best.gain} ` +
-					`points — below the ${options.minGain}-a-game bar, even into a free seat`
+						`${worth} — below the ${options.minGain}-a-game bar`
+				:	`the best remaining add, ${best.add.rated.player.name}, ${worth} — below the ` +
+					`${options.minGain}-a-game bar, even into a free seat`
 			)
 			break
 		}
@@ -1339,11 +1452,11 @@ export const planSwaps = (
 			/* This branch prices a swap by what it does to the LINEUP TOTAL rather than by
 			   the difference of two bscores, so the per-game reading is that total spread
 			   over the window the lineup was projected across. Null where the window has no
-			   games, which is the same absence `bscorePerGame` reports. */
-			gainPerGame:
-				best.add.rated.projection.horizonGames > 0 ?
-					r2(best.gain / best.add.rated.projection.horizonGames)
-				:	null,
+			   games, which is the same absence `bscorePerGame` reports.
+			   Reported from the same `gainPerGame` the bar was just applied to, rather than
+			   recomputed here: the reported rate and the decided rate being two expressions
+			   is how they came to disagree in the first place. */
+			gainPerGame,
 			dropPerGame: best.drop?.rated ? perGame(best.drop.rated) : null,
 			seats: [...new Set(seats)],
 			// Written for the reader, not for the model. "bscore -22.62, below the 25
@@ -1356,13 +1469,16 @@ export const planSwaps = (
 				(seats.length ?
 					`He can fill your ${[...new Set(seats)].join(" or ")} seat. `
 				:	`Your league prints no startable position for him, so he would sit. `) +
-				// What the code actually checks is `bscore < keepFloor` — not far enough
-				// clear of the slot's bar — plus the season-long protect set. "Well below
-				// what a free agent is worth" claimed the first without the qualifier, and
-				// on the shipped roster it said so about a man whose bscore was +5.61.
+				// What the code actually checks is `bscorePerGame < keepFloor` — not far
+				// enough clear of the slot's bar — plus the season-long protect set. "Well
+				// below what a free agent is worth" claimed the first without the qualifier,
+				// and on the shipped roster it said so about a man whose bscore was +5.61.
+				/* "A GAME", because that is the bar that was applied. This read "within 1.9
+				   points", which is a rate printed in a total's unit — the same confusion
+				   that made the check itself compare a total against a per-game floor. */
 				(best.drop ?
 					`${best.drop.spot.name} is the man to give up for him: he is within ` +
-					`${options.keepFloor} points of what the wire offers at his own slot over this ` +
+					`${options.keepFloor} a game of what the wire offers at his own slot over this ` +
 					`window, and is not worth holding over the rest of the season either.`
 				:	`You are holding ${roster.length} of ${capacity} seats, so nobody has to come ` +
 					`out for him.`)
@@ -1393,11 +1509,14 @@ export const planSwaps = (
 	 */
 	if (moves.length === cap) {
 		const resolved = resolveRoster({ ...input, roster })
+		/* Per team game, the same reading as the loop above — this probe asks "who could
+		   still have come out", and an answer drawn with a different bar would price a
+		   move the planner would never have made. */
 		const droppable = resolved.filter(
 			r =>
 				!isReserve(r.spot.slot) &&
 				r.rated?.rateable &&
-				r.rated.bscore < options.keepFloor &&
+				(perGame(r.rated) ?? Infinity) < options.keepFloor &&
 				!protect.has(normalizeName(r.spot.name))
 		)
 		const taken = new Set(moves.map(m => normalizeName(m.add)))

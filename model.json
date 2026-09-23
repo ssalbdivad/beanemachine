@@ -137,12 +137,14 @@
 			"completeGames": 900,
 			"shutouts": 900,
 			"wildPitches": 500,
-			"balks": 900,
-			"homeRunsAllowed": 300
+			"balks": 900
 		},
 		"why": [
 			"Roughly the volume at which a stat is half signal, half noise, following the published stabilisation work (Carleton / Tango).",
 			"`default` is deliberately heavy: an unlisted stat is one we have no stabilisation evidence for, and heavy shrinkage is the honest response to that.",
+			"REMOVED, 2026-09-22: `\"homeRunsAllowed\": 300`. Nothing could ever read it. This table is keyed by StatsAPI field name and looked up while iterating a stat line (`SHRINK_K[key]`, src/engine/project.ts), and MLB names the field `homeRuns` on BOTH sides — which is why `PITCHING_MAP.HR` reads the same key the hitting map does. A repo-wide grep found the string on exactly one line: its own declaration here. So a pitcher's home runs allowed were always regressed with 170, the hitters' constant, and the 300 written for them was a claim about the model that nothing executed — the thing this file exists to make diffable.",
+			"It is deleted rather than made reachable, and that is a choice about evidence, not about effort. Making it reachable means splitting the table per side (`perStat.hitting` / `perStat.pitching`) and selecting by `player.group`, which is the only shape in which a pitching constant can differ from a hitting one for a field MLB spells the same — but it would also move every pitcher's projected HR (k of 150 against 85 after `scale`) for the first time, and the 33W-13L holdout above was measured with 170 applied to pitchers. Deleting the line makes the file true about the model that was actually validated. If the 300 is wanted, it wants the split AND a fresh sweep, not a revert.",
+			"test/engine.mjs now asserts that every key of `perStat` is in `KEPT_STATS`, so the next unreachable knob fails the suite instead of sitting here looking authoritative.",
 			"TURNED ON, 2026-09-19. It had never run. `project` shrinks a per-stat rate toward the population only when the caller hands it one, and neither `rateAll` in src/engine/bscore.ts nor the season simulator did — so this whole section was inert in the shipped product and in every stored result, while project.ts's own comment called its absence 'the single biggest source of bad recommendations'.",
 			"It is applied at HALF the constants above, and the half is measured rather than chosen for comfort. Full strength takes 20 to 27 points off every elite reliever on a fourteen-day projection (Mason Miller 72.2 to 45.2, Josh Hader 43.9 to 23.1) because the population it regresses toward pools closers with mop-up men, and a closer's save rate has no business regressing toward a pitcher who never sees the ninth.",
 			"Measured with the league's own bench and two moves a week, together with the joint replacement bars: chosen on 2021-2023 and validated on 2024-2025, which it had not been fitted on. On those 46 held-out weeks the pair beats the previously shipped model 33W-13L, +42.6 points a week, 95% CI [+21.3, +62.2], sign-test p 0.0045 and paired-t p 0.0001. Over all 111 weeks it is 69W-42L, +25.3/wk, p 0.013 / 0.0003.",

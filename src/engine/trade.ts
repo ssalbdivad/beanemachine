@@ -1,5 +1,12 @@
 import type { League } from "../schema.ts"
-import { jointReplacement, RESERVE_SLOTS, slotsFor, startableSeats, type Rated } from "./bscore.ts"
+import {
+	isReserveSlot,
+	jointReplacement,
+	jointReplacementMen,
+	slotsFor,
+	startableSeats,
+	type Rated
+} from "./bscore.ts"
 
 /**
  * What a trade is actually worth.
@@ -21,10 +28,6 @@ import { jointReplacement, RESERVE_SLOTS, slotsFor, startableSeats, type Rated }
  *  the caller knows whether the league lets him hold both spots. */
 const keyOf = (r: Rated) => `${r.player.id}:${r.player.group}`
 
-/** The same list bscore.ts sets replacement depth by, imported rather than
- *  restated: two copies of it had already drifted apart over Yahoo's "IL+". */
-const UNSTARTABLE = RESERVE_SLOTS
-
 /**
  * One entry per startable spot: three OF slots produce three entries, because the
  * question "what do I start" is asked of spots, not of slot names.
@@ -35,6 +38,17 @@ const UNSTARTABLE = RESERVE_SLOTS
  * This stays as the League-shaped way to ask.
  */
 export const activeSlots = (league: League): string[] => startableSeats(league.roster)
+
+/** The league's slot counts with the reserve seats taken out — `jointReplacementMen`'s
+ *  second argument, written once because the bar and the man it names must be asked of
+ *  the same shape. This file used to alias `RESERVE_SLOTS` as `UNSTARTABLE` and test the
+ *  Set by hand in three places; the Set answers false for "IL-60" and "NA(b)", both of
+ *  which the league editor's Add slot field accepts, so `isReserveSlot` is asked instead
+ *  — the same predicate `activeSlots` above reaches through `startableSeats`. */
+const startableShape = (league: League): Record<string, number> =>
+	Object.fromEntries(
+		Object.entries(league.roster.slots).filter(([slot]) => !isReserveSlot(slot))
+	)
 
 /**
  * The replacement bar at every startable slot: the (teams × slots)-th best
@@ -76,7 +90,12 @@ export const wireBySlot = (
 ): Map<string, Rated[]> => {
 	const out = new Map<string, Rated[]>()
 	for (const slot of Object.keys(league.roster.slots)) {
-		if (UNSTARTABLE.has(slot)) continue
+		/* The predicate rather than the Set this file used to alias as `UNSTARTABLE`. The
+		   alias was imported "so there would be one list", but the SHAPE of the check was
+		   the drift: `RESERVE_SLOTS.has("IL-60")` is false, and the league editor's Add
+		   slot field takes that name. A reserve seat reaching this loop gets a wire list
+		   and a bar, and the lineup then seats a man in a seat that scores nothing. */
+		if (isReserveSlot(slot)) continue
 		out.set(
 			slot,
 			pool
@@ -143,9 +162,7 @@ export const replacementBySlot = (
 	   implementation, so a correction to it cannot leave this page behind again.
 	*/
 	const rateable = pool.filter(r => r.rateable)
-	const startable = Object.fromEntries(
-		Object.entries(league.roster.slots).filter(([slot]) => !UNSTARTABLE.has(slot))
-	)
+	const startable = startableShape(league)
 	for (const [slot, bar] of jointReplacement(rateable, startable, (_sl, count) => teams * count)) {
 		// no eligible player means the bar is unknown, not zero — the slot is left
 		// out of the map and any spot it leaves empty is reported as a hole
@@ -182,19 +199,57 @@ export const replacementPlayerBySlot = (
 	gettable?: (r: { player: { name: string } }) => boolean
 ): Map<string, Rated[]> => {
 	if (gettable) return wireBySlot(league, pool, gettable)
+	/*
+	   THE FOURTH COPY OF THE RULE, AND THE LAST ONE TO GO.
+
+	   This walked each slot's own eligible list down to `teams x count` and read off the
+	   next name — the arithmetic `replacementBySlot` above stopped doing when it moved to
+	   `jointReplacement`. But this function supplies the NAME for the very seat whose
+	   NUMBER that one supplies, so the two became different rules about the same row and
+	   the lineup card printed one man against another man's points. Measured on the
+	   committed capture, league yahoo:228947, with no wire — which is every visitor to
+	   beanemachine.com:
+
+	       Util   bar 81.23   named "Matt Olson"        104.35   +23.12
+	       SP     bar 53.32   named "Walbert Ureña"      72.40   +19.08
+	       1B     bar 81.23   named "Jake Burger"        90.74    +9.51
+	       SS     bar 79.96   named "Jeremy Peña"        88.14    +8.18
+	       C      bar 63.23   named "Austin Wells"       63.23     0.00
+
+	   Catcher agreeing to the cent is the tell `jointReplacement`'s docblock predicts:
+	   it is the one slot almost nobody else qualifies at, so the independent walk and the
+	   joint assignment cannot disagree there, and the position everybody checks by hand
+	   was again the position that was right. Everywhere else the men named were stars —
+	   Olson is 99% rostered — offered to the reader as the body he would have instead,
+	   which is the exact failure `replacementBySlot`'s own note above says this screen
+	   already made once.
+
+	   One assignment answers both now: `jointReplacementMen` hands back the unseated man
+	   it already identified, and his `.points` IS the bar, so the name and the number
+	   cannot come apart again without the engine moving underneath both.
+
+	   Still one man per slot, for the reason the deleted code's comment gave: the estimate
+	   knows who is first in line and nothing about who is behind him, so a second
+	   uncovered seat at the same slot stays unpriced. Only the wire regime can fill two.
+
+	   And the SAME man is now the bar at more than one slot where that is the truth — on
+	   the capture above, Vladimir Guerrero Jr. at both 1B and Util, Kumar Rocker at both
+	   SP and P — because he is the first man left at each. That is not the double-count
+	   `seatedFree` fixes further down: there the card is seating real bodies and a body
+	   can only be had once, here it is quoting a price, and the two slots' prices are
+	   equal (81.23, 53.32) precisely because the same man sets both. A caller that must
+	   name him in two rows should say what he is: the bar, not a claim on a person.
+	*/
+	const rateable = pool.filter(r => r.rateable)
 	const out = new Map<string, Rated[]>()
-	for (const [slot, count] of Object.entries(league.roster.slots)) {
-		if (UNSTARTABLE.has(slot)) continue
-		const eligible = pool
-			.filter(r => r.rateable && r.slots.includes(slot))
-			.sort((a, b) => b.points - a.points)
-		if (!eligible.length) continue
-		// the estimate names one man per slot; the seats below him are unpriced,
-		// which is why this regime cannot fill a second seat with a second body
-		const depth = Math.min(teams * count, eligible.length - 1)
-		const man = eligible[depth]
+	for (const [slot, man] of jointReplacementMen(
+		rateable,
+		startableShape(league),
+		(_sl, count) => teams * count
+	))
+		// no man means nobody in the pool is eligible here at all — a structural hole, and
+		// the same slots `replacementBySlot` leaves out of its map rather than pricing at 0
 		if (man) out.set(slot, [man])
-	}
 	return out
 }
 
@@ -395,12 +450,15 @@ export const startingLineup = (
 	/**
 	 * The free men at each slot, best first — `replacementPlayerBySlot`'s own answer.
 	 *
-	 * With it, the k-th uncovered seat at a slot is priced at the k-th man and named after
-	 * him, and a slot whose list runs out before its seats do is a HOLE: the wire really has
-	 * nobody else there, and pricing that seat at the last man again would be counting one
-	 * body twice. Without it, every uncovered seat is priced at the slot's single bar, which
-	 * is what this did for every caller and is the honest answer in the estimate regime, where
-	 * only one body per slot is known at all.
+	 * With it, these men are SEATED rather than quoted: they enter the matching beside the
+	 * reader's own roster, so each is seated at most once across every slot he is eligible
+	 * for, and a seat nobody is left for is reported as a wire that ran short rather than as
+	 * a second helping of a body already sitting somewhere. It used to price the k-th
+	 * uncovered seat of a slot at the k-th man in that slot's list — a different and worse
+	 * question, and the block inside says what it cost.
+	 *
+	 * Without it, every uncovered seat is priced at the slot's single bar, which is the
+	 * honest answer in the estimate regime, where only one body per slot is known at all.
 	 */
 	ranked?: Map<string, Rated[]> | null
 ): Lineup => {
@@ -424,68 +482,115 @@ export const startingLineup = (
 
 	const spots = activeSlots(league)
 	/*
-	   WHAT EACH SEAT COSTS TO LEAVE EMPTY, seat by seat rather than slot by slot.
-	
-	   The matching decides which of the reader's men to start by weighing each against what
-	   the seat would be worth without him. Handed one number per SLOT — the best free man at
-	   it — every seat of a three-seat slot was charged that same best man's price, so a man
-	   worth more than the third-best free agent and less than the first was benched, marked
-	   "under the wire", and priced at nothing in a trade that gave him away.
-	
-	   With the ranked list, the k-th seat of a slot is weighed against the k-th man, which is
-	   what the lineup below is priced at and what the card prints. Without one, the flat bar
-	   is the only thing known and this is exactly what it was.
+	   ═══ A FREE MAN IS A CANDIDATE, NOT A PRICE ═══════════════════════════════════════
+
+	   Given the league's own wire, the men on it go INTO the matching beside the reader's
+	   own, and the seat a free man wins is a seat the reader is told to fill from the wire.
+	   Every earlier version of this handed the matching a number per seat instead, and each
+	   one of them got a different case wrong:
+
+	     ONE NUMBER PER SLOT (the best free man there). Every seat of a three-seat slot was
+	     charged that same best man's price, so a man worth more than the third-best free
+	     agent and less than the first was benched, marked "under the wire", and priced at
+	     nothing in a trade that gave him away.
+
+	     THE k-TH SEAT AT THE k-TH MAN, per slot. That fixed the double count WITHIN a slot
+	     and left the one ACROSS slots: `wireBySlot` builds each slot's list independently,
+	     so a man eligible at OF and Util is in both, and on this app's own shipped league
+	     every batter is in two lists (Util accepts them all) and every pitcher is in two
+	     (P accepts SP and RP). The OF seat and the Util seat were each priced at the same
+	     best free outfielder while the matching decided who plays.
+
+	     ONE CURSOR ACROSS SLOTS, the obvious repair, is ALSO wrong, and this is why the
+	     repair was not made: it spends a free man on the first seat of his slot even when
+	     the reader's own man ends up in that seat, so the next seat is priced at a man who
+	     was never taken. Four seats OF/OF/OF/Util, my men 105 103 101 95, the wire A100
+	     B90 C80 D70: the cursor prices Util at D70, my 95 clears it, and the lineup comes
+	     out 404 — where seating A at Util and benching my 95 is 409. The per-slot rule
+	     that predates it happens to get that one right. Each rule wins a case the other
+	     loses, because both are guessing an assignment instead of making one.
+
+	   MEASURED, on the committed capture with league 228947's own ownership cut as the wire
+	   (35% rostered, `ownershipCut`), against 61 rosters drafted at every depth from the
+	   best available man to the 61st: 53 lineups are identical to the point and 8 change,
+	   every one of them upward, +15.95 points in total and +3.98 at the largest. Every one
+	   of the eight is the same sentence — a man the old rule benched comes back into the
+	   lineup, because the body he was being measured against was already sitting in another
+	   seat. Juan Soto is one of them. That is a small effect on this capture and a
+	   structural one: it fires wherever the reader's marginal man is near wire quality,
+	   which is the only place the seat/bench decision is hard, and it fires for every
+	   extension user, since `ranked` is non-null exactly when a wire was read.
+
+	   Putting the free men in the pool asks the question that was actually being asked —
+	   "which twenty men fill these twenty seats" — over both populations at once, so a man
+	   is seated once whatever he is eligible for, and a seat is left to the wire exactly
+	   when the wire beats what the reader owns. `bar` then drops to 0 at every seat whose
+	   alternative is a BODY, and survives only where the alternative is a NUMBER: the
+	   estimate regime, which knows one price per slot and no people.
+
+	   TRUNCATED at `spots.length` men per slot, which costs nothing and is not a heuristic:
+	   there are only that many seats in the whole lineup, so a man standing lower than that
+	   in his own slot's list can only be reached once every man above him at that slot is
+	   seated — and that would already have used every seat there is. It keeps the matching
+	   at tens of candidates rather than the several hundred a full wire read carries, which
+	   matters because this runs twice per trade and the relaxation is quadratic in players.
 	*/
-	const seatsSoFar = new Map<string, number>()
-	const barPerSeat = spots.map(slot => {
-		const k = seatsSoFar.get(slot) ?? 0
-		seatsSoFar.set(slot, k + 1)
-		const list = ranked?.get(slot)
-		if (!list) return replacement?.get(slot) ?? 0
-		return list[k]?.points ?? 0
-	})
-	const holder = seat(startable, barPerSeat, spots)
-	const filled = spots.map((_, i) => startable[holder[i]!] ?? null)
-	const taken = new Set(filled.filter(r => r !== null).map(keyOf))
+	const freeMen = ranked ?
+		[...ranked.values()]
+			.flatMap(list => list.slice(0, spots.length))
+			.filter(r => !seen.has(keyOf(r)) && (seen.add(keyOf(r)), true))
+	:	[]
+	/* The reader's own men first, so the strict `>` in `bestAugmentation` resolves a tie
+	   in favour of the man already on the roster: "drop him for somebody exactly as good"
+	   is noise, and it would print on the card as a move. */
+	const candidates = freeMen.length ? [...startable, ...freeMen] : startable
+	const barPerSeat = spots.map(slot => (ranked?.get(slot) ? 0 : (replacement?.get(slot) ?? 0)))
+	const holder = seat(candidates, barPerSeat, spots)
+	const filled = spots.map((_, i) => candidates[holder[i]!] ?? null)
+	/** A seat won by the wire rather than by the roster — index, because the two
+	 *  populations are one array and only the boundary tells them apart. */
+	const isFree = (i: number): boolean => holder[i]! >= startable.length
+	const taken = new Set(
+		filled.filter((r, i) => r !== null && !isFree(i)).map(r => keyOf(r!))
+	)
 
 	const holes: string[] = []
 	const short: string[] = []
 	/**
-	 * THE FREE MEN ALREADY SEATED, ACROSS EVERY SLOT — not a cursor per slot.
+	 * THE MEN THE MATCHING SEATED, READ BACK — not a second walk down the same lists.
 	 *
-	 * The first version of this counted seats at each slot and took the nth man from that
-	 * slot's list, which fixed the double count WITHIN a slot and left the one across slots
-	 * untouched: `wireBySlot` builds each slot's list independently, so a man eligible at OF
-	 * and Util is in both, and on this app's own shipped league every batter is in two lists
-	 * (Util accepts them all) and every pitcher is in two (P accepts SP and RP).
+	 * This used to re-derive the free half: walk the seats in order, take each slot's best
+	 * man not already spent, and print him. It carried a `seatedFree` set to stop the same
+	 * body appearing at OF and at Util — `wireBySlot` builds each slot's list
+	 * independently, so on this app's own shipped league every batter is in two lists and
+	 * every pitcher is in two, and the dev server showed `OF 100.7 Pete Crow-Armstrong`
+	 * beside `Util 100.7 Pete Crow-Armstrong` and `SP 69.5 Chris Sale` beside `P 69.5
+	 * Chris Sale`: 237 points of a 1,344-point lineup that were three men counted twice.
 	 *
-	 * Measured on the dev server before this: `OF 100.7 Pete Crow-Armstrong` and `Util 100.7
-	 * Pete Crow-Armstrong`, `SP 69.5 Chris Sale` and `P 69.5 Chris Sale` — the same name
-	 * printed in two rows, which is the exact sentence the earlier fix was written against, and
-	 * 237 points of a 1,344-point lineup that were three men counted twice.
-	 *
-	 * One set of men, then, spent once each in the order the seats are filled.
+	 * That set is gone because the walk is gone. The free men are in the matching above,
+	 * which seats every man at most once by construction — so the card prints the
+	 * assignment the lineup total was computed from, rather than a second guess at it that
+	 * has to be kept in step by hand.
 	 */
-	const seatedFree = new Set<string>()
 	const starters: Start[] = spots.map((slot, index) => {
-		const player = filled[index]
-		if (player) return { slot, player, points: player.points, source: "roster" }
-		const list = ranked?.get(slot)
-		if (list) {
-			const man = list.find(r => !seatedFree.has(keyOf(r)))
-			if (man) seatedFree.add(keyOf(man))
-			if (man)
-				return {
-					slot,
-					player: null,
-					points: Number(man.points.toFixed(2)),
-					source: "replacement",
-					free: man
-				}
-			/* The list ran out before the seats did — a real and sayable fact, and NOT the one
+		const man = filled[index]
+		if (man && !isFree(index))
+			return { slot, player: man, points: man.points, source: "roster" }
+		if (man)
+			return {
+				slot,
+				player: null,
+				points: Number(man.points.toFixed(2)),
+				source: "replacement",
+				free: man
+			}
+		if (ranked?.get(slot)) {
+			/* The wire ran out before the seats did — a real and sayable fact, and NOT the one
 			   `holes` carries. An absent bar means nobody in the pool is eligible at this slot at
 			   all; this means his league's list is shorter than his seats. Reported apart, because
-			   the card says a different sentence about each and said the wrong one about this. */
+			   the card says a different sentence about each and said the wrong one about this.
+			   Now also covers the rarer honest case the matching can produce: every free man
+			   eligible here projects at or below nothing, and an empty seat beats a negative. */
 			short.push(slot)
 			return { slot, player: null, points: 0, source: "empty", free: null }
 		}

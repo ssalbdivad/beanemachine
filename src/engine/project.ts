@@ -66,11 +66,50 @@ export interface LeagueRates {
 	perUnit: Record<string, number>
 }
 
+/**
+ * THE SAME DENOMINATOR THE SHRINKAGE DIVIDES BY, which this did not use.
+ *
+ * The pitching side counted its population in BATTERS FACED while `project` measures a
+ * pitcher's own volume in OUTS (`const volume = isHitter ? s.plateAppearances : s.outs`),
+ * and the shrinkage formula mixes the two in one expression:
+ * `(value + k * leagueRate) / (volume + k)`. So every thin-sample pitcher was pulled
+ * toward a target denominated in a unit his own rate is not — a numerator and a
+ * denominator drawn from different populations, which is the failure this codebase names
+ * in four other docblocks and had here in the arithmetic that moves every pitcher.
+ *
+ * Measured on the committed capture: the 795 pitchers carrying both fields total 163,144
+ * batters faced against 114,803 outs, a ratio of 1.421, so the prior was 30% low across
+ * the board — the league strikeout rate entered as 0.2220 per unit where the per-out
+ * figure is 0.3154. Re-derivable by summing both fields over `hydrate(snapshot).players`.
+ *
+ * OUTS rather than batters faced, because outs is what the other three sides of the same
+ * formula already use: `volume` above, the recent rate below it (`rv = recentStats.outs`)
+ * and the per-player career prior in src/backtest/season.ts, which divides last season's
+ * pitching line by `p.stats.outs` and is handed to `priorRates` — the very field that
+ * falls through to this one when a man has no history. Changing this unit rather than
+ * those three is one line against three, and it moves the odd one out.
+ *
+ * Effect, re-running `rateAll` over the capture with league yahoo:228947's pitching
+ * table: 671 pitchers rated, mean |Δ| 0.83 points over the horizon, 439 of them moving by
+ * more than half a point and 498 changing rank, but the largest rank move is 17 places
+ * and the largest points move 2.76 (Gerrit Cole 93.04 → 90.28). Nearly every pitcher
+ * moves and almost none of them move PAST anybody, which is what a mis-scaled prior does:
+ * it is a common-mode shift, not a re-ordering. Every one of the six largest moves is
+ * downward, because a pitcher's shrunk line carries earned runs and hits as well as
+ * strikeouts and this league's table charges for them.
+ *
+ * WHAT WOULD HAVE TO CHANGE IF THIS WERE REVERTED: nothing in the caller — but note that
+ * `MODEL.shrinkage.perStat` and `MODEL.shrinkage.scale` were fitted by sweeps run against
+ * the old unit, so every pitching constant is now regressing toward a target 1.42x larger
+ * than the one it was chosen with. The constants want a re-sweep
+ * (`src/backtest/verdict.ts`); the unit mismatch is a defect either way, and leaving it in
+ * place to protect a fit is fitting the error rather than the pitcher.
+ */
 export const leagueRatesFrom = (
 	players: { group: string; stats: StatLine }[],
 	group: "hitting" | "pitching"
 ): LeagueRates => {
-	const unit = group === "hitting" ? "plateAppearances" : "battersFaced"
+	const unit = group === "hitting" ? "plateAppearances" : "outs"
 	const totals: Record<string, number> = {}
 	let volume = 0
 	for (const p of players) {

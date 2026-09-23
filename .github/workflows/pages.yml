@@ -106,7 +106,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # playwright-core, not playwright: only the core package is a dependency, so
+      # only its bin exists — `playwright install` failed this job on its first run.
+      - run: pnpm exec playwright-core install --with-deps chromium
       - run: pnpm build
         env:
           VITE_API_BASE: ${{ vars.VITE_API_BASE }}

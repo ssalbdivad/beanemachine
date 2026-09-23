@@ -518,7 +518,8 @@ dd code{font-family:var(--mono);font-size:var(--fs-3)}
 .period input[type=number]:hover,.period input[type=date]:hover{border-color:var(--rule-strong)}
 /* the lines under the controls are consequences of them rather than a new subject,
    so they open tighter than a card's own opening `.sub` */
-.period-reads,.period-source{margin-top:var(--sp-3)}
+/* `.period-reads` shared this rule and is gone: nothing renders that class any more. */
+.period-source{margin-top:var(--sp-3)}
 /* On a phone the row becomes a column: a select is as wide as its widest option, and
    four of them side by side overflow the card rather than wrapping inside it. */
 @media(max-width:640px){
@@ -768,9 +769,11 @@ pre{
   font-variant-numeric:tabular-nums}
 
 /* ---------- the board ----------
-   The shell only: a grid, a sticky head, and how a cell in it is typeset. WHICH
-   columns exist and which track each one sits in is in Board.tsx beside the markup
-   that emits them, because only that file knows how many there are.
+   The shell only: a grid, a sticky head, and how a cell in it is typeset. WHICH columns
+   exist and which track each one sits in is further down this file, under "the board's
+   columns, and the streaming strip". It used to be in Board.tsx, injected as a <style>
+   from the component's own render, which meant board layout could not be read from either
+   file alone; it moved here on 2026-09-22.
 
    This block used to carry an eight-track template and a ladder of nth-child
    placements for nine columns. Four of the nine are gone and a fifth is conditional,
@@ -830,11 +833,11 @@ pre{
    `.hurt`'s. */
 .who .owner{margin-left:6px;font-style:normal;color:var(--muted);font-size:var(--fs-2)}
 /* every column of digits is tabular, because the column IS the comparison */
-.board-row .uscore,.board-row .bscore,.board-row .dim,.board-row .games,.board-row .gap{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.board-row .uscore{font-size:var(--fs-4);color:var(--muted)}
-.board-row .uscore.up{color:var(--accent);font-weight:600}
+/* `.uscore` and `.dim` were in this selector list and had two rules of their own below it.
+   No row has rendered either cell since the four-column pass — Board.tsx:305 already records
+   the same thing for their sibling `.us-val` — so they went on 2026-09-22. */
+.board-row .bscore,.board-row .games,.board-row .gap{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .bscore{font-size:var(--fs-5);font-weight:600;color:var(--accent)}
-.board-row .dim{font-size:var(--fs-3);color:var(--muted)}
 .board-row .games{font-size:var(--fs-3);color:var(--muted)}
 .gap{font-size:var(--fs-3);color:var(--faint)}
 .gap.up{color:var(--flag);font-weight:600}
@@ -847,7 +850,18 @@ pre{
 .sort-head.r{justify-content:flex-end}
 .sort-head:hover:not(:disabled){color:var(--ink);background:transparent}
 .sort-head.active{color:var(--accent)}
-.sort-head .arrow{font-size:8px;line-height:1;flex:none;width:8px;text-align:center}
+/* The sort glyph. The last four declarations are not a design: until 2026-09-22 this span
+   also matched a bare `.arrow{width:34px;height:48px;margin:0 0 -6px var(--sp-2);
+   overflow:visible}` written for Connect's hand-drawn SVG, which shared the class name.
+   `.sort-head .arrow` outranked it on width only, so the button has been inheriting a 48px
+   height and a left margin from a rule meant for a 34x48 drawing. The SVG and its rule are
+   gone; these are copied here VERBATIM so the board renders byte-for-byte as it did, and
+   they are almost certainly wrong for an 8px text glyph. Whoever can run test/board.mjs
+   should try dropping the height and the margin and look at the column head. */
+.sort-head .arrow{
+  font-size:8px;line-height:1;flex:none;width:8px;text-align:center;
+  height:48px;margin:0 0 -6px var(--sp-2);overflow:visible;
+}
 .board .empty{padding:var(--sp-4) var(--sp-2) 0}
 
 /* ---------- drill-down ---------- */
@@ -968,11 +982,12 @@ textarea::placeholder{color:var(--faint)}
 
 .paste-roster{margin-top:var(--sp-5)}
 .paste-roster h3{margin:0 0 var(--sp-2)}
-/* Numbered because they are steps in an order, not a list of options: the one
-   people miss is select-all, and a bullet does not say "second". */
-.paste-how{margin:0 0 var(--sp-2);padding-left:1.35em;display:flex;flex-direction:column;gap:5px}
-.paste-how li{font-size:var(--fs-3);line-height:var(--lh-snug);color:var(--muted)}
-.paste-how b{color:var(--ink)}
+/* `.paste-how` and its `li`/`b` rules stood here, numbered because they were steps in an
+   order rather than a list of options. trade.css records the markup's removal from the
+   paste fold; what it calls "the ONLY other `.paste-how` in the app, the settings-paste
+   steps" was this copy, and it was left standing when that markup went too. Nothing emits
+   the class now and test/trade-ui.mjs asserts the count is 0, so the rules went on
+   2026-09-22. */
 .paste-note{margin:var(--sp-2) 0 0}
 kbd{
   font-family:var(--mono);font-size:.88em;padding:1px 5px;
@@ -1631,23 +1646,17 @@ main#main:focus{outline:none}
 
 
 /* ---------- the board's one orientation line ---------- */
-/* What this screen is, and why its top five are men nobody recognises. The argument
-   for the sentences is the long note at the top of Board.tsx's render; this rule is
-   only about what they cost. No bottom margin, because `.board-controls` directly
-   below already carries `--sp-5` and a rule of its own, and `.sub`'s own `--sp-4`
-   under it would have been 16px of nothing.
-
-   WHAT IT COSTS, measured on the dev server with no team entered. At 390x844 the
-   paragraph is 113px — six lines of 13px at the `.sub` size — and it pushes the first
-   ranked row from y=900 to y=1013. That row was already 56px below an 844px fold, so
-   nothing that was on screen has gone off it: Billy's pick, which is this screen's
-   answer, moved from 487–663 to 600–776 and is still whole above the fold with 68px to
-   spare, and `document.elementFromPoint` at 195x600 through 195x776 returns the pick
-   card the whole way down (there is no dock on this screen to take those pixels). At
-   1280x1000 it is 75px and four lines. The cost is real and it is paid once, on
-   arrival, by the reader who would otherwise have read three White Sox and a 35.27 as
-   a broken app — which is what two separate walkers did. */
-.board-intro{margin:0}
+/* `.board-intro{margin:0}` and the measured argument for it stood here. The paragraph it
+   styled — `purpose("wire")` printed above the board — was removed, and test/board.mjs now
+   asserts `.board-intro` is absent from the page, so the rule went on 2026-09-22 and the
+   helper that produced the sentence went with it (see the note in src/client/panels.tsx).
+   The measurement the deleted comment carried is the part worth keeping: at 390x844 that
+   paragraph was 113px, six lines at the `.sub` size, and it pushed the first ranked row
+   from y=900 to y=1013 while leaving Billy's pick whole above the fold. That was judged
+   worth paying once, on arrival, by a reader who would otherwise read three White Sox and
+   a 35.27 as a broken app — which is what two separate walkers did. Whoever reintroduces
+   an orientation line here is reintroducing 113px on a phone, and should know it was
+   already tried. */
 
 /* ── LETTING IT READ YOUR LEAGUE ──────────────────────────────────────────────────────
    The one screen in this app that offers to READ rather than to be told: three numbered
@@ -1694,15 +1703,12 @@ main#main:focus{outline:none}
 	color: var(--muted);
 	background: var(--sunken);
 }
-/* The arrow sits beside the words it points at, and gets out of the way when there is no
-   room beside them. */
-.arrow { width: 34px; height: 48px; margin: 0 0 -6px var(--sp-2); overflow: visible }
 .tick { width: 22px; height: 22px; flex: none }
 /* Drawn on, but FINISHED when the animation is killed: the reduced-motion rule in this
    file is `animation:none!important`, so a path that started hidden and animated to
    visible would stay hidden for exactly the readers most likely to need the instruction.
    The base state is the finished state and the keyframes only ever hide it first. */
-.arrow path, .tick path { stroke-dasharray: 180; stroke-dashoffset: 0; animation: arrow-draw .6s ease-out }
+.tick path { stroke-dasharray: 180; stroke-dashoffset: 0; animation: arrow-draw .6s ease-out }
 @keyframes arrow-draw { from { stroke-dashoffset: 180 } }
 .connect-progress { font-family: var(--mono); font-size: var(--fs-2); color: var(--accent) }
 .connect-snag { color: var(--muted); margin: 0 0 var(--sp-3) }
@@ -1746,7 +1752,324 @@ main#main:focus{outline:none}
 	white-space: nowrap;
 	border: 0;
 }
-/* The arrow and the words it points at, on one line, arrow first — its head is at the
-   bottom right, so an arrow drawn after the words ends in empty space. Measured at 390px:
-   the head landed 40px clear of the facsimile before this. */
-.step-point { display: inline-flex; align-items: flex-end; gap: 2px }
+/* `.step-point` stood here — inline-flex, arrow first, because the arrow's head is at the
+   bottom right and one drawn after the words ends in empty space. It wrapped the hand-drawn
+   arrow and the words it pointed at; both the arrow and the markup that used this class are
+   gone, so the rule went with them on 2026-09-22. */
+
+
+
+/* ---------- the board's columns, and the streaming strip ----------
+   These four blocks were `MODE_FOCUS_CSS`, `BOARD_GRID_CSS`, `STREAM_CSS` and
+   `STREAM_GRID_CSS` in src/client/Board.tsx: CSS in template strings, injected at render
+   time as <style precedence="default"> elements. Each carried its own note saying it
+   belonged in app.css and was only in a component because app.css was not that change's
+   file. That was true four separate times, which is how ~305 lines of stylesheet — 9% of
+   Board.tsx — came to live in a component, and how the section above came to say that
+   which columns exist "is in Board.tsx", leaving board layout split across two files with
+   neither readable on its own.
+
+   Moved here on 2026-09-22: same selectors, same declarations, same order. The
+   measurements in the notes below came with them; the four apologies did not. */
+
+/*
+   app.css gives every control one focus treatment, but `.modes .mode` sets
+   `box-shadow:none` at a higher specificity than the shared `button:focus-visible`
+   rule, so the horizon tabs — and only they — took keyboard focus with nothing
+   drawn at all. Confirmed in the browser: computed outline `none`, box-shadow
+   `none`, border unchanged. This restores the same ring the rest of the page uses.
+   It was injected from Board.tsx as a React <style> until 2026-09-22, under a note
+   saying it belonged here.
+*/
+.modes .mode:focus-visible{
+	outline:none;border-color:var(--accent);
+	box-shadow:inset 0 1px 0 var(--edge), var(--ring);
+}
+
+/*
+   The board's grid, now that it carries SEVEN columns rather than eight.
+
+   `uscore` and `owned` used to be two of them, and they are one fact: uscore is
+   `addValue x (1 - owned)`, so it is blank in exactly the rows ownership is blank
+   in. Measured on the committed fixture, that is 500 of 1,233 rateable rows
+   (40.6%) on the fortnight and 585 of 1,433 (40.8%) rest-of-season — and, because
+   Yahoo lists the players it prices rather than the players who rank, 36 of the
+   FIRST 60 rows (60%). The board opened on seven straight rows of two dashes side
+   by side: one missing input, reported twice, in the place where scanning matters
+   most. They are one cell now — the score with the ownership that produced it
+   underneath, or the single word "unlisted".
+
+   Every cell carries `data-col` and is placed by it. app.css places them by
+   `nth-child`, which cannot survive a column being added to one row and not the
+   other — that is on the record: auto-placement once put the confidence gauge
+   under "GP" and the games count under "confidence". Naming the column in the
+   markup makes that class of drift impossible, and it lets the head and the row
+   hold their cells in the SAME order, so app.css's swap of children 6 and 7 is
+   no longer needed by anything.
+
+   THE SELECTORS ARE ONE CLASS DEEPER THAN THE SHELL'S ABOVE (`.board .board-head`, not
+   `.board-head`), and they stay that way. That depth was there because this block was
+   injected from Board.tsx as a React <style> and the cascade was not allowed to depend on
+   which stylesheet the browser saw first. It moved here on 2026-09-22 — the `nth-child`
+   ladder it was written to replace had already gone — so that hazard is gone with it, but
+   the depth is still what keeps these placement rules from colliding with the shell rules
+   above, and flattening them would be a silent change.
+*/
+/*
+  FOUR columns, or five once a roster exists, and the cuts are the point.
+  
+  It carried seven: uscore, bscore, games, confidence, luck, and later Δ mine.
+  Measured on the shipped capture, three of them could not be read as columns at all.
+  uscore is bscore discounted by availability, on a list already filtered to players
+  you can add — the same number twice, or its opposite, depending on a checkbox.
+  Confidence read 100% on 41 of the first 60 rows and took four distinct values across
+  all sixty. Luck is a percentile of expected-minus-actual contact that feeds no
+  ranking on this screen, printed beside numbers that do.
+  
+  Nothing measured is lost. Confidence is in the drill-down, one tap on the row, where
+  the working already lives; luck is there as the wOBA gap it is derived from, and its
+  percentile comes back as a column whenever the board is ordered by it. What goes is
+  the claim that either is a decision column on every visit.
+  
+  The name gets the width. On a phone it was ellipsised while the numbers kept full
+  columns, which is a table that has decided the reader came to look at figures rather
+  than at players.
+*/
+.board .board-head,.board .board-row{
+	grid-template-columns:28px minmax(0,1fr) 88px 62px;
+}
+/* With a roster there is one more, and it is the one an already-good manager reads:
+   what this man gains over the man he would actually displace. */
+.board[data-mine] .board-head,.board[data-mine] .board-row{
+	grid-template-columns:28px minmax(0,1fr) 80px 72px 58px;
+}
+.board[data-mine] .board-head>[data-col=mine],.board[data-mine] .board-row>[data-col=mine]{grid-column:4}
+.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{grid-column:5}
+/* Placed by NAME. app.css places the same cells by nth-child, which cannot
+   survive a column being added to one row and not the other — that is on the
+   record: auto-placement once put the confidence gauge under "GP" and the games
+   count under "confidence". */
+.board .board-head>[data-col],.board .board-row>[data-col]{grid-row:1;min-width:0}
+.board .board-head>[data-col=rank],.board .board-row>[data-col=rank]{grid-column:1}
+.board .board-head>[data-col=who],.board .board-row>[data-col=who]{grid-column:2}
+.board .board-head>[data-col=bscore],.board .board-row>[data-col=bscore]{grid-column:3}
+.board .board-head>[data-col=games],.board .board-row>[data-col=games]{grid-column:4}
+/* Streaming prints projected points where the board prints what he is ahead by, and
+   it is the same track. The rules that used to sit here for uscore, confidence and
+   luck are gone with the columns: nothing renders a uscore or a luck cell on this
+   screen any more, and conf only appears inside the drill-down, which is not a
+   child of a row. A rule kept "in case" is how a deleted column comes back wearing
+   somebody else's heading. */
+.board .board-head>[data-col=pts],.board .board-row>[data-col=pts]{grid-column:3}
+
+/*
+  THE ORDERING'S OWN TRACK STOOD HERE — a generic [data-col=sorted] column inserted left
+  of "ahead by", headed with whatever metric the reader had ordered by, in four
+  written-out combinations because an inherited grid-column is how two cells end up on
+  one track and this file has shipped that twice.
+
+  It existed to enforce a rule this board genuinely needs — A BOARD MUST ALWAYS SHOW THE
+  NUMBER IT IS SORTED BY — against a "Rank by" select that offered orderings no column
+  drew. The select is gone, and the only orderings left are the sortable column heads:
+  bscore (a column on all three horizons), points (a column on Streaming), deltaMine (a
+  column once a roster exists) and name. The sortable() clamp in useBoard.ts holds the
+  shared sort state to an ordering THIS horizon draws, so the rule now holds by
+  construction and there is no missing column left for a generic track to stand in for.
+
+  The rule itself is not deleted, it is enforced somewhere cheaper. Four CSS combinations
+  and a nine-entry lookup table were the cost of being able to order the board by a figure
+  nobody can see; not being able to do that is the better answer.
+*/
+/* The player's name is never cut. */
+.board .board-row .who b{overflow:visible;text-overflow:clip;white-space:normal}
+/*
+  .us-val, .us-own and .us-none stood here — the uscore score with the
+  ownership it was divided by underneath, or the word "unlisted". No row has
+  rendered any of the three since the four-column pass took uscore off the board;
+  checked across src/, test/ and api/, the only surviving mentions are two comments
+  in test/board.mjs explaining that the cells went and one helper built to read the
+  number out of the drill-down instead. The rules below them in this block already
+  say why a rule kept "in case" is how a deleted column comes back wearing somebody
+  else's heading, and these three were that rule.
+*/
+/* the unit rides the number, because the column holds two of them */
+.board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
+
+/* app.css spaces a drill-down heading after another heading and after a note list,
+   but not after a definition list — so "Statcast model" now sits flush against the
+   last row of "Measured", which reads as one table with a caption in the middle of
+   it. Belongs in app.css beside its siblings; here because app.css is not this
+   change's file. */
+.detail dl + h3{margin-top:var(--sp-3)}
+
+/*
+  ONE media block, where there were three.
+  
+  They existed to decide which of nine columns survived at each of three widths. With
+  four there is one decision left: at 390px the board is 300px wide, which holds the
+  rank, the name and one number. The games count goes rather than the value, because
+  the value IS the ranking and a list sorted by a column it does not show is a list
+  nobody can check.
+  
+  The two that went were written for the nine-column board and outlived it. A 900px
+  block set a six-track template and un-hid the games count; a second 640px block
+  then sent that cell to track 3, where "ahead by" already was, and both won on
+  source order — so at 390px the first row read "35.2714GP", two numbers printed on
+  top of each other under one heading. Every rule in them named uscore, confidence or
+  luck, and no row has rendered any of the three since the four-column pass.
+*/
+@media(max-width:640px){
+	.board .board-head,.board .board-row{
+		grid-template-columns:24px minmax(0,1fr) 74px;gap:var(--sp-2);
+	}
+	/* "For you" takes the near column, because it is the one about HIS team, and both
+	   cells are placed explicitly rather than left to inherit from the desktop rule —
+	   in a four-track grid that put "for you" to the right of a number it should lead. */
+	.board[data-mine] .board-head,.board[data-mine] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 62px 62px;gap:var(--sp-2);
+	}
+	.board[data-mine] .board-head>[data-col=mine],
+	.board[data-mine] .board-row>[data-col=mine]{grid-column:3}
+	.board[data-mine] .board-head>[data-col=bscore],
+	.board[data-mine] .board-row>[data-col=bscore]{grid-column:4}
+	.board .board-head>[data-col=games],.board .board-row>[data-col=games],
+	.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{display:none}
+	/* The phone's two [data-ordered] templates stood here, for the same generic track the
+	   desktop block above describes at length. Nothing sets data-ordered any more. */
+	/* Streaming shows what he scores; the board shows what he is ahead by. One number
+	   each at this width, and it is always the one the list is ordered by. */
+	.board[data-mode=stream] .board-head>[data-col=pts],
+	.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
+}
+
+/*
+   The streaming strip and the two things it adds to a row.
+
+   The move marker is a left rail plus a rule under the last one you can afford,
+   rather than a colour on the text: the question is "where does my list stop",
+   which is a boundary, and a boundary is a line. The rail reuses `border-left`,
+   the same 2px the row already reserves for hover and open, so nothing shifts.
+*/
+.stream-strip{
+	display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-3);
+	margin-top:var(--sp-2);
+}
+.stream-strip .strip-label{
+	font-family:var(--mono);font-size:var(--fs-2);letter-spacing:var(--caps);
+	text-transform:uppercase;color:var(--faint);
+}
+/* app.css sets white-space:nowrap on every .toggle, which is right in the filter
+   row where the labels are two words. In this strip the availability toggle also
+   carries the tier it is using ("est. over 35% is taken"), and at 390px that one
+   label ran to 411px — 21px of horizontal scroll on the whole page, on the view
+   this change exists to fix. It wraps here instead; the box stays pinned to the
+   first line so a two-line label does not centre its checkbox against nothing. */
+.stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
+.stream-strip .toggle input{flex:none;margin-top:3px}
+.stream-note{margin-top:var(--sp-2)}
+/* The availability sentence is NOT a stream-note. That class names the coverage
+   line, and test/board.mjs reads the first element matching it — a second paragraph
+   sharing the class silently retargeted five assertions at the wrong sentence.
+   Same margin, its own name. */
+.avail-note{margin-top:var(--sp-2)}
+/* his starts and who they are against, under his name. A block, so it elides on a
+   phone the way the meta line above it does rather than pushing the row wide. */
+.board .board-row .who .starts{
+	display:block;font-size:var(--fs-2);color:var(--muted);
+	overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* Deliberately not a <b>: test/journey.mjs reads every player name off
+   `.board-row .who b` and test/board.mjs off `.board-row b`, so a second bold
+   element inside the row would silently turn both into lists of interleaved
+   names and start counts. */
+.board .board-row .who .starts .n{
+	font-family:var(--mono);font-weight:700;color:var(--accent);
+}
+.board .board-row .who .starts.soft .n{color:var(--muted);font-weight:600}
+
+/*
+   The STREAMING grid, which is deliberately not the board's grid.
+
+   The shared seven columns — uscore, bscore, games, confidence, luck — are the
+   right shape for "who is the best player in baseball right now". They are the
+   wrong shape for "which arm do I add for the next three days", and two of them
+   are worse than merely irrelevant there:
+
+   `uscore` is `addValue x (1 - owned)`, i.e. value discounted by availability. On
+   a list that is ALREADY filtered to players he can add, that discount is applied
+   twice, and it reorders the survivors by who is rarer rather than by who is
+   better — the opposite of the question. It is also null wherever Yahoo priced
+   nobody, which on the live 2026-09-04 capture is 553 of 1,435 players, including
+   the top row of the gettable list.
+
+   `luck` is a percentile of expected-minus-actual wOBA over 21 days. It is a buy-low
+   signal about a season, acted on by ordering the board with "who has been unluckiest"
+   — which now draws the percentile beside each name, because a list ranked by a number
+   it does not print cannot be checked. Nothing about a Saturday start turns on it.
+
+   What goes in their place is the half of the reader's question the board never
+   answered: "expected performance". `pts` is what he is projected to actually
+   score over this window in this league's scoring — the quantity — and `bscore`
+   stays as the comparison against the next arm on the wire. Over three days those
+   two say very different things: on the live capture the best gettable starter
+   projects 33.0 points and 15.9 above replacement, and the fifth-best projects
+   17.2 points and 0.14 above it. One number alone would have hidden that.
+
+   Six columns, placed by NAME like the board's, for the reason the board's own block
+   gives at length: placement by index cannot survive a view with a different number of
+   children, and this is that view. Every rule below names the column it places.
+*/
+/*
+  Streaming carries one more number than the board, and it is the right one.
+  
+  The board asks who is worth adding and answers with what he is ahead of a free man
+  by. Streaming asks which arm to start on Saturday, and what answers that is what he
+  actually scores in the window — a free arm you are not starting is worth nothing to
+  you this week. So both are on the row here, and the list is ordered by the first.
+  
+  EVERY cell is placed explicitly in every combination below, and that is not
+  verbosity. There are four: two horizons times whether a roster exists. A cell left
+  to inherit its column from another combination auto-places, and an auto-placed cell
+  lands on top of its neighbour — measured on the streaming tab with a roster, "points"
+  and "for you" both rendered at x=219.
+*/
+.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
+	grid-template-columns:28px minmax(0,1fr) 66px 74px 58px;
+}
+.board[data-mode=stream] .board-head>[data-col=pts],
+.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3;display:block}
+.board[data-mode=stream] .board-head>[data-col=bscore],
+.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:4;display:block}
+.board[data-mode=stream] .board-head>[data-col=games],
+.board[data-mode=stream] .board-row>[data-col=games]{grid-column:5;display:block}
+/* With a roster, "for you" joins them — it is the only number here about HIS team. */
+.board[data-mine][data-mode=stream] .board-head,.board[data-mine][data-mode=stream] .board-row{
+	grid-template-columns:26px minmax(0,1fr) 60px 66px 64px 52px;
+}
+.board[data-mine][data-mode=stream] .board-head>[data-col=pts],
+.board[data-mine][data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
+.board[data-mine][data-mode=stream] .board-head>[data-col=bscore],
+.board[data-mine][data-mode=stream] .board-row>[data-col=bscore]{grid-column:4}
+.board[data-mine][data-mode=stream] .board-head>[data-col=mine],
+.board[data-mine][data-mode=stream] .board-row>[data-col=mine]{grid-column:5;display:block}
+.board[data-mine][data-mode=stream] .board-head>[data-col=games],
+.board[data-mine][data-mode=stream] .board-row>[data-col=games]{grid-column:6}
+/* Under 640px the board is 300px wide: the name and two numbers. On this tab the
+   points ARE the ordering, and a list must always show the number it is sorted by. */
+@media(max-width:640px){
+	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 58px 52px;gap:var(--sp-2);
+	}
+	.board[data-mode=stream] .board-head>[data-col=bscore],
+	.board[data-mode=stream] .board-row>[data-col=bscore]{display:none}
+	.board[data-mode=stream] .board-head>[data-col=games],
+	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4;display:block}
+	/* With a roster the second number is his own, not the league's. */
+	.board[data-mine][data-mode=stream] .board-head,.board[data-mine][data-mode=stream] .board-row{
+		grid-template-columns:24px minmax(0,1fr) 58px 56px;gap:var(--sp-2);
+	}
+	.board[data-mine][data-mode=stream] .board-head>[data-col=mine],
+	.board[data-mine][data-mode=stream] .board-row>[data-col=mine]{grid-column:4;display:block}
+	.board[data-mine][data-mode=stream] .board-head>[data-col=games],
+	.board[data-mine][data-mode=stream] .board-row>[data-col=games]{display:none}
+}

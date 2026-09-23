@@ -2236,8 +2236,6 @@ constant. The identity check above carries no such caveat: it is exact.
 ```sh
 node src/refresh.ts                                   # capture a fresh snapshot into data/snapshot.json
 node src/backtest/evaluate.ts                         # rebuild the corpus and re-score every variant
-node src/backtest/run.ts                              # the smaller single-season fold runner
-node src/backtest/tune.ts                             # sweep window length x blend weight x Statcast weight
 node src/backtest/compete.ts --seasons=2021,2022,2023,2024,2025 --moves=2   # play the seasons out
 node src/backtest/verdict.ts --statcast=point-in-time  # pool every stored measurement
 node src/backtest/xwoba.ts --real --prior-days=21 --seasons=2024 --min=30   # the xwOBA study

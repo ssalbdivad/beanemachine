@@ -1,5 +1,7 @@
 # generated at build time from scoring.json
-# regenerable logo exploration output (run logo/round*.mjs to rebuild)
+# Logo exploration output. The round*.mjs scripts that wrote it were deleted on
+# 2026-09-22; these patterns stay because the artifacts are still on the author's disk
+# and `git add -A` would sweep them in, which is the same reason *.png below exists.
 *.tmp
 .audit/
 .perf/

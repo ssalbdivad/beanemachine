@@ -193,314 +193,23 @@ const WINDOWS = [
 const tabId = (mode: Filters["mode"]) => `horizon-${mode}`
 const PANEL_ID = "horizon-panel"
 
-/**
- * app.css gives every control one focus treatment, but `.modes .mode` sets
- * `box-shadow:none` at a higher specificity than the shared `button:focus-visible`
- * rule, so the horizon tabs — and only they — took keyboard focus with nothing
- * drawn at all. Confirmed in the browser: computed outline `none`, box-shadow
- * `none`, border unchanged. This restores the same ring the rest of the page uses.
- * It belongs in app.css and should move there; it is here because app.css is not
- * this change's file.
+/*
+ * THE BOARD'S COLUMN PLACEMENT AND THE STREAMING STRIP ARE IN app.css, under the heading
+ * "the board's columns, and the streaming strip".
+ *
+ * They were four CSS-in-template-string constants here — MODE_FOCUS_CSS, BOARD_GRID_CSS,
+ * STREAM_CSS and STREAM_GRID_CSS — injected as <style> elements from this file's render,
+ * and every one of the four carried a note saying it belonged in app.css. They were moved
+ * there on 2026-09-22 along with those notes, so the reasoning for every column, every
+ * width and every cut is in the stylesheet beside the rules it explains.
+ *
+ * WHAT THIS FILE STILL OWES THAT STYLESHEET: every cell it emits carries a `data-col`, and
+ * placement is by that attribute rather than by index. A column added to the markup with
+ * no matching rule in app.css simply does not render, which is the failure this
+ * arrangement was chosen for — index placement once put the confidence gauge under "GP"
+ * and the games count under "confidence".
  */
-const MODE_FOCUS_CSS = `.modes .mode:focus-visible{
-	outline:none;border-color:var(--accent);
-	box-shadow:inset 0 1px 0 var(--edge), var(--ring);
-}`
 
-/**
- * The board's grid, now that it carries SEVEN columns rather than eight.
- *
- * `uscore` and `owned` used to be two of them, and they are one fact: uscore is
- * `addValue x (1 - owned)`, so it is blank in exactly the rows ownership is blank
- * in. Measured on the committed fixture, that is 500 of 1,233 rateable rows
- * (40.6%) on the fortnight and 585 of 1,433 (40.8%) rest-of-season — and, because
- * Yahoo lists the players it prices rather than the players who rank, 36 of the
- * FIRST 60 rows (60%). The board opened on seven straight rows of two dashes side
- * by side: one missing input, reported twice, in the place where scanning matters
- * most. They are one cell now — the score with the ownership that produced it
- * underneath, or the single word "unlisted".
- *
- * Every cell carries `data-col` and is placed by it. app.css places them by
- * `nth-child`, which cannot survive a column being added to one row and not the
- * other — that is on the record: auto-placement once put the confidence gauge
- * under "GP" and the games count under "confidence". Naming the column in the
- * markup makes that class of drift impossible, and it lets the head and the row
- * hold their cells in the SAME order, so app.css's swap of children 6 and 7 is
- * no longer needed by anything.
- *
- * This belongs in app.css and should move there, replacing the `nth-child` block
- * and its two media queries; it is here because app.css is not this change's
- * file. The selectors are deliberately one class deeper than app.css's so the
- * cascade cannot depend on which stylesheet React inserts first.
- */
-const BOARD_GRID_CSS = `
-/*
-  FOUR columns, or five once a roster exists, and the cuts are the point.
-  
-  It carried seven: uscore, bscore, games, confidence, luck, and later Δ mine.
-  Measured on the shipped capture, three of them could not be read as columns at all.
-  uscore is bscore discounted by availability, on a list already filtered to players
-  you can add — the same number twice, or its opposite, depending on a checkbox.
-  Confidence read 100% on 41 of the first 60 rows and took four distinct values across
-  all sixty. Luck is a percentile of expected-minus-actual contact that feeds no
-  ranking on this screen, printed beside numbers that do.
-  
-  Nothing measured is lost. Confidence is in the drill-down, one tap on the row, where
-  the working already lives; luck is there as the wOBA gap it is derived from, and its
-  percentile comes back as a column whenever the board is ordered by it. What goes is
-  the claim that either is a decision column on every visit.
-  
-  The name gets the width. On a phone it was ellipsised while the numbers kept full
-  columns, which is a table that has decided the reader came to look at figures rather
-  than at players.
-*/
-.board .board-head,.board .board-row{
-	grid-template-columns:28px minmax(0,1fr) 88px 62px;
-}
-/* With a roster there is one more, and it is the one an already-good manager reads:
-   what this man gains over the man he would actually displace. */
-.board[data-mine] .board-head,.board[data-mine] .board-row{
-	grid-template-columns:28px minmax(0,1fr) 80px 72px 58px;
-}
-.board[data-mine] .board-head>[data-col=mine],.board[data-mine] .board-row>[data-col=mine]{grid-column:4}
-.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{grid-column:5}
-/* Placed by NAME. app.css places the same cells by nth-child, which cannot
-   survive a column being added to one row and not the other — that is on the
-   record: auto-placement once put the confidence gauge under "GP" and the games
-   count under "confidence". */
-.board .board-head>[data-col],.board .board-row>[data-col]{grid-row:1;min-width:0}
-.board .board-head>[data-col=rank],.board .board-row>[data-col=rank]{grid-column:1}
-.board .board-head>[data-col=who],.board .board-row>[data-col=who]{grid-column:2}
-.board .board-head>[data-col=bscore],.board .board-row>[data-col=bscore]{grid-column:3}
-.board .board-head>[data-col=games],.board .board-row>[data-col=games]{grid-column:4}
-/* Streaming prints projected points where the board prints what he is ahead by, and
-   it is the same track. The rules that used to sit here for uscore, confidence and
-   luck are gone with the columns: nothing renders a uscore or a luck cell on this
-   screen any more, and conf only appears inside the drill-down, which is not a
-   child of a row. A rule kept "in case" is how a deleted column comes back wearing
-   somebody else's heading. */
-.board .board-head>[data-col=pts],.board .board-row>[data-col=pts]{grid-column:3}
-
-/*
-  THE ORDERING'S OWN TRACK STOOD HERE — a generic [data-col=sorted] column inserted left
-  of "ahead by", headed with whatever metric the reader had ordered by, in four
-  written-out combinations because an inherited grid-column is how two cells end up on
-  one track and this file has shipped that twice.
-
-  It existed to enforce a rule this board genuinely needs — A BOARD MUST ALWAYS SHOW THE
-  NUMBER IT IS SORTED BY — against a "Rank by" select that offered orderings no column
-  drew. The select is gone, and the only orderings left are the sortable column heads:
-  bscore (a column on all three horizons), points (a column on Streaming), deltaMine (a
-  column once a roster exists) and name. The sortable() clamp in useBoard.ts holds the
-  shared sort state to an ordering THIS horizon draws, so the rule now holds by
-  construction and there is no missing column left for a generic track to stand in for.
-
-  The rule itself is not deleted, it is enforced somewhere cheaper. Four CSS combinations
-  and a nine-entry lookup table were the cost of being able to order the board by a figure
-  nobody can see; not being able to do that is the better answer.
-*/
-/* The player's name is never cut. */
-.board .board-row .who b{overflow:visible;text-overflow:clip;white-space:normal}
-/*
-  .us-val, .us-own and .us-none stood here — the uscore score with the
-  ownership it was divided by underneath, or the word "unlisted". No row has
-  rendered any of the three since the four-column pass took uscore off the board;
-  checked across src/, test/ and api/, the only surviving mentions are two comments
-  in test/board.mjs explaining that the cells went and one helper built to read the
-  number out of the drill-down instead. The rules below them in this block already
-  say why a rule kept "in case" is how a deleted column comes back wearing somebody
-  else's heading, and these three were that rule.
-*/
-/* the unit rides the number, because the column holds two of them */
-.board .board-row .g-unit{font-size:var(--fs-1);color:var(--faint);margin-left:3px}
-
-/* app.css spaces a drill-down heading after another heading and after a note list,
-   but not after a definition list — so "Statcast model" now sits flush against the
-   last row of "Measured", which reads as one table with a caption in the middle of
-   it. Belongs in app.css beside its siblings; here because app.css is not this
-   change's file. */
-.detail dl + h3{margin-top:var(--sp-3)}
-
-/*
-  ONE media block, where there were three.
-  
-  They existed to decide which of nine columns survived at each of three widths. With
-  four there is one decision left: at 390px the board is 300px wide, which holds the
-  rank, the name and one number. The games count goes rather than the value, because
-  the value IS the ranking and a list sorted by a column it does not show is a list
-  nobody can check.
-  
-  The two that went were written for the nine-column board and outlived it. A 900px
-  block set a six-track template and un-hid the games count; a second 640px block
-  then sent that cell to track 3, where "ahead by" already was, and both won on
-  source order — so at 390px the first row read "35.2714GP", two numbers printed on
-  top of each other under one heading. Every rule in them named uscore, confidence or
-  luck, and no row has rendered any of the three since the four-column pass.
-*/
-@media(max-width:640px){
-	.board .board-head,.board .board-row{
-		grid-template-columns:24px minmax(0,1fr) 74px;gap:var(--sp-2);
-	}
-	/* "For you" takes the near column, because it is the one about HIS team, and both
-	   cells are placed explicitly rather than left to inherit from the desktop rule —
-	   in a four-track grid that put "for you" to the right of a number it should lead. */
-	.board[data-mine] .board-head,.board[data-mine] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 62px 62px;gap:var(--sp-2);
-	}
-	.board[data-mine] .board-head>[data-col=mine],
-	.board[data-mine] .board-row>[data-col=mine]{grid-column:3}
-	.board[data-mine] .board-head>[data-col=bscore],
-	.board[data-mine] .board-row>[data-col=bscore]{grid-column:4}
-	.board .board-head>[data-col=games],.board .board-row>[data-col=games],
-	.board[data-mine] .board-head>[data-col=games],.board[data-mine] .board-row>[data-col=games]{display:none}
-	/* The phone's two [data-ordered] templates stood here, for the same generic track the
-	   desktop block above describes at length. Nothing sets data-ordered any more. */
-	/* Streaming shows what he scores; the board shows what he is ahead by. One number
-	   each at this width, and it is always the one the list is ordered by. */
-	.board[data-mode=stream] .board-head>[data-col=pts],
-	.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
-}
-`
-
-/**
- * The STREAMING grid, which is deliberately not the board's grid.
- *
- * The shared seven columns — uscore, bscore, games, confidence, luck — are the
- * right shape for "who is the best player in baseball right now". They are the
- * wrong shape for "which arm do I add for the next three days", and two of them
- * are worse than merely irrelevant there:
- *
- * `uscore` is `addValue x (1 - owned)`, i.e. value discounted by availability. On
- * a list that is ALREADY filtered to players he can add, that discount is applied
- * twice, and it reorders the survivors by who is rarer rather than by who is
- * better — the opposite of the question. It is also null wherever Yahoo priced
- * nobody, which on the live 2026-09-04 capture is 553 of 1,435 players, including
- * the top row of the gettable list.
- *
- * `luck` is a percentile of expected-minus-actual wOBA over 21 days. It is a buy-low
- * signal about a season, acted on by ordering the board with "who has been unluckiest"
- * — which now draws the percentile beside each name, because a list ranked by a number
- * it does not print cannot be checked. Nothing about a Saturday start turns on it.
- *
- * What goes in their place is the half of the reader's question the board never
- * answered: "expected performance". `pts` is what he is projected to actually
- * score over this window in this league's scoring — the quantity — and `bscore`
- * stays as the comparison against the next arm on the wire. Over three days those
- * two say very different things: on the live capture the best gettable starter
- * projects 33.0 points and 15.9 above replacement, and the fifth-best projects
- * 17.2 points and 0.14 above it. One number alone would have hidden that.
- *
- * Six columns, placed by NAME like the board's, for the reason BOARD_GRID_CSS
- * gives at length: app.css places by nth-child, and this view has a different
- * number of children, so every index-based rule below has to be answered
- * explicitly at every width or a heading ends up over the wrong cell.
- */
-const STREAM_GRID_CSS = `
-/*
-  Streaming carries one more number than the board, and it is the right one.
-  
-  The board asks who is worth adding and answers with what he is ahead of a free man
-  by. Streaming asks which arm to start on Saturday, and what answers that is what he
-  actually scores in the window — a free arm you are not starting is worth nothing to
-  you this week. So both are on the row here, and the list is ordered by the first.
-  
-  EVERY cell is placed explicitly in every combination below, and that is not
-  verbosity. There are four: two horizons times whether a roster exists. A cell left
-  to inherit its column from another combination auto-places, and an auto-placed cell
-  lands on top of its neighbour — measured on the streaming tab with a roster, "points"
-  and "for you" both rendered at x=219.
-*/
-.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
-	grid-template-columns:28px minmax(0,1fr) 66px 74px 58px;
-}
-.board[data-mode=stream] .board-head>[data-col=pts],
-.board[data-mode=stream] .board-row>[data-col=pts]{grid-column:3;display:block}
-.board[data-mode=stream] .board-head>[data-col=bscore],
-.board[data-mode=stream] .board-row>[data-col=bscore]{grid-column:4;display:block}
-.board[data-mode=stream] .board-head>[data-col=games],
-.board[data-mode=stream] .board-row>[data-col=games]{grid-column:5;display:block}
-/* With a roster, "for you" joins them — it is the only number here about HIS team. */
-.board[data-mine][data-mode=stream] .board-head,.board[data-mine][data-mode=stream] .board-row{
-	grid-template-columns:26px minmax(0,1fr) 60px 66px 64px 52px;
-}
-.board[data-mine][data-mode=stream] .board-head>[data-col=pts],
-.board[data-mine][data-mode=stream] .board-row>[data-col=pts]{grid-column:3}
-.board[data-mine][data-mode=stream] .board-head>[data-col=bscore],
-.board[data-mine][data-mode=stream] .board-row>[data-col=bscore]{grid-column:4}
-.board[data-mine][data-mode=stream] .board-head>[data-col=mine],
-.board[data-mine][data-mode=stream] .board-row>[data-col=mine]{grid-column:5;display:block}
-.board[data-mine][data-mode=stream] .board-head>[data-col=games],
-.board[data-mine][data-mode=stream] .board-row>[data-col=games]{grid-column:6}
-/* Under 640px the board is 300px wide: the name and two numbers. On this tab the
-   points ARE the ordering, and a list must always show the number it is sorted by. */
-@media(max-width:640px){
-	.board[data-mode=stream] .board-head,.board[data-mode=stream] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 58px 52px;gap:var(--sp-2);
-	}
-	.board[data-mode=stream] .board-head>[data-col=bscore],
-	.board[data-mode=stream] .board-row>[data-col=bscore]{display:none}
-	.board[data-mode=stream] .board-head>[data-col=games],
-	.board[data-mode=stream] .board-row>[data-col=games]{grid-column:4;display:block}
-	/* With a roster the second number is his own, not the league's. */
-	.board[data-mine][data-mode=stream] .board-head,.board[data-mine][data-mode=stream] .board-row{
-		grid-template-columns:24px minmax(0,1fr) 58px 56px;gap:var(--sp-2);
-	}
-	.board[data-mine][data-mode=stream] .board-head>[data-col=mine],
-	.board[data-mine][data-mode=stream] .board-row>[data-col=mine]{grid-column:4;display:block}
-	.board[data-mine][data-mode=stream] .board-head>[data-col=games],
-	.board[data-mine][data-mode=stream] .board-row>[data-col=games]{display:none}
-}
-`
-
-/**
- * The streaming strip and the two things it adds to a row.
- *
- * Belongs in app.css beside the rest of the board's styling and should move there;
- * it is here because app.css is not this change's file.
- *
- * The move marker is a left rail plus a rule under the last one you can afford,
- * rather than a colour on the text: the question is "where does my list stop",
- * which is a boundary, and a boundary is a line. The rail reuses `border-left`,
- * the same 2px the row already reserves for hover and open, so nothing shifts.
- */
-const STREAM_CSS = `
-.stream-strip{
-	display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-3);
-	margin-top:var(--sp-2);
-}
-.stream-strip .strip-label{
-	font-family:var(--mono);font-size:var(--fs-2);letter-spacing:var(--caps);
-	text-transform:uppercase;color:var(--faint);
-}
-/* app.css sets white-space:nowrap on every .toggle, which is right in the filter
-   row where the labels are two words. In this strip the availability toggle also
-   carries the tier it is using ("est. over 35% is taken"), and at 390px that one
-   label ran to 411px — 21px of horizontal scroll on the whole page, on the view
-   this change exists to fix. It wraps here instead; the box stays pinned to the
-   first line so a two-line label does not centre its checkbox against nothing. */
-.stream-strip .toggle{white-space:normal;align-items:flex-start;max-width:100%}
-.stream-strip .toggle input{flex:none;margin-top:3px}
-.stream-note{margin-top:var(--sp-2)}
-/* The availability sentence is NOT a stream-note. That class names the coverage
-   line, and test/board.mjs reads the first element matching it — a second paragraph
-   sharing the class silently retargeted five assertions at the wrong sentence.
-   Same margin, its own name. */
-.avail-note{margin-top:var(--sp-2)}
-/* his starts and who they are against, under his name. A block, so it elides on a
-   phone the way the meta line above it does rather than pushing the row wide. */
-.board .board-row .who .starts{
-	display:block;font-size:var(--fs-2);color:var(--muted);
-	overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-/* Deliberately not a <b>: test/journey.mjs reads every player name off
-   \`.board-row .who b\` and test/board.mjs off \`.board-row b\`, so a second bold
-   element inside the row would silently turn both into lists of interleaved
-   names and start counts. */
-.board .board-row .who .starts .n{
-	font-family:var(--mono);font-weight:700;color:var(--accent);
-}
-.board .board-row .who .starts.soft .n{color:var(--muted);font-weight:600}
-`
 
 /** Arrow keys walk the tab strip, because a tablist is one tab stop rather than
  *  three. Focus moves without selecting: picking a horizon re-rates all ~1,430
@@ -1434,10 +1143,6 @@ export const Board = ({
 			  directly underneath. The heading is on the label of each control.
 			*/}
 			<section className="board-controls">
-				<style href="board-mode-focus" precedence="default">{MODE_FOCUS_CSS}</style>
-				<style href="board-grid" precedence="default">{BOARD_GRID_CSS}</style>
-				<style href="board-stream" precedence="default">{STREAM_CSS}</style>
-				<style href="board-stream-grid" precedence="default">{STREAM_GRID_CSS}</style>
 				{/* The tabs are the tablist's only children, because a tablist that
 				    contains anything else stops being one to a screen reader. */}
 				<div className="modes" role="tablist" aria-label="What to rank for">
@@ -1595,12 +1300,22 @@ export const Board = ({
 					))}
 				</div>
 				)}
+				{/* THE ROW ITSELF IS GATED, not merely its contents. Every child here is
+				    off in `stream` — the search box and the availability toggle because
+				    the stream strip above carries its own, "Hide injured" because it is
+				    stash-only — so an unconditional `.filters` rendered on Streaming as an
+				    element with no children. It is still a flex item of `.board-controls`
+				    (`gap:var(--sp-3)`), so it spent 12px of column gap above Billy's pick
+				    on the one horizon whose list is shortest and whose controls are the
+				    most crowded. The two `mode !== "stream"` tests that used to wrap the
+				    first two children are now this one test, which is the same condition
+				    read once. */}
+				{filters.mode !== "stream" && (
 				<div className="filters">
 					{/* No label above it: "Search" over a box that says "Player name…" is a
 					    line of type saying what the box already says, and this row sits
 					    between a reader and the ranking. The accessible name is on the
 					    input. */}
-					{filters.mode !== "stream" && (
 					<label className="ctl ctl-search">
 						<input
 							type="text"
@@ -1610,7 +1325,6 @@ export const Board = ({
 							onChange={e => set("search", e.currentTarget.value)}
 						/>
 					</label>
-					)}
 					{/* Not `disabled` any more, and that is the whole point of this change.
 					    It was disabled whenever the league's live free-agent list had not
 					    arrived, which on the hosted build is always — so the one control
@@ -1627,7 +1341,6 @@ export const Board = ({
 					    control, one screen, two words for the state and two answers to
 					    whether you may change it. The strip's copy is the one scoped to the
 					    question, so it is the one that survives. */}
-					{filters.mode !== "stream" && (
 					<label className="toggle" data-avail={availability.basis} title={availTitle}>
 						<input
 							type="checkbox"
@@ -1649,7 +1362,6 @@ export const Board = ({
 							</em>
 						</span>
 					</label>
-					)}
 					{/*
 					  HIDE INJURED, on the one horizon where it can match.
 
@@ -1682,6 +1394,7 @@ export const Board = ({
 					</label>
 					)}
 				</div>
+				)}
 				{/*
 				  "MORE FILTERS" STOOD HERE and held three controls, every one of which is
 				  gone. Measured at 390x844 before this pass: 25 controls above the first
@@ -2010,14 +1723,14 @@ export const Board = ({
 					    own. It carried nine: `proj pts` and `waiver pts` went because bscore is
 					    one minus the other, so the table stated the same fact three times;
 					    `owned` was folded into uscore and uscore into the drill-down; confidence
-					    and luck went because neither was a decision column. BOARD_GRID_CSS
-					    carries the measurements. */}
+					    and luck went because neither was a decision column. The board's
+					    block in app.css carries the measurements. */}
 					<div className="board-head">
 						<span data-col="rank">#</span>
 						<SortHead col="who" field="name" sort={sort} desc={desc} setFilters={setFilters}>Player</SortHead>
 						{/* uscore discounts value by availability, which on a list already
 						    filtered to what he can add is that discount applied twice — see
-						    STREAM_GRID_CSS. What replaces it is the half of his question the
+						    the streaming grid's note in app.css. What replaces it is the half of his question the
 						    board never answered: what this man actually scores over the
 						    window. */}
 						{filters.mode === "stream" && (
@@ -2034,7 +1747,7 @@ export const Board = ({
 						    streaming tab the head had three cells over four of body and every
 						    heading sat over the wrong column. A head and a row that disagree about
 						    how many cells they have is the exact failure named at the top of
-						    BOARD_GRID_CSS. */}
+						    the board's block in app.css. */}
 						{/* A generic `sorted` heading stood here, drawn whenever the ordering had
 						    no column of its own. Nothing is ordered by a number without a column
 						    any more — see the note where its CSS used to be, and `sortable` in
@@ -2305,7 +2018,6 @@ export const Board = ({
 		</>
 	)
 }
-
 
 
 /**
@@ -2712,8 +2424,8 @@ const SortHead = ({
 	col, field, sort, desc, setFilters, right, children
 }: {
 	/** Which board column this heading is, echoed onto the cell as `data-col`.
-	 *  The grid places by that name rather than by child index — see
-	 *  BOARD_GRID_CSS for why an index is not survivable here. */
+	 *  The grid places by that name rather than by child index — see the board's
+	 *  block in app.css for why an index is not survivable here. */
 	col: string
 	field: NonNullable<Filters["sort"]>
 	/**
@@ -2929,7 +2641,7 @@ const Row = ({
 	 *  silently leaves one of them a track short. */
 	mine: boolean
 	/** On the Streaming tab, where the row answers a different question and
-	 *  therefore carries different columns — see STREAM_GRID_CSS. */
+	 *  therefore carries different columns — see the streaming grid's note in app.css. */
 	stream: boolean
 	/** How old the reader's own wire read is, where a row's figure came off it. */
 	wireAge: string | null

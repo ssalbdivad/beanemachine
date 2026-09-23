@@ -296,11 +296,6 @@ const AddStat = ({
 	)
 }
 
-/** The editor's counts, which are the engine's counts — this was a third hand-written
- *  copy of `["IL", "NA", "IL+"]` and of the reserve test, rendering four hundred pixels
- *  from `leagueGaps`'s answer, which used the canonical predicate. See `rosterCounts`. */
-export const recount = rosterCounts
-
 export const RosterPanel = ({
 	roster,
 	editing,
@@ -316,8 +311,14 @@ export const RosterPanel = ({
 }) => {
 	const order = roster.slot_order ?? Object.keys(roster.slots)
 	const seen = new Set<string>()
+	/* `rosterCounts` and not a hand-written count: the editor's counts are the engine's
+	 * counts. This was once a third hand-written copy of `["IL", "NA", "IL+"]` and of the
+	 * reserve test, rendering four hundred pixels from `leagueGaps`'s answer, which used the
+	 * canonical predicate. (It reached here through a one-line alias, `recount`, exported as
+	 * though it were API; nothing outside this file ever imported it, so on 2026-09-22 the
+	 * alias went and the call became the real name.) */
 	const setSlots = (slots: Record<string, number>, slot_order = roster.slot_order) =>
-		onChange({ ...roster, slots, slot_order, counts: recount(slots) })
+		onChange({ ...roster, slots, slot_order, counts: rosterCounts(slots) })
 
 	const addSlot = (form: HTMLFormElement) => {
 		const data = new FormData(form)
@@ -538,10 +539,13 @@ export interface Gap {
 	label: string
 	/** What was actually read, or null while it is missing. Never a default. */
 	have: string | null
-	/** Why it cannot be guessed at. */
-	why: string
-	/** What stays unavailable until it exists. */
-	blocks: string
+	/* A `why` ("Points per stat, as your league scores them.") and a `blocks` ("Every
+	 * ranking is in your league's own points, so without these every player comes out at
+	 * exactly zero.") stood here, three sentences each, and were deleted on 2026-09-22.
+	 * Nothing had ever read either one: both consumers — the Setup card below and
+	 * Onboard's own missing-value line — take `label` and `have` and nothing else. The
+	 * docblock on `Setup` asserted the opposite in so many words, which is how six
+	 * written-out sentences survived the pass that stopped printing them. */
 }
 
 /** The three inputs every priced answer in the app is denominated in. */
@@ -561,24 +565,15 @@ export const leagueGaps = (league: League): Gap[] => {
 	return [
 		{
 			label: "What each stat is worth",
-			have: scored ? `${scored} stats scored` : null,
-			why: "Points per stat, as your league scores them.",
-			blocks:
-				"Every ranking is in your league's own points, so without these every player comes out at exactly zero."
+			have: scored ? `${scored} stats scored` : null
 		},
 		{
 			label: "How many teams",
-			have: league.meta.max_teams == null ? null : `${league.meta.max_teams} teams`,
-			why: "The number of teams in the league, as it drafts.",
-			blocks:
-				"How many teams there are decides how deep the free-agent pool runs, and a player is worth what he beats the next man up by. Nothing is ranked without it."
+			have: league.meta.max_teams == null ? null : `${league.meta.max_teams} teams`
 		},
 		{
 			label: "Roster slots",
-			have: slots.length ? `${slots.length} slots, ${starters} starting` : null,
-			why: "How many of each position you start, plus bench and IL.",
-			blocks:
-				"Which positions are scarce, and the lineup every recommendation is judged against."
+			have: slots.length ? `${slots.length} slots, ${starters} starting` : null
 		}
 	]
 }
@@ -845,24 +840,21 @@ export const tradesClosed = (
  */
 export const tab = (id: View): string => VIEWS.find(v => v.id === id)?.label ?? id
 
-/**
- * THE SAME SENTENCE THE TAB CARRIES, for a screen that wants to say it out loud.
+/*
+ * A `purpose(id)` helper stood here beside `tab(id)` — the same lookup, returning
+ * `VIEWS[].purpose` instead of `VIEWS[].label` — and was deleted on 2026-09-22 with the
+ * eighteen lines of argument above it. It had one caller ever, the board, which printed it
+ * as `.board-intro`; that paragraph was removed (Board.tsx records the 61 of 163px it bought
+ * back, and test/board.mjs asserts `.board-intro` is gone), and nothing replaced it. The one
+ * surface still showing these sentences reads the field directly — App.tsx's disabled-tab
+ * `title` uses `v.purpose` off `VIEWS`, not a helper.
  *
- * `VIEWS[].purpose` is the best orientation copy in the app and for most of its life it
- * reached exactly one surface: the `title` attribute on each nav button, which is a hover.
- * Measured 2026-09-12 at 390x844 on Pickups, with no team entered — 70 `title` attributes
- * live on that screen alone, 68 of them longer than six words, the three tab sentences
- * among those, and not one reachable by a thumb. A phone reader has never seen any of the
- * three. (58 was the count on My league; the board is worse, because every row carries a
- * sentence about its own game count.)
- *
- * So the sentence is exported the way the LABEL is, for the same reason the label is
- * (see `tab`): a screen that wants to introduce itself should read the one copy of its
- * own sentence rather than grow a second one that drifts. One caller so far, the board,
- * because the board is the screen whose first impression is five names nobody recognises.
- * The other two screens are Decide.tsx and Trade.tsx and they can call this unchanged.
+ * `VIEWS[].purpose` itself stays and is still the only copy of that copy. The finding the
+ * deleted comment recorded also stays true and is NOT fixed by this deletion: those three
+ * sentences reach a phone reader through nothing but a hover. A screen that wants to say one
+ * out loud should read `VIEWS` directly, which is two lines, rather than restore a helper
+ * whose whole documented justification was a caller it no longer had.
  */
-export const purpose = (id: View): string => VIEWS.find(v => v.id === id)?.purpose ?? ""
 
 /**
  * The word in the address bar for each screen.
@@ -936,9 +928,11 @@ export const VIEWS: { id: View; label: string; purpose: string; season: number }
  *
  * So this card now says only what is missing and where to put it: the gap labels, no
  * justification, and one button to My league — or, on My league itself, where the form is
- * directly underneath, no button at all. `leagueGaps` still carries `why` and `blocks`
- * because Onboard's own gap list and the tests of the schema read them; this card stopped
- * printing them because "every player comes out at exactly zero" explains the app.
+ * directly underneath, no button at all. This card stopped printing `why` and `blocks`
+ * because "every player comes out at exactly zero" explains the app rather than this
+ * league. A sentence here claimed the two fields survived that cut because Onboard and the
+ * schema tests still read them; neither ever did, and both fields were deleted on
+ * 2026-09-22 — see the note in their place on `Gap`.
  *
  * `IMPORT_COMMAND` is still re-exported for the docs that print it.
  */

@@ -1,4 +1,4 @@
-// What src/engine/spread.ts measures, asserted against the committed bytes — and,
+// What src/backtest/spread.ts measures, asserted against the committed bytes — and,
 // behind --measure, the harness that re-derives every number in that file's comments
 // from MLB's own day-by-day record.
 //
@@ -13,7 +13,7 @@ import {
 	spreadOf, cohortOf, separates,
 	LEVEL_FIT, RELIABILITY_K, SAMPLING_ERROR, COHORT_SHAPE,
 	MINIMUM_APPEARANCES, START_SHARE
-} from "../src/engine/spread.ts"
+} from "../src/backtest/spread.ts"
 import { asNumber, mapPlayerSeasons, windowStatsUrl } from "../src/data/statsapi.ts"
 import { scoreStats } from "../src/engine/points.ts"
 
@@ -255,11 +255,11 @@ t("the three animals are genuinely different: a starter's median day is more tha
 // corpus it was measured on is 736 live reads no test may make, so the only way it
 // stays checkable is by being handed everything it uses.
 // ---------------------------------------------------------------------------
-const src = readFileSync("src/engine/spread.ts", "utf8")
+const src = readFileSync("src/backtest/spread.ts", "utf8")
 const body = src.slice(src.indexOf("export type Cohort"))
 t("spread.ts imports nothing but a type and the scoring it is handed",
 	[...src.matchAll(/^import .*?from "(.+?)"/gm)].map(m => m[1]).every(
-		s => s === "../data/statsapi.ts" || s === "./points.ts"))
+		s => s === "../data/statsapi.ts" || s === "../engine/points.ts"))
 t("and reads no clock, no file and no network",
 	!/Date\.now|new Date|readFileSync|fetch\(/.test(body))
 t("the same lines in a different order give the same summary",

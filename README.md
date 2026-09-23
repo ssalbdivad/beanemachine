@@ -142,8 +142,18 @@ carries the same body as a React component so the mark picks up theme tokens; it
 is authored against `--acc`, aliased onto the app's `--accent` in
 `src/client/app.css`.
 
-Exploration rounds that got here live in `logo/round*.mjs` with contact sheets in
-`logo/sheet*.png`.
+Nineteen exploration rounds preceded this one. Their scripts were deleted on 2026-09-22:
+they were tracked, but the contact sheets they existed to produce were not, because
+`.gitignore` excludes `logo/candidates*.json` and `logo/sheet*.png` — so the history this
+paragraph used to point at could never be seen from a clean checkout anyway. It is in git
+if it is ever wanted.
+
+`logo/finalists.json` survived that sweep and is not build output. It is the
+hand-curated shortlist of ten — Billy plus six brim variants plus three sizings of the NY
+— and **nothing in the repository writes it**, so deleting it would have discarded a
+choice no script can make again. It went out with the round scripts and was put back the
+same day. The reader that used to open it went with them; it stays as the record of what
+was chosen from, which is the thing a rerun cannot reproduce.
 
 ## Docs
 

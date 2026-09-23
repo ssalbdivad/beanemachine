@@ -18,8 +18,6 @@
 		"refresh": "node src/refresh.ts",
 		"test:board": "node test/board.mjs",
 		"test:engine": "node test/engine.mjs",
-		"backtest": "node src/backtest/run.ts",
-		"tune": "node src/backtest/tune.ts",
 		"evaluate": "node src/backtest/evaluate.ts",
 		"test:static": "node test/static.mjs",
 		"auto": "node src/auto/run.ts",

@@ -13,10 +13,19 @@ import { countGamesPlayed, scheduleUrl } from "./seasons.ts"
  * from the evaluation window reaches the projection.
  *
  * THE READS HERE GO TO THE NETWORK UNCACHED, unlike corpus.ts and season.ts which go
- * through src/backtest/cache.ts. That is kept deliberately: run.ts and tune.ts, the two
- * callers, measure one fold at a time against live data. So the duplication that was
- * removed from this file is the SHAPE of each read — the URL and the mapping — and not
- * the transport, which is the part that was never the same.
+ * through src/backtest/cache.ts. That was kept deliberately for run.ts and tune.ts, the
+ * two callers, which measured one fold at a time against live data. So the duplication
+ * that was removed from this file is the SHAPE of each read — the URL and the mapping —
+ * and not the transport, which is the part that was never the same.
+ *
+ * BOTH OF THOSE CALLERS WERE DELETED on 2026-09-22, superseded by corpus.ts + evaluate.ts,
+ * which own the leak-free folds and are what model.json cites. What survives them is the
+ * half of this file that corpus.ts, evaluate.ts and test/engine.mjs still import:
+ * `underlyingWindowUrl`, `parseUnderlyingCsv`, `spearman` and `topNValue`. The other four
+ * — `fetchWindow`, `fetchUnderlyingWindow`, `fetchGamesPlayedWindow` and `rmse` — now have
+ * no caller in the repository. They are left standing rather than deleted because they are
+ * the uncached fold reader itself, and the next hand-run study that wants to stand at a
+ * past date without warming the 14GB cache wants exactly them. If none appears, they go.
  */
 
 const SAVANT = "https://baseballsavant.mlb.com/leaderboard/custom"

@@ -24,11 +24,19 @@ import { taken as takenStore } from "./taken.ts"
  * thing this app refuses about a pool.
  */
 
-/** How old a pool has to be before the app says anything. Not a new number: it is
- *  `STALE_WIRE_HOURS`, the line the chip has coloured itself on since long before any of
- *  this, and it is the right one — Yahoo processes waiver claims overnight, so a wire
- *  genuinely turns over about once a day. */
-export const STALE_POOL_HOURS = 24
+/* A `STALE_POOL_HOURS = 24` stood here, and a `hoursSince(at)` at the bottom of the file,
+ * both deleted on 2026-09-22 because neither had ever had a caller. Each was documented as
+ * the SHARED copy of something — the constant "so the chip and the sheet cannot disagree",
+ * the helper likewise — and in both cases the sharing was the thing that never happened:
+ * the chip reads its own `STALE_WIRE_HOURS = 24` in App.tsx and gets its hours from
+ * `since()` in ago.ts, which already returns `{ label, hours }`. So there was one threshold
+ * written twice and one hours-since implemented twice, and this file held the unused half of
+ * both pairs. The fact the constant recorded is still true and still worth knowing — Yahoo
+ * processes waiver claims overnight, so a wire turns over about once a day, which is why 24
+ * is the right number. If a second caller ever wants it, export App.tsx's constant from
+ * ago.ts beside `since`, which is where the hours already come from, rather than declaring
+ * a third one here.
+ */
 
 export interface PoolRead {
 	added: number | null
@@ -378,12 +386,4 @@ export const readLeagueHere = async (
 		said: [got, ...snags].filter(Boolean).join(" ") || "Nothing new came back.",
 		read: said.length > 0
 	}
-}
-
-/** Hours since an ISO instant, or null when there is nothing to measure. Shared so the
- *  chip and the sheet cannot disagree about whether a list is old. */
-export const hoursSince = (at: string | null | undefined): number | null => {
-	if (!at) return null
-	const ms = Date.now() - Date.parse(at)
-	return Number.isFinite(ms) ? ms / 3_600_000 : null
 }

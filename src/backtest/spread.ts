@@ -1,5 +1,5 @@
 import type { StatLine } from "../data/statsapi.ts"
-import { roundTo, scoreStats } from "./points.ts"
+import { roundTo, scoreStats } from "../engine/points.ts"
 
 /**
  * How WIDE a player's game is, measured — not a point estimate of how good he is.
@@ -15,7 +15,14 @@ import { roundTo, scoreStats } from "./points.ts"
  * variance' src/engine` returned nothing.
  *
  * So this module measures the spread. It does NOT rank on it, and the measurements
- * written below are the reason. Every number in this comment was produced by the
+ * written below are the reason.
+ *
+ * IT LIVED IN `src/engine/` UNTIL 2026-09-22 and was moved here because of that refusal.
+ * Nothing under src/ ever imported it — `test/spread.mjs` was the only reader — so it sat
+ * in the directory that means "what the app runs" while running in nothing. It is not
+ * deleted, and must not be: this header is the record of a model change that was measured
+ * and rejected, and `test/spread.mjs` (in `test:node`, so it runs in CI) keeps every figure
+ * in it re-derivable. Evidence that cannot be re-derived is not evidence. Every number in this comment was produced by the
  * harness in `test/spread.mjs --measure`, which re-derives all of them from MLB's
  * own day-by-day record; the method is stated with each so it can be checked rather
  * than believed.

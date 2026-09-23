@@ -1696,6 +1696,51 @@ clean("over the whole journey")
 }
 
 /*
+ * A TEAM ENTERED IN THE SHEET ENDS THE SETUP, whichever way the reader leaves it.
+ *
+ * Only "Show me the board", a loaded file and the dock's own Close used to end it. A tab
+ * press keeps the bar on purpose (a half-typed team must survive it), so a reader who
+ * entered his team and then tapped Pickups kept a primary "Set up my league" button on
+ * every screen after — the owner's report was "it prompts me to add my team even though I
+ * already have". Once the team is saved there is nothing typed left to protect.
+ */
+{
+	const tp = await browser.newPage({ viewport: { width: 390, height: 844 } })
+	await tp.route("**/scoring.json", async route => {
+		const j = await (await route.fetch()).json()
+		j.leagues = {}
+		j.active_league = null
+		delete j.pools
+		delete j.rosters
+		delete j.lineups
+		await route.fulfill({ json: j })
+	})
+	await tp.goto(BASE, { waitUntil: "domcontentloaded" })
+	await tp.waitForSelector(".dock-bar button", { timeout: 30000 })
+	if ((await tp.locator(".dock-bar button").getAttribute("aria-expanded")) !== "true")
+		await tp.click(".dock-bar button")
+	await tp.waitForSelector(".dock-sheet .onboard-where button", { timeout: 20000 })
+	await tp.click('.dock-sheet .onboard-where button:text-is("Somewhere else")')
+	await tp.waitForSelector(".dock-sheet .onboard textarea", { timeout: 20000 })
+	await tp.fill(".dock-sheet .onboard textarea", "Aaron Judge\nTarik Skubal\nCal Raleigh")
+	await tp.click('.dock-sheet .onboard button:has-text("That\u2019s my team")')
+	await tp.waitForTimeout(1200)
+	const saved = await tp.evaluate(() =>
+		Object.values(JSON.parse(localStorage["beanemachine:roster"] ?? "{}")).some(r => r.length > 0))
+	await tp.click('.views button:has-text("Pickups")')
+	await tp.waitForSelector(".board-row", { timeout: 30000 })
+	await tp.waitForTimeout(500)
+	t("a team saved from the sheet takes the setup bar away once he taps elsewhere",
+		saved && (await tp.$$(".dock-bar")).length === 0,
+		`team saved: ${saved}; bar: ${await tp.$$eval(".dock-bar", n => n.map(e => e.innerText.replace(/\n+/g, " ")).join())}`)
+	await tp.click('.views button:has-text("Tonight")')
+	await tp.waitForTimeout(500)
+	t("…and it stays away on the next screen",
+		(await tp.$$(".dock-bar")).length === 0)
+	await tp.close()
+}
+
+/*
  * ═══════════════════════════════════════════════════════════════════════════════════
  * THE PLATFORM IS ASKED FIRST, AND EVERY SCREEN OF THE WIZARD FITS A PHONE.
  *

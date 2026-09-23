@@ -708,6 +708,28 @@ export const App = () => {
 			return false
 		}
 	}, [key, rev])
+	/**
+	 * A TEAM THAT ARRIVED DURING SETUP ENDS THE SETUP, once the sheet is shut.
+	 *
+	 * `onboarding` went false on three presses only — "Show me the board", a loaded file,
+	 * and the dock's own Close — and a tab press deliberately keeps it (see the note on the
+	 * tabs). So a reader who imported his team and then tapped Pickups kept the dock bar on
+	 * every screen afterwards, a primary "Set up my league" button asking for what he had
+	 * just given. The owner reported exactly that: "it prompts me to add my team even
+	 * though I already have."
+	 *
+	 * Only a team that ARRIVED while setting up counts. A reader who already had one and
+	 * opened the sheet to start another league has typed nothing that has been saved yet,
+	 * and unmounting the dock under him would throw it away.
+	 */
+	const hadTeam = useRef(hasTeam)
+	const teamArrived = useRef(false)
+	useEffect(() => {
+		if (hasTeam && !hadTeam.current && onboarding) teamArrived.current = true
+		hadTeam.current = hasTeam
+		if (!onboarding) teamArrived.current = false
+		else if (teamArrived.current && !setupOpen) setOnboarding(false)
+	}, [hasTeam, onboarding, setupOpen])
 	/** The reader's own men, for the one period read the page makes. Same swallow as
 	 *  `hasTeam` above and for the same reason. */
 	const ownedIds = useMemo(() => {
@@ -1264,6 +1286,20 @@ export const App = () => {
 				</div>
 			: view === "wire" ?
 				<div className="grid">
+					{/* The adds Tonight names, first and in Tonight's order — see `only` on
+					    Decide. The board under it is everyone else. */}
+					{hasTeam && (
+						<Decide
+							snapshot={snapshot}
+							league={shown}
+							leagueKey={key}
+							error={snapshotError}
+							matchup={matchup}
+							onOpenTeam={null}
+							only="pickups"
+							onOpenTonight={() => go({ view: "board" })}
+						/>
+					)}
 					<Board
 						key={wireKey}
 						snapshot={snapshot}
@@ -1271,6 +1307,7 @@ export const App = () => {
 						leagueKey={key}
 						error={snapshotError}
 						preview={!league}
+						planned={hasTeam}
 					/>
 				</div>
 			: view === "trade" ?

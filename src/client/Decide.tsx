@@ -102,7 +102,9 @@ export const Decide = ({
 	leagueKey,
 	error,
 	matchup,
-	onOpenTeam
+	onOpenTeam,
+	only,
+	onOpenTonight
 }: {
 	snapshot: Snapshot | null
 	league: League | null
@@ -122,6 +124,21 @@ export const Decide = ({
 	 *  same press under a different name, and this card stands down rather than
 	 *  offering a second door to one room. */
 	onOpenTeam: (() => void) | null
+	/**
+	 * "pickups" draws only the waiver half of this card, for the top of Pickups.
+	 *
+	 * Pickups used to answer "who should I add" on its own, three different ways at once:
+	 * Billy's pick reduced on bscore, the list under it sorted by "for you", and the
+	 * streaming horizon by raw points — while Tonight, from `planSwaps`, said something
+	 * else again. Walked on the owner's league: Billy crowned Grant Taylor, the list put
+	 * Jake Burger first and Taylor fourth, and Tonight said "Add Jake Burger, drop Sandy
+	 * Alcantara". So Pickups now leads with THIS card's adds, computed by this component
+	 * rather than copied, so the two screens cannot drift, and the board under it is the
+	 * working rather than a fourth opinion.
+	 */
+	only?: "pickups"
+	/** The way from the pickups card to the rest of the plan. */
+	onOpenTonight?: () => void
 }) => {
 	const storedSeats = leagueKey ? lineupStore.of(leagueKey) : null
 	/** Tonight, live, from MLB. One request, no server — see src/data/today.ts. */
@@ -2270,6 +2287,9 @@ export const Decide = ({
 	}, [plan, today])
 
 	if (!league) return null
+	/* On Pickups every blocked state below belongs to somebody else: the board carries its
+	   own loading, error and refusal, and a reader with no team gets Billy's pick instead. */
+	if (only && (error || !snapshot || owned.error || !seats?.spots.length)) return null
 
 	/**
 	 * Waiting for the data and failing to get it are different states, and neither is
@@ -2443,6 +2463,46 @@ export const Decide = ({
 					<button type="button" className="primary decide-cta" onClick={onOpenTeam}>
 						Add your players
 					</button>
+				</p>
+			</section>
+		)
+	}
+
+	if (only === "pickups") {
+		/* Tonight's own rows, in Tonight's order, keeping only the ones that bring a man
+		   off the wire: the paired adds, and a seat tonight that a free agent fills. A row
+		   that only starts or sits men already on the team is Tonight's business, not this
+		   screen's. */
+		const adds = toDo.rows.filter(row => row.move || row.seat?.in.some(x => x.wire))
+		return (
+			<section className="card full decide decide-pickups">
+				<h2>Who should I add?</h2>
+				{!candidates.length ?
+					<p className="sub">
+						No add can be judged: nothing has read your league&rsquo;s free-agent list, and
+						who is free cannot be estimated from this capture either.
+					</p>
+				: !adds.length ?
+					<p className="sub">None worth making.</p>
+				:	<ul className="decide-list decide-do">
+						{adds.map(row =>
+							row.move ? addRow(row.move)
+							: row.seat ? seatRow(row.seat, row.value)
+							:	null
+						)}
+					</ul>
+				}
+				<p className="sub decide-rest">
+					{estimatedWire ?
+						<b>Who is free is an estimate. </b>
+					: wireAge ?
+						<>Your league&rsquo;s own free-agent list, read {wireAge}. </>
+					:	null}
+					{onOpenTonight && (
+						<button type="button" className="chip-btn" onClick={onOpenTonight}>
+							Tonight&rsquo;s full lineup &rarr;
+						</button>
+					)}
 				</p>
 			</section>
 		)

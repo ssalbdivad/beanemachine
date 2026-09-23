@@ -413,7 +413,8 @@ export const Board = ({
 	league,
 	leagueKey,
 	error,
-	preview = false
+	preview = false,
+	planned = false
 }: {
 	snapshot: Snapshot | null
 	league: League | null
@@ -425,6 +426,11 @@ export const Board = ({
 	 *  reader's own. Every number is real and none of it is HIS, and a board that does
 	 *  not say which it is on is the demo-league mistake in a new coat. */
 	preview?: boolean
+	/** Whether Tonight's adds are drawn above this board, in which case they ARE the pick.
+	 *  Billy's card reduced on bscore while the rows under it sort by "for you", so with a
+	 *  team it crowned a man the list beneath ranked fourth — a second answer to a question
+	 *  the card above already answered. */
+	planned?: boolean
 }) => {
 	/**
 	 * Your own men, so a row can be priced against the seat it would actually take.
@@ -1430,7 +1436,8 @@ export const Board = ({
 				*/}
 			</section>
 
-			{pick ?
+			{planned ? null
+			: pick ?
 				<BillysPick
 					r={pick}
 					horizon={span.phrase}
@@ -2058,8 +2065,6 @@ const BillysPick = ({
 	streaming,
 	contactKnown
 }: {
-	/** A BoardRow, not a Ranked, because the card now leads on the number the reader's
-	 *  own roster produced where there is one — see `theWorstManYouHold`. */
 	r: BoardRow
 	horizon: string
 	/** Which availability source picked him, and therefore which claim the card is
@@ -2075,28 +2080,9 @@ const BillysPick = ({
 	contactKnown: boolean
 }) => {
 	const clauses: string[] = []
-	/**
-	 * THE NUMBER THAT CHOSE HIM LEADS, and it is not always the same number.
-	 *
-	 * `best()` picks by `deltaMine` wherever a roster can price it, so on a visit where
-	 * the reader has told the app his team the card is crowning a man for what he adds
-	 * over the reader's own bench — and the old sentence described a different
-	 * subtraction entirely. Both are stated, in the order they decided anything, each in
-	 * its own words: the bar for you first because it is why he is here, the bar for the
-	 * league second because it is the number the column and the methodology are in.
-	 *
-	 * Each sentence is built by the function that owns it (`theWorstManYouHold`,
-	 * `theManLeftAt`) precisely so that neither can be relabelled into the other.
-	 */
-	if (r.deltaMine !== null)
-		clauses.push(
-			r.deltaMine > 0 ?
-				`Adding him is worth ${r.deltaMine} more points over ${horizon} than ${theWorstManYouHold()}`
-				// A negative one is a real state and it is not dressed as a positive: the
-				// candidate list is everyone with a bscore above zero, so a man can beat the
-				// league's bar while every eligible man in the reader's own dugout beats him.
-			:	`Over ${horizon} he projects ${Math.abs(r.deltaMine)} points BEHIND ${theWorstManYouHold()}`
-		)
+	/* A "for you" clause led here, on what he adds over the reader's own bench. The card
+	   is not drawn for a reader with a team any more — Tonight's adds stand in its place on
+	   Pickups (see `planned`) — so without a roster there is no bench to name. */
 	clauses.push(
 		/* `basis` is already this card's argument for which claim it may make, and whose bar
 		   the number subtracts is the same question one step further on: a real wire is walked
@@ -2172,19 +2158,6 @@ const BillysPick = ({
 		)
 	else if (r.projection.horizonGames)
 		clauses.push(`his team plays ${r.projection.horizonGames} games in that stretch`)
-	/**
-	 * The reason not to act that only a roster can state, and it is outside the fold for
-	 * the same reason every other worry is: a reason not to act that has to be opened is
-	 * a reason nobody reads.
-	 *
-	 * Reachable whenever the best row the filters leave is behind the reader's own bench
-	 * — he is ahead of the league's bar, which is what put him on the candidate list, and
-	 * behind the man he would have to bench for him, which is what decides the move.
-	 */
-	const bench =
-		r.deltaMine !== null && r.deltaMine <= 0 ?
-			`He clears the league's bar and not yours: ${theWorstManYouHold()} already projects ${Math.abs(r.deltaMine)} points more over ${horizon}.`
-		:	null
 	/**
 	 * The confidence clause is GATED on the contact file, and that gate is the one
 	 * user-visible cost of taking the Statcast rows off the first paint.
@@ -2273,7 +2246,6 @@ const BillysPick = ({
 						<summary>why him</summary>
 						{clauses.join(" · ")}.
 					</details>
-					{bench && <em className="pick-worry"> {bench}</em>}
 					{worry && <em className="pick-worry"> {worry}</em>}
 				</div>
 			</div>

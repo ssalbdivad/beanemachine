@@ -2938,49 +2938,42 @@ await phone.close()
     mineCol.some((r, i) => i > 0 && mineCol[i - 1].b < r.b),
     JSON.stringify(mineCol.map(r => r.b)))
   /*
-   * BILLY IS PICKED BY THE SAME NUMBER THE BOARD IS IN, and says so in its own words.
+   * WITH A TEAM, PICKUPS HAS ONE ANSWER AND IT IS TONIGHT'S.
    *
-   * The hero card used to reduce on bscore whatever else was on screen, so with a roster
-   * entered it crowned a man the column beside him said was fifth-best for this reader.
-   * Three things have to hold together or the card is back to explaining one number with
-   * another's sentence: the badge carries the "for you" figure under the column's own
-   * heading, the working leads with the sentence about the reader's own bench, and the
-   * bscore sentence is still there, second, unchanged.
+   * This block used to assert Billy's pick here — its badge, its working, and that it
+   * topped the bscore ordering. That card is gone for a reader with a team, and the reason
+   * is this very walk: the pick reduced on bscore while the rows under it open on "for
+   * you", so on the owner's league Billy crowned Grant Taylor, the list put Jake Burger
+   * first and Taylor fourth, and Tonight said "Add Jake Burger, drop Sandy Alcantara" —
+   * three answers to one question. The pick's own behaviour is still asserted on the
+   * no-roster board above, which is the only board it is drawn on now.
+   *
+   * What replaces it is Tonight's add list, drawn by the same component, so the claim
+   * worth asserting is across screens: the men Pickups tells him to add are the men
+   * Tonight tells him to add, in the same order.
    */
-  /* THE NUMBER THAT CHOOSES HIM WENT BACK TO BSCORE, and the badge with it.
-     This required `/for you$/` and refused `ahead by`, because the pick was made on the
-     reader's own bar. That ranking has since been played out over 111 paired weeks and
-     loses to bscore by 21.5 points a week (95% CI [+5.9, +36.3], paired-t p 0.0053) —
-     dropping the replacement subtraction drops slot scarcity out of the pick, which is
-     most of what the metric is for. The RULE this block protects is unchanged and is the
-     reason the badge had to move too: whichever number decided is the number shown,
-     named in the words of the column it lives in. */
-  const badge = (await dm.textContent(".pick-score")).replace(/\s+/g, " ").trim()
-  t("the pick's badge carries the number that chose him, named as the column names it",
-    /ahead by$/.test(badge) && !/for you/i.test(badge), badge)
-  await dm.click(".card.pick details.pick-more > summary")
-  await dm.waitForTimeout(200)
-  const dmWhy = (await dm.textContent(".card.pick details.pick-more")).replace(/\s+/g, " ")
-  /* Still asserted, and still first: what he gains over the reader's own bench is the
-     most useful sentence on the card once the man is chosen. It is no longer what CHOSE
-     him, which is why the badge above now reads the league's bar instead. */
-  t("and the working still leads on the reader's own bar, in a sentence about that bar",
-    /worth [\d.]+ more points over .+ than the worst man you hold who could take one of his spots/.test(dmWhy),
-    dmWhy.slice(0, 160))
-  t("and the league's bar is still stated too, in its own words, not relabelled",
-    /more points than the man left at .+ once every team has filled it/.test(dmWhy),
-    dmWhy.slice(0, 200))
-  /* The pick must be the top of the ordering it was chosen BY, which is bscore — not the
-     top of whatever column the reader has since sorted into. This walk has re-sorted the
-     board by "for you", so row one is that column's best man and the pick is bscore's;
-     asserting they are the same man would be asserting that the two metrics agree, which
-     is the thing the season measured them NOT doing. Sorted back to bscore, they are the
-     same man, and that is the claim. */
+  await dm.waitForSelector(".decide-pickups", { timeout: 30000 })
+  t("with a roster Pickups draws no second pick of its own",
+    (await dm.$$(".card.pick")).length === 0)
+  t("it leads with Tonight's adds, above the board",
+    await dm.$eval(".decide-pickups", c =>
+      c.getBoundingClientRect().top < document.querySelector(".board-row").getBoundingClientRect().top))
+  const addsOn = page => page.$$eval(
+    ".decide-pickups .decide-do-add b:first-of-type, .decide-pickups .decide-add-wire b",
+    bs => bs.map(b => b.textContent.trim()))
+  const onPickups = await addsOn(dm)
+  await dm.click('.views button:has-text("Tonight")')
+  await dm.waitForSelector(".decide .decide-do, .decide .decide-moves, .decide p.sub", { timeout: 30000 })
+  await dm.waitForTimeout(800)
+  const onTonight = await dm.$$eval(
+    ".decide .decide-do-add b:first-of-type, .decide .decide-add-wire b, .decide .decide-moves .decide-do-add b:first-of-type",
+    bs => [...new Set(bs.map(b => b.textContent.trim()))])
+  t("and they are the men Tonight names, in Tonight's order",
+    onPickups.length > 0 && onPickups.join("|") === onTonight.join("|"),
+    `pickups ${JSON.stringify(onPickups)} vs tonight ${JSON.stringify(onTonight)}`)
+  await dm.click('.views button:has-text("Pickups")')
+  await dm.waitForSelector(".board-row", { timeout: 30000 })
   await rankBy(dm, "bscore")
-  t("the pick is the man at the top of the ordering that chose him",
-    (await dm.textContent(".pick-name")).startsWith(
-      await dm.$eval(".board-row [data-col=who] b", e => e.textContent.trim())),
-    `${(await dm.textContent(".pick-name")).slice(0, 30)} vs row one`)
   const pairs = await dm.$$eval(".board-row", rs =>
     rs.slice(0, 20).map(r => ({
       b: r.querySelector("[data-col=bscore]")?.textContent.trim(),

@@ -159,6 +159,11 @@ reviewer following the old text would have looked for a tool that is not in the 
 This is what turns Firefox's four-line install into one press, and makes it survive a
 restart. `Load Temporary Add-on` is wiped every time Firefox quits; a signed `.xpi` is not.
 
+**Status, 2026-09-23:** the add-on exists — AMO #3077309, unlisted, 0.2.0 signed on
+2026-09-22 by automated review. Its versions page is
+<https://addons.mozilla.org/developers/addon/3077309/versions>, and from now on step 2 is
+**Upload New Version** there rather than a new submission (step 3 is not asked again).
+
 1. `npm run build`
 2. Sign in at **addons.mozilla.org/developers/** → **Submit a New Add-on**.
 3. Choose **On your own** (self-distribution), *not* "On this site".
@@ -166,7 +171,11 @@ restart. `Load Temporary Add-on` is wiped every time Firefox quits; a signed `.x
 5. Answer the source-code question — see **Source code** below. A minified bundle needs
    its source on either route.
 6. When it comes back signed, download the `.xpi` to
-   `extension/signed/beanemachine-firefox.xpi`.
+   `extension/signed/beanemachine-firefox.xpi`. It lands in Downloads as
+   `beanemachine-firefox-<version>.xpi` or similar; rename it. **Commit it** — the site is
+   built by CI from a clean checkout, so a file that is only on this machine is one the live
+   site never serves. (The directory was gitignored until 2026-09-23, which made this route
+   impossible to finish.)
 7. In `src/client/Connect.tsx` set `FIREFOX_XPI = "beanemachine-firefox.xpi"`.
 8. `npm run build && npm run test:all`, then commit and push.
 9. **Open the live link in Firefox once.** If it offers to install, done. If it downloads
@@ -175,8 +184,10 @@ restart. `Load Temporary Add-on` is wiped every time Firefox quits; a signed `.x
    Developer mode. Do not infer this from headers; press the link.
 
 **Shipping a new version afterwards** is: bump `VERSION` in `extension/build.mjs`, repeat
-2–6, `npm run build`, push. `public/updates.json` is rewritten with the new version and
-the signed file's SHA-256, Firefox polls it, and every existing install updates itself.
+2, 4–6 (as **Upload New Version**), `npm run build`, push. `public/updates.json` is rewritten
+with the signed file's own version — read from inside the `.xpi`, never assumed to be
+`VERSION`, so between the bump and the signing it keeps advertising the old file correctly —
+and its SHA-256. Firefox polls it, and every existing install updates itself.
 That file is why step 9 is the last manual install anyone does.
 
 **Chrome has no route A.** Outside the Web Store it will not install a packaged extension

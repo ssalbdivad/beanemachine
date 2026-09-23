@@ -47,12 +47,13 @@ dist-ext
 # Built by extension/build.mjs and copied here so the site can hand it to a reader.
 # A build artifact in the tree is a build artifact that goes stale.
 public/beanemachine-*.zip
-# The signed add-on Mozilla hands back, and its copy in public/. A build artifact in the
-# tree is a build artifact that goes stale, and this one is also a signature over a
-# particular build — committing it would let the repo and the file it claims drift.
+# The COPY of the signed add-on, and the update manifest built from it. The signed file
+# itself, extension/signed/beanemachine-firefox.xpi, is committed: it is not a build
+# artifact but a signature only Mozilla can produce, and the site is built in CI from a
+# clean checkout, so an ignored copy is one the live site never has. Drift is handled by
+# build.mjs reading the version from inside the file rather than assuming it.
 public/beanemachine-*.xpi
 public/updates.json
-extension/signed/
 
 # Rendered from extension/PRIVACY.md by extension/privacy-page.mjs at build time. One source,
 # and the page a store reviewer opens cannot drift from the file the add-on ships beside.

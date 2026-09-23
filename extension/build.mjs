@@ -34,7 +34,7 @@ import { createHash } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { basename, dirname, resolve } from "node:path"
-import { deflateRawSync } from "node:zlib"
+import { deflateRawSync, inflateRawSync } from "node:zlib"
 import { fileURLToPath } from "node:url"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -633,8 +633,11 @@ if (!DEV && zips.length) {
    the setup sheet from four lines into one press.
 
    It cannot be built here. It is a file Mozilla returns, so the process is: drop it at
-   extension/signed/beanemachine-firefox.xpi, and this copies it into `public/` so the site
-   serves it. extension/SUBMITTING.md has the submission steps.
+   extension/signed/beanemachine-firefox.xpi, COMMIT it, and this copies it into `public/` so
+   the site serves it. Committed because the site is built by CI from a clean checkout: until
+   2026-09-23 the directory was gitignored, so the file could only ever reach a local build,
+   and setting `FIREFOX_XPI` would have failed the deploy on the interlock below.
+   extension/SUBMITTING.md has the submission steps.
 
    THE INTERLOCK. The page cannot check whether a file exists, so `FIREFOX_XPI` in
    src/client/Connect.tsx states it, and exactly one of these two mistakes is possible:
@@ -659,6 +662,35 @@ if (!DEV && zips.length) {
 */
 const signed = resolve(here, "signed", "beanemachine-firefox.xpi")
 const signedHere = existsSync(signed)
+/* The version is read from INSIDE the signed file, never assumed to be VERSION. The two part
+   ways every release: VERSION is bumped and pushed first, and the file Mozilla signs arrives
+   afterwards. Advertising VERSION over an older file would pair a new version number with the
+   old file's hash, and an install that fetched it would get back the version it already had.
+   Only the central directory and one entry are read; see `entriesOf` in test/extension.mjs
+   for the same walk with its reasoning. */
+const versionInside = b => {
+	let end = b.length - 22
+	while (end >= 0 && b.readUInt32LE(end) !== 0x06054b50) end--
+	if (end < 0) throw new Error(`${signed} is not a zip`)
+	let at = b.readUInt32LE(end + 16)
+	for (let i = b.readUInt16LE(end + 10); i > 0; i--) {
+		const nameLen = b.readUInt16LE(at + 28)
+		if (b.toString("utf8", at + 46, at + 46 + nameLen) === "manifest.json") {
+			const offset = b.readUInt32LE(at + 42)
+			const from = offset + 30 + b.readUInt16LE(offset + 26) + b.readUInt16LE(offset + 28)
+			const body = b.subarray(from, from + b.readUInt32LE(at + 20))
+			return JSON.parse(b.readUInt16LE(at + 10) === 8 ? inflateRawSync(body) : body).version
+		}
+		at += 46 + nameLen + b.readUInt16LE(at + 30) + b.readUInt16LE(at + 32)
+	}
+	throw new Error(`${signed} has no manifest.json`)
+}
+const signedVersion = signedHere ? versionInside(await readFile(signed)) : null
+if (!DEV && signedVersion && signedVersion !== VERSION)
+	console.log(
+		`  ⚠ the signed add-on is ${signedVersion} and this build is ${VERSION}: updates.json\n` +
+			`    advertises ${signedVersion} until ${VERSION} is signed and dropped in.`
+	)
 const linked = /^const FIREFOX_XPI: string \| null = "(.+?)"/m.exec(
 	await readFile(resolve(here, "..", "src", "client", "Connect.tsx"), "utf8")
 )?.[1]
@@ -672,7 +704,7 @@ if (!DEV) {
 			[GECKO_ID]: {
 				updates: [
 					{
-						version: VERSION,
+						version: signedVersion ?? VERSION,
 						update_link: `https://beanemachine.com/${basename(signed)}`,
 						...(signedHere ?
 							{
@@ -691,7 +723,7 @@ if (!DEV) {
 		`${JSON.stringify(update, null, "\t")}\n`
 	)
 	console.log(
-		`wrote public/updates.json for ${VERSION}` +
+		`wrote public/updates.json for ${signedVersion ?? VERSION}` +
 			(signedHere ? " with the signed file's hash" : " — no signed file yet, so no hash")
 	)
 }

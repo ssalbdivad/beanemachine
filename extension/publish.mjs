@@ -119,11 +119,11 @@ const linked = /^const FIREFOX_XPI: string \| null = "(.+?)"/m.exec(
 console.log(`\n────────  version ${VERSION}, commit ${commit}  ────────`)
 console.log(`
 ROUTE A — Firefox, signed and self-hosted
-  1. addons.mozilla.org/developers → Submit a New Add-on → "On your own"
+  1. addons.mozilla.org/developers/addon/3077309/versions → Upload New Version
   2. upload   dist-ext/beanemachine-firefox-selfhost.zip
   3. source   beanemachine-source.zip   (yes to the generated/minified question)
      build instructions: extension/SUBMITTING.md, "Source code"
-  4. save the signed .xpi to extension/signed/beanemachine-firefox.xpi
+  4. save the signed .xpi to extension/signed/beanemachine-firefox.xpi and commit it
   5. set FIREFOX_XPI in src/client/Connect.tsx, then npm run build && npm run test:all
 
 ROUTE B — the stores

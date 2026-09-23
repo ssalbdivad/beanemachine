@@ -117,7 +117,9 @@ jobs:
       # delay and a race, and this repo has paid for that pattern before.
       - name: Serve the built site and walk it
         run: |
-          pnpm preview &
+          # --host 127.0.0.1: bare `vite preview` binds `localhost`, which is ::1 on the
+          # runner, so polling 127.0.0.1 never saw it and the job reported "never came up".
+          pnpm preview --host 127.0.0.1 --strictPort &
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:4173/ >/dev/null && break
             sleep 1

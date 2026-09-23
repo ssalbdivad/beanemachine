@@ -101,6 +101,7 @@ type Step = "where" | "yahoo" | "espn" | "team" | "teams"
 
 export const Onboard = ({
 	snapshot,
+	snapshotError,
 	leagueKey,
 	league,
 	openConnect = false,
@@ -117,12 +118,16 @@ export const Onboard = ({
 	 *  team in it and the finish button can say what it is finishing. */
 	leagueKey: string | null
 	league: League | null
-	/** Whether a league can be read from wherever this page is running: true with a
-	 *  server behind it, and on the static build true for ESPN alone. Unused since the
-	 *  wizard: the one URL route left is ESPN's, which reads from the browser on every
-	 *  build, and the generic "read it from that address" box that this gated is gone.
-	 *  Kept because App.tsx passes it and owns the interface. */
-	canImport: boolean
+	/** Why the player list could not be loaded, when it could not.
+	 *
+	 *  THIS SLOT USED TO BE `canImport`, a boolean the wizard stopped reading when the
+	 *  generic "read it from that address" box went, and which the comment here kept alive
+	 *  on the grounds that App.tsx passes it. A prop nothing reads is not an interface, it
+	 *  is a line App.tsx has to keep true about a component that does not care — so it is
+	 *  replaced rather than removed, by the one fact the sheet was missing. See `readTeam`
+	 *  and `readLeague`: both open `if (!snapshot) return`, and a button that returns in
+	 *  silence is the exact defect this file's own docstring says it fixed once already. */
+	snapshotError: string | null
 	/** Another screen asked for the Yahoo reader rather than the first question — see
 	 *  `onConnect` in src/client/Trade.tsx, which is the screen a reader with a league is
 	 *  standing on and the one place the reader was never offered. */
@@ -230,6 +235,8 @@ export const Onboard = ({
 	/** The step "teams" was reached from, so its Back returns there — the team box, or the
 	 *  Yahoo reader whose read came back without the count. */
 	const [teamsFrom, setTeamsFrom] = useState<Step>("team")
+	/** Set only by the team-count question's "read it off my Yahoo league" offer — see `back`. */
+	const [cameFromTeams, setCameFromTeams] = useState(false)
 	/*
 	   A PRIVATE ESPN LEAGUE, SAID ON THE ESPN SCREEN AS AN INSTRUCTION.
 
@@ -314,6 +321,16 @@ export const Onboard = ({
 	 * src/client/read-yahoo.ts.
 	 */
 	const readLeague = async () => {
+		/* SAME SILENT RETURN AS `readTeam`, and the same repair — see the note there. The
+		   press that pulls a whole Yahoo league across needs the player list to match the
+		   names it reads against, so it opened `if (!snapshot) return` and, on a read that
+		   failed, did nothing forever with a fully drawn screen in front of the reader. The
+		   button is disabled while the list is on its way (`waiting`, below), so this branch
+		   is the error case alone: say it where the read's other failures are said. */
+		if (snapshotError)
+			return setNote(
+				`The player list couldn’t be loaded, so your league can’t be matched to it yet: ${snapshotError}`
+			)
 		if (!snapshot) return
 		setReadFailure(null)
 		/* Before the await, not after: a press that throws has still been made, and the
@@ -442,7 +459,26 @@ export const Onboard = ({
 	 * scoring he is adopting is the scoring he has been looking at for the last
 	 * minute, still labelled as borrowed on the board behind the sheet.
 	 */
+	/**
+	 * WHAT A PRESS DOES BEFORE THE PLAYER LIST HAS ARRIVED, which until now was nothing.
+	 *
+	 * `public/snapshot.json` is a megabyte, and both primary buttons in this wizard open
+	 * `if (!snapshot) return`. On a phone on a slow connection that is a multi-second window
+	 * in which the sheet is fully drawn and typeable; on a read that FAILED it never ends,
+	 * and the sheet renders identically to one that is ready. The reader types his team,
+	 * presses the button, and the app says nothing and changes nothing — which is word for
+	 * word the defect this file's docstring below says was fixed, on the `leagueKey` half of
+	 * the same condition. The `snapshot` half survived it.
+	 *
+	 * Both buttons carry it now: disabled while the list is on its way, with the label saying
+	 * so, and a note rather than a silent return when it will never arrive.
+	 */
+	const waiting = !snapshot && !snapshotError
 	const readTeam = () => {
+		if (snapshotError)
+			return setTeamNote(
+				`The player list couldn’t be loaded, so your team can’t be matched to it yet: ${snapshotError}`
+			)
 		if (!snapshot) return
 		const got = rosterFromPaste(team, snapshot)
 		setRead(got)
@@ -506,7 +542,21 @@ export const Onboard = ({
 			</button>
 		</p>
 	)
-	const back = backTo("where")
+	/**
+	 * BACK GOES WHERE HE CAME FROM, and on the yahoo step that is not always "where".
+	 *
+	 * The three platform steps share one Back and it went to the first question. That is
+	 * right when the reader arrived by answering it, and wrong on the one route that reaches
+	 * the yahoo step from somewhere else: the last question, "How many teams are in your
+	 * league?", offers "Read the team count off my Yahoo league" and sets `step` to yahoo.
+	 * Back from there dropped him at "Where's your league?" — two screens behind the question
+	 * he was answering, with the answer he had already given behind him.
+	 *
+	 * `teamsFrom` already records the step the count question was reached from, for its own
+	 * Back. This is the same idea one level up, set by that offer alone, so every other route
+	 * into the yahoo step still backs to the first question.
+	 */
+	const back = backTo(cameFromTeams ? "teams" : "where")
 	/** The one alternative a platform route offers, and it exists because a read can fail:
 	 *  a private ESPN league, a Yahoo reader that will not install. Same words on both. */
 	const typeInstead = (
@@ -537,14 +587,37 @@ export const Onboard = ({
 						{/* Three answers, stacked and full width, because they are the whole screen
 						    and a thumb should not have to aim. `.onboard-where` is the hook the
 						    suites click by label. */}
+						{/* Answering this question clears `cameFromTeams`: it is set by the team-count
+						    screen's Yahoo shortcut so that Back from the yahoo step returns to the
+						    count, and a reader who has walked back out to this question is no longer
+						    on that errand. Left set, a later yahoo → Back would have sent him
+						    FORWARD to a question he had not reached yet. */}
 						<div className="onboard-where">
-							<button type="button" onClick={() => setStep(yahoo())}>
+							<button
+								type="button"
+								onClick={() => {
+									setCameFromTeams(false)
+									setStep(yahoo())
+								}}
+							>
 								Yahoo
 							</button>
-							<button type="button" onClick={() => setStep("espn")}>
+							<button
+								type="button"
+								onClick={() => {
+									setCameFromTeams(false)
+									setStep("espn")
+								}}
+							>
 								ESPN
 							</button>
-							<button type="button" onClick={() => setStep("team")}>
+							<button
+								type="button"
+								onClick={() => {
+									setCameFromTeams(false)
+									setStep("team")
+								}}
+							>
 								Somewhere else
 							</button>
 						</div>
@@ -582,6 +655,10 @@ export const Onboard = ({
 							readAt={receipt.at}
 							failure={readFailure}
 							onRead={() => void readLeague()}
+							/* The list this read matches names against is a megabyte, so on a phone
+							   there is a window where this sheet is drawn and the press does nothing.
+							   Connect says so on the button rather than looking ready. */
+							waiting={waiting}
 							onBack={() => setStep("team")}
 						/>
 						{/* What the read itself said — a stat whose value would not parse, a sweep
@@ -601,13 +678,42 @@ export const Onboard = ({
 					*/
 					<>
 						{back}
-						<h2>Paste your ESPN league link</h2>
-						<p className="sub">Copy it from the address bar on your league&rsquo;s page.</p>
+						<h2>Paste your ESPN team link</h2>
+						{/*
+						  HIS TEAM'S PAGE, NOT HIS LEAGUE'S, and the difference is the whole setup.
+
+						  This asked for the league page and showed `…/baseball/league?leagueId=…`
+						  as the example. `detect` in src/import.ts reads the team out of the query
+						  string — `teamId: u.match(/teamId=(\d+)/)?.[1] ?? null` — and a league URL
+						  never carries one, so the import came back with `team_id: null` and
+						  src/import.ts's own note fires: "The URL didn't carry `teamId=`, so which
+						  of these teams is yours is not known."
+
+						  The chain that produced, walked through the code: the wizard's finish
+						  appears the moment a league exists, so the ESPN reader is told he is done
+						  with nought players; Tonight then says "Add the players you own"; that
+						  lands him on My league; and the pull button there is
+						  `disabled={pulling || !readTeamId}` under the caption "Enter your team
+						  number above." The last instruction a finished wizard gave him is to go
+						  and find his own numeric id.
+
+						  The team page always carries it, and it is what his address bar actually
+						  shows while he is looking at his team — so asking for that one costs the
+						  reader nothing and is the difference between a setup that finishes and
+						  one that hands him a number to hunt for.
+
+						  STILL OUTSTANDING, deliberately: with `teamId` in hand the roster could be
+						  read in the same press, the way the Yahoo route does (`readLeague` writes
+						  roster and lineupStore together). That needs `onImportUrl` to report what
+						  it imported, which it does not — it returns void — so it is a change to
+						  App's interface rather than to this screen, and it is not this commit.
+						*/}
+						<p className="sub">Open your team on ESPN and copy the address.</p>
 						<p className="onboard-url">
 							<input
 								type="text"
 								value={url}
-								placeholder="https://fantasy.espn.com/baseball/league?leagueId=…"
+								placeholder="https://fantasy.espn.com/baseball/team?leagueId=…&teamId=…"
 								onChange={e => {
 									setUrl(e.currentTarget.value)
 									/* A new address is a new question; the old answer about the
@@ -615,7 +721,7 @@ export const Onboard = ({
 									setEspnAsked(false)
 									setEspnPrivate(false)
 								}}
-								aria-label="Your ESPN league's web address"
+								aria-label="Your ESPN team's web address"
 							/>
 							<button
 								type="button"
@@ -683,9 +789,13 @@ export const Onboard = ({
 								type="button"
 								className="primary"
 								onClick={readTeam}
-								disabled={!team.trim()}
+								disabled={!team.trim() || waiting}
 							>
-								{held > 0 ? "Replace my team" : "That’s my team"}
+								{waiting ?
+									"Loading players…"
+								: held > 0 ?
+									"Replace my team"
+								:	"That’s my team"}
 							</button>
 						</p>
 						{/* The one line left of the privacy paragraph ("Nothing leaves this phone. There
@@ -854,31 +964,43 @@ export const Onboard = ({
 					<div className="onboard-teams">
 						{backTo(teamsFrom)}
 						<h2>How many teams are in your league?</h2>
-						{offerPress ?
+						{offerPress && (
 							/* Its own class, because a class naming a control belongs to one
 							   control and the suites address this one by it. */
 							<p className="onboard-offer onboard-teams-read">
-								<button type="button" className="as-link" onClick={() => setStep("yahoo")}>
+								<button
+									type="button"
+									className="as-link"
+									onClick={() => {
+										setCameFromTeams(true)
+										setStep("yahoo")
+									}}
+								>
 									Read the team count off my Yahoo league
 								</button>
 							</p>
-						:	<div className="chips">
-								{[8, 10, 12, 14, 16].map(n => (
-									<button
-										key={n}
-										type="button"
-										className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
-										aria-pressed={league.meta.max_teams === n}
-										onClick={() => {
-											setTeamsAnswered(true)
-											onTeamCount(n)
-										}}
-									>
-										{n}
-									</button>
-								))}
-							</div>
-						}
+						)}
+						{/* ALWAYS, NOT INSTEAD — see the note on `offerPress`. These chips are the
+						    answer every reader can give whatever platform he is on; the line above is
+						    a shortcut for one of them. Drawn as the alternative to that line, they
+						    left a non-Yahoo reader on the last screen of the wizard with nothing on
+						    it he could press. */}
+						<div className="chips">
+							{[8, 10, 12, 14, 16].map(n => (
+								<button
+									key={n}
+									type="button"
+									className={`chip-btn${league.meta.max_teams === n ? " on" : ""}`}
+									aria-pressed={league.meta.max_teams === n}
+									onClick={() => {
+										setTeamsAnswered(true)
+										onTeamCount(n)
+									}}
+								>
+									{n}
+								</button>
+							))}
+						</div>
 					</div>
 				)}
 				</div>
@@ -923,7 +1045,22 @@ export const Onboard = ({
 				league && (
 					<p className={`onboard-done${answered ? " onboard-foot" : ""}`}>
 						<button type="button" className={ready ? "primary" : ""} onClick={onDone}>
-							{read && read.players.length ? "Show me tonight" : "Show me the board"}
+							{/*
+						  ONE LABEL, BECAUSE THERE IS ONE DESTINATION AND NO SCREEN CALLED A BOARD.
+
+						  This branched on `read && read.players.length` between "Show me tonight" and
+						  "Show me the board". Both press `onDone`, which goes to `view: "board"` —
+						  the tab labelled **Tonight**. The screen this app actually calls a board is
+						  `wire`, labelled Pickups. So one of the two labels named a screen that does
+						  not exist and neither named a different one.
+
+						  The branch was also backwards about who deserved which. `read` is set only
+						  by `readTeam`, the typed-textarea route, so a reader who pressed one button
+						  and pulled his whole Yahoo league across — roster, seats, opponent — was
+						  told "Show me the board", and the reader who typed four names got the
+						  specific one. It was measuring which code path ran, not what he has.
+						*/}
+						Show me tonight
 						</button>
 						{missing.length > 0 && (
 							<span className="sub">

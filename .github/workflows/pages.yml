@@ -39,8 +39,13 @@ jobs:
       # the pure-Node suites — no browser, no dev server, no live API — run
       # before the capture so a defect fails the job without first spending a
       # live MLB + Savant read. deploy needs: build, so a failure here is a
-      # deploy that does not happen. The four browser suites stay out: they
-      # drive a real page and need Vite up, which this job has no server for.
+      # deploy that does not happen.
+      #
+      # The browser suites are no longer all out: `screens` below runs the one
+      # that drives the published artifact. See the comment on that job — this
+      # line was the ONLY gate on what reached Pages, including two unattended
+      # crons a day, and it covers about half the repo's assertions and none of
+      # its screens.
       - run: pnpm test:node
       # capture live MLB + Savant data; the browser can't call them directly
       # (neither sends CORS headers), so the snapshot is how real data ships
@@ -58,8 +63,71 @@ jobs:
         with:
           path: dist
 
+  # ════════════════════════════════════════════════════════════════════════════
+  # THE SCREENS, AGAINST THE ARTIFACT THAT IS ABOUT TO SHIP.
+  #
+  # `build` ran `pnpm test:node` and nothing else, and `deploy: needs: build`, so
+  # that was the whole gate on what reached GitHub Pages — including the two
+  # `schedule:` crons above, which redeploy at 11:00 and 23:00 UTC with nobody
+  # watching. Counted on 2026-09-22: the seven browser suites hold 1,182 of the
+  # repo's 2,398 assertions and 15,905 of its 23,000 test lines. CI was checking
+  # about half the assertions and not one screen.
+  #
+  # The gap sat exactly where the product's risk is. test/static.mjs is the only
+  # place the onboarding wizard is walked end to end — where's your league, the
+  # team box, "That's my team", the count, "Show me tonight", and then that the
+  # screen it lands on is about his own team — and it is the only suite that runs
+  # against `pnpm preview`, i.e. the built artifact, which is the one thing the
+  # dev server deliberately cannot show. The wizard was rebuilt and its only
+  # end-to-end proof had never run on a push.
+  #
+  # static.mjs alone, deliberately. It is the highest value per minute of the
+  # seven: no API server, no dev server, no live MLB read — just the dist/ that
+  # is about to be uploaded. The suites that need `dev:web` and a backend
+  # (journey, decide, board, trade-ui) are a second job and a second decision;
+  # shipping the cheap one that covers the first-run flow beats arguing about
+  # the rest. `npm run shots`-style browser downloads are the only new cost, and
+  # `--with-deps chromium` is about a minute.
+  #
+  # It does NOT run `pnpm refresh`, so it never spends a live MLB read: it builds
+  # against the snapshot.json already in the tree. That means it is checking the
+  # code path, not today's data — which is the right split, because the data is
+  # what `build` refreshes and the screens are what a push changes.
+  # ════════════════════════════════════════════════════════════════════════════
+  screens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+      # `preview` serves dist/ on 4173, which is the port test/static.mjs expects.
+      # Backgrounded and waited for rather than slept on: a fixed sleep is both a
+      # delay and a race, and this repo has paid for that pattern before.
+      - name: Serve the built site and walk it
+        run: |
+          pnpm preview &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4173/ >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4173/ >/dev/null || { echo "preview never came up"; exit 1; }
+          node test/static.mjs
+
   deploy:
-    needs: build
+    # BOTH, so a screen that broke stops the deploy the same way a unit test does.
+    # `screens` builds its own copy rather than taking `build`'s artifact: the two
+    # jobs run in parallel that way, and the thing it checks is the build itself.
+    needs: [build, screens]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

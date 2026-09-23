@@ -739,6 +739,64 @@ export const App = () => {
 		 */
 		!docked && (view === "trade" || store === "unreadable")
 
+	/*
+	 * ONE SET OF TOOLBAR WIRING, RENDERED TWICE.
+	 *
+	 * `<Toolbar>` appears on two parts of the page — the league selector above the answer
+	 * and the management block under it — and until 2026-09-22 both call sites spelled out
+	 * all fifteen props. A `diff` of the two, de-indented, reported exactly one differing
+	 * line: `part="selector"` against `part="manage"`. Everything else was byte-identical,
+	 * including a twelve-line `onDownload` that rebuilt the `carried` array and its toast
+	 * string in both places, and the comment "reading the league needs a server; storing
+	 * what it read never does", which appeared verbatim twice.
+	 *
+	 * The two call sites are four hundred lines apart, so nothing made that visible: a fix
+	 * applied to one and not the other gave the page two Download buttons that said
+	 * different things, and neither the file nor the suite would have caught it. `part` is
+	 * the only thing the two renders actually disagree about, so it is the only thing
+	 * either one still passes.
+	 */
+	const toolbar = {
+		config,
+		store,
+		view,
+		manage,
+		activeKey: key,
+		templates,
+		onSelect: (k: string) => void run(async () => adopt(leagues.activate(k), k)),
+		onImport: (url: string) =>
+			void run(async () => {
+				// reading the league needs a server; storing what it read never does
+				const { key: k, league } = await api.import(url)
+				adopt(leagues.save(k, league), k)
+				show(`Imported ${league.meta.league_name ?? k}`)
+			}),
+		onCreate: (template: string) => void create(template),
+		onRemove: (k: string) =>
+			void run(async () => {
+				adopt(leagues.remove(k))
+				show("Removed")
+			}),
+		onOnboard: () => {
+			setOnboarding(true)
+			go({ sheet: true })
+		},
+		onDownload: () => {
+			if (!config) return
+			const file = leagues.download(config)
+			const carried = [
+				`${Object.keys(file.leagues).length} league${Object.keys(file.leagues).length === 1 ? "" : "s"}`,
+				file.rosters ? `${Object.keys(file.rosters).length} roster` : null,
+				file.lineups ? `${Object.keys(file.lineups).length} lineup` : null,
+				file.pools ? `${Object.keys(file.pools).length} free-agent list` : null
+			].filter(Boolean)
+			show(`Saved a file with ${carried.join(", ")} in it. Drop it on this page to load it back.`)
+		},
+		onLoadFile: loadFile,
+		onPicker: registerPicker,
+		onReject: (m: string) => show(m, true)
+	}
+
 	return (
 		<div className={`wrap${busy ? " busy" : ""}${acknowledged ? " saved" : ""}`}>
 			{/* The first stop on the page, and off screen until it is the focused one. A
@@ -890,49 +948,7 @@ export const App = () => {
 				    one thing on the page that has to fit. */}
 			</nav>
 
-			<Toolbar
-				config={config}
-				store={store}
-				view={view}
-				manage={manage}
-				activeKey={key}
-				templates={templates}
-				onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
-				onImport={url =>
-					void run(async () => {
-						// reading the league needs a server; storing what it read never does
-						const { key: k, league } = await api.import(url)
-						adopt(leagues.save(k, league), k)
-						show(`Imported ${league.meta.league_name ?? k}`)
-					})
-				}
-				onCreate={template => void create(template)}
-				onRemove={k =>
-					void run(async () => {
-						adopt(leagues.remove(k))
-						show("Removed")
-					})
-				}
-				onOnboard={() => {
-					setOnboarding(true)
-					go({ sheet: true })
-				}}
-				onDownload={() => {
-					if (!config) return
-					const file = leagues.download(config)
-					const carried = [
-						`${Object.keys(file.leagues).length} league${Object.keys(file.leagues).length === 1 ? "" : "s"}`,
-						file.rosters ? `${Object.keys(file.rosters).length} roster` : null,
-						file.lineups ? `${Object.keys(file.lineups).length} lineup` : null,
-						file.pools ? `${Object.keys(file.pools).length} free-agent list` : null
-					].filter(Boolean)
-					show(`Saved a file with ${carried.join(", ")} in it. Drop it on this page to load it back.`)
-				}}
-				onLoadFile={loadFile}
-				onPicker={registerPicker}
-				onReject={m => show(m, true)}
-				part="selector"
-			/>
+			<Toolbar {...toolbar} part="selector" />
 
 			<Status
 				league={league ?? null}
@@ -1318,49 +1334,7 @@ export const App = () => {
 			  `manage` is true for that case on every view, and moving it into one view would
 			  have taken the only way out with it.
 			*/}
-				<Toolbar
-					config={config}
-					store={store}
-					view={view}
-					manage={manage}
-					activeKey={key}
-					templates={templates}
-					onSelect={k => void run(async () => adopt(leagues.activate(k), k))}
-					onImport={url =>
-						void run(async () => {
-							// reading the league needs a server; storing what it read never does
-							const { key: k, league } = await api.import(url)
-							adopt(leagues.save(k, league), k)
-							show(`Imported ${league.meta.league_name ?? k}`)
-						})
-					}
-					onCreate={template => void create(template)}
-					onRemove={k =>
-						void run(async () => {
-							adopt(leagues.remove(k))
-							show("Removed")
-						})
-					}
-					onOnboard={() => {
-						setOnboarding(true)
-						go({ sheet: true })
-					}}
-					onDownload={() => {
-						if (!config) return
-						const file = leagues.download(config)
-						const carried = [
-							`${Object.keys(file.leagues).length} league${Object.keys(file.leagues).length === 1 ? "" : "s"}`,
-							file.rosters ? `${Object.keys(file.rosters).length} roster` : null,
-							file.lineups ? `${Object.keys(file.lineups).length} lineup` : null,
-							file.pools ? `${Object.keys(file.pools).length} free-agent list` : null
-						].filter(Boolean)
-						show(`Saved a file with ${carried.join(", ")} in it. Drop it on this page to load it back.`)
-					}}
-					onLoadFile={loadFile}
-					onPicker={registerPicker}
-					onReject={m => show(m, true)}
-					part="manage"
-				/>
+				<Toolbar {...toolbar} part="manage" />
 
 			{/*
 			  The setup hovers at the foot of the page rather than sitting above the
@@ -1433,7 +1407,7 @@ export const App = () => {
 					snapshot={snapshot}
 					leagueKey={key}
 					league={league ?? null}
-					canImport={getMode() !== "static"}
+					snapshotError={snapshotError}
 					onCreateLeague={(platform, made) =>
 						void run(async () => {
 							if (!config) return

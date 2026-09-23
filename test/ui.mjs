@@ -1541,10 +1541,21 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 	await ep.click('.onboard-where button:text-is("ESPN")')
 	await ep.waitForSelector(".onboard-url", { timeout: 10000 })
 	const say = (await ep.$eval(".dock-sheet .onboard", e => e.innerText)).replace(/\s+/g, " ")
-	t("an ESPN reader is asked for his league's link",
-		/paste your espn league link/i.test(say), say.slice(0, 200))
+	/* HIS TEAM'S LINK, NOT HIS LEAGUE'S — and the claim got stricter rather than moving.
+	   This asked for "paste your espn league link" and for the line "Copy it from the address
+	   bar on your league's page." A league URL never carries `teamId=`, which is the one thing
+	   `detect` in src/import.ts reads the team out of, so the reader finished the wizard with
+	   a league and no team and the app's next instruction to him was to go and find his own
+	   numeric id on My league. The team page always carries it and is what his address bar
+	   shows while he is looking at his team. The placeholder is asserted too, because it is
+	   the half of this instruction a reader actually copies the shape of. */
+	t("an ESPN reader is asked for his TEAM's link, which is the one that carries teamId",
+		/paste your espn team link/i.test(say) && !/espn league link/i.test(say), say.slice(0, 200))
 	t("…and told where to copy it from, in one line",
-		/Copy it from the address bar on your league.s page\./.test(say), say)
+		/Open your team on ESPN and copy the address\./.test(say), say)
+	t("…and the example address shows a teamId, because that is the point of asking",
+		/teamId=/.test(await ep.getAttribute(".onboard-url input", "placeholder")),
+		await ep.getAttribute(".onboard-url input", "placeholder"))
 	t("there is one address box on that screen, and no paste box at all",
 		(await ep.locator(".onboard-url").count()) === 1 &&
 			(await ep.locator('[data-ctl="paste-settings"], .dock-sheet .onboard textarea').count()) === 0,
@@ -1810,9 +1821,18 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
 		document.documentElement.setAttribute("data-beanemachine-extension", "0.0.0-test")
 	)
 	await ap.waitForSelector(".onboard-teams-read button", { timeout: 15000 })
-	t("the moment the reader is there, the press replaces the question",
-		(await ap.locator(".onboard-teams .chip-btn").count()) === 0,
-		`${await ap.locator(".onboard-teams .chip-btn").count()} chips still up`)
+	/* WAS "the press REPLACES the question", asserting zero chips once the reader is present.
+	   That either/or is the defect: a reader who answered ESPN or "Somewhere else", but who
+	   has the reader installed from a Yahoo league he set up last season, reached the last
+	   question of the wizard and found its only control was an offer to read a Yahoo league
+	   he does not have — and the only way to get the chips back was to press it and let the
+	   read fail. The offer is a shortcut for one platform; the chips are the answer every
+	   reader can give. Both, now, and the offer is gated on the league actually being Yahoo.
+	   Asserted as a pair, because either alone leaves somebody with nothing to press. */
+	t("the press is offered as a shortcut, not instead of the question",
+		(await ap.locator(".onboard-teams .chip-btn").count()) === 5 &&
+			(await ap.locator(".onboard-teams-read button").count()) === 1,
+		`${await ap.locator(".onboard-teams .chip-btn").count()} chips, ${await ap.locator(".onboard-teams-read button").count()} offers`)
 	t("…and the button names what it reads and where from",
 		/team count/i.test(await ap.textContent(".onboard-teams-read button")),
 		await ap.textContent(".onboard-teams-read button"))

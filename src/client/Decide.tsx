@@ -16,7 +16,7 @@ import { ledgerStore } from "./ledger.ts"
 import { pool as poolStore } from "./pool.ts"
 import { roster } from "./roster.ts"
 import { normalizeName } from "./useBoard.ts"
-import { andList } from "../data/names.ts"
+import { andList, indexByName } from "../data/names.ts"
 import { useSlate } from "./useSlate.ts"
 import { lastNight, useActuals } from "./useActuals.ts"
 import type { Matchup } from "./useMatchup.ts"
@@ -199,6 +199,23 @@ export const Decide = ({
 		}
 	}, [leagueKey, rev])
 	const ownedIds = owned.ids
+	/**
+	 * The bare player ids the roster store holds, without the `:group` half of the key.
+	 *
+	 * Six places on this card now join a printed name to a board row, and the ids are what
+	 * tell two men of one name apart — see `indexByName` in src/data/names.ts. Derived once
+	 * rather than spelled `new Set(ownedIds.map(k => k.split(":")[0]))` at each of them,
+	 * which is the duplication this file's own history keeps paying for: six copies of one
+	 * key rule is six chances for one of them to drift.
+	 *
+	 * The `:group` half is deliberately dropped. A two-way player is ONE man the reader
+	 * owns, stored under two keys, and a set keyed on the pair would answer "no" for
+	 * whichever half of Ohtani the caller did not happen to ask about.
+	 */
+	const mineIds = useMemo(
+		() => new Set(ownedIds.map(k => k.split(":")[0] ?? k)),
+		[ownedIds]
+	)
 	const carried = leagueKey ? poolStore.of(leagueKey) : null
 
 	/**
@@ -238,13 +255,12 @@ export const Decide = ({
 		 * store. An EMPTY roster therefore means no seats at all, which is the honest
 		 * answer — and the card's own no-roster state is what renders.
 		 */
-		const mine = new Set(ownedIds.map(k => k.split(":")[0]))
 		const ownedNames = new Set<string>()
 		const knownNames = new Set<string>()
 		for (const p of snapshot?.players ?? []) {
 			const n = normalizeName(p.name)
 			knownNames.add(n)
-			if (mine.has(String(p.id))) ownedNames.add(n)
+			if (mineIds.has(String(p.id))) ownedNames.add(n)
 		}
 		/*
 		 * A seat survives if the roster still owns the man, OR if the capture cannot name
@@ -298,7 +314,7 @@ export const Decide = ({
 			}]
 		})
 		return spots.length ? { spots, at: null as string | null, known: false } : null
-	}, [storedSeats, ownedIds, snapshot])
+	}, [storedSeats, ownedIds, mineIds, snapshot])
 
 	/**
 	 * The same wire the board reads, from the same place.
@@ -596,7 +612,35 @@ export const Decide = ({
 			underlying: h.underlying, injuries, injuryPolicy: "exclude",
 			teams: league.meta.max_teams
 		})
-		const byName = new Map(rows.map(r => [normalizeName(r.player.name), r]))
+		/**
+		 * HIS SEATS, JOINED TO TONIGHT'S BOARD — one row per seat, chosen rather than
+		 * collided.
+		 *
+		 * This was `new Map(rows.map(r => [normalizeName(r.player.name), r]))`, and a Map
+		 * keeps the LAST row per key. Five keys collide on the committed capture (see
+		 * `indexByName` in src/data/names.ts, re-derived 2026-09-22), so a seat reading
+		 * "Luis Garcia Jr." at 1B got the relief pitcher of that name: his projection, his
+		 * bscore, and his `player.teamId` — which is the field two lines of this card read
+		 * to say when the seat locks. A lock time off the wrong club is advice about the
+		 * wrong clock.
+		 *
+		 * The seat's own printed eligibility and the ids the roster store says are his are
+		 * both known HERE and nowhere downstream, which is why the join is resolved once,
+		 * up front, into the plain name→row map the rest of this memo already reads. A
+		 * name that is still two men after both is put in `twoMen` and refused: the card
+		 * would otherwise have to pick one, and picking is what this fixes.
+		 */
+		const board = indexByName(rows, r => r.player)
+		const byName = new Map<string, (typeof rows)[number]>()
+		/** Seats whose printed name is two different players on the board. Kept apart from
+		 *  `unmatched` because "we cannot find him" and "we found two of him" are different
+		 *  things to be told, and only the second is the reader's to fix. */
+		const twoMen: string[] = []
+		for (const sp of seats.spots) {
+			const got = board.pick(sp.name, { positions: sp.positions, owned: mineIds })
+			if (got.row) byName.set(normalizeName(sp.name), got.row)
+			else if (got.why === "ambiguous") twoMen.push(sp.name)
+		}
 		/** What MLB says about each man tonight, where the live read succeeded. */
 		const liveStatus = new Map<string, TodayStatus | null>()
 		const playing = new Set<string>()
@@ -616,7 +660,10 @@ export const Decide = ({
 		for (const sp of seats.spots) {
 			const r = byName.get(normalizeName(sp.name))
 			if (!r) {
-				if (!isReserveSlot(sp.slot)) unmatched.push(sp.name)
+				/* A seat refused for ambiguity is not a seat the board has no row for, and it
+				   must not be counted as one: the two have different sentences and only one of
+				   them is true. */
+				if (!isReserveSlot(sp.slot) && !twoMen.includes(sp.name)) unmatched.push(sp.name)
 				continue
 			}
 			// "has a game" is a claim about a man who can play it. Counting everyone whose
@@ -843,7 +890,7 @@ export const Decide = ({
 			).values()
 		]
 		return {
-			day, lineup, idle, unmatched, unfilled, playing: playing.size, locked, stuck, mineGames,
+			day, lineup, idle, unmatched, twoMen, unfilled, playing: playing.size, locked, stuck, mineGames,
 			calledOff,
 			/** What the lineup reaches if the reader does everything the card still offers.
 			 *  Equal to `lineup.pointsPlanned` when nothing is frozen. */
@@ -924,7 +971,13 @@ export const Decide = ({
 					 * of four different things is actually true.
 					 */
 					why:
-						!r || unmatched.includes(sp.name) ?
+						/* Ahead of the unmatched sentence, because it is the more specific of the
+						   two and the only one that is actionable: the reader can look at his own
+						   roster and see which Max Muncy he has. Saying "no projection exists for
+						   that name" about a name the board holds two rows for would be false. */
+						twoMen.includes(sp.name) ?
+							"two different players go by that name, so nothing here can say which is yours"
+						: !r || unmatched.includes(sp.name) ?
 							"he is not on the board — no projection exists for that name"
 						: live && live.kind === "no-game" ? "no game today"
 						: live && live.kind === "benched" ? "not in today's lineup"
@@ -988,7 +1041,7 @@ export const Decide = ({
 					)
 				:	null
 		}
-	}, [snapshot, league, seats, slate, injuries, crossed])
+	}, [snapshot, league, seats, slate, injuries, crossed, mineIds])
 
 	/*
 	 * THE CARD IS DERIVED AT A MOMENT, AND THE MOMENT HAS TO BE NOW.
@@ -1058,15 +1111,33 @@ export const Decide = ({
 			ownership: h.ownership, eligibility: h.eligibility, underlying: h.underlying,
 			injuries, injuryPolicy: "keep", teams: league.meta.max_teams
 		})
-		const mine = new Set(seats.spots.map(sp => normalizeName(sp.name)))
+		/* WALKED FROM THE SEATS, not from the board. This looped every rated row and asked
+		   whether its name was one of his, which made the board's own duplicate names the
+		   deciding vote: either Max Muncy's rest-of-season value could protect the other,
+		   because the only thing the two were compared on was a string. Asking the seat
+		   instead lets the join use the eligibility printed beside it and the ids the
+		   roster store holds — see `indexByName`. Rateable rows only, so a man with no
+		   projection cannot shadow the man who has one. */
+		const board = indexByName(
+			rows.filter(r => r.rateable),
+			r => r.player
+		)
 		const keep = new Set<string>()
-		for (const r of rows) {
-			if (!r.rateable) continue
-			const n = normalizeName(r.player.name)
-			if (mine.has(n) && r.bscore >= DEFAULTS.keepFloor) keep.add(n)
+		for (const sp of seats.spots) {
+			const got = board.pick(sp.name, { positions: sp.positions, owned: mineIds })
+			/* PER TEAM GAME, which is the unit `keepFloor` is in — see `PlanOptions`. This
+			   read `r.bscore`, a rest-of-season TOTAL, against a 1.9-a-game bar, so on the
+			   committed capture (re-derived 2026-09-22, median 18 team games remaining) it
+			   protected 170 of the top 270 men where the per-game reading protects 40. That
+			   set is handed to `planSwaps` as `protect`, so it compounded with the same
+			   defect inside the planner: a quadrupled protect set on top of a halved
+			   droppable one, which is why the card could offer adds and almost never an
+			   add/drop. Revert it and the season horizon swallows the roster again. */
+			if (got.row && (got.row.bscorePerGame ?? 0) >= DEFAULTS.keepFloor)
+				keep.add(normalizeName(sp.name))
 		}
 		return keep
-	}, [snapshot, league, seats, wireTest, injuries])
+	}, [snapshot, league, seats, wireTest, injuries, mineIds])
 
 	/*
 	  MOVED ABOVE THE PLAN, because the plan now uses it.
@@ -1133,11 +1204,16 @@ export const Decide = ({
 		/* A half-read evening is not a running total: with the hitting side missing, every bat
 		   he has looks like a man who has not come up yet. Same rule as the recap's. */
 		if (sofar.missing.length) return null
-		const by = new Map(today.ratedToday.map(r => [normalizeName(r.player.name), r]))
+		/* The seat's own eligibility and the reader's ids pick the row, because the line it
+		   leads to is keyed `${id}:${group}` — the wrong Luis García here does not fail to
+		   score, it scores somebody else's night into this reader's total. A name that is
+		   still two men contributes nothing, which is the same silence a man with no line
+		   gets one branch down: an understated total beats a confidently wrong one. */
+		const board = indexByName(today.ratedToday, r => r.player)
 		let sum = 0
 		let any = false
 		for (const sp of seats.spots.filter(sp => !isReserveSlot(sp.slot))) {
-			const r = by.get(normalizeName(sp.name))
+			const r = board.pick(sp.name, { positions: sp.positions, owned: mineIds }).row
 			if (!r) continue
 			const line = sofar.actuals.lines.get(`${r.player.id}:${r.player.group}`)
 			if (!line) continue
@@ -1145,17 +1221,21 @@ export const Decide = ({
 			sum += scoreStats(line.stats, tableFor(league, r.player.group), r.player.group).points
 		}
 		return any ? { points: Number(sum.toFixed(1)), lineup: !!seats.at } : null
-	}, [sofar.actuals, sofar.missing, league, seats, today])
+	}, [sofar.actuals, sofar.missing, league, seats, today, mineIds])
 
 	/** Seated names to pitching ids, off the capture rather than off the rating, so a man in a
 	 *  seat still counts toward the innings he has thrown even on a day the rating skipped
 	 *  him — which is every day he is hurt, and exactly when a floor starts to bite. */
-	const pitcherIdByName = useMemo(() => {
-		const m = new Map<string, number>()
-		for (const p of snapshot?.players ?? [])
-			if (p.group === "pitching") m.set(normalizeName(p.name), p.id)
-		return m
-	}, [snapshot])
+	/* An INDEX rather than a Map, and here the ids are the only thing that can decide: the
+	   capture holds two pitchers called Yunior Marte (#805074 and #628708) and the group
+	   test cannot separate them, so `m.set(name, p.id)` silently banked one man's innings
+	   against the other's seat. That is a number a reader compares to his league's floor
+	   and acts on. Where the roster store is empty there is nothing to choose with and the
+	   seat contributes nothing, which understates rather than misattributes. */
+	const pitchersByName = useMemo(
+		() => indexByName((snapshot?.players ?? []).filter(p => p.group === "pitching"), p => p),
+		[snapshot]
+	)
 
 	const banked = useMemo((): number | null => {
 		/* A PERIOD THAT OPENED TODAY HAS THROWN NOTHING, and that is a fact rather than an
@@ -1183,13 +1263,13 @@ export const Decide = ({
 		if (!seated.length) return null
 		const seatedKeys = new Set<string>()
 		for (const sp of seated) {
-			const id = pitcherIdByName.get(normalizeName(sp.name))
-			if (id !== undefined) seatedKeys.add(`${id}:pitching`)
+			const p = pitchersByName.pick(sp.name, { owned: mineIds }).row
+			if (p) seatedKeys.add(`${p.id}:pitching`)
 		}
 		let outs = 0
 		for (const k of seatedKeys) outs += thrown.lines.get(k)?.stats.outs ?? 0
 		return Number((outs / 3).toFixed(1))
-	}, [thrown.lines, seats, pitcherIdByName, periodStart])
+	}, [thrown.lines, seats, pitchersByName, periodStart, mineIds])
 
 
 	const plan = useMemo(() => {
@@ -1204,6 +1284,11 @@ export const Decide = ({
 			// has read this league's wire — see `estimatedWire`
 			availableNames: new Set(candidates.map(p => normalizeName(p.name))),
 			available: candidates.map(p => ({ name: p.name, positions: p.positions })),
+			/* The one piece of evidence that separates two men of the same name in the same
+			   group — the two Max Muncys in the capture — and the browser is the only caller
+			   that has it. Without it the planner refuses such a spot into `blocked`; with
+			   it, it plans the man the reader actually owns. See `indexByName`. */
+			ownedIds: mineIds,
 			shape: {
 				slots: league.roster.slots,
 				slot_order: league.roster.slot_order,
@@ -1240,7 +1325,7 @@ export const Decide = ({
 			}
 		}
 		return { lineup: planLineup(input), swaps: planSwaps(input, 60, keepForSeason) }
-	}, [rated, league, seats, candidates, keepForSeason, banked])
+	}, [rated, league, seats, candidates, keepForSeason, banked, mineIds])
 	const lineup = plan?.lineup ?? null
 
 	/**
@@ -1493,9 +1578,24 @@ export const Decide = ({
 	const recorded = useRef<string | null>(null)
 	useEffect(() => {
 		if (!leagueKey || !today || !seats) return
-		const byName = new Map(today.ratedToday.map(r => [normalizeName(r.player.name), r]))
+		/*
+		 * THE LEDGER IS KEYED ON `${id}:${group}`, so a name that resolves to the wrong man
+		 * does not merely lose a row — it grades this reader's evening against somebody
+		 * else's line, permanently, in the one store whose contents cannot be rebuilt.
+		 *
+		 * Every name asked about here is a man in one of his own seats, so the seat's
+		 * printed eligibility is available for the join even though `today.lineup.starters`
+		 * carries only a name and a slot: the positions are looked up off `seats.spots` by
+		 * the same printed name. Where that leaves two men, the row is REFUSED — the same
+		 * empty array an unmatched name already returns, which `gradeRecord` reads as a day
+		 * it cannot grade rather than as a day Billy got wrong.
+		 */
+		const board = indexByName(today.ratedToday, r => r.player)
+		const seatPositions = new Map(seats.spots.map(sp => [normalizeName(sp.name), sp.positions]))
+		const rowFor = (name: string) =>
+			board.pick(name, { positions: seatPositions.get(normalizeName(name)), owned: mineIds }).row
 		const side = (name: string, slot: string | null, projected: number | null) => {
-			const r = byName.get(normalizeName(name))
+			const r = rowFor(name)
 			return r ?
 					[{ key: `${r.player.id}:${r.player.group}`, name, slot, projected }]
 				:	[]
@@ -1511,7 +1611,7 @@ export const Decide = ({
 		   says in words. No special case needed. */
 		const had = seats.spots
 			.filter(sp => !isReserveSlot(sp.slot))
-			.flatMap(sp => side(sp.name, sp.slot, byName.get(normalizeName(sp.name))?.points ?? null))
+			.flatMap(sp => side(sp.name, sp.slot, rowFor(sp.name)?.points ?? null))
 		const moves = (plan?.swaps.moves ?? []).map(m => ({ add: m.add, drop: m.drop ?? null }))
 		const entry = { date: today.day, at: new Date().toISOString(), start, sit, had, moves }
 		const sig = JSON.stringify([entry.date, start, sit, had, moves])
@@ -1522,7 +1622,7 @@ export const Decide = ({
 		} catch {
 			// see the note above: this card does not refuse its own job over the history
 		}
-	}, [leagueKey, today, seats, plan])
+	}, [leagueKey, today, seats, plan, mineIds])
 
 	/**
 	 * The men the plan could not price, grouped by WHY — one row per reason, never one
@@ -2389,7 +2489,7 @@ export const Decide = ({
 						  this card: the spread that would be needed to turn "behind by 40" into
 						  "start the wilder arm" was measured on 64,027 player-days and does not
 						  survive the test — a player's own measured spread predicts his next spread
-						  18-31% WORSE than knowing only his cohort and his level (src/engine/
+						  18-31% WORSE than knowing only his cohort and his level (src/backtest/
 						  spread.ts). So the number is told to the reader, who can act on it, and is
 						  kept out of the ranking, which cannot.
 						*/}
@@ -2692,7 +2792,10 @@ export const Decide = ({
 							<summary>what these numbers are</summary>
 							Each figure is what your starting lineup projects over this period with
 							the move made. Everyone leaving is under the keep floor — no more than{" "}
-							{DEFAULTS.keepFloor} points clear of what the wire still offers at his own
+							{/* A GAME. The floor is `bscorePerGame < keepFloor`, and printing a rate
+							    with "points" after it is the same unit slip that let the planner
+							    compare a whole-window total against this number for months. */}
+							{DEFAULTS.keepFloor} a game clear of what the wire still offers at his own
 							slot — and none is worth holding for the rest of the season either.
 							{estimatedWire ?
 								<>

@@ -13,8 +13,10 @@ import type { ExtensionState } from "./extension.ts"
  *
  * IT DRAWS ITS OWN TARGETS where it points at anything: the extensions-page address is
  * our own selectable text, not a screenshot of somebody else's browser, which would be out of
- * date the week that browser is restyled. (`Arrow` drew a hand-made arrow at those targets
- * and the walkthrough no longer needs one; it stays exported for any screen that does.)
+ * date the week that browser is restyled. (An `Arrow` component drew a hand-made arrow at
+ * those targets. The walkthrough stopped needing one, and it was kept exported "for any
+ * screen that does" — no screen ever did, so it was deleted on 2026-09-22. `Tick`, which
+ * shares its two-pass stroke, is still used and stays.)
  *
  * WHAT IT NEVER DOES. It does not tell a reader who cannot install anything that he is
  * unsupported, it does not grey out a control he cannot use, and it does not take the
@@ -59,37 +61,19 @@ export const browserOf = (ua: string = navigator.userAgent): Browser => {
 export const takesExtension = (b: Browser): boolean =>
 	b === "chrome" || b === "firefox" || b === "edge" || b === "firefox-android"
 
-/**
- * A HAND-DRAWN ARROW, twice.
+/*
+ * A HAND-DRAWN ARROW stood here — one cubic path stroked twice, a ghost pass at a third
+ * opacity and a pixel off true, then the real one over it, which is what makes a line look
+ * drawn rather than plotted. Deleted on 2026-09-22 with its `.arrow` box rule in app.css;
+ * it had no caller in src or test.
  *
- * One cubic path, stroked twice: a ghost pass at a third opacity and a pixel and a bit off
- * true, then the real one over it. That is what makes a line look drawn rather than
- * plotted, and it costs eight lines instead of a filter — `feTurbulence` was tried on this
- * project's background once and deleted for being un-measurable.
- *
- * The draw-on is written so that killing the animation leaves a FINISHED arrow. The app's
- * reduced-motion rule is `*{animation:none!important}`, so an arrow that started at
- * `stroke-dashoffset: 140` and animated to 0 would be permanently invisible for the
- * readers most likely to need the instruction. The base state is the finished state and
- * the keyframes only ever hide it first.
+ * The one thing in it worth carrying forward is the draw-on, and `Tick` below still carries
+ * it: the animation is written so that KILLING it leaves a finished mark. This app's
+ * reduced-motion rule is `*{animation:none!important}`, so a path that started at
+ * `stroke-dashoffset: 140` and animated to 0 would be permanently invisible for exactly the
+ * readers most likely to need the instruction. The base state is the finished state and the
+ * keyframes only ever hide it first. Any new drawn mark here must be written the same way.
  */
-export const Arrow = ({ label }: { label: string }): React.ReactElement => (
-	<svg className="arrow" viewBox="0 0 64 92" role="img" aria-label={label}>
-		<g
-			fill="none"
-			stroke="var(--accent)"
-			strokeWidth="2.6"
-			strokeLinecap="round"
-			strokeLinejoin="round"
-			vectorEffect="non-scaling-stroke"
-		>
-			<path opacity=".32" d="M9.2 8.4C6.9 27 11.4 43.6 20.4 56.2c7.6 10.6 18.6 17 30.8 21.2" />
-			<path d="M8 7C5.7 25.8 10.2 42.2 19.2 54.8c7.6 10.6 18.6 17 30.8 21.2" />
-			<path opacity=".32" d="M38.6 79.2 50.8 78l-3.6-11.6" />
-			<path d="M37.4 78 49.6 76.8 46 65.2" />
-		</g>
-	</svg>
-)
 
 /** The same two-pass stroke as the arrow, so a finished step is ticked by the hand that
  *  drew the arrow rather than by a font. */
@@ -249,6 +233,7 @@ export const Connect = ({
 	freeAgents,
 	readAt,
 	onRead,
+	waiting = false,
 	onBack,
 	failure,
 	browser = browserOf()
@@ -259,6 +244,12 @@ export const Connect = ({
 	freeAgents: number | null
 	readAt: string | null
 	onRead: () => void
+	/** True while the player list this read matches names against is still downloading.
+	 *  `public/snapshot.json` is a megabyte, so on a phone there is a window in which this
+	 *  walkthrough is fully drawn and the press does nothing at all — which is what it used
+	 *  to do, silently, because `readLeague` opens `if (!snapshot) return`. Saying so on the
+	 *  button is cheaper than a reader pressing it twice and concluding it is broken. */
+	waiting?: boolean
 	/** "Type your players instead" — the sheet's team step. */
 	onBack: () => void
 	failure: GrabFailure | null
@@ -314,8 +305,16 @@ export const Connect = ({
 				}
 				{snags}
 				<p className="connect-go">
-					<button type="button" className="primary" onClick={onRead} disabled={ext.busy}>
-						{ext.busy ? "Reading…" : leagueName ? "Read it again" : "Read my league"}
+					<button
+						type="button"
+						className="primary"
+						onClick={onRead}
+						disabled={ext.busy || waiting}
+					>
+						{ext.busy ? "Reading…"
+						: waiting ? "Loading players…"
+						: leagueName ? "Read it again"
+						: "Read my league"}
 					</button>
 					{!ext.yahooOpen && (
 						<button type="button" onClick={() => ext.openYahoo()}>

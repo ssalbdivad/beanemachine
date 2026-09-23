@@ -1479,8 +1479,29 @@ const AGE = /(in the last hour|\d+ hours? ago|\d+ days? ago|at an unknown time)/
 	t("a hand-entered team is not told the page has not been told about it",
 		!/has not been told which players are yours|Add your players/.test(text),
 		text.slice(0, 240))
-	t("it produces a lineup for that team",
-		(await page.$$(".decide-changes li")).length > 0, text.slice(0, 400))
+	/*
+	   TIME-OF-DAY FLAKE, FIXED BY ASSERTING THE RIGHT THING RATHER THAN BY LOOSENING IT.
+
+	   This required at least one row in `.decide-changes`. That list is the LINEUP diff —
+	   who to start and who to sit — and a lineup change is only possible for a seat whose
+	   game has not begun. Run in the evening, every seat has started, the card correctly
+	   offers no lineup change, and the assertion failed on a card that was right. Measured
+	   2026-09-22 at 19:50 ET against an unmodified checkout: the card read "every seat has
+	   started · 11 of your men are in tonight's card · your lineup projects 0" and this line
+	   failed there too, so it is not a regression and never was — it is a suite that passes
+	   in the morning.
+
+	   What the block is actually about is in its own docstring: a team entered BY HAND gets a
+	   real answer, with no file, no server and no terminal. That answer is that the card
+	   accounted for his men. So the claim is now "the card is about his eighteen", which is
+	   true at every hour: either it offers lineup rows, or it says in words why it cannot and
+	   how many of his men are playing. Both are answers; an empty card is not, and an empty
+	   card still fails.
+	*/
+	const rows = (await page.$$(".decide-changes li")).length
+	t("it produces an answer about that team, at any hour",
+		rows > 0 || /every seat has started|of your men are in tonight.s card/.test(text),
+		`${rows} lineup rows | ${text.slice(0, 400)}`)
 	t("and it says the seats are unknown rather than inventing a comparison",
 		/lineup to set, not the changes to make/.test(text), text.slice(0, 900))
 	/* Both shapes of a move count as an answer. This roster has free seats, so the adds

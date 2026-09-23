@@ -1861,9 +1861,11 @@ t("and nothing invents an answer to it, so the card below knows it is assuming",
     return JSON.stringify(c.leagues[c.active_league].scoring_period)
   }))
 
-// The way out of the sheet says what he is getting, and it says it differently once he
-// has a team: "Show me the board" is a place, "Show me tonight" is an answer. It used
-// to read "Done" either way.
+// The way out of the sheet says what he is getting. It used to read "Done"; then it
+// branched between "Show me the board" and "Show me tonight" on whether THIS session had
+// parsed a textarea — so a reader who pressed one button and pulled his whole Yahoo league
+// across got the vaguer of the two, and "the board" named a screen this app does not have
+// (the tab is Tonight; the screen called a board is Pickups). One label now, on every route.
 t("and the way out names what the answer bought him",
   /show me tonight/i.test(await p.$eval(".onboard-done button", e => e.innerText)),
   await p.$eval(".onboard-done button", e => e.innerText))

@@ -1052,19 +1052,36 @@ t("and where the slate is light enough for the count to explain something, it is
  * exercises the grouping — more men benched than reasons to bench them — is asserted
  * SEPARATELY, so a night that happens to give every man his own reason fails a claim
  * that says so instead of quietly making the one above vacuous.
+ *
+ * AND WHETHER THERE IS A BENCH DIFF AT ALL DEPENDS ON THE CLOCK, which those two
+ * separate claims did not allow for. A seat can only be changed before its game
+ * begins; run in the evening every seat has started, the card correctly offers no
+ * bench rows, and both claims failed on a card that was right. Measured 2026-09-22 at
+ * 20:20 ET against an unmodified checkout: "0 bench rows", failing identically there,
+ * so this was a suite that passed in the morning rather than a regression.
+ *
+ * The grouping invariant above is unconditional and stays unconditional — zero rows
+ * satisfies "no reason appears twice" honestly. The two claims about THIS night now
+ * say what they always meant: either the night gives a diff, and then it must be a
+ * grouped one, or every seat is locked and the card says so. A card that offers
+ * neither still fails.
  */
+const locked = /every seat has started|all of tonight.s games have started/i.test(
+	await page.$eval(".decide", e => e.innerText).catch(() => "")
+)
 const benchGroups = await page.$$eval(".decide-bench-group", rows => rows.map(r => ({
 	why: r.querySelector(".decide-why")?.textContent.trim(),
 	men: [...r.querySelectorAll("b")].map(b => b.textContent.trim())
 })))
 t("some of the pasted seats are wrong for tonight, so there is a diff to group",
-	benchGroups.length > 0, `${benchGroups.length} bench rows`)
+	benchGroups.length > 0 || locked,
+	`${benchGroups.length} bench rows, locked=${locked}`)
 t("every bench row is a different reason — one row per reason, never one per man",
 	new Set(benchGroups.map(g => g.why)).size === benchGroups.length,
 	benchGroups.map(g => g.why).join(" | "))
 t("and this night really does put several men behind one reason",
-	benchGroups.reduce((n, g) => n + g.men.length, 0) > benchGroups.length,
-	`${benchGroups.reduce((n, g) => n + g.men.length, 0)} men in ${benchGroups.length} rows`)
+	benchGroups.reduce((n, g) => n + g.men.length, 0) > benchGroups.length || locked,
+	`${benchGroups.reduce((n, g) => n + g.men.length, 0)} men in ${benchGroups.length} rows, locked=${locked}`)
 /**
  * The reasons themselves. "he is not projected to play today" was printed about
  * Roman Anthony on 2026-09-08 — a man rateable at 4.14 points with Boston playing,

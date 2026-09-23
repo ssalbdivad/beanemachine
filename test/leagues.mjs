@@ -21,8 +21,14 @@ import {
   importableInBrowser,
   importLeague,
   IN_BROWSER,
+  fetchWithin,
+  ImportError,
+  PLATFORM_TIMEOUT_MS,
+  seatsWithoutRule,
   readableInBrowser
 } from "../src/import.ts"
+import { YAHOO } from "../src/data/platforms.ts"
+import { createServer } from "node:http"
 import { resolvePeriod, leagueWeek, scoringEnd } from "../src/engine/period.ts"
 
 const cfg = JSON.parse(readFileSync("scoring.json", "utf8"))
@@ -661,6 +667,75 @@ t("and the refusal points at the platforms that do run baseball leagues",
   /yahoo/i.test(sleeperRefusal ?? "") && /espn/i.test(sleeperRefusal ?? ""),
   String(sleeperRefusal))
 
+/*
+ * ── ANOTHER SPORT'S LEAGUE IS THE SAME DEAD END, AND IT USED TO IMPORT ────────────────
+ *
+ * `detect` matched football, basketball and hockey on both platforms and handed them on.
+ * An ESPN football league is genuinely `H2H_POINTS`, so the format guard passed it; its
+ * scoring ids went through a map of BASEBALL stat ids and its lineup slots through
+ * `ESPN_MLB_SLOT`, which calls slot 0 "C". The league was saved and made active with a
+ * quarterback seated at catcher.
+ *
+ * So the file that spends forty lines refusing Sleeper — because a league you can neither
+ * use nor fix is a dead end — imported the same dead end from the platforms it does
+ * support. These assert the refusal, and that it is a refusal of the SPORT rather than of
+ * the URL: a reader who pasted his real football league made no mistake with his URL, and
+ * the sentence has to tell him something he can act on.
+ */
+const refusalFor = url => {
+  try { detect(url); return null }
+  catch (e) { return e.message }
+}
+for (const [url, sport, platform] of [
+  ["https://football.fantasysports.yahoo.com/f1/123456", "football", "Yahoo"],
+  ["https://basketball.fantasysports.yahoo.com/nba/123456", "basketball", "Yahoo"],
+  ["https://hockey.fantasysports.yahoo.com/hockey/123456", "hockey", "Yahoo"],
+  ["https://fantasy.espn.com/football/league?leagueId=81134470", "football", "ESPN"],
+  ["https://fantasy.espn.com/basketball/team?leagueId=1&teamId=2", "basketball", "ESPN"],
+  ["https://fantasy.espn.com/hockey/league?leagueId=1", "hockey", "ESPN"]
+]) {
+  const why = refusalFor(url)
+  t(`a ${platform} ${sport} league is refused rather than imported as baseball`,
+    why !== null, `imported: ${JSON.stringify((() => { try { return detect(url) } catch { return null } })())}`)
+  t(`…naming the sport it actually is, and baseball as the one this ranks`,
+    why !== null && why.includes(sport) && /baseball/i.test(why) && !/unrecognized/i.test(why),
+    String(why))
+}
+/* The refusal must not swallow the leagues this app exists for. */
+t("and the baseball URLs on both platforms still import exactly as they did",
+  detect("https://baseball.fantasysports.yahoo.com/b1/228947/8").leagueId === "228947" &&
+    detect("https://baseball.fantasysports.yahoo.com/b1/228947/8").teamId === "8" &&
+    detect("https://fantasy.espn.com/baseball/league?leagueId=81134470&seasonId=2021").leagueId === "81134470")
+
+/*
+ * ── ONE YAHOO URL PARSER ──────────────────────────────────────────────────────────────
+ *
+ * `detect` carried its own Yahoo regex while `YAHOO.at` in src/data/platforms.ts answered
+ * the same question by different rules, and both faced the reader: `detect` is what the
+ * address box calls, `YAHOO.at` is what the extension uses to say which league page he is
+ * standing on. They disagreed on two of four real shapes, so the extension could offer to
+ * read a page whose URL the app's own box answered with "Unrecognized league URL".
+ *
+ * `detect` now calls the descriptor, and these are the two shapes that used to throw. The
+ * lesson on `yahooSegments` is why it is the descriptor that won: the league id is the
+ * segment after a segment that is NOT a number, so `/2024/b1/228947` keys as 228947 rather
+ * than as the year.
+ */
+for (const url of [
+  "https://baseball.fantasysports.yahoo.com/b1/228947",
+  "https://baseball.fantasysports.yahoo.com/b1/228947/8",
+  "https://baseball.fantasysports.yahoo.com/2024/b1/228947",
+  "https://fantasysports.yahoo.com/b1/228947",
+  "https://baseball.fantasysports.yahoo.com/b1/228947/settings"
+]) {
+  const at = YAHOO.at(url)
+  let got = null
+  try { got = detect(url) } catch (e) { got = e.message }
+  t(`the importer and the extension read the same league out of "${url.slice(8, 60)}"`,
+    got !== null && typeof got !== "string" && got.leagueId === at.leagueId,
+    JSON.stringify({ detect: got, descriptor: at.leagueId }))
+}
+
 // The URL form, which is what the client actually holds when the user hits Import.
 const URLS = {
   "https://fantasy.espn.com/baseball/league?leagueId=81134470&seasonId=2021": true,
@@ -916,6 +991,59 @@ t("and so does a payload with no scheduleSettings at all",
     partial["2B/SS"] === undefined, JSON.stringify(partial))
   /* Everything the Yahoo side depends on is untouched — this is an addition, not a rewrite. */
   const yahooish = deriveSlotAccepts({ C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1, OF: 3, Util: 1, SP: 2, RP: 2, P: 4, BN: 2, IL: 2 })
+  /*
+     AND THE SEATS THE VOCABULARY STOPPED SHORT OF.
+
+     `batterPositions` was the six names a Yahoo settings page prints. `ESPN_MLB_SLOT` names
+     four more — 8 LF, 9 CF, 10 RF, 11 DH — and `importEspn` feeds those straight in here, so
+     a league that seats a DH got an accepts table with no DH in it. `legalSlotsFor` iterates
+     that table, so the seat could be returned for nobody and `planLineup` left it empty while
+     `activeSlots` went on counting it.
+
+     It cost twice: `Util`'s list is the same array, so a man ESPN reports as DH-only matched
+     the DH seat and the Util seat alike — which is to say neither — and `resolveRoster`
+     blocked a rostered player with "fills none of this league's slots".
+
+     No fixture catches this: test/fixtures/espn-81134470-settings.json is a 2021 league with
+     `"11": 0` and `"19": 0`, so both seats are zero there. This is the regression fixture.
+  */
+  const espnish = deriveSlotAccepts({
+    C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1, LF: 1, CF: 1, RF: 1, DH: 1, IF: 1, Util: 1, P: 9, BN: 4, IL: 3
+  })
+  t("a DH seat takes designated hitters rather than nobody at all",
+    JSON.stringify(espnish.DH) === JSON.stringify(["DH"]), JSON.stringify(espnish.DH))
+  for (const seat of ["LF", "CF", "RF"])
+    t(`and the ${seat} seat takes the men ESPN reports at ${seat}`,
+      JSON.stringify(espnish[seat]) === JSON.stringify([seat]), JSON.stringify(espnish[seat]))
+  t("the Util seat takes every batter position this league rosters, DH included",
+    JSON.stringify(espnish.Util) ===
+      JSON.stringify(["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]),
+    JSON.stringify(espnish.Util))
+  /* ESPN's infield seat is a combination by MEANING rather than by spelling, so it cannot be
+     read off its own name the way `2B/SS` can. Which positions is settled by the shipped
+     capture: of 212 rostered rows in test/fixtures/espn-81134470-2021.json, every man carrying
+     slot 19 also carries one of 1B/2B/3B/SS, and the eight catcher-only men carry none — only
+     J.T. Realmuto, who is C AND 1B, has it. */
+  t("an IF seat takes the infield, and the catcher is not in it",
+    JSON.stringify(espnish.IF) === JSON.stringify(["1B", "2B", "3B", "SS"]), JSON.stringify(espnish.IF))
+  t("every seat this league has a rule for, and no seat left without one",
+    seatsWithoutRule(
+      { C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1, LF: 1, CF: 1, RF: 1, DH: 1, IF: 1, Util: 1, P: 9, BN: 4, IL: 3 },
+      espnish
+    ).length === 0,
+    JSON.stringify(Object.keys(espnish)))
+  /* Only what the league rosters, the same rule every other line here follows. */
+  const noCorners = deriveSlotAccepts({ C: 1, OF: 3, DH: 1, IF: 1, "1B": 1, Util: 1, BN: 2 })
+  t("an infield seat in a league that rosters one infield position claims only that one",
+    JSON.stringify(noCorners.IF) === JSON.stringify(["1B"]), JSON.stringify(noCorners.IF))
+  /* A seat this has no rule for announces itself instead of quietly accepting nobody — which
+     is the state DH and IF were in, undetected, for as long as ESPN leagues have imported. */
+  const strange = { C: 1, OF: 3, Util: 1, BN: 2, "SUPER-FLEX": 1 }
+  t("a seat name nothing here recognises is reported rather than silently dropped",
+    JSON.stringify(seatsWithoutRule(strange, deriveSlotAccepts(strange))) ===
+      JSON.stringify(["SUPER-FLEX"]),
+    JSON.stringify(seatsWithoutRule(strange, deriveSlotAccepts(strange))))
+
   t("a Yahoo-shaped league derives exactly what it always did",
     JSON.stringify(yahooish.Util) === JSON.stringify(["C", "1B", "2B", "3B", "SS", "OF"]) &&
       JSON.stringify(yahooish.P) === JSON.stringify(["SP", "RP"]) &&
@@ -1126,6 +1254,90 @@ t("a platform with no reader is not asked", !canReadPool("sleeper") && !canReadP
       .perPeriod === null)
   t("a settings map without the row says nothing",
     deriveInningsMinimum({}).perPeriod === null && deriveInningsMinimum({}).source === null)
+}
+
+/**
+ * ── A PLATFORM THAT NEVER ANSWERS ─────────────────────────────────────────────────────
+ *
+ * Not one fetch on the import, roster or pool path had a deadline. A hang is the one
+ * failure the try/catch around it cannot turn into a state — the promise never settles,
+ * so nothing reaches the `finally` that clears `busy`, and the onboarding wizard's
+ * primary button spins forever with no message and no way out. That is the first screen
+ * a stranger ever sees, and it is the defect in this set a real reader actually hits.
+ *
+ * Asserted against a server that accepts the connection and then says nothing, which is
+ * exactly the shape that defeats a try/catch: an outright refusal already threw.
+ */
+{
+  const hang = createServer(() => {
+    /* accept, hold, never reply — no status line, no body, no close */
+  })
+  await new Promise(done => hang.listen(0, "127.0.0.1", done))
+  const url = `http://127.0.0.1:${hang.address().port}/league`
+
+  const began = Date.now()
+  let thrown = null
+  try {
+    await fetchWithin(url, {}, "Yahoo", 400)
+  } catch (e) {
+    thrown = e
+  }
+  const took = Date.now() - began
+
+  t("a platform that accepts the connection and never answers does not hang forever",
+    thrown !== null && took < 5000, `${took}ms, threw ${thrown && thrown.constructor.name}`)
+  t("…and it gives up at the deadline rather than whenever the socket happens to die",
+    took >= 400 && took < 3000, `${took}ms`)
+  t("…as an ImportError, which is the channel the wizard already renders verbatim",
+    thrown instanceof ImportError, String(thrown))
+  t("…whose sentence names the platform and the wait, in the reader's words",
+    thrown instanceof ImportError && /Yahoo/.test(thrown.message) &&
+      /0\.4 seconds/.test(thrown.message) && !/AbortError|signal/i.test(thrown.message),
+    String(thrown && thrown.message))
+
+  /* The caller's own signal still works, and is NOT reported as a timeout: a component
+     that unmounts has cancelled, and telling its reader that Yahoo was slow would be a
+     sentence about somebody else's server for something the app did. */
+  const mine = new AbortController()
+  const cancelled = fetchWithin(url, { signal: mine.signal }, "Yahoo", 60_000).then(
+    () => null,
+    e => e
+  )
+  mine.abort()
+  const err = await cancelled
+  t("a caller that cancels is still able to, and is not told the platform was slow",
+    err !== null && !(err instanceof ImportError), String(err))
+
+  await new Promise(done => hang.close(done))
+  /* Sockets the server never answered keep the loop alive; the test is over. */
+  hang.closeAllConnections?.()
+}
+
+/**
+ * ── AND THE DEADLINE CANNOT BE LEFT OFF THE NEXT ONE ──────────────────────────────────
+ *
+ * The bug was not one missing `signal`, it was seven of them — every fetch on this path,
+ * in three files, none of which had ever been given one. A test of `fetchWithin` alone
+ * would pass just as happily beside a bare `fetch` added tomorrow, so this asserts the
+ * shape of the files instead: `fetchWithin` is the only thing in either of them that
+ * calls `fetch` directly, and it is the one place the deadline is composed.
+ */
+{
+  const bare = src =>
+    (src
+      /* comments out first: several of them talk ABOUT fetch */
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+      .match(/(?<![A-Za-z0-9_.])fetch\s*\(/g) ?? []).length
+  const imp = readFileSync("src/import.ts", "utf8")
+  const ros = readFileSync("src/data/rosters.ts", "utf8")
+  t("src/import.ts calls fetch in exactly one place, and that place is fetchWithin",
+    bare(imp) === 1 && /export const fetchWithin[\s\S]{0,900}?await fetch\(/.test(imp),
+    String(bare(imp)))
+  t("and no roster or pool read reaches for a bare fetch of its own",
+    bare(ros) === 0, String(bare(ros)))
+  t("the budget an import is allowed is stated once, in seconds a reader would wait",
+    PLATFORM_TIMEOUT_MS === 15_000, String(PLATFORM_TIMEOUT_MS))
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`)

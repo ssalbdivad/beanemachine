@@ -58,6 +58,24 @@ export const ESPN_BASEBALL = "flb"
 let seasonCache: { at: number; season: number } | null = null
 const SEASON_TTL = 6 * 60 * 60 * 1000
 
+/**
+ * HOW LONG THE TWO ASIDES IN THIS FILE MAY HOLD AN IMPORT UP.
+ *
+ * Neither request here had a deadline, and both sit in front of the press a reader is
+ * watching: `espnSeason` runs before the settings request and `openingDayOf` after it, so a
+ * hang in either one froze the onboarding wizard with no message — the argument is written
+ * out on `PLATFORM_TIMEOUT_MS` in src/import.ts, which bounds the requests an import cannot
+ * proceed without.
+ *
+ * These two are not those. Both already FALL BACK silently on any failure — the calendar
+ * year, and a null opening day that makes the period derivation skip itself — so a deadline
+ * here costs one argument and no new branch, and being wrong about it costs a reader a
+ * slightly worse league rather than a failed import. Five seconds, the same budget
+ * `fetchSlate` gives MLB for the same reason: a request whose failure is already handled
+ * should not be allowed to spend a reader's patience on the chance that it lands.
+ */
+const TIMEOUT_MS = 5_000
+
 export const espnSeason = async (
 	fetchImpl: typeof fetch = fetch,
 	headers: Record<string, string> = {},
@@ -66,7 +84,10 @@ export const espnSeason = async (
 	if (seasonCache && now - seasonCache.at < SEASON_TTL)
 		return { season: seasonCache.season, asked: true }
 	try {
-		const res = await fetchImpl(`${ESPN_API}/games/${ESPN_BASEBALL}`, { headers })
+		const res = await fetchImpl(`${ESPN_API}/games/${ESPN_BASEBALL}`, {
+			headers,
+			signal: AbortSignal.timeout(TIMEOUT_MS)
+		})
 		if (res.ok) {
 			const data = (await res.json()) as { currentSeasonId?: unknown }
 			const id = Number(data?.currentSeasonId)
@@ -449,6 +470,57 @@ export const espnMatchupDays = (
 }
 
 /**
+ * THE LAST DAY THIS LEAGUE SCORES, which an ESPN league has never been asked for.
+ *
+ * `scoringEnd` in src/engine/period.ts reads `league.scoring_period.ends_on` and only the
+ * Yahoo importer ever set it, so every "rest of the season" screen shown to an ESPN manager
+ * ranked past the end of his own league. The Yahoo half of this is written up at
+ * period.ts:300 with the measurement — league 228947, read 2026-09-18, season ends on the
+ * 27th and the Stash board was holding players for October. It is the same failure one
+ * platform over, and the third of its kind in src/import.ts: `leagueLimits` and
+ * `leagueTradeDeadline` both grew an `espn` branch for exactly this reason.
+ *
+ * ESPN states it and needs no extra request. `view=mStatus` — already fetched, for
+ * `currentMatchupPeriod` — carries `finalScoringPeriod`, and a scoring period is a DAY
+ * counted from opening day, which is period 1. Measured 2026-09-22 against the live payload
+ * for public league 81134470's 2021 season: `finalScoringPeriod: 186`, and 2021 opened on
+ * 04-01, so the last day it scores is 04-01 plus 185 = 2021-10-03. That is the day the 2021
+ * MLB regular season ended, which is the same confirmation `openingDayOf` below already
+ * rests on and was written down there before this function existed.
+ *
+ * It needs opening day, so it is null whenever that is — the rule at the top of this file.
+ * Null is also the honest answer for a number outside the window a baseball season can
+ * occupy: about 190 days of regular season, so anything past 250 is a shape this has not
+ * seen and a date nobody stated. A league that ends LATER than the captured slate changes
+ * nothing anyway, because `scoringEnd` only ever pulls the horizon in.
+ */
+export const espnSeasonEnd = (
+	status: Record<string, any> | null | undefined,
+	openingDay: string | null
+): { endsOn: string | null; note: string | null } => {
+	if (!openingDay || !/^\d{4}-\d{2}-\d{2}$/.test(openingDay))
+		return {
+			endsOn: null,
+			note:
+				"This could not work out when the baseball season starts, so it does not know " +
+				"the last day your league scores and will rank the rest of the regular season."
+		}
+	const final = Number(status?.finalScoringPeriod)
+	if (!Number.isInteger(final) || final < 1 || final > 250)
+		return {
+			endsOn: null,
+			note:
+				status?.finalScoringPeriod === undefined ?
+					"ESPN didn't say which day your league stops scoring, so the board ranks the " +
+					"rest of the regular season rather than the rest of your season."
+				:	`ESPN says your league's last scoring day is ${String(status.finalScoringPeriod)}, ` +
+					`which is not a day of a baseball season, so nothing here claims when your ` +
+					`league stops scoring.`
+		}
+	return { endsOn: plus(openingDay, final - 1), note: null }
+}
+
+/**
  * THE DAY THE SEASON STARTED, asked of the one source this app already trusts for a calendar.
  *
  * ESPN's scoring period 1 is the first day of the regular season, and MLB's own schedule is
@@ -471,7 +543,8 @@ export const openingDayOf = async (
 	try {
 		const res = await fetchImpl(
 			`https://statsapi.mlb.com/api/v1/schedule?sportId=1&gameType=R` +
-				`&startDate=${season}-03-01&endDate=${season}-04-15`
+				`&startDate=${season}-03-01&endDate=${season}-04-15`,
+			{ signal: AbortSignal.timeout(TIMEOUT_MS) }
 		)
 		if (!res.ok) return null
 		const data = (await res.json()) as { dates?: { date?: string; games?: unknown[] }[] }

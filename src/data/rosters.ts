@@ -1,4 +1,4 @@
-import { agentHeaders, readableInBrowser } from "../import.ts"
+import { agentHeaders, fetchWithin, ImportError, readableInBrowser } from "../import.ts"
 import { parseRoster, type RosterEntry } from "./yahoo-pool.ts"
 import { espnSeason } from "./espn.ts"
 
@@ -64,7 +64,10 @@ export { readableInBrowser }
 const yahoo = async (leagueId: string, teamId: string, sport: string): Promise<RosterRead> => {
 	const url = `https://${sport}.fantasysports.yahoo.com/b1/${leagueId}/${teamId}`
 	// node only: Yahoo sends no CORS headers, so this is never reached from a page.
-	const res = await fetch(url, { headers: { "user-agent": UA } })
+	/* `fetchWithin` rather than `fetch`: a roster read with no deadline is a `busy` flag that
+	   never clears — see `PLATFORM_TIMEOUT_MS` in src/import.ts. Its `ImportError` is already
+	   a sentence for the reader, and `fetchTeamRoster` below hands it straight to the note. */
+	const res = await fetchWithin(url, { headers: { "user-agent": UA } }, "Yahoo")
 	if (!res.ok) return { players: [], note: `Yahoo returned HTTP ${res.status} for that team.` }
 	const text = await res.text()
 	if (/Please sign in/i.test(text.slice(0, 4000)))
@@ -213,7 +216,7 @@ const espn = async (
 	season: number
 ): Promise<RosterRead> => {
 	const get = (yr: number) =>
-		fetch(
+		fetchWithin(
 			`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${sport}` +
 				/* Five views, one request. `mRoster` and `mSettings` are what his own team needs;
 				   `mMatchupScore` and `mStatus` name who he is playing this week, which the app
@@ -223,7 +226,8 @@ const espn = async (
 				   reader has to work out for himself. */
 				`/seasons/${yr}/segments/0/leagues/${leagueId}` +
 					`?view=mRoster&view=mSettings&view=mMatchupScore&view=mStatus&view=mTeam`,
-			{ headers: { ...agentHeaders(UA), accept: "application/json" } }
+			{ headers: { ...agentHeaders(UA), accept: "application/json" } },
+			"ESPN"
 		)
 	let res = await get(season)
 	// ESPN 404s a season the league never played, and the default season is the
@@ -377,6 +381,11 @@ export const fetchTeamRoster = async (opts: {
 			note: `Reading a roster isn't supported for ${platform || "this platform"} yet.`
 		}
 	} catch (e) {
+		/* A deadline is already a sentence the reader can act on — see `fetchWithin` in
+		   src/import.ts — so it is passed through rather than wrapped in "Couldn't reach espn
+		   (ESPN didn't answer within 15 seconds…)", which says the same thing twice and names
+		   the platform in the app's vocabulary rather than his. */
+		if (e instanceof ImportError) return { players: [], note: e.message }
 		return { players: [], note: `Couldn't reach ${platform} (${(e as Error).message}).` }
 	}
 }
@@ -432,9 +441,11 @@ export const fetchEspnPool = async (
 		}
 	}
 	try {
-		const res = await fetch(url, {
-			headers: { ...agentHeaders(UA), "x-fantasy-filter": JSON.stringify(filter) }
-		})
+		const res = await fetchWithin(
+			url,
+			{ headers: { ...agentHeaders(UA), "x-fantasy-filter": JSON.stringify(filter) } },
+			"ESPN"
+		)
 		if (!res.ok)
 			return {
 				players: [],
@@ -473,6 +484,8 @@ export const fetchEspnPool = async (
 				:	"ESPN served the league but listed no free agents."
 		}
 	} catch (e) {
+		/* The deadline's own sentence, verbatim — same reasoning as `fetchTeamRoster` above. */
+		if (e instanceof ImportError) return { players: [], positionsRead: [], note: e.message }
 		return { players: [], positionsRead: [], note: `Couldn't reach ESPN (${(e as Error).message}).` }
 	}
 }

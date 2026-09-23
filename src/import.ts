@@ -2,9 +2,12 @@ import type { League } from "./schema.ts"
 import { cellText, documentText, parseNumber, parseTables } from "./html.ts"
 import { eligibilityFromText } from "./data/yahoo-read.ts"
 import { ESPN_MLB_SLOT } from "./data/rosters.ts"
+import { YAHOO } from "./data/platforms.ts"
 import {
+	ESPN_BASEBALL,
 	espnInningsMinimum,
 	espnMatchupDays,
+	espnSeasonEnd,
 	openingDayOf,
 	espnLock,
 	espnMoveLimit,
@@ -48,6 +51,72 @@ export const agentHeaders = (ua: string): Record<string, string> =>
 export class ImportError extends Error {}
 
 /**
+ * HOW LONG TO WAIT FOR A PLATFORM BEFORE DECIDING IT IS NOT COMING.
+ *
+ * Not one request on this path had a deadline. A hang is the one failure the try/catch
+ * around it cannot turn into a state — the promise simply never settles, so nothing
+ * reaches the `finally` that clears `busy`, and the onboarding wizard's primary button
+ * spins forever with no message and no way out. That is the first screen a stranger ever
+ * sees, and the argument for bounding it is already written down in src/data/today.ts,
+ * where the same thing was measured against MLB's schedule API: still outstanding after
+ * 32 seconds, no error, no state change.
+ *
+ * FIFTEEN SECONDS RATHER THAN THE SLATE'S FIVE. `fetchSlate` is an overlay on a board
+ * that already works, so a reader who waits five seconds for it has been told nothing
+ * worth five seconds. An import is the thing he is waiting FOR: there is no screen behind
+ * it, and giving up on a platform that was merely slow costs him the whole press. Fifteen
+ * is long enough that a slow-but-alive platform still lands and short enough that the
+ * wizard says something while he is still looking at it.
+ *
+ * IT BOUNDS ONE REQUEST, NOT ONE IMPORT, which is worth stating because an ESPN press
+ * makes up to four in sequence (the season, the settings, the 404 retry, opening day) and
+ * a Yahoo press makes three. The two that are merely helpful — `espnSeason` and
+ * `openingDayOf`, both of which already fall back silently — carry their own shorter
+ * budget in src/data/espn.ts, so the realistic worst case is about forty seconds of
+ * everything being slow at once rather than a wait with no end. A single deadline across
+ * a whole import would be stricter and would mean threading a signal through both
+ * importers and every helper they call; per-request is what removes the unbounded wait,
+ * which is the failure a reader actually hits.
+ */
+export const PLATFORM_TIMEOUT_MS = 15_000
+
+/**
+ * `fetch` that cannot hang, and whose deadline arrives as a sentence rather than a stall.
+ *
+ * `who` is what the reader should be told did not answer, in his own words — "Yahoo",
+ * "ESPN" — because `needs_review` and the wizard's error line are read by somebody who
+ * has never seen this repo and cannot act on a URL.
+ *
+ * The caller's signal is composed with the deadline rather than replaced by it, the same
+ * bargain `fetchSlate` strikes: a component that unmounts must still be able to cancel.
+ * `AbortSignal.timeout` fires a `TimeoutError`, but the composed signal reports whatever
+ * aborted first, so the deadline's own `aborted` flag is what distinguishes "we gave up"
+ * from "the caller gave up" — and only the first of those is a sentence for the reader.
+ */
+export const fetchWithin = async (
+	url: string,
+	init: RequestInit = {},
+	who = "That platform",
+	timeoutMs: number = PLATFORM_TIMEOUT_MS
+): Promise<Response> => {
+	const deadline = AbortSignal.timeout(timeoutMs)
+	const { signal, ...rest } = init
+	try {
+		return await fetch(url, {
+			...rest,
+			signal: signal ? AbortSignal.any([signal, deadline]) : deadline
+		})
+	} catch (e) {
+		if (deadline.aborted)
+			throw new ImportError(
+				`${who} didn't answer within ${timeoutMs / 1000} seconds. It may be busy right ` +
+					`now — try again in a moment.`
+			)
+		throw e
+	}
+}
+
+/**
  * Why a Sleeper league URL is refused outright rather than imported.
  *
  * Sleeper does not run fantasy baseball, verified four independent ways and
@@ -81,25 +150,49 @@ const SLEEPER_REFUSAL =
 	"sport's league, whose scoring and roster slots this baseball engine cannot use. " +
 	"If your baseball league is on Yahoo or ESPN, paste that URL instead."
 
-const YAHOO_SPORTS = {
-	baseball: "mlb",
-	football: "nfl",
-	basketball: "nba",
-	hockey: "nhl"
-} as const
+/**
+ * Why a football, basketball or hockey URL is refused rather than imported.
+ *
+ * Both platforms put the sport in the URL, so both were MATCHED and neither was checked
+ * again. What an NFL league then became, measured against the code as it stood: ESPN's
+ * football leagues really are `H2H_POINTS`, so `espnPointsFormat` passed them; their
+ * `scoringItems` went through `ESPN_STAT`, a bare `Record<number, …>` of BASEBALL stat ids
+ * with no sport anywhere in the key; and their `lineupSlotCounts` went through
+ * `ESPN_MLB_SLOT`, which names slot 0 "C" and 6 "2B/SS". The league was saved, made active,
+ * and priced a quarterback against a replacement catcher. src/data/rosters.ts:85 has said
+ * the load-bearing half of this all along — "ESPN numbers seats differently in every sport,
+ * and the football numbering this file used to carry (20 = BN, 21 = IL) names nothing at
+ * all in baseball".
+ *
+ * This is the same dead end `SLEEPER_REFUSAL` below spends forty lines refusing, and the
+ * argument is the same one: all four inputs this engine needs to rank anything — batting
+ * scoring, pitching scoring, roster slots, team count — are absent or another sport's, and
+ * there is no repair, because you cannot hand-enter baseball scoring onto a QB/RB/WR seat
+ * chart. A league you can neither use nor fix is a dead end, so the URL is refused at the
+ * one moment the reader can still do something else.
+ *
+ * The URL is still MATCHED so the refusal can name the sport, exactly as Sleeper's is: a
+ * reader who pastes his real football league has made no mistake with his URL, and
+ * "unrecognized league URL" would be a lie about the URL rather than a fact about baseball.
+ *
+ * The sentence is the one src/data/yahoo-read.ts:281 already says when the extension lands
+ * on a non-baseball Yahoo page, because a reader who meets this twice should meet it in the
+ * same words both times.
+ */
+const otherSportRefusal = (platform: string, sport: string): string =>
+	`That URL is your ${sport} league on ${platform}. This only knows baseball, so nothing ` +
+	`was imported — it ranks players by the points a BASEBALL league pays for hits, walks, ` +
+	`strikeouts and saves, and there is no way to enter that scoring onto another sport's ` +
+	`roster. Paste your baseball league's URL instead.`
 
-const ESPN_GAMES = {
-	baseball: "flb",
-	football: "ffl",
-	basketball: "fba",
-	hockey: "fhl"
-} as const
+/** The sport in a URL, on either platform. Both spell it the same way — Yahoo in the
+ *  hostname, ESPN in the path — and only one of them is one this app can price. */
+const BASEBALL = "baseball"
 
 export type Target =
 	| {
 			platform: "yahoo"
 			sport: string
-			yahooGame: keyof typeof YAHOO_SPORTS
 			leagueId: string
 			teamId: string | null
 	  }
@@ -114,28 +207,60 @@ export type Target =
 export const detect = (url: string): Target => {
 	const u = url.trim()
 
-	const yahoo = u.match(
-		/(baseball|football|basketball|hockey)\.fantasysports\.yahoo\.com\/\w+\/(\d+)(?:\/(\d+))?/
-	)
-	if (yahoo) {
-		const game = yahoo[1] as keyof typeof YAHOO_SPORTS
-		return {
-			platform: "yahoo",
-			sport: YAHOO_SPORTS[game],
-			yahooGame: game,
-			leagueId: yahoo[2]!,
-			teamId: yahoo[3] ?? null
-		}
+	/*
+	   ONE YAHOO URL PARSER, AND IT IS THE DESCRIPTOR'S.
+
+	   This used to carry its own regex —
+	   `/(baseball|…)\.fantasysports\.yahoo\.com\/\w+\/(\d+)(?:\/(\d+))?/` — while
+	   `YAHOO.at` in src/data/platforms.ts answered the same question by different rules, and
+	   both faced the reader: this one is what the address box calls, that one is what the
+	   extension uses to say which league page he is standing on. Run against four real
+	   shapes, they disagreed on half of them:
+
+	     /b1/228947              → both 228947
+	     /b1/228947/8            → both 228947, team 8
+	     /2024/b1/228947         → THIS THREW; the descriptor reads 228947
+	     fantasysports.yahoo.com/b1/228947 (no sport subdomain) → THIS THREW; descriptor reads it
+
+	   So the extension could offer to read a league page whose URL this box answered with
+	   "Unrecognized league URL. Supported: Yahoo (*.fantasysports.yahoo.com)" — a sentence
+	   that is false about the URL it was just handed. The descriptor is also the one with
+	   the lesson written on it: the league id is the segment after a segment that is NOT a
+	   number, because taking the first number instead keys a league as `2024` on
+	   `/2024/b1/228947`, silently and permanently.
+
+	   Deleting the regex rather than fixing it is what makes the two impossible to drift
+	   again: there is now one recogniser per platform and the importer calls it.
+	*/
+	if (YAHOO.owns(u)) {
+		const at = YAHOO.at(u)
+		/* The descriptor reads the sport off the subdomain and answers null for the bare host,
+		   which carries no sport at all. Null is treated as baseball, which is the same
+		   fallback `YAHOO.onePress` and `YAHOO.sweep` already make for the same reason: it is
+		   the sport every page this project fetches is on, and a wrong guess fails loudly on
+		   the settings page rather than quietly in the scoring table. */
+		if (at.sport !== null && at.sport !== BASEBALL)
+			throw new ImportError(otherSportRefusal("Yahoo", at.sport))
+		if (!at.leagueId)
+			throw new ImportError(
+				"That Yahoo URL doesn't have a league number in it. Open your league on Yahoo " +
+					"and copy the address from there."
+			)
+		return { platform: "yahoo", sport: "mlb", leagueId: at.leagueId, teamId: at.teamId }
 	}
 
 	const espn = u.match(/fantasy\.espn\.com\/(baseball|football|basketball|hockey)\b/)
 	if (espn) {
+		if (espn[1] !== BASEBALL) throw new ImportError(otherSportRefusal("ESPN", espn[1]!))
 		const leagueId = u.match(/leagueId=(\d+)/)?.[1]
 		if (!leagueId) throw new ImportError("That ESPN URL has no `leagueId=` in it.")
 		const season = u.match(/seasonId=(\d+)/)?.[1]
 		return {
 			platform: "espn",
-			sport: ESPN_GAMES[espn[1] as keyof typeof ESPN_GAMES],
+			/* ESPN's own name for fantasy baseball, in every path it serves, taken from the one
+			   place that states it rather than from a four-sport table this can no longer reach
+			   the other three rows of. */
+			sport: ESPN_BASEBALL,
 			leagueId,
 			teamId: u.match(/teamId=(\d+)/)?.[1] ?? null,
 			season: season ? Number(season) : null
@@ -187,8 +312,10 @@ export const importableInBrowser = (url: string): boolean => {
 	}
 }
 
-const fetchText = async (url: string): Promise<string> => {
-	const res = await fetch(url, { headers: agentHeaders(USER_AGENT) })
+/** `who` names the platform in the reader's words, for the deadline sentence — see
+ *  `fetchWithin`. Defaulted to Yahoo because every page this reads is one of Yahoo's. */
+const fetchText = async (url: string, who = "Yahoo"): Promise<string> => {
+	const res = await fetchWithin(url, { headers: agentHeaders(USER_AGENT) }, who)
 	if (!res.ok) throw new ImportError(`${url} returned HTTP ${res.status}.`)
 	return res.text()
 }
@@ -214,11 +341,56 @@ const STAT_CODE = /\(([A-Za-z0-9/]+)\)\s*$/
  * here. Returns null when the league listed no slots, which is the caller's cue
  * that there is nothing to derive from rather than that everything is ineligible.
  */
+/**
+ * EVERY BATTER SEAT THIS PROJECT HAS A NAME FOR, and it used to stop at six.
+ *
+ * The list was `["C","1B","2B","3B","SS","OF"]`, which is exactly what a Yahoo settings page
+ * prints. ESPN seats more than that and this repo already maps them: `ESPN_MLB_SLOT` in
+ * src/data/rosters.ts names 8 "LF", 9 "CF", 10 "RF" and 11 "DH", and `importEspn` feeds those
+ * names straight in here. A name not on this list got no entry at all, so a league that seats
+ * a DH produced an accepts table with no DH in it — and `legalSlotsFor` iterates that table,
+ * so the seat could never be returned for anybody and `planLineup` left it permanently empty
+ * while `activeSlots` went on counting it.
+ *
+ * It cost twice. `Util`'s accepts list is this same array, so a man ESPN reports as DH-only
+ * matched neither the DH seat nor the Util seat and `resolveRoster` blocked him outright with
+ * "fills none of this league's slots" — a rostered player the planner refuses to move.
+ *
+ * This is the same failure the compound seats below were fixed for, and the same sentence
+ * applies: a seat nobody can fill is a seat the replacement bar prices as if the league did
+ * not have it, which moves every row on the board. The fix simply stopped at slash-named
+ * seats.
+ *
+ * ONLY SEATS THE LEAGUE ACTUALLY ROSTERS survive the filter, so a Yahoo league derives
+ * precisely what it always did — none of the four new names appears on a Yahoo settings page.
+ * Order is kept as it was, with the additions on the end, because `Util`'s list is rendered.
+ */
+const BATTER_SEATS = ["C", "1B", "2B", "3B", "SS", "OF", "LF", "CF", "RF", "DH"]
+
+/**
+ * A SEAT THAT IS A COMBINATION BY MEANING RATHER THAN BY SPELLING.
+ *
+ * `2B/SS` says what it takes in its own name and is read off it below. ESPN's `IF` does not:
+ * it is one word and it means the infield. Left out it was another unfillable seat, because
+ * "IF" is not a position any player is ever reported at — `espnPositions` drops slot 19 from a
+ * man's eligibility precisely because it is a combination rather than a place he plays.
+ *
+ * WHICH positions, settled by the shipped capture rather than by ESPN's documentation, which
+ * does not exist. In test/fixtures/espn-81134470-2021.json, of 212 rostered rows, every man
+ * carrying slot 19 in `eligibleSlots` also carries at least one of 1, 2, 3 or 4 — and the nine
+ * catchers are the test: eight of them are C-only and NONE has 19, while J.T. Realmuto, who is
+ * C and 1B, does. So ESPN's infield seat is 1B/2B/3B/SS and does not include the catcher.
+ *
+ * A table rather than a rule because there is exactly one of these and inventing a general one
+ * would mean guessing at the next word ESPN coins.
+ */
+const COMPOUND_SEATS: Record<string, string[]> = { IF: ["1B", "2B", "3B", "SS"] }
+
 export const deriveSlotAccepts = (
 	slots: Record<string, number>
 ): Record<string, string[] | "any" | "injured_only"> | null => {
 	if (!Object.keys(slots).length) return null
-	const batterPositions = ["C", "1B", "2B", "3B", "SS", "OF"].filter(p => p in slots)
+	const batterPositions = BATTER_SEATS.filter(p => p in slots)
 	const accepts: Record<string, string[] | "any" | "injured_only"> = Object.fromEntries(
 		batterPositions.map(p => [p, [p]])
 	)
@@ -252,8 +424,35 @@ export const deriveSlotAccepts = (
 			.filter(x => batterPositions.includes(x) || ["SP", "RP"].includes(x))
 		if (parts.length > 1) accepts[name] = parts
 	}
+	/* And the one seat whose name is a combination without saying so — see `COMPOUND_SEATS`.
+	   Same rule as every line above it: only the positions this league actually rosters, so an
+	   infield seat in a league with no shortstop does not claim to take one. */
+	for (const [name, positions] of Object.entries(COMPOUND_SEATS)) {
+		if (name in accepts || !(name in slots)) continue
+		const kept = positions.filter(p => batterPositions.includes(p))
+		if (kept.length) accepts[name] = kept
+	}
 	return accepts
 }
+
+/**
+ * The seats this derivation could not write a rule for, named so the reader hears about them.
+ *
+ * `deriveSlotAccepts` answers with a table and has no channel for what it could not answer,
+ * which is how five real ESPN seat names went missing in silence for months. The seats above
+ * are now all named, so this is empty on every league shape this project has met; it exists
+ * because the next unnamed one must announce itself rather than becoming another seat nobody
+ * can fill. Both importers report it, and the league editor on My league is where a reader
+ * fixes it.
+ *
+ * Reserve seats are excluded on purpose: `BN` and the IL slots get their rules from the two
+ * lines that handle them, and a seat whose name this does not recognise is only a problem
+ * when the app thinks somebody should be starting in it.
+ */
+export const seatsWithoutRule = (
+	slots: Record<string, number>,
+	accepts: Record<string, string[] | "any" | "injured_only"> | null
+): string[] => (accepts ? Object.keys(slots).filter(name => !(name in accepts)) : [])
 
 /** The lock is a weekday when lineups are set for the whole period, e.g. "Monday". */
 const WEEKDAY_NAMES: readonly string[] = [
@@ -440,8 +639,33 @@ export const deriveEspnPeriod = (
 			:	`ESPN stated a lineup lock this does not recognise (${lockType}), so it is left ` +
 				`unknown rather than guessed at.`
 		)
+	/*
+	   THE DAY THIS LEAGUE STOPS SCORING, READ BEFORE THE PERIOD AND SEPARATELY FROM IT.
+
+	   Same reasoning as the lock two lines up: the two facts live in different blocks of
+	   ESPN's payload and fail independently, and a league whose `scheduleSettings` this cannot
+	   read still states its final scoring day perfectly well. It is carried on all three
+	   returns below rather than on the successful one, because `scoringEnd` in
+	   src/engine/period.ts is what every "rest of the season" screen asks, and a league that
+	   could not be given a period length is not thereby a league that scores forever.
+
+	   `week` stays absent, unlike the Yahoo side. `leagueWeek` numbers a week by walking back
+	   in sevens from `ends_on` and demanding it land exactly on the resolved period's first
+	   day — which is a Yahoo fact, not a general one. ESPN's matchups are not seven days
+	   apiece: `espnMatchupDays` records that unit 1 runs 11 or 12 days, the unit holding the
+	   All-Star break runs 14, and the playoff rounds are double. So the walk-back would either
+	   refuse every week or, worse, land on one by coincidence. Nothing is invented here.
+	*/
+	const { endsOn, note: endsNote } = espnSeasonEnd(status, openingDay ?? null)
+	if (endsNote) needsReview.push(endsNote)
 	const empty: NonNullable<League["scoring_period"]> = {
-		kind: null, days: null, starts_on: null, anchor: null, lineup_lock: lock, source: null
+		kind: null,
+		days: null,
+		starts_on: null,
+		anchor: null,
+		lineup_lock: lock,
+		ends_on: endsOn,
+		source: null
 	}
 	if (!sched || typeof sched !== "object") {
 		needsReview.push(
@@ -501,6 +725,7 @@ export const deriveEspnPeriod = (
 				starts_on: WEEKDAY[new Date(`${window.start}T00:00:00Z`).getUTCDay()]!,
 				anchor: window.start,
 				lineup_lock: lock,
+				ends_on: endsOn,
 				source:
 					`ESPN's own schedule for your league: matchup ${window.matchup} runs ` +
 					`${window.start} to ${window.end}, which is ${window.days} days.`
@@ -556,6 +781,7 @@ export const deriveEspnPeriod = (
 			starts_on: null,
 			anchor: null,
 			lineup_lock: lock,
+			ends_on: endsOn,
 			/* PRINTED, under "Read from:" on My league — so it is written in a reader's words
 			   and not in ESPN's field names, which he can see nowhere. The arithmetic is the
 			   same one the code does, stated so he can check it against his own league page:
@@ -788,7 +1014,11 @@ export const deriveScoringPeriod = (
 }
 
 const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<League> => {
-	const base = `https://${t.yahooGame}.fantasysports.yahoo.com/b1/${t.leagueId}`
+	/* `detect` refuses every other sport now, so the host is not a variable any more — see
+	   `otherSportRefusal`. It was `t.yahooGame`, filled from a four-sport table, and the only
+	   thing that table ever did downstream was build a football URL for a parser that then
+	   diagnosed the failure as "it may be a roto or categories league". */
+	const base = `https://${BASEBALL}.fantasysports.yahoo.com/b1/${t.leagueId}`
 	const settingsUrl = `${base}/settings`
 	const eligibilityUrl = `${base}/positioneligibility`
 	const needsReview: string[] = []
@@ -851,7 +1081,9 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 	const slots: Record<string, number> = {}
 	for (const slot of slotOrder) slots[slot] = (slots[slot] ?? 0) + 1
 
-	const slotAccepts = t.sport === "mlb" ? deriveSlotAccepts(slots) : null
+	/* Was `t.sport === "mlb" ? … : null`, which is now a condition that cannot be false: a
+	   non-baseball URL never reaches this function. */
+	const slotAccepts = deriveSlotAccepts(slots)
 	if (slotAccepts) {
 		needsReview.push(
 			// A needs_review line is read by the reader, on My league, next to his own
@@ -861,6 +1093,17 @@ const importYahoo = async (t: Extract<Target, { platform: "yahoo" }>): Promise<L
 				"Yahoo's eligibility grid. Yahoo never says it outright, so check it if a " +
 				"lineup looks wrong."
 		)
+		/* The same question the ESPN side asks, because it is the same derivation: a seat Yahoo
+		   spells in a way this has no rule for is just as unfillable. Empty on every Yahoo
+		   league this project has read. */
+		const ruleless = seatsWithoutRule(slots, slotAccepts)
+		if (ruleless.length)
+			needsReview.push(
+				`This doesn't know which positions can fill your ${ruleless.join(", ")} ` +
+					`seat${ruleless.length === 1 ? "" : "s"}, so nobody will be started there ` +
+					`and nobody is priced against ${ruleless.length === 1 ? "it" : "them"}. ` +
+					`Set what ${ruleless.length === 1 ? "it takes" : "they take"} below.`
+			)
 	}
 
 	/* ONE READING OF THIS PAGE, SHARED WITH THE BROWSER. The four expressions this used to
@@ -990,7 +1233,11 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	   months, including the retry; the importer never learned it.
 	*/
 	const get = (yr: number) =>
-		fetch(url.replace(/seasons\/\d+/, `seasons/${yr}`), { headers: agentHeaders(USER_AGENT) })
+		fetchWithin(
+			url.replace(/seasons\/\d+/, `seasons/${yr}`),
+			{ headers: agentHeaders(USER_AGENT) },
+			"ESPN"
+		)
 	let res = await get(season)
 	/*
 	   AND THE YEAR THIS ACTUALLY READ, which is not always the year it asked for.
@@ -1101,6 +1348,13 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 	   reader is entitled to know about. */
 	const inningsNote = espnInningsMinimum(settings).note
 
+	const slotAccepts = deriveSlotAccepts(slots)
+	/* Seats ESPN named only by a number are already reported below, in their own sentence and
+	   their own words, so they are dropped here rather than said twice. What is left is a seat
+	   ESPN gave a NAME this derivation has no rule for — none today, by construction, which is
+	   the point of asking. */
+	const ruleless = seatsWithoutRule(slots, slotAccepts).filter(s => !unnamedSlots.includes(s))
+
 	return {
 		meta: {
 			platform: "espn",
@@ -1163,7 +1417,7 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 			   priced against the wrong bar. It is the same function the Yahoo side uses, so the
 			   two routes cannot disagree about what a Util seat takes.
 			*/
-			slot_accepts: deriveSlotAccepts(slots)
+			slot_accepts: slotAccepts
 		},
 		/* ESPN states each man's own eligibility in `gamesPlayedByPosition`, on a player read
 		   this import does not make. Null is the truth, and the board falls back to each man's
@@ -1207,6 +1461,14 @@ const importEspn = async (t: Extract<Target, { platform: "espn" }>): Promise<Lea
 						`by a number, or that pay differently by position, which this app cannot ` +
 						`express. They are kept exactly as they arrived and score nothing \u2014 ` +
 						`nothing about them is guessed at. Enter those by hand below if they matter.`
+				]
+			:	[]),
+			...(ruleless.length ?
+				[
+					`This doesn't know which positions can fill your ${ruleless.join(", ")} ` +
+						`seat${ruleless.length === 1 ? "" : "s"}, so nobody will be started there ` +
+						`and nobody is priced against ${ruleless.length === 1 ? "it" : "them"}. ` +
+						`Set what ${ruleless.length === 1 ? "it takes" : "they take"} below.`
 				]
 			:	[]),
 			...(unnamedSlots.length ?

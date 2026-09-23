@@ -12,9 +12,11 @@
  * of those produces a confident sentence on a screen a manager acts on, which is the failure
  * this file exists to prevent.
  */
+import { readFileSync } from "node:fs"
 import {
 	espnInningsMinimum,
 	espnMatchupDays,
+	espnSeasonEnd,
 	openingDayOf,
 	espnLock,
 	espnMoveLimit,
@@ -401,6 +403,86 @@ const t = (n, ok, x = "") => {
 		abstract.period.days === 7 && abstract.period.anchor === null, JSON.stringify(abstract.period))
 	t("…and says it is assuming a Monday start, because it is",
 		abstract.needsReview.some(r => /assumes Monday/.test(r)), JSON.stringify(abstract.needsReview))
+
+	/*
+	   AND THE DAY THE LEAGUE STOPS SCORING, which no ESPN league ever carried.
+
+	   `scoringEnd` in src/engine/period.ts reads `scoring_period.ends_on` and only the Yahoo
+	   importer set it, so every "rest of the season" screen shown to an ESPN manager ranked
+	   past the end of his own league — the Yahoo half of this is written up at period.ts:300
+	   with its measurement. The reading is `status.finalScoringPeriod` counted from opening
+	   day, and 186 from 2021-04-01 is 2021-10-03, which is the day the 2021 regular season
+	   ended.
+
+	   Carried on EVERY return, not just the one that read a window: a league whose schedule
+	   could not be parsed is not thereby a league that scores forever.
+	*/
+	t("an ESPN league now knows the last day it scores",
+		got.period.ends_on === "2021-10-03", String(got.period.ends_on))
+	t("…including one whose schedule said nothing this could use",
+		deriveEspnPeriod({}, status, null, "2021-04-01").period.ends_on === "2021-10-03",
+		JSON.stringify(deriveEspnPeriod({}, status, null, "2021-04-01").period))
+	/* `week` is deliberately NOT claimed. `leagueWeek` numbers a week by walking back in
+	   sevens from `ends_on`, which is a Yahoo fact: ESPN's unit 1 runs 11 or 12 days, the
+	   All-Star unit runs 14 and the playoff rounds are double, so the walk would refuse every
+	   week or land on one by coincidence. */
+	t("…and claims no week number, because ESPN's matchups are not seven days apiece",
+		got.period.week === undefined || got.period.week === null, JSON.stringify(got.period.week))
+	/* Absent is null AND SAID, the rule at the top of src/data/espn.ts. */
+	const noEnd = deriveEspnPeriod(settings, { currentMatchupPeriod: 20 }, null, "2021-04-01")
+	t("a league whose status names no final day says so rather than ranking to October",
+		noEnd.period.ends_on === null &&
+			noEnd.needsReview.some(r => /stops scoring|rest of the regular season/i.test(r)),
+		JSON.stringify(noEnd.needsReview))
+}
+
+/* ── the last day a league scores, on its own ─────────────────────────────────────────── */
+{
+	/* Measured 2026-09-22 against the live payload for public league 81134470's 2021 season:
+	   `status.finalScoringPeriod: 186`. Opening day 2021-04-01 plus 185 is 2021-10-03, the day
+	   the 2021 MLB regular season ended — the same confirmation `openingDayOf` already rests
+	   on. A scoring period is a DAY, which is what makes this arithmetic rather than a guess:
+	   the same payload's `latestScoringPeriod` reads 187. */
+	t("ESPN's final scoring period is a day counted from opening day",
+		espnSeasonEnd({ finalScoringPeriod: 186 }, "2021-04-01").endsOn === "2021-10-03",
+		JSON.stringify(espnSeasonEnd({ finalScoringPeriod: 186 }, "2021-04-01")))
+	t("and period 1 is opening day itself, not the day after",
+		espnSeasonEnd({ finalScoringPeriod: 1 }, "2026-03-25").endsOn === "2026-03-25")
+	/* Null AND SAID, every way it can be missing. */
+	const noStatus = espnSeasonEnd(null, "2021-04-01")
+	t("no status block is unknown, and the reader is told the board will rank past his season",
+		noStatus.endsOn === null && /rest of the regular season/i.test(noStatus.note ?? ""),
+		JSON.stringify(noStatus))
+	t("no opening day is unknown too, rather than counted from nothing",
+		espnSeasonEnd({ finalScoringPeriod: 186 }, null).endsOn === null)
+	/* A number outside the window a baseball season can occupy is a shape this has not seen.
+	   Read as a day count, 4000 would put the end of the season in 2032 — and `scoringEnd`
+	   only ever pulls the horizon IN, so a far-future date silently turns the whole check off. */
+	const silly = espnSeasonEnd({ finalScoringPeriod: 4000 }, "2021-04-01")
+	t("a final period that is not a day of a baseball season is refused, and quoted back",
+		silly.endsOn === null && /4000/.test(silly.note ?? ""), JSON.stringify(silly))
+}
+
+/* ── and neither aside in espn.ts may wait forever ────────────────────────────────────── */
+{
+	/*
+	   `espnSeason` runs BEFORE the settings request of an import and `openingDayOf` after it,
+	   so a hang in either one froze the onboarding wizard with no message — see
+	   `PLATFORM_TIMEOUT_MS` in src/import.ts for the measurement and the argument. Both
+	   already fall back silently on any failure, so the deadline costs one argument and no
+	   new branch, which is exactly why it was so easy to leave off.
+
+	   Asserted on the source rather than on a hung socket because both functions swallow the
+	   abort by design: a test that called them would see the fallback and could not tell a
+	   five-second deadline from no deadline at all.
+	*/
+	const src = readFileSync("src/data/espn.ts", "utf8")
+		.replace(/\/\*[\s\S]*?\*\//g, "")
+		.replace(/\/\/[^\n]*/g, "")
+	const calls = (src.match(/fetchImpl\s*\(/g) ?? []).length
+	const deadlines = (src.match(/AbortSignal\.timeout\(/g) ?? []).length
+	t("every request espn.ts makes carries a deadline",
+		calls === 2 && deadlines === calls, `${calls} calls, ${deadlines} deadlines`)
 }
 
 /* ── what kind of league it is ────────────────────────────────────────────────────────── */

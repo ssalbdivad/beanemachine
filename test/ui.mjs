@@ -1863,10 +1863,12 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
  * Asserted in the page rather than in node because Connect.tsx reads `import.meta.env`,
  * which only means something under Vite.
  *
- * THE STATE IS ASSERTED, not merely the shape. Today every desktop browser is `unpacked`.
- * When `FIREFOX_XPI` is set to the signed file — see extension/SUBMITTING.md — this block
- * FAILS, deliberately: flipping it is a claim about the world, and the claim should have to
- * be restated here with the evidence rather than slipping through green.
+ * THE STATE IS ASSERTED, not merely the shape. Chrome and Edge are `unpacked`; Firefox is
+ * `signed` since 2026-09-24, when AMO (#3077309, unlisted) signed 0.3.0 and the file was
+ * committed at extension/signed/beanemachine-firefox.xpi — five META-INF entries, version
+ * 0.3.0, update_url pointing at updates.json. Flipping any of these is a claim about the
+ * world, so this block FAILS on a flip, deliberately, until the claim is restated here with
+ * its evidence rather than slipping through green.
  */
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
@@ -1889,7 +1891,8 @@ await mp.screenshot({ path: "/tmp/bc-mobile.png", fullPage: true })
   t("no store has it yet, and the code says so in one place",
     kinds.inStore === false, JSON.stringify(kinds.inStore))
   t("every desktop browser is offered the file it can actually load",
-    ["chrome", "edge", "firefox"].every(b => kinds[b].kind === "unpacked" && !!kinds[b].at),
+    ["chrome", "edge"].every(b => kinds[b].kind === "unpacked" && !!kinds[b].at)
+      && kinds.firefox.kind === "signed" && kinds.firefox.at === "/beanemachine-firefox.xpi",
     JSON.stringify(kinds))
   /* A self-distributed .xpi cannot be installed on Firefox for Android — it takes add-ons
      from AMO and nowhere else — so it stays null until a real LISTING exists, and the phone

@@ -120,7 +120,7 @@ export const Tick = (): React.ReactElement => (
  *     results for your search" while Mozilla's API 404'd the id. A search page is how that
  *     bug was written in the first place.
  */
-const FIREFOX_XPI: string | null = null
+const FIREFOX_XPI: string | null = "beanemachine-firefox.xpi"
 const CHROME_LISTING: string | null = null
 const FIREFOX_LISTING: string | null = null
 

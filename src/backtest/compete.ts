@@ -3,7 +3,7 @@ import type { League } from "../schema.ts"
 import { CAREER_SWEEP, COMBO_SWEEP, DEPTH_SWEEP, HEADLINE_SWEEP, MATCHUP_RETUNE, QUALITY_RETUNE, RETUNE_SWEEP, JOINT_SWEEP, ORACLE_SWEEP, RATE_SWEEP, RECENCY_SWEEP, SHRINK_SWEEP, MARGIN_SWEEP, VOLUME_SWEEP, MATCHUP_SWEEP, MIRAGE_SWEEP, playSeason, QUALITY_SWEEP, RELIEF_SWEEP, STRATEGIES, SWEEP } from "./season.ts"
 
 /**
- * Season-long head-to-head: `nub run compete`
+ * Season-long head-to-head: `pnpm run compete`
  *
  * Each strategy drafts from the same pool, sets a legal roster every week, makes
  * waiver moves on what it believes at the time, and is scored on what its players
@@ -144,7 +144,7 @@ for (const name of contenders) {
  * half an hour of pitch-level fetching — and the conclusions they support get
  * revised as more seasons land. Keeping only the console output means the evidence
  * for a shipped weight lives in a terminal scrollback that no longer exists. These
- * files are the audit trail: `nub run verdict` pools them.
+ * files are the audit trail: `pnpm run verdict` pools them.
  */
 /*
    A RUN THAT SAW THE FUTURE IS NOT A RESULT, AND MUST NOT BE FILED AS ONE.

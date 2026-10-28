@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs"
 import { gzipSync } from "node:zlib"
 import { buildSnapshot } from "./data/snapshot.ts"
 
-/** Refresh the data snapshot: nub src/refresh.ts */
+/** Refresh the data snapshot: node src/refresh.ts */
 const season = Number(process.argv.find(a => a.startsWith("--season="))?.slice(9) ?? 2026)
 /* `sources` is returned BESIDE the snapshot rather than on it. It is provenance for
    whoever runs this command — 11 rows naming each upstream read and how many rows it

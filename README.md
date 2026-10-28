@@ -435,12 +435,13 @@ that answers 200 and serves a working site — so every browser suite here defau
 trusting a status code (`test/ui.mjs`, `board.mjs`, `trade-ui.mjs`, `decide.mjs`,
 `journey.mjs`). `test/static.mjs` runs against `npm run preview` on `:4173`.
 
-Two notes a new reader will otherwise hit. The `dev`, `start` and `import` entries
-in `package.json` shell out to `nub`, a TypeScript runner this repo does not
-install, so they fail; the lines above are what they were meant to do, and
-`node --experimental-strip-types src/cli.ts <league-url>` is the `import` one. (On
-Node 23.6 and later the flag is a no-op — type stripping is on by default — but it is
-required on 22.x and harmless everywhere, so it is what gets printed.) And `npm test`
+Two notes a new reader will otherwise hit. Every script here runs on plain Node
+with no TypeScript runner: `node <file>.ts` for a script, `pnpm run <script>` for a
+package script. `pnpm run dev` is the two lines above in one (`node --watch
+src/server.ts` beside Vite), `pnpm run start` is `node src/server.ts`, and
+`pnpm run import -- <league-url>` is `node src/cli.ts <league-url>`. (Node strips
+types by default since 22.18; on an older 22.x add `--experimental-strip-types`.)
+And `npm test`
 runs eighteen suites in two groups: thirteen are pure Node (`api`, `paste`, `settings`,
 `today`, `injuries`, `engine`, `leagues`, `trade`, `auto`, `period`, `ownership`,
 `compete`, `actuals` — the `test:node` script, which is also the CI gate) while five

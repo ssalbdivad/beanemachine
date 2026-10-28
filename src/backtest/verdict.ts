@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs"
 
 /**
- * Pools every measurement in data/results/ into one verdict: `nub run verdict`
+ * Pools every measurement in data/results/ into one verdict: `pnpm run verdict`
  *
  * A single season is 23 paired weeks, which settles nothing. The decisions in this
  * project are made on paired weekly counts across as many seasons as have been run,

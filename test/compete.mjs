@@ -2,7 +2,7 @@
 //
 // The correlation suite says the ranking is good; this says a manager using it
 // wins. It replays 2021-2025 week by week from the disk cache, so it needs a warm
-// cache (`nub run compete` once) but then runs offline.
+// cache (`pnpm run compete` once) but then runs offline.
 //
 // Not in the default `test` script because it depends on that cache. Run with:
 //   node test/compete.mjs
